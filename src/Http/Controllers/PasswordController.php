@@ -3,12 +3,9 @@
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Keyring\Changes\EmailChanges;
+use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\Responses\StatusResponse;
-use Keyring\Events\PasswordChanged;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
-use Keyring\KeyringManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
 
@@ -16,18 +13,12 @@ class PasswordController
 {
     use RespondsWithStatus;
 
-    public function __construct(
-        protected KeyringManager $keyring,
-        protected Sessions $sessions,
-        protected EmailChanges $emailChanges,
-    ) {}
-
     /**
      * Change the password. Users who have one must type it (OWASP: covers a
      * session left open on a shared computer); passwordless users rely on the
      * fresh verification the route already requires.
      */
-    public function update(Request $request): StatusResponse
+    public function update(Request $request, PasswordChanges $passwords, Sessions $sessions): StatusResponse
     {
         $user = $request->user();
 
@@ -39,19 +30,14 @@ class PasswordController
             'sign_out_others' => ['sometimes', 'boolean'],
         ]);
 
-        $this->keyring->changing(fn () => $user->forceFill(['password' => Hash::make($validated['password'])])->save());
+        $passwords->change(
+            $user,
+            $validated['password'],
+            currentSession: $sessions->current($request)?->id,
+            signOutOthers: $validated['sign_out_others'] ?? true,
+        );
 
         $request->session()->regenerate();
-
-        // Whoever might know the old password shouldn't keep a change of
-        // address they started with it.
-        $this->emailChanges->cancel($user);
-
-        if ($validated['sign_out_others'] ?? true) {
-            $this->sessions->revokeAll($user, except: $this->sessions->current($request)?->id);
-        }
-
-        PasswordChanged::dispatch($user);
 
         return $this->status('password-updated');
     }
