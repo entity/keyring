@@ -12,6 +12,7 @@ use Keyring\KeyringManager;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\RiskEngine;
+use Keyring\Risk\RiskLocks;
 use Keyring\Session\SessionAssurance;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
@@ -30,6 +31,7 @@ class AuthenticateSession
         protected SessionAssurance $assurance,
         protected DeviceManager $devices,
         protected RiskEngine $risk,
+        protected RiskLocks $locks,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -43,9 +45,15 @@ class AuthenticateSession
         $user = $guard->user();
         $session = $this->sessions->current($request);
 
-        // Signed in some other way (e.g. a "remember me" cookie): register it,
-        // with no verifications, so sensitive routes still ask for a factor.
         if ($session === null) {
+            // The session was registered, but its record is gone (revoked and
+            // expired, or the store was cleared). Treat it as signed out rather
+            // than starting it over with a fresh window.
+            if ($request->session()->has(Sessions::KEY)) {
+                return $this->signOut($request);
+            }
+
+            // Signed in some other way (e.g. a "remember me" cookie): register it.
             $this->sessions->start($request, $user, $this->devices->find($request, $user), $this->assurance->level());
 
             return $next($request);
@@ -94,6 +102,10 @@ class AuthenticateSession
         if ($action->revokeSessions) {
             $this->sessions->registry()->revokeAll($user);
             $this->devices->cycleRememberToken($user);
+        }
+
+        if ($action->lockSeconds !== null) {
+            $this->locks->lock($user, $action->lockSeconds);
         }
 
         if ($action->reauthenticate || $action->deny || $action->revokeSessions) {

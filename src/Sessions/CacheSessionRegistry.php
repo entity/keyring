@@ -21,6 +21,13 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function save(RegisteredSession $session): void
     {
+        // Never clear a revocation from a stale copy of the record.
+        $stored = $this->find($session->id);
+
+        if ($stored?->revokedAt !== null && $session->revokedAt === null) {
+            $session = $session->with(['revokedAt' => $stored->revokedAt]);
+        }
+
         $this->cache->put($this->key($session->id), $session->toArray(), $this->ttl($session));
 
         $this->index($session->userId, function (array $ids) use ($session) {
@@ -51,7 +58,7 @@ class CacheSessionRegistry implements SessionRegistry
     public function touch(string $id, int $at): void
     {
         if ($session = $this->find($id)) {
-            $this->cache->put($this->key($id), $session->with(['lastActivityAt' => $at])->toArray(), $this->ttl($session));
+            $this->save($session->with(['lastActivityAt' => $at]));
         }
     }
 

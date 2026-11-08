@@ -17,7 +17,11 @@ class DatabaseSessionRegistry implements SessionRegistry
 
     public function save(RegisteredSession $session): void
     {
-        $this->query()->upsert([$session->toArray()], ['id']);
+        // Never clear revoked_at from a stale copy: a revocation that lands
+        // between reading and saving a record must stick.
+        $row = $session->toArray();
+
+        $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at'])));
     }
 
     public function find(string $id): ?RegisteredSession
