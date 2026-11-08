@@ -7,16 +7,12 @@ use Illuminate\Contracts\Auth\PasswordBroker;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
-use Keyring\Changes\EmailChanges;
+use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\Responses\StatusResponse;
-use Keyring\Events\PasswordReset;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Risk\RiskLocks;
-use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -34,9 +30,7 @@ class PasswordResetController
 
     public function __construct(
         protected KeyringManager $keyring,
-        protected Sessions $sessions,
-        protected EmailChanges $emailChanges,
-        protected RiskLocks $locks,
+        protected PasswordChanges $passwords,
     ) {}
 
     public function create(Request $request): mixed
@@ -87,13 +81,7 @@ class PasswordResetController
         ], function (Authenticatable&Model $user, string $password) use ($request) {
             $request->validate(['password' => PasswordRules::for($user)]);
 
-            $this->keyring->changing(fn () => $user->forceFill(['password' => Hash::make($password)])->save());
-
-            $this->sessions->revokeAll($user);
-            $this->emailChanges->cancel($user);
-            $this->locks->unlock($user);
-
-            PasswordReset::dispatch($user);
+            $this->passwords->reset($user, $password);
         });
 
         // Laravel says "no user with that address" for unknown accounts. Answer
