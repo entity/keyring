@@ -3,6 +3,7 @@
 - [Introduction](#introduction)
 - [Routes](#routes)
 - [Signing In With a Password](#signing-in-with-a-password)
+    - [Finding the User](#finding-the-user)
 - [Signing In With a Passkey](#signing-in-with-a-passkey)
 - [The Challenge Page](#the-challenge-page)
     - [Page Props](#page-props)
@@ -59,11 +60,31 @@ Post the username and password to `/login`:
 
 | Field | |
 |---|---|
-| `email` (or your `username` attribute) | Required. Lowercased before the lookup. |
+| `email` (or your `username` attribute) | Required. Trimmed and lowercased before the lookup (see [`normalizeUsernamesUsing()`](#finding-the-user)). |
 | `password` | Required. |
 | `remember` | Optional boolean, for Laravel's "remember me" cookie. |
 
 A wrong password and an unknown account produce the same error, on the username field, using Laravel's `auth.failed` message. Both take the same time.
+
+### Finding the User
+
+By default Keyring looks the user up by the `username` attribute, trimmed and lowercased. Change either in your `KeyringServiceProvider`:
+
+```php
+use App\Models\User;
+use Illuminate\Http\Request;
+
+// Sign in with an email address or a username, and never as a banned user.
+Keyring::findUsersUsing(fn (Request $request) => User::query()
+    ->where(fn ($query) => $query->where('email', $request->email)->orWhere('username', $request->email))
+    ->where('banned', false)
+    ->first());
+
+// Keep usernames' case (for lookups, rate limits, email changes and reservations).
+Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
+```
+
+`findUsersUsing()` only finds the user: Keyring still checks the password, and answers a `null` the same way as a wrong password, in the same time. The username field's validation still applies; change it with a [pipeline step](#writing-a-step) if you need to.
 
 ## Signing In With a Passkey
 
@@ -173,6 +194,13 @@ When the requirement is met, Keyring:
 ## Registration
 
 `POST /register` passes the whole request to your `CreatesNewUsers` action (published to `app/Actions/Keyring/CreateNewUser.php` and registered with `Keyring::createUsersUsing()`). The action validates and returns the new user. Keyring then dispatches Laravel's `Registered` event and signs the user in, counting the password they just chose as proved. It doesn't consult the policy, since the user has no other factors yet.
+
+To leave new users signed out, for example until they verify their email or an admin approves them, pass `false` or a callback to `signInAfterRegistering()`. They're sent to the login page with the `registered` status:
+
+```php
+Keyring::signInAfterRegistering(false);
+Keyring::signInAfterRegistering(fn (User $user, Request $request) => ! $user->needs_approval);
+```
 
 The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
 

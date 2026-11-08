@@ -9,6 +9,7 @@ use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Lang;
@@ -30,6 +31,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\SecurityNotice;
 use Keyring\Notifications\SendSecurityNotifications;
@@ -53,6 +55,21 @@ class KeyringManager
 
     /** @var class-string<Device> */
     protected string $deviceModel = Device::class;
+
+    /** @var class-string<PendingChange> */
+    protected string $pendingChangeModel = PendingChange::class;
+
+    /** @var class-string<SecurityEvent> */
+    protected string $securityEventModel = SecurityEvent::class;
+
+    /** @var (Closure(string): string)|null */
+    protected ?Closure $usernameNormalizer = null;
+
+    /** @var (Closure(Request): ((Authenticatable&Model)|null))|null */
+    protected ?Closure $userFinder = null;
+
+    /** @var bool|(Closure(Authenticatable&Model, Request): bool) */
+    protected bool|Closure $signInAfterRegistering = true;
 
     /** @var list<string>|null Security emails to send, null for the config value. */
     protected ?array $notifications = null;
@@ -397,11 +414,80 @@ class KeyringManager
 
     /**
      * A typed username as Keyring stores and looks it up: trimmed and
-     * lowercased.
+     * lowercased, unless the app says otherwise.
      */
     public function normalizeUsername(string $username): string
     {
-        return Str::lower(trim($username));
+        return $this->usernameNormalizer === null
+            ? Str::lower(trim($username))
+            : ($this->usernameNormalizer)($username);
+    }
+
+    /**
+     * Normalise usernames your own way, e.g. keep their case, or format phone
+     * numbers. Used for lookups, rate limits, email changes and reservations.
+     *
+     * @param  Closure(string): string  $callback
+     */
+    public function normalizeUsernamesUsing(Closure $callback): static
+    {
+        $this->usernameNormalizer = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Find the user a password sign in is for your own way, e.g. by email or
+     * username, or skipping banned accounts. Return null for no account;
+     * Keyring checks the password and answers the same either way.
+     *
+     * @param  Closure(Request): ((Authenticatable&Model)|null)  $callback
+     */
+    public function findUsersUsing(Closure $callback): static
+    {
+        $this->userFinder = $callback;
+
+        return $this;
+    }
+
+    /**
+     * The user a password sign in is for, if any.
+     *
+     * @internal
+     */
+    public function findUser(Request $request): (Authenticatable&Model)|null
+    {
+        $user = $this->userFinder === null
+            ? $this->provider()->retrieveByCredentials([
+                $this->username() => $this->normalizeUsername((string) $request->input($this->username())),
+            ])
+            : ($this->userFinder)($request);
+
+        return $user instanceof Model ? $user : null;
+    }
+
+    /**
+     * Whether registering signs the new user in: pass false, or a callback
+     * deciding per user, to send them to the login page instead (for
+     * example until an admin approves them).
+     *
+     * @param  bool|(Closure(Authenticatable&Model, Request): bool)  $when
+     */
+    public function signInAfterRegistering(bool|Closure $when): static
+    {
+        $this->signInAfterRegistering = $when;
+
+        return $this;
+    }
+
+    /**
+     * @internal
+     */
+    public function signsInAfterRegistering(Authenticatable&Model $user, Request $request): bool
+    {
+        return is_bool($this->signInAfterRegistering)
+            ? $this->signInAfterRegistering
+            : ($this->signInAfterRegistering)($user, $request);
     }
 
     /**
@@ -488,5 +574,41 @@ class KeyringManager
     public function deviceModel(): string
     {
         return $this->deviceModel;
+    }
+
+    /**
+     * @param  class-string<PendingChange>  $model
+     */
+    public function usePendingChangeModel(string $model): static
+    {
+        $this->pendingChangeModel = $model;
+
+        return $this;
+    }
+
+    /**
+     * @return class-string<PendingChange>
+     */
+    public function pendingChangeModel(): string
+    {
+        return $this->pendingChangeModel;
+    }
+
+    /**
+     * @param  class-string<SecurityEvent>  $model
+     */
+    public function useSecurityEventModel(string $model): static
+    {
+        $this->securityEventModel = $model;
+
+        return $this;
+    }
+
+    /**
+     * @return class-string<SecurityEvent>
+     */
+    public function securityEventModel(): string
+    {
+        return $this->securityEventModel;
     }
 }

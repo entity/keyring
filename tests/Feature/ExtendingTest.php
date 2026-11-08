@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
+use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SessionRegistry;
@@ -20,6 +21,8 @@ use Keyring\Enums\Assurance;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
+use Keyring\Models\PendingChange;
+use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Support\PasswordRules;
@@ -155,6 +158,21 @@ it('says how to register an action the app has not registered', function () {
 
     expect(fn () => app(ResetsUserPasswords::class))->toThrow(MissingAction::class, 'Keyring::resetUserPasswordsUsing()');
 });
+
+it('uses the app\'s own pending change and security event models', function () {
+    Notification::fake();
+    Keyring::usePendingChangeModel(AppPendingChange::class)->useSecurityEventModel(AppSecurityEvent::class);
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+
+    expect(app(EmailChanges::class)->pending($this->user))->toBeInstanceOf(AppPendingChange::class)
+        ->and(Keyring::activity($this->user)->first())->toBeInstanceOf(AppSecurityEvent::class);
+});
+
+class AppPendingChange extends PendingChange {}
+
+class AppSecurityEvent extends SecurityEvent {}
 
 class FillsEverything implements UpdatesUserPasswords
 {

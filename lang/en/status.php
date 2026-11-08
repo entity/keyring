@@ -19,6 +19,7 @@ return [
     'enrollment-started' => 'Finish setting up your new sign-in method.',
     'password-reset' => 'Your password has been reset. Please sign in.',
     'password-updated' => 'Your password has been changed.',
+    'registered' => 'Your account has been created. You can sign in once it\'s ready.',
     'reset-link-sent' => 'If that address has an account, we\'ve emailed a link to reset the password.',
     'sessions-revoked' => 'You\'ve been signed out everywhere else.',
     'signed-out' => 'You\'ve been signed out. Please sign in again.',

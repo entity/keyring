@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Keyring\Devices\UserAgent;
+use Keyring\Facades\Keyring;
 use Keyring\Models\SecurityEvent;
 
 /**
@@ -20,7 +21,8 @@ class SecurityLog
      */
     public function record(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = []): SecurityEvent
     {
-        $event = new SecurityEvent([
+        $model = Keyring::securityEventModel();
+        $event = new $model([
             'type' => $type,
             'factor' => $factor,
             'device_id' => $device,
@@ -63,7 +65,7 @@ class SecurityLog
             ->get();
 
         if ($alerts->isNotEmpty()) {
-            SecurityEvent::query()->whereKey($alerts->modelKeys())->update(['seen_at' => now()]);
+            Keyring::securityEventModel()::query()->whereKey($alerts->modelKeys())->update(['seen_at' => now()]);
         }
 
         return $alerts;
@@ -85,6 +87,6 @@ class SecurityLog
      */
     protected function query(Authenticatable&Model $user): Builder
     {
-        return SecurityEvent::query()->ownedBy($user);
+        return Keyring::securityEventModel()::query()->ownedBy($user);
     }
 }

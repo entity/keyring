@@ -76,6 +76,8 @@ Every use dispatches `Keyring\Events\ProtectionBypassed` with the reason, and lo
 
 ## Changing the Email Address
 
+Whoever controls the address can reset the password, so this flow's safeguards aren't options: the new address always confirms, the old one can always revert for a while, and the old address stays reserved meanwhile. You choose the timings (`email_changes.expire` and `email_changes.revertable_for`), the validation (your `ValidateEmailChange` action), the emails and the pages.
+
 ### Requesting a Change
 
 `POST /user/email` with `email` asks to change the address. It needs a [fresh verification](step-up.md#fresh-verification). Your `ValidatesEmailChanges` action (published to `app/Actions/Keyring/ValidateEmailChange.php`) validates the request and returns the new address, so add rules there, such as only allowing your company's domain. Don't check there whether the address is taken; Keyring handles that without revealing it. The response is always the `email-change-requested` [status response](sign-in-flow.md#status-responses), whatever happens next, so it never reveals whether the new address already has an account.
