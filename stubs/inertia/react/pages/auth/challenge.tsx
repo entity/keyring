@@ -6,7 +6,10 @@ import factors from '../../keyring/factors'
 export default function ChallengePage(props: ChallengeProps) {
   const challenge = useChallenge(props, factors)
   const [showingAlternatives, setShowingAlternatives] = useState(false)
-  const { Component, form } = challenge
+  const { form } = challenge
+
+  // A factor with no component yet gets the closest built-in one.
+  const Component = challenge.Component ?? (props.challenge.options ? factors['security-key'] : factors.totp)
 
   return (
     <>

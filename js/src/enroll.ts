@@ -1,5 +1,6 @@
 import { json } from './http'
 import { routes } from './routes'
+import type { Enrollment } from './types'
 import { createCredential } from './webauthn'
 
 /**
@@ -15,7 +16,7 @@ export function isWebAuthn(enrollment: Record<string, any>): boolean {
  * Start enrolling: returns what to show (a QR code, recovery codes...).
  */
 export function beginEnrollment(factor: string, data: Record<string, unknown> = {}) {
-  return json<{ factor: string, enrollment: Record<string, any> }>('POST', routes.enroll(factor), data)
+  return json<Enrollment>('POST', routes.enroll(factor), data)
 }
 
 /**

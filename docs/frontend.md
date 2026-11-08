@@ -103,8 +103,8 @@ const challenge = reactive(useChallenge(props, factors))
 | `component` | The component for `props.factor` (a computed ref). |
 | `submit(data?)` | Posts the form, plus `data` and the authenticator ID, to the verify route. Clears `code` and `password` afterwards. |
 | `switchTo(option)` | Visits the challenge page for one of `props.alternatives`. |
-| `send()` | Asks the server to send a code, for email codes. |
-| `useKey()` | Runs the WebAuthn ceremony with `props.challenge.options` and submits the result. Browser errors (like the user cancelling) are set on `form.errors.credential`. |
+| `send()` | Asks the server to send a code, for factors that send one. |
+| `verifyKey()` | Runs the WebAuthn ceremony with `props.challenge.options` and submits the result. Browser errors (like the user cancelling) are set on `form.errors.credential`. |
 | `alternatives` | `props.alternatives`, as a computed ref. |
 
 The Vue factor components receive `challenge` and `page` (the page props).
@@ -165,7 +165,7 @@ const { challenge, page } = defineProps<{ challenge: any, page: ChallengeProps }
 </template>
 ```
 
-The published `SecurityKey` component calls `challenge.useKey()` as soon as it mounts, with a "try again" button in case the user dismisses the browser prompt.
+The published `SecurityKey` component calls `challenge.verifyKey()` once as soon as it mounts, with a "try again" button in case the user dismisses the browser prompt.
 
 ## Signing In With a Passkey
 
@@ -192,7 +192,7 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 |---|---|
 | `autofill` | Also offer passkeys in the email field's autofill, when the browser supports it. The field needs `autocomplete="username webauthn"`. |
 | `factor` | The factor key, `passkey` by default. |
-| `remember` | Whether to tick "remember me". A function in Vue, a boolean in React. |
+| `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. |
 
 It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts.
 
@@ -302,11 +302,11 @@ configureRoutes({
 })
 ```
 
-The keys are `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `enroll`, `confirmEnrollment` and `authenticator`. The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
+The keys are `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share, so changing it moves all three. The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
 
 ## Flash Messages and Alerts
 
-Keyring's non-JSON responses flash a `status` to the session, such as `code-sent`, `password-updated`, `device-revoked` or `email-change-requested`. Share it through your Inertia middleware alongside the ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts):
+Keyring's non-JSON responses flash a `status` slug to the session (JSON responses include it as `status`, with a readable `message`), such as `code-sent`, `password-updated`, `device-revoked` or `email-change-requested`. Share it through your Inertia middleware alongside the ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts):
 
 ```php
 public function share(Request $request): array

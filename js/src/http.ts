@@ -3,6 +3,8 @@
  * WebAuthn options, enrolling). Sends Laravel's XSRF cookie like Inertia does.
  */
 export async function json<T = any>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, body?: unknown): Promise<T> {
+  const token = xsrf()
+
   const response = await fetch(url, {
     method,
     credentials: 'same-origin',
@@ -10,12 +12,13 @@ export async function json<T = any>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
       'Accept': 'application/json',
       'Content-Type': 'application/json',
       'X-Requested-With': 'XMLHttpRequest',
-      ...(xsrf() && { 'X-XSRF-TOKEN': xsrf()! }),
+      ...(token && { 'X-XSRF-TOKEN': token }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 
-  const data = response.status === 204 ? {} : await response.json()
+  // An error page may not be JSON; the status still tells the story.
+  const data = response.status === 204 ? {} : await response.json().catch(() => ({}))
 
   if (!response.ok) {
     throw new KeyringRequestError(response.status, data?.message ?? 'Request failed', data?.errors ?? {}, data)

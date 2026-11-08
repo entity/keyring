@@ -3,7 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/react'
 
 export default function Login({ canResetPassword, canRegister, status }: { canResetPassword: boolean, canRegister: boolean, status?: string }) {
   const form = useForm({ email: '', password: '', remember: false })
-  const passkey = usePasskeyLogin({ autofill: true, remember: form.data.remember })
+  const passkey = usePasskeyLogin({ autofill: true, remember: () => form.data.remember })
 
   function submit(e: React.FormEvent) {
     e.preventDefault()

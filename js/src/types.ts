@@ -21,6 +21,9 @@ export interface ChallengeProps {
   expiresAt: string
 }
 
+/**
+ * What beginEnrollment() resolves with.
+ */
 export interface Enrollment {
   factor: string
   enrollment: Record<string, any>

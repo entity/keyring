@@ -1,9 +1,9 @@
-import { router, useForm } from '@inertiajs/vue3'
+import { useForm } from '@inertiajs/vue3'
 import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
-import { json } from './http'
+import { challengeFields, errorMessage, isAbort, keyCredential, passkeyCredential, sendCode, signInWith, switchTo } from './challenge'
 import { routes } from './routes'
 import type { AuthenticatorSummary, ChallengeProps } from './types'
-import { getCredential, supportsAutofill, supportsWebAuthn } from './webauthn'
+import { supportsAutofill, supportsWebAuthn } from './webauthn'
 
 export * from './index'
 
@@ -15,9 +15,7 @@ export * from './index'
  * load them lazily), so supporting a new factor is one line.
  */
 export function useChallenge(props: ChallengeProps, factors: Record<string, Component>) {
-  const form = useForm<Record<string, any>>({ code: '', password: '', trust: false })
-
-  const component = computed(() => factors[props.factor])
+  const form = useForm<Record<string, any>>(challengeFields())
 
   function submit(data: Record<string, unknown> = {}) {
     form
@@ -25,26 +23,27 @@ export function useChallenge(props: ChallengeProps, factors: Record<string, Comp
       .post(routes.verify(props.purpose, props.factor), { preserveScroll: true, onFinish: () => form.reset('code', 'password') })
   }
 
-  function switchTo(option: AuthenticatorSummary) {
-    router.get(routes.challenge(props.purpose, option.factor), option.id ? { authenticator: option.id } : {})
-  }
-
-  function send() {
-    router.post(routes.send(props.purpose, props.factor), { authenticator: props.authenticator.id }, { preserveScroll: true })
-  }
-
-  /** Run the WebAuthn ceremony for passkeys and security keys, then submit. */
-  async function useKey() {
+  /** Run the passkey or security key prompt, then submit. */
+  async function verifyKey() {
     form.clearErrors()
 
     try {
-      submit({ credential: await getCredential(props.challenge.options) })
+      submit({ credential: await keyCredential(props) })
     } catch (error) {
-      form.setError('credential', error instanceof Error ? error.message : String(error))
+      form.setError('credential', errorMessage(error))
     }
   }
 
-  return { form, component, submit, switchTo, send, useKey, alternatives: computed(() => props.alternatives) }
+  return {
+    form,
+    props,
+    component: computed(() => factors[props.factor] as Component | undefined),
+    alternatives: computed(() => props.alternatives),
+    submit,
+    verifyKey,
+    switchTo: (option: AuthenticatorSummary) => switchTo(props, option),
+    send: () => sendCode(props),
+  }
 }
 
 /**
@@ -55,29 +54,33 @@ export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember
   const supported = ref(false)
   const processing = ref(false)
   const error = ref<string | null>(null)
-  let controller: AbortController | null = null
+  let current: AbortController | null = null
 
-  async function signIn(conditional = false) {
-    controller?.abort()
-    controller = new AbortController()
+  async function signIn(conditional: boolean) {
+    current?.abort()
+    const controller = (current = new AbortController())
     error.value = null
     processing.value = !conditional
 
     try {
-      const options = await json('GET', routes.loginOptions(factor))
-      const credential = await getCredential(options, { autofill: conditional, signal: controller.signal })
+      const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
 
-      router.post(routes.loginWith(factor), { credential, remember: remember() }, {
-        onError: errors => { error.value = Object.values(errors)[0] ?? null },
+      signInWith(factor, credential, remember(), {
+        onError: message => { error.value = message },
         onFinish: () => { processing.value = false },
       })
     } catch (caught) {
+      // A newer request took over; it owns the state now.
+      if (current !== controller) {
+        return
+      }
+
       processing.value = false
 
       // Autofill gives up quietly (no passkeys, or the user typed instead), so
       // only an explicit "Sign in with a passkey" shows an error.
-      if (!conditional && !(caught instanceof DOMException && caught.name === 'AbortError')) {
-        error.value = caught instanceof Error ? caught.message : String(caught)
+      if (!conditional && !isAbort(caught)) {
+        error.value = errorMessage(caught)
       }
     }
   }
@@ -90,7 +93,7 @@ export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember
     }
   })
 
-  onBeforeUnmount(() => controller?.abort())
+  onBeforeUnmount(() => current?.abort())
 
   return { supported, processing, error, signIn: () => signIn(false) }
 }

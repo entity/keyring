@@ -12,7 +12,8 @@ const copies: Record<string, { label: string, hint?: string | null, inputmode: '
 
 const copy = computed(() => copies[page.factor] ?? { label: 'Code', hint: null, inputmode: 'text' })
 
-const needsSending = computed(() => page.factor === 'email-code')
+// Factors that send codes say whether one was sent.
+const needsSending = computed(() => 'sent' in page.challenge)
 </script>
 
 <template>

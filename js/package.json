@@ -24,7 +24,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.stubs.json"
+    "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.stubs.json",
+    "test": "bun test"
   },
   "peerDependencies": {
     "@inertiajs/core": "^3.0.0",

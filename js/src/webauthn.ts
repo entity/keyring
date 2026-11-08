@@ -23,17 +23,15 @@ export async function supportsAutofill(): Promise<boolean> {
  */
 export async function createCredential(options: Json): Promise<Json> {
   const publicKey = 'parseCreationOptionsFromJSON' in PublicKeyCredential
-    ? (PublicKeyCredential as any).parseCreationOptionsFromJSON(options)
+    ? PublicKeyCredential.parseCreationOptionsFromJSON(options as PublicKeyCredentialCreationOptionsJSON)
     : {
         ...options,
         challenge: fromBase64Url(options.challenge),
         user: { ...options.user, id: fromBase64Url(options.user.id) },
         excludeCredentials: (options.excludeCredentials ?? []).map(descriptor),
-      }
+      } as PublicKeyCredentialCreationOptions
 
-  const credential = await navigator.credentials.create({ publicKey })
-
-  return toJson(credential as PublicKeyCredential)
+  return toJson(await navigator.credentials.create({ publicKey }))
 }
 
 /**
@@ -43,25 +41,23 @@ export async function createCredential(options: Json): Promise<Json> {
  */
 export async function getCredential(options: Json, { autofill = false, signal }: { autofill?: boolean, signal?: AbortSignal } = {}): Promise<Json> {
   const publicKey = 'parseRequestOptionsFromJSON' in PublicKeyCredential
-    ? (PublicKeyCredential as any).parseRequestOptionsFromJSON(options)
+    ? PublicKeyCredential.parseRequestOptionsFromJSON(options as PublicKeyCredentialRequestOptionsJSON)
     : {
         ...options,
         challenge: fromBase64Url(options.challenge),
         allowCredentials: (options.allowCredentials ?? []).map(descriptor),
-      }
+      } as PublicKeyCredentialRequestOptions
 
-  const credential = await navigator.credentials.get({
-    publicKey,
-    mediation: autofill ? 'conditional' as CredentialMediationRequirement : undefined,
-    signal,
-  })
-
-  return toJson(credential as PublicKeyCredential)
+  return toJson(await navigator.credentials.get({ publicKey, mediation: autofill ? 'conditional' : undefined, signal }))
 }
 
-function toJson(credential: PublicKeyCredential): Json {
-  if (typeof (credential as any).toJSON === 'function') {
-    return (credential as any).toJSON()
+function toJson(credential: Credential | null): Json {
+  if (!(credential instanceof PublicKeyCredential)) {
+    throw new Error('No passkey or security key was used.')
+  }
+
+  if (typeof credential.toJSON === 'function') {
+    return credential.toJSON()
   }
 
   const response = credential.response as AuthenticatorAttestationResponse & AuthenticatorAssertionResponse

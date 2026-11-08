@@ -9,7 +9,8 @@ export default function Code({ challenge }: { challenge: Challenge }) {
     'recovery': { label: 'Recovery code', hint: `${props.authenticator.remaining ?? 0} left`, inputMode: 'text' as const },
   }[props.factor] ?? { label: 'Code', hint: undefined, inputMode: 'text' as const }
 
-  const needsSending = props.factor === 'email-code'
+  // Factors that send codes say whether one was sent.
+  const needsSending = 'sent' in props.challenge
 
   if (needsSending && !props.challenge.sent) {
     return (

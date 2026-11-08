@@ -1,9 +1,9 @@
-import { router, useForm } from '@inertiajs/react'
-import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
-import { json } from './http'
+import { useForm } from '@inertiajs/react'
+import { useEffect, useRef, useState, type ComponentType } from 'react'
+import { challengeFields, errorMessage, isAbort, keyCredential, passkeyCredential, sendCode, signInWith, switchTo } from './challenge'
 import { routes } from './routes'
 import type { AuthenticatorSummary, ChallengeProps } from './types'
-import { getCredential, supportsAutofill, supportsWebAuthn } from './webauthn'
+import { supportsAutofill, supportsWebAuthn } from './webauthn'
 
 export * from './index'
 
@@ -19,83 +19,94 @@ export type FactorComponent = ComponentType<{ challenge: Challenge }>
  * lazily), so supporting a new factor is one line.
  */
 export function useChallenge(props: ChallengeProps, factors: Record<string, FactorComponent>) {
-  const form = useForm<Record<string, any>>({ code: '', password: '', trust: false })
+  const form = useForm<Record<string, any>>(challengeFields())
 
-  const submit = useCallback((data: Record<string, unknown> = {}) => {
+  function submit(data: Record<string, unknown> = {}) {
     form.transform(fields => ({ ...fields, ...data, authenticator: props.authenticator.id }))
     form.post(routes.verify(props.purpose, props.factor), { preserveScroll: true, onFinish: () => form.reset('code', 'password') })
-  }, [form, props.purpose, props.factor, props.authenticator.id])
+  }
 
-  const switchTo = useCallback((option: AuthenticatorSummary) => {
-    router.get(routes.challenge(props.purpose, option.factor), option.id ? { authenticator: option.id } : {})
-  }, [props.purpose])
-
-  const send = useCallback(() => {
-    router.post(routes.send(props.purpose, props.factor), { authenticator: props.authenticator.id }, { preserveScroll: true })
-  }, [props.purpose, props.factor, props.authenticator.id])
-
-  /** Run the WebAuthn ceremony for passkeys and security keys, then submit. */
-  const useKey = useCallback(async () => {
+  /** Run the passkey or security key prompt, then submit. */
+  async function verifyKey() {
     form.clearErrors()
 
     try {
-      submit({ credential: await getCredential(props.challenge.options) })
+      submit({ credential: await keyCredential(props) })
     } catch (error) {
-      form.setError('credential', error instanceof Error ? error.message : String(error))
+      form.setError('credential', errorMessage(error))
     }
-  }, [form, submit, props.challenge])
+  }
 
-  return { form, props, Component: factors[props.factor], submit, switchTo, send, useKey, alternatives: props.alternatives }
+  return {
+    form,
+    props,
+    Component: factors[props.factor] as FactorComponent | undefined,
+    alternatives: props.alternatives,
+    submit,
+    verifyKey,
+    switchTo: (option: AuthenticatorSummary) => switchTo(props, option),
+    send: () => sendCode(props),
+  }
 }
 
 /**
  * Sign in with a passkey, without a username. With `autofill`, passkeys are
  * offered in the email field's autofill (give it autoComplete="username webauthn").
  */
-export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember = false }: { autofill?: boolean, factor?: string, remember?: boolean } = {}) {
+export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember = () => false }: { autofill?: boolean, factor?: string, remember?: () => boolean } = {}) {
   const [supported, setSupported] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const controller = useRef<AbortController | null>(null)
+  const current = useRef<AbortController | null>(null)
+  const rememberRef = useRef(remember)
 
-  const run = useCallback(async (conditional: boolean) => {
-    controller.current?.abort()
-    controller.current = new AbortController()
+  useEffect(() => {
+    rememberRef.current = remember
+  })
+
+  async function signIn(conditional: boolean) {
+    current.current?.abort()
+    const controller = (current.current = new AbortController())
     setError(null)
     setProcessing(!conditional)
 
     try {
-      const options = await json('GET', routes.loginOptions(factor))
-      const credential = await getCredential(options, { autofill: conditional, signal: controller.current.signal })
+      const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
 
-      router.post(routes.loginWith(factor), { credential, remember }, {
-        onError: errors => setError(Object.values(errors)[0] ?? null),
-        onFinish: () => setProcessing(false),
-      })
+      signInWith(factor, credential, rememberRef.current(), { onError: setError, onFinish: () => setProcessing(false) })
     } catch (caught) {
+      // A newer request took over; it owns the state now.
+      if (current.current !== controller) {
+        return
+      }
+
       setProcessing(false)
 
       // Autofill gives up quietly (no passkeys, or the user typed instead), so
       // only an explicit "Sign in with a passkey" shows an error.
-      if (!conditional && !(caught instanceof DOMException && caught.name === 'AbortError')) {
-        setError(caught instanceof Error ? caught.message : String(caught))
+      if (!conditional && !isAbort(caught)) {
+        setError(errorMessage(caught))
       }
     }
-  }, [factor, remember])
+  }
 
   useEffect(() => {
+    let cancelled = false
     setSupported(supportsWebAuthn())
 
     if (autofill) {
       supportsAutofill().then(available => {
-        if (available) {
-          run(true)
+        if (available && !cancelled) {
+          signIn(true)
         }
       })
     }
 
-    return () => controller.current?.abort()
-  }, [autofill, run])
+    return () => {
+      cancelled = true
+      current.current?.abort()
+    }
+  }, [autofill, factor])
 
-  return { supported, processing, error, signIn: () => run(false) }
+  return { supported, processing, error, signIn: () => signIn(false) }
 }
