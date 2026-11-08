@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Models\PendingChange;
+use Keyring\Sessions\Sessions;
 use Keyring\UserKeyring;
 
 /**
@@ -22,6 +24,20 @@ trait HasKeyring
     public static function bootHasKeyring(): void
     {
         static::updating(fn (self $user) => Keyring::guardProtectedAttributes($user));
+
+        // Clean up once the user is really gone (not when soft deleted), so a
+        // passkey can be registered again on a new account.
+        static::deleted(function (self $user) {
+            if (method_exists($user, 'isForceDeleting') && ! $user->isForceDeleting()) {
+                return;
+            }
+
+            app(Sessions::class)->registry()->revokeAll($user);
+
+            $user->authenticators()->delete();
+            $user->devices()->delete();
+            PendingChange::query()->whereMorphedTo('authenticatable', $user)->delete();
+        });
     }
 
     /**
