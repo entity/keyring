@@ -95,11 +95,12 @@ class AuthenticatorChanges
      *
      * @throws ValidationException
      */
-    public function remove(Authenticatable&Model $user, string $id): Authenticator
+    public function remove(Authenticatable&Model $user, string $id, ?string $password = null): Authenticator
     {
-        $removed = RowLock::hold($user, function () use ($user, $id) {
+        $removed = RowLock::hold($user, function () use ($user, $id, $password) {
             $authenticator = $this->find($user, $id);
-            $remaining = $this->keyring->for($user)->without($authenticator);
+            $keyring = $this->keyring->for($user);
+            $remaining = $keyring->without($authenticator);
 
             // Recovery codes are only useful while there's a second factor to
             // recover, so they go too when this was the last one. The policy
@@ -114,6 +115,10 @@ class AuthenticatorChanges
                 throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
             }
 
+            if ($keyring->hasSecondFactor() && ! $left->hasSecondFactor()) {
+                $this->ensurePasswordStandsAlone($user, $password);
+            }
+
             collect([$authenticator, ...$cascade])->each->delete();
 
             return $authenticator;
@@ -122,6 +127,31 @@ class AuthenticatorChanges
         AuthenticatorRemoved::dispatch($user, $removed);
 
         return $removed;
+    }
+
+    /**
+     * The password may have been as short as min_with_mfa while it had a
+     * second factor beside it. On its own it needs min_without_mfa (NIST
+     * SP 800-63B), and only the user can say how long it is, so removing the
+     * last second factor takes it, typed again.
+     *
+     * @throws ValidationException
+     */
+    protected function ensurePasswordStandsAlone(Authenticatable&Model $user, ?string $password): void
+    {
+        if (blank($user->getAuthPassword())) {
+            return;
+        }
+
+        if ($password === null || ! $this->keyring->provider()->validateCredentials($user, ['password' => $password])) {
+            throw ValidationException::withMessages(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
+        }
+
+        $min = config('keyring.passwords.min_without_mfa');
+
+        if (mb_strlen($password) < $min) {
+            throw ValidationException::withMessages(['password' => __('keyring::keyring.password_too_short_alone', ['min' => $min])]);
+        }
     }
 
     /**

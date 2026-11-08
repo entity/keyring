@@ -48,6 +48,11 @@ export function makeDefault(id: string) {
   return json('PATCH', routes.authenticator(id), { default: true })
 }
 
-export function removeAuthenticator(id: string) {
-  return json('DELETE', routes.authenticator(id))
+/**
+ * Remove an authenticator. Removing the user's last second factor also needs
+ * their password, so Keyring can check it's long enough on its own; without
+ * it the request fails with an error on `password`.
+ */
+export function removeAuthenticator(id: string, password?: string) {
+  return json('DELETE', routes.authenticator(id), password === undefined ? undefined : { password })
 }

@@ -9,6 +9,8 @@ use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -62,6 +64,17 @@ class UserKeyring
         return $this->all()->contains(
             fn (Authenticator $authenticator) => in_array($category, $authenticator->factor()->categories($authenticator), true),
         );
+    }
+
+    /**
+     * Whether the user has a real second factor: more than recovery codes
+     * (a fallback), and better than email codes (below NIST AAL2). A
+     * password used with one may be shorter.
+     */
+    public function hasSecondFactor(): bool
+    {
+        return $this->without(...$this->of(RecoveryCodes::KEY)->all(), ...$this->of(EmailCode::KEY)->all())
+            ->canMeet(Requirement::aal2()->including(Category::Possession));
     }
 
     /**

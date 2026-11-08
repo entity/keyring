@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Validator;
 use Keyring\Enums\Assurance;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
@@ -8,6 +9,7 @@ use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Support\PasswordRules;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -93,10 +95,25 @@ it('removes an authenticator and drops recovery codes once nothing is left to re
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
-    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id))->assertOk();
+    Keyring::withoutProtection(fn () => $this->user->update(['password' => 'a long enough passphrase']));
+
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'a long enough passphrase'])->assertOk();
 
     expect($this->user->keyring->refresh()->all()->pluck('factor')->all())->toBe(['password']);
     Event::assertDispatched(AuthenticatorRemoved::class);
+});
+
+it('checks the password is long enough on its own before removing the last second factor', function () {
+    $phone = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $tablet = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    // Another second factor stays, so nothing more is asked.
+    $this->deleteJson(route('keyring.authenticators.destroy', $phone->id))->assertOk();
+
+    $this->deleteJson(route('keyring.authenticators.destroy', $tablet->id))->assertJsonValidationErrors(['password' => 'Enter your password']);
+    $this->deleteJson(route('keyring.authenticators.destroy', $tablet->id), ['password' => 'password'])->assertJsonValidationErrors(['password' => 'at least 15 characters']);
+
+    expect(Authenticator::find($tablet->id))->not->toBeNull();
 });
 
 it('refuses to remove the last factor the policy needs', function () {
@@ -131,4 +148,16 @@ it('keeps the session verified when enrolling from an inertia page', function ()
     // Keyring's other session data (verifications, the session registry).
     expect(session('keyring.result.enrollment.secret'))->not->toBeNull();
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+});
+
+it('only allows the shorter password with a real second factor, not recovery codes alone', function () {
+    $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+    expect($this->user->keyring->hasSecondFactor())->toBeFalse();
+    expect(Validator::make(['password' => 'short pass', 'password_confirmation' => 'short pass'], ['password' => PasswordRules::for($this->user)])->fails())->toBeTrue();
+
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    expect($this->user->keyring->refresh()->hasSecondFactor())->toBeTrue();
+    expect(Validator::make(['password' => 'short pass', 'password_confirmation' => 'short pass'], ['password' => PasswordRules::for($this->user->fresh())])->fails())->toBeFalse();
 });
