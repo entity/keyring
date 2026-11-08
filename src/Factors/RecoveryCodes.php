@@ -45,19 +45,26 @@ class RecoveryCodes extends Factor implements Enrollable
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $hash = $this->hash((string) $request->input('code'));
-        $hashes = $this->hashes($authenticator);
 
-        $match = array_find_key($hashes, fn (string $stored) => hash_equals($stored, $hash));
+        $used = $this->consume($authenticator, function (Authenticator $locked) use ($hash) {
+            $hashes = $this->hashes($locked);
+            $match = array_find_key($hashes, fn (string $stored) => hash_equals($stored, $hash));
 
-        if ($match === null) {
+            if ($match === null) {
+                return false;
+            }
+
+            unset($hashes[$match]);
+            $locked->secret = json_encode(array_values($hashes));
+
+            return true;
+        });
+
+        if (! $used) {
             return null;
         }
 
-        unset($hashes[$match]);
-        $authenticator->secret = json_encode(array_values($hashes));
-        $authenticator->save();
-
-        RecoveryCodeUsed::dispatch($authenticator, count($hashes));
+        RecoveryCodeUsed::dispatch($authenticator, count($this->hashes($authenticator)));
 
         return $this->verified($authenticator);
     }

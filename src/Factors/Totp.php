@@ -66,13 +66,17 @@ class Totp extends Factor implements Enrollable
             $this->window,
         );
 
-        if ($timestep === false) {
-            return null;
-        }
+        $used = $timestep !== false && $this->consume($authenticator, function (Authenticator $locked) use ($timestep) {
+            if ((int) $timestep <= (int) $locked->meta('last_timestep', 0)) {
+                return false;
+            }
 
-        $authenticator->withMeta('last_timestep', (int) $timestep)->save();
+            $locked->withMeta('last_timestep', (int) $timestep);
 
-        return $this->verified($authenticator);
+            return true;
+        });
+
+        return $used ? $this->verified($authenticator) : null;
     }
 
     public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment

@@ -2,6 +2,7 @@
 
 namespace Keyring\Factors;
 
+use Closure;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
@@ -89,6 +90,30 @@ abstract class Factor implements FactorContract
             phishingResistant: $phishingResistant ?? $this->phishingResistant($authenticator),
             at: now()->getTimestamp(),
         );
+    }
+
+    /**
+     * Use up something single-use on the authenticator (a TOTP step, a
+     * recovery code). The callback gets a fresh, row-locked copy and returns
+     * whether it may be used, so two requests with the same code can't both
+     * pass. Changes it makes are saved.
+     *
+     * @param  Closure(Authenticator): bool  $use
+     */
+    protected function consume(Authenticator $authenticator, Closure $use): bool
+    {
+        return $authenticator->getConnection()->transaction(function () use ($authenticator, $use) {
+            $locked = $authenticator->newQuery()->lockForUpdate()->find($authenticator->getKey());
+
+            if ($locked === null || ! $use($locked)) {
+                return false;
+            }
+
+            $locked->save();
+            $authenticator->setRawAttributes($locked->getAttributes(), sync: true);
+
+            return true;
+        });
     }
 
     /**
