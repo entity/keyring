@@ -4,9 +4,9 @@ namespace Keyring\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
+use Keyring\Devices\UserAgent;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
@@ -74,7 +74,7 @@ class AuthenticateSession
         }
 
         if ($now - $session->lastActivityAt >= 60) {
-            $this->sessions->registry()->touch($session->id, $now);
+            $this->sessions->registry()->update($session->id, ['lastActivityAt' => $now]);
         }
 
         return $next($request);
@@ -100,10 +100,10 @@ class AuthenticateSession
         }
 
         if ($action->doesSomething()) {
-            $this->sessions->registry()->save($session->with([
+            $this->sessions->registry()->update($session->id, [
                 'ip' => $request->ip(),
-                'userAgent' => Str::limit((string) $request->userAgent(), 500, ''),
-            ]));
+                'userAgent' => UserAgent::from($request),
+            ]);
         }
 
         return null;

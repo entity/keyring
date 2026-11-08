@@ -24,7 +24,13 @@ interface SessionRegistry
      */
     public function forUser(Authenticatable $user): Collection;
 
-    public function touch(string $id, int $at): void;
+    /**
+     * Change some of a session's fields (named as on RegisteredSession), and
+     * only those, so a request can't write back a stale copy of the rest.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public function update(string $id, array $changes): void;
 
     public function revoke(string $id): void;
 
@@ -34,4 +40,9 @@ interface SessionRegistry
     public function revokeAll(Authenticatable $user, ?string $except = null): int;
 
     public function revokeDevice(Authenticatable $user, string $deviceId): int;
+
+    /**
+     * Forget sessions that have expired or been revoked. Returns how many.
+     */
+    public function prune(): int;
 }

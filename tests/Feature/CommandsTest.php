@@ -4,6 +4,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
@@ -11,6 +12,7 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Models\Authenticator;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
@@ -133,4 +135,22 @@ describe('keyring:import fortify', function () {
 
         expect($this->user->keyring->refresh()->of('passkey')->first()->name)->toBe('MacBook');
     });
+});
+
+it('prunes old devices, email changes and ended sessions', function () {
+    $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $old = Keyring::deviceModel()::make(['token_hash' => 'a', 'revoked_at' => now()->subDays(31)]);
+    $old->authenticatable()->associate($user)->save();
+    $current = Keyring::deviceModel()::make(['token_hash' => 'b']);
+    $current->authenticatable()->associate($user)->save();
+
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('ended', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
+    $registry->save(new RegisteredSession('live', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addDay()->getTimestamp()));
+
+    $this->artisan('keyring:prune')->assertSuccessful();
+
+    expect(Keyring::deviceModel()::pluck('id')->all())->toBe([$current->id])
+        ->and($registry->find('ended'))->toBeNull()
+        ->and($registry->find('live'))->not->toBeNull();
 });

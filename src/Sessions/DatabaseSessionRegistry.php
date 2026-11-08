@@ -42,9 +42,9 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
     }
 
-    public function touch(string $id, int $at): void
+    public function update(string $id, array $changes): void
     {
-        $this->query()->where('id', $id)->update(['last_activity_at' => $at]);
+        $this->query()->where('id', $id)->update(RegisteredSession::columns($changes));
     }
 
     public function revoke(string $id): void
@@ -68,6 +68,14 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->where('device_id', $deviceId)
             ->whereNull('revoked_at')
             ->update(['revoked_at' => now()->getTimestamp()]);
+    }
+
+    public function prune(): int
+    {
+        return $this->query()
+            ->where('expires_at', '<=', now()->getTimestamp())
+            ->orWhereNotNull('revoked_at')
+            ->delete();
     }
 
     protected function query(): Builder

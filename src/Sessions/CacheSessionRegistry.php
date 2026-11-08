@@ -62,11 +62,23 @@ class CacheSessionRegistry implements SessionRegistry
             ->values();
     }
 
-    public function touch(string $id, int $at): void
+    /**
+     * The cache has no partial writes, so this reads and writes the record.
+     * Revocations live in their own key, so this can never undo one.
+     */
+    public function update(string $id, array $changes): void
     {
         if ($session = $this->find($id)) {
-            $this->save($session->with(['lastActivityAt' => $at]));
+            $this->save($session->with($changes));
         }
+    }
+
+    /**
+     * Records expire with their TTL.
+     */
+    public function prune(): int
+    {
+        return 0;
     }
 
     public function revoke(string $id): void

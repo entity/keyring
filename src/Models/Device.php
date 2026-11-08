@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
@@ -34,7 +35,7 @@ use Keyring\Support\Url;
 #[Hidden('token_hash', 'authenticatable_type', 'authenticatable_id')]
 class Device extends Model
 {
-    use HasUlids;
+    use HasUlids, MassPrunable;
 
     protected function casts(): array
     {
@@ -73,6 +74,16 @@ class Device extends Model
         $query->whereNull('revoked_at');
     }
 
+    /**
+     * Revoked devices, a month after they were signed out.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return static::query()->where('revoked_at', '<', now()->subDays(30));
+    }
+
     public function user(): ?Authenticatable
     {
         $user = $this->authenticatable;
@@ -106,6 +117,6 @@ class Device extends Model
     {
         $where = $this->location['city'] ?? $this->location['region'] ?? $this->location['country'] ?? null;
 
-        return trim(($this->name ?? __('Unknown device')).($where ? ' '.__('near :place', ['place' => $where]) : ''));
+        return trim(($this->name ?? __('keyring::keyring.unknown_device')).($where ? ' '.__('keyring::keyring.near', ['place' => $where]) : ''));
     }
 }

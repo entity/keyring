@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
@@ -33,7 +34,7 @@ class Sessions
             deviceId: $device?->id,
             assurance: $assurance,
             ip: $request->ip(),
-            userAgent: Str::limit((string) $request->userAgent(), 500, ''),
+            userAgent: UserAgent::from($request),
             authenticatedAt: $now,
             lastActivityAt: $now,
             expiresAt: $now + $this->absolute($assurance),
@@ -60,10 +61,10 @@ class Sessions
         $session = $this->current($request);
 
         if ($session !== null && $assurance->value > $session->assurance->value) {
-            $this->registry->save($session->with([
+            $this->registry->update($session->id, [
                 'assurance' => $assurance,
                 'expiresAt' => min($session->expiresAt, $session->authenticatedAt + $this->absolute($assurance)),
-            ]));
+            ]);
         }
     }
 

@@ -2,6 +2,7 @@
 
 namespace Keyring\Sessions;
 
+use Illuminate\Support\Str;
 use Keyring\Enums\Assurance;
 
 /**
@@ -50,6 +51,23 @@ final readonly class RegisteredSession
             'expires_at' => $this->expiresAt,
             'revoked_at' => $this->revokedAt,
         ];
+    }
+
+    /**
+     * Storage columns for some of the fields, e.g. ['lastActivityAt' => 1] to ['last_activity_at' => 1].
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<string, mixed>
+     */
+    public static function columns(array $changes): array
+    {
+        $columns = [];
+
+        foreach ($changes as $field => $value) {
+            $columns[Str::snake($field)] = $value instanceof Assurance ? $value->value : $value;
+        }
+
+        return $columns;
     }
 
     public static function fromArray(array $data): self

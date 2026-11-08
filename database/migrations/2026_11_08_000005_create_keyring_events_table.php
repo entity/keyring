@@ -19,6 +19,9 @@ return new class extends Migration
             $table->json('meta')->nullable();
             $table->timestamp('seen_at')->nullable();
             $table->timestamp('created_at')->index();
+
+            // Recent events of one type for a user, checked on every login.
+            $table->index(['authenticatable_type', 'authenticatable_id', 'type', 'created_at'], 'keyring_events_owner_type_index');
         });
     }
 

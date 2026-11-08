@@ -21,7 +21,7 @@ return new class extends Migration
             $table->text('user_agent')->nullable();
             $table->unsignedInteger('authenticated_at');
             $table->unsignedInteger('last_activity_at');
-            $table->unsignedInteger('expires_at');
+            $table->unsignedInteger('expires_at')->index();
             $table->unsignedInteger('revoked_at')->nullable();
         });
     }
