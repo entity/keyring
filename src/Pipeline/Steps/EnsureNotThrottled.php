@@ -30,8 +30,12 @@ class EnsureNotThrottled
             if ($lockedUntil > now()->getTimestamp()) {
                 return $this->lockout($context, $lockedUntil - now()->getTimestamp());
             }
+        }
 
-            if ($this->limiter->tooManyAttempts($this->key($limit), $limit->maxAttempts)) {
+        // Count the attempt before verifying it, so overlapping requests
+        // can't all slip under the limit while they're being checked.
+        foreach ($limits as $limit) {
+            if ($this->limiter->hit($this->key($limit), $limit->decaySeconds) > $limit->maxAttempts) {
                 return $this->lockout($context, $this->limiter->availableIn($this->key($limit)));
             }
         }
@@ -39,12 +43,10 @@ class EnsureNotThrottled
         $context = $next($context);
 
         foreach ($limits as $limit) {
-            $key = $this->key($limit);
-
             if ($context->outcome === Outcome::Failed) {
                 $this->failed($limit);
-            } elseif (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true)) {
-                $this->limiter->clear($key);
+            } elseif (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true) && ! $this->shared($limit)) {
+                $this->limiter->clear($this->key($limit));
             }
         }
 
@@ -52,15 +54,15 @@ class EnsureNotThrottled
     }
 
     /**
-     * Count a failure. Each time a key locks out, the lock lasts twice as long
-     * as the last one (OWASP), up to a day. The count resets a day after the
-     * last lockout.
+     * Once a key reaches its limit, lock it. Each lock lasts twice as long as
+     * the last one (OWASP), up to a day. The lockout count resets a day after
+     * the first lockout.
      */
     protected function failed(Limit $limit): void
     {
         $key = $this->key($limit);
 
-        if ($this->limiter->hit($key, $limit->decaySeconds) < $limit->maxAttempts) {
+        if ($this->limiter->attempts($key) < $limit->maxAttempts) {
             return;
         }
 
@@ -69,6 +71,15 @@ class EnsureNotThrottled
 
         $this->cache->put($key.':locked', now()->getTimestamp() + $seconds, $seconds);
         $this->limiter->clear($key);
+    }
+
+    /**
+     * Limits shared by every account (per IP) are never cleared by one
+     * account's success, or an attacker could reset them with their own login.
+     */
+    protected function shared(Limit $limit): bool
+    {
+        return str_contains((string) $limit->key, '|ip|');
     }
 
     protected function lockout(Context $context, int $retryAfter): Context

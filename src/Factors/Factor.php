@@ -45,16 +45,22 @@ abstract class Factor implements FactorContract
         return ['code' => ['required', 'string', 'max:64']];
     }
 
+    /**
+     * Keys containing "|ip|" are shared by every account on that address, so
+     * a success never clears them. Requests that don't name an account (like
+     * a usernameless passkey) only get the per-IP limit, so they can't fill
+     * one bucket that every user shares.
+     */
     public function limits(Request $request, ?Attempt $attempt): array
     {
         $account = $attempt !== null
-            ? $attempt->userId
-            : Str::lower((string) $request->input(config('keyring.username')));
+            ? (string) $attempt->userId
+            : Str::transliterate(Str::lower(trim((string) $request->input(config('keyring.username')))));
 
-        return [
-            Limit::perMinute(config('keyring.limits.per_account'))->by($this->key().'|account|'.$account),
+        return array_values(array_filter([
+            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($this->key().'|account|'.$account),
             Limit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
-        ];
+        ]));
     }
 
     public function errorKey(): string
