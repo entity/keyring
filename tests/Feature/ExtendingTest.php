@@ -43,6 +43,16 @@ it('lets apps swap the response for every action', function () {
         ->assertExactJson(['custom' => 'sessions-revoked']);
 });
 
+it('answers json callers with the status and its message', function () {
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->deleteJson('/user/devices')
+        ->assertExactJson(['status' => 'sessions-revoked', 'message' => Keyring::statusMessage('sessions-revoked')]);
+
+    expect(Keyring::statusMessage('sessions-revoked'))->toBe("You've been signed out everywhere else.")
+        ->and(Keyring::statusMessage('passwords.sent'))->toBeNull()
+        ->and(Keyring::statusMessage(null))->toBeNull();
+});
+
 it('answers unknown factors with a 404', function () {
     $this->postJson('/login/sms')->assertNotFound();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->postJson('/user/authenticators/sms')->assertNotFound();

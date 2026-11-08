@@ -11,6 +11,7 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Inertia\Inertia;
@@ -347,6 +348,15 @@ class KeyringManager
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
         return $this->container->make(SecurityLog::class)->activity($user, $limit);
+    }
+
+    /**
+     * The message for a status slug Keyring flashes or returns, such as
+     * "device-revoked", from keyring::status. Null for anything else.
+     */
+    public function statusMessage(mixed $status): ?string
+    {
+        return is_string($status) && Lang::has($key = 'keyring::status.'.$status) ? __($key) : null;
     }
 
     /**

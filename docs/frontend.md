@@ -348,17 +348,17 @@ The published pages also link to a few paths directly (`/login`, `/register`, `/
 
 Keyring's non-JSON responses flash a `status` slug to the session (JSON responses include it as `status`, with a readable `message`), such as `code-sent`, `password-updated`, `device-revoked` or `email-change-requested`. Extra data, such as new recovery codes, is flashed as `keyring.result`. See [Status Responses](sign-in-flow.md#status-responses).
 
-Share them through your Inertia middleware alongside the ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts). Translate the slug with `keyring::status.*` to get the message:
+Share them through your Inertia middleware alongside the ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts). `Keyring::statusMessage()` translates a slug from `keyring::status.*`, and gives `null` for anything else:
 
 ```php
-use Illuminate\Support\Facades\Lang;
+use Keyring\Facades\Keyring;
 
 public function share(Request $request): array
 {
     return [
         ...parent::share($request),
         'status' => fn () => $request->session()->get('status'),
-        'statusMessage' => fn () => Lang::has($key = 'keyring::status.'.$request->session()->get('status')) ? __($key) : null,
+        'statusMessage' => fn () => Keyring::statusMessage($request->session()->get('status')),
         'keyringResult' => fn () => $request->session()->get('keyring.result'),
         'keyringAlerts' => fn () => $request->session()->get('keyring.alerts', []),
     ];

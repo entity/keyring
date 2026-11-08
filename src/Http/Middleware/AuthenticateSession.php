@@ -116,7 +116,7 @@ class AuthenticateSession
         // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
         // login, remembering where they were going.
         if ($request->expectsJson() && ! $request->hasHeader('X-Inertia')) {
-            return new JsonResponse(['status' => 'signed-out', 'message' => __('keyring::status.signed-out')], 401);
+            return new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401);
         }
 
         return redirect()->guest(route('login'))->with('status', 'signed-out');
