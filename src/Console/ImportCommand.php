@@ -59,7 +59,8 @@ class ImportCommand extends Command
         $issues = ['skipped' => [], 'failed' => []];
 
         if (Schema::hasColumn((new $model)->getTable(), 'two_factor_secret')) {
-            $model::query()->whereNotNull('two_factor_secret')
+            // Without global scopes: a soft deleted user can be restored later.
+            $model::query()->withoutGlobalScopes()->whereNotNull('two_factor_secret')
                 ->chunkById(200, function ($users) use (&$counts, &$issues) {
                     foreach ($users as $user) {
                         $this->importTwoFactor($user, $counts, $issues);
@@ -261,7 +262,7 @@ class ImportCommand extends Command
             return;
         }
 
-        $user = $model::query()->find($passkey->user_id);
+        $user = $model::query()->withoutGlobalScopes()->find($passkey->user_id);
 
         if ($user === null) {
             $issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: that user doesn't exist";
