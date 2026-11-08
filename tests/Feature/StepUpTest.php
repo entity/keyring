@@ -75,7 +75,7 @@ it('does not slide the fresh window with activity', function () {
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
 });
 
-it('lets any enrolled factor confirm, not just the password', function () {
+it('asks a user with two factors for both once the window has passed', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
 
     signIn();
@@ -87,8 +87,10 @@ it('lets any enrolled factor confirm, not just the password', function () {
     $this->inertia()->get(route('keyring.confirm.challenge'))
         ->assertJsonPath('props.factor', 'totp');
 
-    // The login code can't be replayed, so use the next one.
-    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, step: 1)])->assertRedirect('/account');
+    // The login code can't be replayed, so use the next one. A user with two
+    // factors proves both again, as signing in would ask.
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, step: 1)])->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
 });
 
 it('also satisfies laravel password confirmation', function () {

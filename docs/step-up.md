@@ -58,10 +58,12 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 
 ## Fresh Verification
 
-`keyring.fresh:15m` lets the request through when the user verified a factor in the last 15 minutes. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
+`keyring.fresh:15m` lets the request through when the user verified, in the last 15 minutes, as much as signing in would ask of them. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
 
 - Users with only a password confirm with their password.
-- Users who have any possession factor (an authenticator app, a passkey, a security key, email or recovery codes) must use one. A stolen session plus a phished password can't be used to add or remove factors.
+- Users with two factors prove both again, as NIST SP 800-63B asks before binding a new authenticator. A stolen session plus one phished factor can't add, remove or change anything.
+- Users who have any possession factor (an authenticator app, a passkey, a security key, email or recovery codes) always use one.
+- A policy the user can't fully meet yet (one that asks for a passkey they haven't added) counts as far as they can, so they can still add it.
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is fresh for step-up too.
 
@@ -79,10 +81,12 @@ When a request needs step-up, Keyring starts a confirm attempt with the requirem
 
 These routes need a user signed in to Keyring's guard (`auth:{guard}`), and the verify and send routes take the session lock like the login challenge's. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress starts one that any one factor satisfies.
 
+A page that asks again while a confirm attempt for the same requirement is in progress continues it, so what the user already proved isn't lost.
+
 When the user has verified enough, Keyring:
 
 1. regenerates the session ID, destroying the old one,
-2. records the new verifications, and raises the registered session's assurance (which can shorten its [absolute timeout](devices-and-sessions.md#timeouts)),
+2. records the new verifications, which resets the [level's clocks](devices-and-sessions.md#timeouts), and raises the registered session's assurance,
 3. sets Laravel's `auth.password_confirmed_at`,
 4. dispatches `Keyring\Events\Confirmed`,
 5. redirects to the intended URL, or `home`.
