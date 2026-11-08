@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('keyring_authenticators', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->morphs('authenticatable');
+            $table->morphs('authenticatable', 'keyring_authenticators_owner_index');
             $table->string('factor', 64);
             $table->string('name');
             $table->text('secret')->nullable();
@@ -25,7 +25,7 @@ return new class extends Migration
             $table->timestamp('last_used_at')->nullable();
             $table->timestamps();
 
-            $table->index(['authenticatable_type', 'authenticatable_id', 'factor']);
+            $table->index(['authenticatable_type', 'authenticatable_id', 'factor'], 'keyring_authenticators_owner_factor_index');
         });
     }
 

@@ -23,7 +23,7 @@ abstract class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
-        $app['config']->set('database.default', 'testing');
+        $app['config']->set('database.default', env('DB_CONNECTION', 'testing'));
         $app['config']->set('auth.providers.users.model', User::class);
         $app['config']->set('keyring.passwords.uncompromised', false);
     }

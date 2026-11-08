@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('keyring_devices', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->morphs('authenticatable');
+            $table->morphs('authenticatable', 'keyring_devices_owner_index');
             $table->string('token_hash', 64);
             $table->string('name')->nullable();
             $table->text('user_agent')->nullable();

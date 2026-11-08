@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('keyring_pending_changes', function (Blueprint $table) {
             $table->ulid('id')->primary();
-            $table->morphs('authenticatable');
+            $table->morphs('authenticatable', 'keyring_pending_changes_owner_index');
             $table->string('attribute', 64);
             $table->text('value');
             $table->text('previous_value')->nullable();

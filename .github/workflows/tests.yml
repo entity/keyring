@@ -20,6 +20,49 @@ jobs:
       - run: vendor/bin/phpstan analyse --no-progress
       - run: vendor/bin/pest
 
+  databases:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - connection: pgsql
+            port: 5432
+          - connection: mysql
+            port: 3306
+    services:
+      pgsql:
+        image: postgres:18
+        env:
+          POSTGRES_DB: keyring
+          POSTGRES_PASSWORD: password
+        ports: ['5432:5432']
+        options: --health-cmd=pg_isready --health-interval=5s --health-retries=10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: keyring
+          MYSQL_ROOT_PASSWORD: password
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-retries=10
+    env:
+      DB_CONNECTION: ${{ matrix.connection }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: ${{ matrix.port }}
+      DB_DATABASE: keyring
+      DB_USERNAME: ${{ matrix.connection == 'pgsql' && 'postgres' || 'root' }}
+      DB_PASSWORD: password
+    name: tests (${{ matrix.connection }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_pgsql, pdo_mysql, sodium, bcmath, intl
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - run: vendor/bin/pest
+
   js:
     runs-on: ubuntu-latest
     defaults:
