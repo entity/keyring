@@ -2,6 +2,7 @@
 
 namespace Keyring\Changes;
 
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -283,7 +284,7 @@ class EmailChanges
     /**
      * One by one, so each removal is logged and announced.
      */
-    protected function removeAuthenticatorsAddedSince(Authenticatable&Model $user, Carbon $since): void
+    protected function removeAuthenticatorsAddedSince(Authenticatable&Model $user, CarbonInterface $since): void
     {
         $this->keyring->authenticatorModel()::query()
             ->ownedBy($user)

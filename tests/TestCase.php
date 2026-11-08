@@ -2,7 +2,9 @@
 
 namespace Keyring\Tests;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Date;
 use Keyring\KeyringServiceProvider;
 use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
@@ -21,6 +23,9 @@ abstract class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
+        // Like Laravel's starter kits, so nothing relies on mutable dates.
+        Date::use(CarbonImmutable::class);
+
         $app['config']->set('database.default', getenv('DB_CONNECTION') ?: 'testing');
         $app['config']->set('auth.providers.users.model', User::class);
         $app['config']->set('keyring.passwords.uncompromised', false);
