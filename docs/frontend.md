@@ -247,7 +247,7 @@ await removeAuthenticator(added.authenticator.id)
 | `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
 | `renameAuthenticator(id, name)` | `PATCH` with `name`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. |
-| `removeAuthenticator(id)` | `DELETE`. |
+| `removeAuthenticator(id, password?)` | `DELETE`. Removing the user's last second factor also needs their password. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them.
