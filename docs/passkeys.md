@@ -45,8 +45,9 @@ Users add either through the [authenticator routes](authenticators.md). Keyring 
 
 Every WebAuthn verification proves possession. It also proves inherence only when the authenticator reports that it verified the user this time (the UV flag), with a PIN, fingerprint or face.
 
-- A passkey always requires user verification, so it proves possession and inherence, and reaches [AAL3](policies.md#assurance-levels) on its own.
-- A security key that doesn't verify the user proves possession only. After a password, that's still AAL3, since the possession factor is phishing resistant.
+- A passkey always requires user verification, so it proves possession and inherence, and reaches [AAL2](policies.md#assurance-levels) on its own. Most passkeys sync between devices (iCloud Keychain, Google Password Manager), and NIST caps those at AAL2. A passkey that stays on its device reaches AAL3.
+- A security key that doesn't verify the user proves possession only. After a password, that's AAL3, since the key is phishing resistant and can't leave its device.
+- Whether a key may sync is the backup-eligible flag it reports. Keyring reads it on every sign in, not just at registration, and a key that hasn't reported it counts as synced.
 
 When planning what to offer, Keyring assumes a security key will verify the user if it did so when it was registered. The categories that count are always the ones from the actual response.
 

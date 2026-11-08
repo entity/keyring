@@ -5,9 +5,9 @@ use Keyring\Enums\Category;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
-function verified(string $factor, array $categories, bool $phishingResistant = false): Verification
+function verified(string $factor, array $categories, bool $phishingResistant = false, bool $deviceBound = false): Verification
 {
-    return new Verification($factor, null, $categories, $phishingResistant, time());
+    return new Verification($factor, null, $categories, $phishingResistant, time(), $deviceBound);
 }
 
 it('counts distinct categories, not verifications', function () {
@@ -21,11 +21,15 @@ it('counts distinct categories, not verifications', function () {
         ->and(Requirement::aal1()->isMetBy([]))->toBeFalse();
 });
 
-it('lets a user verified passkey finish aal2 on its own', function () {
-    $passkey = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
+it('lets a user verified passkey finish aal2 on its own, and aal3 only when it can\'t sync', function () {
+    $synced = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
+    $bound = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true, deviceBound: true);
 
-    expect(Requirement::aal2()->isMetBy([$passkey]))->toBeTrue()
-        ->and(Requirement::aal3()->isMetBy([$passkey]))->toBeTrue();
+    expect(Requirement::aal2()->isMetBy([$synced]))->toBeTrue()
+        ->and(Requirement::aal3()->isMetBy([$synced]))->toBeFalse()
+        ->and(Requirement::aal3()->isMetBy([$bound]))->toBeTrue()
+        ->and(Requirement::aal3()->wouldProgress([], $synced))->toBeFalse()
+        ->and(Requirement::aal3()->wouldProgress([], $bound))->toBeTrue();
 });
 
 it('requires specific categories', function () {
@@ -50,10 +54,10 @@ it('requires a phishing resistant verification', function () {
 it('knows whether another verification would help', function () {
     $password = verified('password', [Category::Knowledge]);
 
-    expect(Requirement::aal2()->wouldProgress([$password], [Category::Knowledge], false))->toBeFalse()
-        ->and(Requirement::aal2()->wouldProgress([$password], [Category::Possession], false))->toBeTrue()
-        ->and(Requirement::aal2()->phishingResistant()->wouldProgress([$password], [Category::Possession], false))->toBeFalse()
-        ->and(Requirement::aal2()->phishingResistant()->wouldProgress([$password], [Category::Possession], true))->toBeTrue();
+    expect(Requirement::aal2()->wouldProgress([$password], verified('pin', [Category::Knowledge])))->toBeFalse()
+        ->and(Requirement::aal2()->wouldProgress([$password], verified('totp', [Category::Possession])))->toBeTrue()
+        ->and(Requirement::aal2()->phishingResistant()->wouldProgress([$password], verified('totp', [Category::Possession])))->toBeFalse()
+        ->and(Requirement::aal2()->phishingResistant()->wouldProgress([$password], verified('webauthn', [Category::Possession], phishingResistant: true)))->toBeTrue();
 });
 
 it('limits itself to what a user can prove', function () {
@@ -81,11 +85,13 @@ it('round trips through an array', function () {
 it('works out assurance from verifications', function () {
     $password = verified('password', [Category::Knowledge]);
     $totp = verified('totp', [Category::Possession]);
-    $key = verified('webauthn', [Category::Possession], phishingResistant: true);
+    $synced = verified('webauthn', [Category::Possession], phishingResistant: true);
+    $key = verified('webauthn', [Category::Possession], phishingResistant: true, deviceBound: true);
 
     expect(Assurance::of([]))->toBe(Assurance::None)
         ->and(Assurance::of([$password]))->toBe(Assurance::AAL1)
         ->and(Assurance::of([$password, $totp]))->toBe(Assurance::AAL2)
+        ->and(Assurance::of([$password, $synced]))->toBe(Assurance::AAL2)
         ->and(Assurance::of([$password, $key]))->toBe(Assurance::AAL3);
 });
 

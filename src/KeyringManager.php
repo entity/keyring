@@ -168,6 +168,7 @@ class KeyringManager
             return $requirement->limitedTo(
                 array_values(array_filter(Category::cases(), $keyring->has(...))),
                 $keyring->canMeet(Requirement::aal1()->phishingResistant()),
+                $keyring->canMeet(Requirement::aal1()->deviceBound()),
             );
         }
 

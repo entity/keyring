@@ -50,14 +50,14 @@ class AuthenticatorFactory extends Factory
      * A passkey that only works with Keyring::fake(), or with a
      * VirtualAuthenticator enrolled through the real flow.
      */
-    public function passkey(): static
+    public function passkey(bool $synced = true): static
     {
-        return $this->webauthn('passkey', 'Passkey', userVerified: true);
+        return $this->webauthn('passkey', 'Passkey', userVerified: true, synced: $synced);
     }
 
     public function securityKey(bool $userVerified = false): static
     {
-        return $this->webauthn('security-key', 'Security key', $userVerified);
+        return $this->webauthn('security-key', 'Security key', $userVerified, synced: false);
     }
 
     public function emailCode(): static
@@ -65,7 +65,7 @@ class AuthenticatorFactory extends Factory
         return $this->state(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]);
     }
 
-    protected function webauthn(string $factor, string $name, bool $userVerified): static
+    protected function webauthn(string $factor, string $name, bool $userVerified, bool $synced): static
     {
         return $this->state(fn () => [
             'factor' => $factor,
@@ -74,7 +74,7 @@ class AuthenticatorFactory extends Factory
             'credential_id' => rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
             'public_key' => '{}',
             'transports' => ['usb'],
-            'meta' => ['user_verified' => $userVerified],
+            'meta' => ['user_verified' => $userVerified, 'backup_eligible' => $synced],
         ]);
     }
 

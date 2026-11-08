@@ -80,6 +80,15 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         return true;
     }
 
+    /**
+     * A passkey that syncs (iCloud Keychain, Google Password Manager...) can
+     * leave the device, so it isn't. Unknown counts as synced.
+     */
+    public function deviceBound(Authenticator $authenticator): bool
+    {
+        return $authenticator->meta('backup_eligible') === false;
+    }
+
     public function priority(): int
     {
         return $this->profile->priority;
@@ -175,7 +184,8 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             return null;
         }
 
-        $actual->forceFill([
+        // Whether the key may sync is reported again on every sign in.
+        $actual->withMeta('backup_eligible', $result['backupEligible'])->forceFill([
             'public_key' => $this->ceremonies()->toJson($result['record']),
             'sign_count' => $result['record']->counter,
         ])->save();
@@ -183,6 +193,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         return $this->verified(
             $actual,
             categories: $this->categoriesFor($result['userVerified']),
+            deviceBound: ! $result['backupEligible'],
         );
     }
 

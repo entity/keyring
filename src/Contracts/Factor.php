@@ -38,6 +38,12 @@ interface Factor
     public function phishingResistant(Authenticator $authenticator): bool;
 
     /**
+     * Whether the secret can't leave the device it's on, e.g. a security key
+     * or a passkey that isn't synced. NIST only accepts these at AAL3.
+     */
+    public function deviceBound(Authenticator $authenticator): bool;
+
+    /**
      * Higher priority factors are offered first.
      */
     public function priority(): int;
