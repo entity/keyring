@@ -8,6 +8,7 @@ use Illuminate\Support\Timebox;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
+use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
@@ -33,7 +34,9 @@ class VerifyFactor
 
         $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context) {
             if ($context->identifying && $context->factor instanceof PrimaryFactor) {
-                $context->authenticator = $context->factor->identify($context->request);
+                $authenticator = $context->factor->identify($context->request);
+
+                $context->authenticator = $authenticator !== null && Keyring::belongsToGuard($authenticator->user()) ? $authenticator : null;
 
                 if ($context->authenticator !== null) {
                     $context->attempt = Attempt::start(

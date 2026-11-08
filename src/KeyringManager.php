@@ -417,6 +417,17 @@ class KeyringManager
     }
 
     /**
+     * The session only keeps the user's ID, so anyone the guard's provider
+     * wouldn't load back would come back as whoever else has that ID.
+     */
+    public function belongsToGuard(Authenticatable&Model $user): bool
+    {
+        $found = $this->provider()->retrieveById($user->getAuthIdentifier());
+
+        return $found instanceof Model && $found->is($user);
+    }
+
+    /**
      * Everything the user can sign in with.
      */
     public function for(Authenticatable&Model $user): UserKeyring

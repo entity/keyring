@@ -18,6 +18,15 @@ return new class extends Migration
             $table->timestamps();
         });
 
+        Schema::create('staff', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->string('password')->nullable();
+            $table->rememberToken();
+            $table->timestamps();
+        });
+
         Schema::create('password_reset_tokens', function (Blueprint $table) {
             $table->string('email')->primary();
             $table->string('token');

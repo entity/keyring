@@ -23,8 +23,9 @@ The [conformance suite](testing.md#the-conformance-suite) tests several of these
 ### Signing In
 
 - A wrong password and an unknown account give the same error, on the same field, with the same status code.
+- A sign-in only succeeds for a user Keyring's guard would load back through its provider. A passkey that belongs to another model (say, staff when the guard signs in users) fails like an unknown one, even when the IDs match.
 - Every failed factor check takes at least `timebox` microseconds (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist.
-- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, or as soon as the user's password changes.
+- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, as soon as the user's password changes, or when `keyring.guard` is no longer the guard they started under.
 - The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.

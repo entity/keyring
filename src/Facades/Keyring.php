@@ -34,6 +34,7 @@ use Keyring\KeyringManager;
  * @method static \Illuminate\Contracts\Auth\StatefulGuard guard()
  * @method static \Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model user()
  * @method static \Illuminate\Contracts\Auth\UserProvider provider(string|null $guard = null)
+ * @method static bool belongsToGuard(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static \Keyring\UserKeyring for(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static string username()
  * @method static string normalizeUsername(string $username)

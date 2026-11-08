@@ -33,10 +33,10 @@ class AttemptStore
     }
 
     /**
-     * The attempt in progress, unless it expired, its user is gone, or their
-     * password changed since it was saved: a reset or change elsewhere ends
-     * every half-finished sign in, including one that already got past the
-     * old password.
+     * The attempt in progress, unless it expired, it started under another
+     * guard, its user is gone, or their password changed since it was saved:
+     * a reset or change elsewhere ends every half-finished sign in, including
+     * one that already got past the old password.
      */
     public function current(Purpose $purpose): ?Attempt
     {
@@ -49,7 +49,9 @@ class AttemptStore
         try {
             $data = json_decode(Crypt::decryptString($payload), true, flags: JSON_THROW_ON_ERROR);
             $attempt = Attempt::fromArray($data);
-            $valid = ! $attempt->expired && hash_equals($data['password'] ?? '', $this->passwordHash($attempt->user()));
+            $valid = ! $attempt->expired
+                && $attempt->guard === config('keyring.guard')
+                && hash_equals($data['password'] ?? '', $this->passwordHash($attempt->user()));
         } catch (AttemptExpired|DecryptException|\JsonException|\TypeError|\ValueError) {
             $valid = false;
         }
