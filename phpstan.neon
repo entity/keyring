@@ -7,3 +7,4 @@ parameters:
         - src
         - tests/Fixtures
         - tests/TestCase.php
+        - tests/Feature/ConformanceTest.php
