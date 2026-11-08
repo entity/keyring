@@ -45,7 +45,7 @@ class DeviceManager
         $token = $this->token($request);
 
         return $token === null ? new EloquentCollection : Keyring::deviceModel()::query()
-            ->where('token_hash', hash('sha256', $token))
+            ->withToken($token)
             ->active()
             ->get();
     }
@@ -64,11 +64,11 @@ class DeviceManager
             $token = $this->token($request) ?? Str::random(40);
 
             // A revoked device starts over with a new token.
-            if ($this->query($user)->where('token_hash', hash('sha256', $token))->exists()) {
+            if ($this->query($user)->withToken($token)->exists()) {
                 $token = Str::random(40);
             }
 
-            $device = Keyring::deviceModel()::make(['token_hash' => hash('sha256', $token), 'first_seen_at' => now()]);
+            $device = Keyring::deviceModel()::make(['token_hash' => Device::hashToken($token), 'first_seen_at' => now()]);
             $device->authenticatable()->associate($user);
 
             $this->queueCookie($token);

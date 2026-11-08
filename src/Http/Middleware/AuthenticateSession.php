@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
+use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
@@ -24,6 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AuthenticateSession
 {
+    use ChoosesFormat;
+
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
@@ -115,7 +118,7 @@ class AuthenticateSession
 
         // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
         // login, remembering where they were going.
-        if ($request->expectsJson() && ! $request->hasHeader('X-Inertia')) {
+        if ($this->wantsJson($request)) {
             return new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401);
         }
 

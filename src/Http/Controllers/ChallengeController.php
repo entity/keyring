@@ -7,7 +7,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
@@ -20,6 +19,7 @@ use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
+use Keyring\Support\Throttle;
 
 /**
  * One controller for every factor and both purposes (login and step-up).
@@ -101,9 +101,7 @@ class ChallengeController
 
         // Three codes per sign in attempt every ten minutes.
         if (! $limiter->attempt($key, 3, fn () => $factor->send($attempt, $authenticator), 600)) {
-            throw ValidationException::withMessages([
-                'code' => __('auth.throttle', ['seconds' => $limiter->availableIn($key), 'minutes' => ceil($limiter->availableIn($key) / 60)]),
-            ])->status(429);
+            Throttle::fail('code', $limiter->availableIn($key));
         }
 
         $this->attempts->save($attempt);

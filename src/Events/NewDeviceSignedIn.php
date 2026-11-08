@@ -9,7 +9,7 @@ use Keyring\Models\Device;
 
 /**
  * Someone signed in from a device this account hasn't used before. Keyring
- * doesn't email anyone; listen for this and decide.
+ * emails the user about it when the "new_device" security email is on.
  */
 class NewDeviceSignedIn
 {

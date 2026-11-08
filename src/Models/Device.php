@@ -48,12 +48,29 @@ class Device extends Model
     }
 
     /**
+     * The device cookie is stored as a SHA-256 hash.
+     */
+    public static function hashToken(string $token): string
+    {
+        return hash('sha256', $token);
+    }
+
+    /**
      * @param  Builder<static>  $query
      */
     #[Scope]
     protected function active(Builder $query): void
     {
         $query->whereNull('revoked_at');
+    }
+
+    /**
+     * @param  Builder<static>  $query
+     */
+    #[Scope]
+    protected function withToken(Builder $query, string $token): void
+    {
+        $query->where('token_hash', static::hashToken($token));
     }
 
     /**

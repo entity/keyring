@@ -72,9 +72,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     public function categories(Authenticator $authenticator): array
     {
-        return $this->profile->requiresUserVerification() || $authenticator->meta('user_verified')
-            ? [Category::Possession, Category::Inherence]
-            : [Category::Possession];
+        return $this->categoriesFor($this->profile->requiresUserVerification() || $authenticator->meta('user_verified'));
     }
 
     public function phishingResistant(Authenticator $authenticator): bool
@@ -184,7 +182,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
         return $this->verified(
             $actual,
-            categories: $result['userVerified'] ? [Category::Possession, Category::Inherence] : [Category::Possession],
+            categories: $this->categoriesFor($result['userVerified']),
         );
     }
 
@@ -204,11 +202,6 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         ], [
             'options' => $this->ceremonies()->toJson($options),
         ]);
-    }
-
-    public function enrollmentRules(): array
-    {
-        return ['credential' => ['required'], 'name' => ['nullable', 'string', 'max:64']];
     }
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
@@ -273,5 +266,16 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     protected function ceremonies(): Ceremonies
     {
         return app(Ceremonies::class);
+    }
+
+    /**
+     * A key only counts as inherence when it verified the user (PIN or
+     * biometrics), not just their presence.
+     *
+     * @return list<Category>
+     */
+    protected function categoriesFor(bool $userVerified): array
+    {
+        return $userVerified ? [Category::Possession, Category::Inherence] : [Category::Possession];
     }
 }
