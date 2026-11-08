@@ -82,7 +82,7 @@ class Password extends Factor implements PrimaryFactor
             return null;
         }
 
-        $this->provider()->rehashPasswordIfRequired($user, $credentials);
+        Keyring::changing(fn () => $this->provider()->rehashPasswordIfRequired($user, $credentials));
 
         return $this->verified($authenticator);
     }

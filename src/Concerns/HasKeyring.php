@@ -17,6 +17,14 @@ use Keyring\UserKeyring;
 trait HasKeyring
 {
     /**
+     * Protected attributes (email, password) can only change through Keyring.
+     */
+    public static function bootHasKeyring(): void
+    {
+        static::updating(fn (self $user) => Keyring::guardProtectedAttributes($user));
+    }
+
+    /**
      * @return MorphMany<Authenticator, $this>
      */
     public function authenticators(): MorphMany

@@ -1,0 +1,255 @@
+<?php
+
+use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
+use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
+use Keyring\Events\EmailChanged;
+use Keyring\Events\EmailChangeReverted;
+use Keyring\Events\PasswordChanged;
+use Keyring\Events\PasswordReset;
+use Keyring\Events\ProtectionBypassed;
+use Keyring\Exceptions\ProtectedAttributeException;
+use Keyring\Facades\Keyring;
+use Keyring\Models\Authenticator;
+use Keyring\Models\PendingChange;
+use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\EmailAddressInUse;
+use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Notifications\ResetPassword;
+use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\User;
+
+beforeEach(function () {
+    Notification::fake();
+
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+});
+
+function sentTo(string $address, string $notification): object
+{
+    $sent = null;
+
+    Notification::assertSentTo(new AnonymousNotifiable, $notification, function ($instance, $channels, $notifiable) use ($address, &$sent) {
+        if ($notifiable->routes['mail'] === $address) {
+            $sent = $instance;
+
+            return true;
+        }
+
+        return false;
+    });
+
+    return $sent;
+}
+
+function linkIn(object $notification, string $text): string
+{
+    $mail = $notification->toMail(new AnonymousNotifiable);
+
+    if ($mail->actionText === $text) {
+        return $mail->actionUrl;
+    }
+
+    return collect([...$mail->introLines, ...$mail->outroLines])->first(fn ($line) => str_starts_with($line, 'http'));
+}
+
+describe('protected attributes', function () {
+    it('refuses email and password changes outside a keyring flow', function () {
+        expect(fn () => $this->user->fresh()->update(['email' => 'new@example.com']))->toThrow(ProtectedAttributeException::class)
+            ->and(fn () => $this->user->fresh()->update(['password' => 'new-password']))->toThrow(ProtectedAttributeException::class);
+
+        $this->user->fresh()->update(['name' => 'Taylor Otwell']);
+        expect($this->user->fresh()->name)->toBe('Taylor Otwell');
+    });
+
+    it('has an escape hatch that announces itself', function () {
+        Event::fake([ProtectionBypassed::class]);
+
+        Keyring::withoutProtection(fn () => $this->user->update(['email' => 'admin-set@example.com']), reason: 'support ticket 42');
+
+        expect($this->user->fresh()->email)->toBe('admin-set@example.com');
+        Event::assertDispatched(ProtectionBypassed::class, fn ($event) => $event->reason === 'support ticket 42');
+    });
+});
+
+describe('changing email', function () {
+    it('needs both addresses to confirm when there is no second factor', function () {
+        Event::fake([EmailChanged::class]);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'New@Example.com'])->assertOk();
+
+        $this->getJson(route('keyring.email.show'))->assertJsonPath('pending.email', 'new@example.com')
+            ->assertJsonPath('pending.needsCurrentConfirmation', true);
+
+        $this->get(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        expect($this->user->fresh()->email)->toBe('taylor@example.com');
+
+        $this->get(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Confirm the change'));
+        expect($this->user->fresh()->email)->toBe('new@example.com')
+            ->and($this->user->fresh()->email_verified_at)->not->toBeNull();
+
+        Event::assertDispatched(EmailChanged::class);
+    });
+
+    it('only needs the new address to confirm when there is a second factor', function () {
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+
+        $notice = sentTo('taylor@example.com', EmailChangeNotice::class);
+        expect($notice->confirmToken)->toBeNull();
+
+        $this->get(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        expect($this->user->fresh()->email)->toBe('new@example.com');
+    });
+
+    it('does not reveal that an address is taken', function () {
+        User::create(['name' => 'Other', 'email' => 'taken@example.com', 'password' => 'password']);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'taken@example.com'])
+            ->assertOk()
+            ->assertJsonPath('status', 'email-change-requested');
+
+        sentTo('taken@example.com', EmailAddressInUse::class);
+        Notification::assertNotSentTo(new AnonymousNotifiable, ConfirmEmailChange::class);
+        expect(PendingChange::count())->toBe(0);
+    });
+
+    it('lets the old address revert the change and signs everyone out', function () {
+        Event::fake([EmailChangeReverted::class]);
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com']);
+        $this->get(linkIn(sentTo('attacker@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        expect($this->user->fresh()->email)->toBe('attacker@example.com');
+
+        $this->travel(3)->days();
+
+        $this->get(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Wasn\'t you'))
+            ->assertRedirect(route('password.request'));
+
+        expect($this->user->fresh()->email)->toBe('taylor@example.com')
+            ->and(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+        Event::assertDispatched(EmailChangeReverted::class);
+    });
+
+    it('stops allowing reverts after the window', function () {
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com']);
+        $this->get(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+
+        $this->travel(8)->days();
+
+        $this->get(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Wasn\'t you'));
+        expect($this->user->fresh()->email)->toBe('new@example.com');
+    });
+
+    it('needs a fresh verification to start', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertStatus(423);
+    });
+});
+
+describe('changing password', function () {
+    it('needs the current password and signs out other sessions', function () {
+        Event::fake([PasswordChanged::class]);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $other = app(Sessions::class)->registry();
+
+        $this->putJson(route('user-password.update'), [
+            'current_password' => 'wrong',
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ])->assertJsonValidationErrors('current_password');
+
+        $this->putJson(route('user-password.update'), [
+            'current_password' => 'password',
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ])->assertOk();
+
+        expect(Hash::check('correct horse battery staple', $this->user->fresh()->password))->toBeTrue();
+        Event::assertDispatched(PasswordChanged::class);
+    });
+
+    it('asks for longer passwords without a second factor', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+        $this->putJson(route('user-password.update'), [
+            'current_password' => 'password',
+            'password' => 'short-ish-pw',
+            'password_confirmation' => 'short-ish-pw',
+        ])->assertJsonValidationErrors('password');
+    });
+
+    it('refuses passwords bcrypt would truncate', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $long = str_repeat('ü', 40); // 80 bytes
+
+        $this->putJson(route('user-password.update'), [
+            'current_password' => 'password',
+            'password' => $long,
+            'password_confirmation' => $long,
+        ])->assertJsonValidationErrors('password');
+    });
+});
+
+describe('resetting password', function () {
+    it('answers the same for unknown addresses', function () {
+        $known = $this->postJson(route('password.email'), ['email' => 'taylor@example.com'])->json('status');
+        $unknown = $this->postJson(route('password.email'), ['email' => 'nobody@example.com'])->json('status');
+
+        expect($known)->toBe($unknown);
+        Notification::assertSentTo($this->user, ResetPassword::class);
+    });
+
+    it('builds reset links from APP_URL, not the Host header', function () {
+        config(['app.url' => 'https://app.example.com']);
+
+        $this->withHeader('Host', 'evil.example')->post(route('password.email'), ['email' => 'taylor@example.com']);
+
+        Notification::assertSentTo($this->user, ResetPassword::class, function (ResetPassword $notification) {
+            return str_starts_with($notification->toMail($this->user)->actionUrl, 'https://app.example.com/reset-password/');
+        });
+    });
+
+    it('resets without signing in, and signs out every session', function () {
+        Event::fake([PasswordReset::class]);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post('/logout');
+
+        $this->post(route('password.email'), ['email' => 'taylor@example.com']);
+
+        $token = null;
+        Notification::assertSentTo($this->user, ResetPassword::class, function ($notification) use (&$token) {
+            $token = $notification->token;
+
+            return true;
+        });
+
+        $this->inertia()->get(route('password.reset', ['token' => $token, 'email' => 'taylor@example.com']))
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+
+        $this->post(route('password.update'), [
+            'token' => $token,
+            'email' => 'taylor@example.com',
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ])->assertRedirect(route('login'));
+
+        $this->assertGuest();
+        expect(Hash::check('correct horse battery staple', $this->user->fresh()->password))->toBeTrue()
+            ->and(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+        Event::assertDispatched(PasswordReset::class);
+    });
+});

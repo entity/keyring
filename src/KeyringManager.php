@@ -12,6 +12,8 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Keyring\Contracts\Factor;
+use Keyring\Events\ProtectionBypassed;
+use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Exceptions\UnknownFactor;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -43,6 +45,9 @@ class KeyringManager
 
     /** @var class-string<Authenticator> */
     protected string $authenticatorModel = Authenticator::class;
+
+    /** How many Keyring flows are currently allowed to change protected attributes. */
+    protected int $changing = 0;
 
     public function __construct(
         protected Container $container,
@@ -234,6 +239,71 @@ class KeyringManager
     public function username(): string
     {
         return config('keyring.username');
+    }
+
+    /**
+     * Attributes that may only change through Keyring's flows.
+     *
+     * @return list<string>
+     */
+    public function protectedAttributes(): array
+    {
+        return config('keyring.protected', ['email', 'password']);
+    }
+
+    /**
+     * Run a Keyring flow that's allowed to change protected attributes.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     *
+     * @internal
+     */
+    public function changing(Closure $callback): mixed
+    {
+        $this->changing++;
+
+        try {
+            return $callback();
+        } finally {
+            $this->changing--;
+        }
+    }
+
+    /**
+     * Change protected attributes outside a Keyring flow, for trusted admin
+     * tooling. Every use is announced with a ProtectionBypassed event.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    public function withoutProtection(Closure $callback, ?string $reason = null): mixed
+    {
+        ProtectionBypassed::dispatch($reason);
+
+        return $this->changing($callback);
+    }
+
+    /**
+     * Refuse changes to protected attributes made outside a Keyring flow.
+     *
+     * @internal
+     */
+    public function guardProtectedAttributes(Model $model): void
+    {
+        if ($this->changing > 0) {
+            return;
+        }
+
+        $changed = array_values(array_filter($this->protectedAttributes(), $model->isDirty(...)));
+
+        if ($changed !== []) {
+            throw ProtectedAttributeException::for($model, $changed);
+        }
     }
 
     /**
