@@ -25,6 +25,7 @@ use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\SoftDeletingUser;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -228,6 +229,35 @@ describe('keyring:import fortify', function () {
             ->expectsOutputToContain("Failed passkey 2 of user {$this->user->id}: its credential is in an unexpected format")
             ->assertFailed();
         expect(Authenticator::count())->toBe(0);
+    });
+
+    it('imports users the model\'s global scopes hide, so a restored user keeps their factors', function () {
+        Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+        config(['auth.providers.users.model' => SoftDeletingUser::class]);
+        Schema::create('passkeys', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id');
+            $table->string('name');
+            $table->string('credential_id');
+            $table->json('credential');
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamps();
+        });
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
+            'two_factor_confirmed_at' => now(),
+            'deleted_at' => now(),
+        ]);
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'MacBook', 'credential_id' => 'a', 'credential' => '{"counter":0}']);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        expect(Authenticator::pluck('factor')->all())->toEqualCanonicalizing(['totp', 'passkey']);
+
+        DB::table('users')->update(['deleted_at' => null]);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect(route('keyring.login.challenge'));
+        $this->assertGuest();
     });
 
     it('imports laravel passkeys so they keep working', function () {
