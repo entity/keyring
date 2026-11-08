@@ -31,7 +31,7 @@ class EmailChangeController
             'email' => ['required', 'string', 'email', 'max:255'],
         ]);
 
-        $this->changes->request($request->user(), $validated['email']);
+        $this->changes->request($request->user(), $validated['email'], $request);
 
         return $this->status('email-change-requested');
     }

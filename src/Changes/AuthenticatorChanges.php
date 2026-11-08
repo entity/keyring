@@ -98,7 +98,7 @@ class AuthenticatorChanges
     public function remove(Authenticatable&Model $user, string $id): Authenticator
     {
         $removed = RowLock::hold($user, function () use ($user, $id) {
-            $authenticator = $this->keyring->authenticatorModel()::query()->ownedBy($user)->findOrFail($id)->setRelation('authenticatable', $user);
+            $authenticator = $this->find($user, $id);
             $remaining = $this->keyring->for($user)->without($authenticator);
 
             // Recovery codes are only useful while there's a second factor to
@@ -122,6 +122,17 @@ class AuthenticatorChanges
         AuthenticatorRemoved::dispatch($user, $removed);
 
         return $removed;
+    }
+
+    /**
+     * One of the user's authenticators.
+     */
+    public function find(Authenticatable&Model $user, string $id): Authenticator
+    {
+        return $this->keyring->authenticatorModel()::query()
+            ->ownedBy($user)
+            ->findOrFail($id)
+            ->setRelation('authenticatable', $user);
     }
 
     /**
