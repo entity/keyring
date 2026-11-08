@@ -145,6 +145,22 @@ it('signs out everywhere else', function (string $driver) {
     $this->get('/home')->assertOk();
 })->with('registries');
 
+it('stops trusting the other devices when signing out everywhere else', function () {
+    login();
+    $here = Device::sole();
+    $here->forceFill(['trusted_until' => now()->addDay()])->save();
+    $elsewhere = $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'elsewhere'), 'trusted_until' => now()->addDay()]);
+
+    $this->deleteJson(route('keyring.devices.destroy-others'))->assertOk();
+
+    expect($here->fresh()->isTrusted())->toBeTrue()
+        ->and($elsewhere->fresh()->isTrusted())->toBeFalse();
+
+    app(Sessions::class)->revokeAll($this->user);
+
+    expect($here->fresh()->isTrusted())->toBeFalse();
+});
+
 it('lists devices with the current one marked', function () {
     login();
 

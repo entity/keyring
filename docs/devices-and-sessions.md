@@ -55,7 +55,7 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->device()?->isTru
     : Requirement::aal2()->ifEnrolled());
 ```
 
-Revoking a device stops trusting it.
+Revoking a device stops trusting it. Signing out everywhere else, including after a password change, stops trusting every other device. A password reset, a reverted email change and a critical risk sign out everywhere, so they stop trusting every device.
 
 ### New Device Sign Ins
 
@@ -173,7 +173,7 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 `DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` signs out every session except the current one and changes the "remember me" token. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which also cycles the remember token and returns how many sessions it revoked:
+`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, and stops trusting every other device. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which returns how many sessions it revoked:
 
 ```php
 use Keyring\Sessions\Sessions;
@@ -225,7 +225,7 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 | `forUser($user)` | The user's sessions that haven't expired or been revoked, most recent first. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |
-| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one, cycles the remember token and stops trusting the other devices. Returns how many. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A store that expires records itself can return `0`. |
 
