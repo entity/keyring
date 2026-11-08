@@ -1,7 +1,15 @@
 {
     "name": "entity/keyring",
     "description": "Factor-driven authentication for Laravel: many authenticators per user, devices, sessions, step-up and risk.",
-    "keywords": ["laravel", "auth", "mfa", "2fa", "webauthn", "passkeys", "totp"],
+    "keywords": [
+        "laravel",
+        "auth",
+        "mfa",
+        "2fa",
+        "webauthn",
+        "passkeys",
+        "totp"
+    ],
     "license": "MIT",
     "type": "library",
     "require": {
@@ -30,27 +38,42 @@
     },
     "extra": {
         "laravel": {
-            "providers": ["Keyring\\KeyringServiceProvider"],
-            "aliases": {"Keyring": "Keyring\\Facades\\Keyring"}
+            "providers": [
+                "Keyring\\KeyringServiceProvider"
+            ],
+            "aliases": {
+                "Keyring": "Keyring\\Facades\\Keyring"
+            }
         }
     },
     "scripts": {
         "test": "pest",
         "lint": "pint",
-        "analyse": "phpstan analyse"
+        "refactor": "rector",
+        "analyse": "phpstan analyse",
+        "check": [
+            "rector --dry-run",
+            "pint --test",
+            "phpstan analyse",
+            "pest"
+        ]
     },
     "config": {
         "sort-packages": true,
-        "allow-plugins": {"pestphp/pest-plugin": true}
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
     "require-dev": {
+        "driftingly/rector-laravel": "^2.7",
         "inertiajs/inertia-laravel": "^3.7",
         "larastan/larastan": "^3.14",
         "laravel/pint": "^1.32",
         "orchestra/testbench": "^11.3",
         "pestphp/pest": "^5.3",
-        "pestphp/pest-plugin-laravel": "^5.0"
+        "pestphp/pest-plugin-laravel": "^5.0",
+        "rector/rector": "^2.8"
     }
 }

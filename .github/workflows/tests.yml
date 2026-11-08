@@ -16,6 +16,7 @@ jobs:
           extensions: sqlite3, pdo_sqlite, sodium, bcmath, intl
           coverage: none
       - run: composer install --no-interaction --prefer-dist
+      - run: vendor/bin/rector --dry-run
       - run: vendor/bin/pint --test
       - run: vendor/bin/phpstan analyse --no-progress
       - run: vendor/bin/pest
