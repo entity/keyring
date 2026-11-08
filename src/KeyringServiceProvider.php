@@ -16,7 +16,6 @@ use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Http\Middleware\AuthenticateSession;
-use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
@@ -110,12 +109,12 @@ class KeyringServiceProvider extends ServiceProvider
 
     protected function registerRoutes(): void
     {
-        Route::group([
-            'prefix' => config('keyring.prefix'),
-            'domain' => config('keyring.domain'),
-            'middleware' => [...config('keyring.middleware'), PreventCaching::class],
-        ], function () {
-            $this->loadRoutesFrom(__DIR__.'/../routes/keyring.php');
-        });
+        if ($this->app->routesAreCached()) {
+            return;
+        }
+
+        Route::prefix(config('keyring.prefix'))
+            ->domain(config('keyring.domain'))
+            ->group(fn () => $this->app->make(KeyringManager::class)->routes());
     }
 }

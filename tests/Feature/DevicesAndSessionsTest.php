@@ -71,7 +71,12 @@ it('gives new device events a working "this wasn\'t me" link', function () {
 
     $this->get('/home')->assertOk();
 
-    $this->get($url)->assertRedirect('/login');
+    // Opening the link only shows a page, so mail scanners can't sign anyone out.
+    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report');
+    $this->flushHeaders();
+    expect(Device::sole()->isRevoked())->toBeFalse();
+
+    $this->post($url)->assertRedirect('/login');
 
     $this->get('/home')->assertRedirect('/login');
     expect(Device::sole()->isRevoked())->toBeTrue();

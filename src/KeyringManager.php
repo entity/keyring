@@ -10,6 +10,7 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Keyring\Activity\SecurityLog;
 use Keyring\Contracts\CreatesNewUsers;
@@ -21,6 +22,7 @@ use Keyring\Exceptions\UnknownFactor;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
+use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
@@ -188,6 +190,17 @@ class KeyringManager
             class_exists(Inertia::class) => Inertia::render($component, $props),
             default => view(str_replace('/', '.', $component), $props),
         };
+    }
+
+    /**
+     * Register Keyring's routes. Keyring does this itself unless the "routes"
+     * option is false; then call it wherever you like, e.g. inside your own
+     * route group with a prefix or extra middleware.
+     */
+    public function routes(): void
+    {
+        Route::middleware([...config('keyring.middleware'), PreventCaching::class])
+            ->group(__DIR__.'/../routes/keyring.php');
     }
 
     /**

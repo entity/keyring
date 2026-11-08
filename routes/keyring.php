@@ -92,9 +92,12 @@ Route::middleware('throttle:12,1')->group(function () {
 
 Route::get('/user/devices', [DeviceController::class, 'index'])->middleware('auth:'.$guard)->name('keyring.devices.index');
 
-Route::get('/devices/{device}/report', [DeviceController::class, 'report'])
-    ->middleware(['signed:relative', 'throttle:6,1'])
-    ->name('keyring.devices.report');
+// Like the email-change links: GET shows a page with a button, and only the
+// POST signs the device out, so mail scanners opening the link do nothing.
+Route::middleware(['signed:relative', 'throttle:6,1'])->group(function () {
+    Route::get('/devices/{device}/report', [DeviceController::class, 'page'])->name('keyring.devices.report');
+    Route::post('/devices/{device}/report', [DeviceController::class, 'report'])->name('keyring.devices.report.store');
+});
 
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth:'.$guard)

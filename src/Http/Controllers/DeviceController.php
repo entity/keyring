@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Keyring\Devices\DeviceManager;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Sessions\Sessions;
 
@@ -38,7 +39,9 @@ class DeviceController
         $this->devices->revoke($device);
 
         if ($current) {
-            return redirect()->route('login');
+            return $this->wantsJson($request)
+                ? new JsonResponse(['status' => 'device-revoked', 'redirect' => route('login')])
+                : redirect()->route('login');
         }
 
         return $this->respond($request, 'device-revoked');
@@ -61,7 +64,21 @@ class DeviceController
     }
 
     /**
-     * The signed "this wasn't me" link from a new device email.
+     * The page the signed "this wasn't me" link opens. It changes nothing;
+     * its button POSTs back to the same signed URL.
+     */
+    public function page(Request $request, KeyringManager $keyring, string $device): mixed
+    {
+        $device = Device::query()->findOrFail($device);
+
+        return $keyring->render('device-report', [
+            'device' => $device->description(),
+            'url' => $request->getRequestUri(),
+        ]);
+    }
+
+    /**
+     * Sign the reported device out.
      */
     public function report(Request $request, string $device): mixed
     {
