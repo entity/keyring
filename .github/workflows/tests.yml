@@ -64,6 +64,7 @@ jobs:
           coverage: none
       - run: composer install --no-interaction --prefer-dist
       - run: vendor/bin/pest
+      - run: vendor/bin/pest --testsuite=Concurrency
 
   js:
     runs-on: ubuntu-latest
