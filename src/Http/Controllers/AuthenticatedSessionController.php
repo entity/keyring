@@ -40,7 +40,7 @@ class AuthenticatedSessionController
     {
         $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
 
-        abort_unless($factor instanceof DiscoverableFactor, 404);
+        abort_unless($factor instanceof DiscoverableFactor && $factor->startsLogin(), 404);
 
         return new JsonResponse($factor->loginOptions($request));
     }
@@ -52,7 +52,7 @@ class AuthenticatedSessionController
     {
         $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
 
-        abort_unless($factor instanceof PrimaryFactor, 404);
+        abort_unless($factor instanceof PrimaryFactor && $factor->startsLogin(), 404);
 
         $attempts->forget(Purpose::Login);
 

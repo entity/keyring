@@ -113,7 +113,11 @@ class UserKeyring
      */
     public function canSignIn(): bool
     {
-        return $this->all()->contains(fn (Authenticator $authenticator) => $authenticator->factor() instanceof PrimaryFactor);
+        return $this->all()->contains(function (Authenticator $authenticator) {
+            $factor = $authenticator->factor();
+
+            return $factor instanceof PrimaryFactor && $factor->startsLogin();
+        });
     }
 
     public function refresh(): static

@@ -92,10 +92,10 @@ it('does not let a security key sign in without a password', function () {
     $key = new VirtualAuthenticator(userVerification: false);
     enroll('security-key', $key);
 
-    $this->getJson(route('keyring.login.options', 'security-key'))->assertOk();
+    $this->getJson(route('keyring.login.options', 'security-key'))->assertNotFound();
 
     $this->post(route('keyring.login.factor', 'security-key'), ['credential' => $key->assert(['challenge' => 'x', 'rpId' => 'localhost'])])
-        ->assertSessionHasErrors('credential');
+        ->assertNotFound();
 
     $this->assertGuest();
 });

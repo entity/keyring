@@ -241,6 +241,11 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         ]);
     }
 
+    public function startsLogin(): bool
+    {
+        return $this->profile->primary;
+    }
+
     public function profile(): Profile
     {
         return $this->profile;

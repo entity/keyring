@@ -12,6 +12,12 @@ use Keyring\Models\Authenticator;
 interface PrimaryFactor extends Factor
 {
     /**
+     * Whether this factor, as configured, can start a login. WebAuthn is
+     * primary for passkeys, but security keys only ever come second.
+     */
+    public function startsLogin(): bool;
+
+    /**
      * Find the authenticator the request is aimed at.
      *
      * Implementations must take the same time whether or not a user is found,

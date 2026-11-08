@@ -23,6 +23,11 @@ use Keyring\Models\Authenticator;
  */
 class Password extends Factor implements PrimaryFactor
 {
+    public function startsLogin(): bool
+    {
+        return true;
+    }
+
     private static ?string $dummyHash = null;
 
     public function key(): string
