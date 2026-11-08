@@ -75,8 +75,12 @@ class SessionAssurance
         return $times === [] ? null : max($times);
     }
 
+    /**
+     * Forget everything proved this session, including the marker that keeps
+     * Laravel's own password.confirm middleware satisfied.
+     */
     public function flush(): void
     {
-        $this->session->forget(self::KEY);
+        $this->session->forget([self::KEY, 'auth.password_confirmed_at']);
     }
 }
