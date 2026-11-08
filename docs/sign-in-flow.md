@@ -27,7 +27,7 @@ Signing in is a short state machine:
 
 1. The user proves a first factor, usually their password, at `POST /login`. This identifies them.
 2. Keyring asks the [policy](policies.md) what they need. If that's met, they're signed in.
-3. Otherwise Keyring saves a pending **attempt** in the session and sends them to the challenge page, which asks for the next factor. They repeat until the requirement is met.
+3. Otherwise Keyring regenerates the session ID, saves a pending **attempt** in the session and sends them to the challenge page, which asks for the next factor. They repeat until the requirement is met.
 
 The pending attempt is encrypted JSON in the session. It lasts `pending_login_ttl` (10 minutes by default), and ends early if the user's password changes meanwhile, so a reset also stops someone who already got past the old password. After that, the user is sent back to the login page with `keyring::keyring.expired`.
 
@@ -185,7 +185,7 @@ Viewing or prefetching the page never sends anything. Each pending attempt can s
 When the requirement is met, Keyring:
 
 1. signs the user into the guard (with "remember me" if it was ticked),
-2. regenerates the session ID,
+2. regenerates the session ID, destroying the old one,
 3. records what they proved, for [step-up](step-up.md),
 4. recognises or registers the [device](devices-and-sessions.md), and registers the session,
 5. dispatches `Keyring\Events\Authenticated`,
@@ -233,7 +233,7 @@ Every verification, at login or step-up, goes through one pipeline of steps:
 | `ResolveDevice` | Notes the device this attempt comes from, and the `trust` checkbox. |
 | `AssessRisk` | Runs the [risk signals](risk.md) once per login and acts on them. Skipped for step-up. |
 | `DetermineRequirement` | Asks the policy what's needed. |
-| `CompleteAttempt` | Signs the user in, or confirms them, when the requirement is met. Otherwise saves the attempt for the challenge page. |
+| `CompleteAttempt` | Signs the user in, or confirms them, when the requirement is met. Otherwise regenerates the session ID and saves the attempt for the challenge page. |
 
 The steps live in `Keyring\Pipeline\Steps\`.
 

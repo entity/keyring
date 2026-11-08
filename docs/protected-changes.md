@@ -148,7 +148,7 @@ With the `HasKeyring` trait, saving a user with a reserved address any other way
 
 `confirmed` is whether the new address has confirmed. `DELETE /user/email` cancels it and responds with `email-change-cancelled`.
 
-A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it.
+A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it. Signing out everywhere else cancels it too, as does anything else that goes through `Sessions::revokeAll()`, but the old address's "this wasn't me" link keeps working until the change would have expired, so someone who signs out first can still remove what was added since.
 
 ## Changing the Password
 
@@ -163,7 +163,7 @@ Keyring itself reads `sign_out_others`, an optional boolean that defaults to `tr
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
-Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Password Rules
 

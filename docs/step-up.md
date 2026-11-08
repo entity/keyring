@@ -81,7 +81,7 @@ These routes need a user signed in to Keyring's guard (`auth:{guard}`), and the 
 
 When the user has verified enough, Keyring:
 
-1. regenerates the session ID,
+1. regenerates the session ID, destroying the old one,
 2. records the new verifications, and raises the registered session's assurance (which can shorten its [absolute timeout](devices-and-sessions.md#timeouts)),
 3. sets Laravel's `auth.password_confirmed_at`,
 4. dispatches `Keyring\Events\Confirmed`,

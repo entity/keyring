@@ -173,12 +173,14 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 `DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, and stops trusting every other device. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which returns how many sessions it revoked:
+`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which returns how many sessions it revoked, and regenerate the session yourself:
 
 ```php
 use Keyring\Sessions\Sessions;
 
 app(Sessions::class)->revokeAll($user, except: app(Sessions::class)->current($request)?->id);
+
+$request->session()->regenerate(true);
 ```
 
 Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends.

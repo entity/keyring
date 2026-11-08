@@ -56,6 +56,9 @@ class DeviceController
     {
         $count = $this->sessions->revokeAll($request->user(), except: $this->sessions->current($request)?->id);
 
+        // Someone who copied this session's cookie doesn't get to stay either.
+        $request->session()->regenerate(true);
+
         SessionsRevoked::dispatch($request->user(), $count);
 
         return $this->status('sessions-revoked');

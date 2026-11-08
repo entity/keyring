@@ -36,7 +36,7 @@ class SignIn
         $user = $attempt->user();
 
         $this->keyring->guard()->login($user, $attempt->remember);
-        $request->session()->regenerate();
+        $request->session()->regenerate(true);
         $this->assurance->reset($attempt->verifications);
 
         [$device, $new] = $this->devices->signIn($request, $user, $attempt->trustDevice);
@@ -59,7 +59,7 @@ class SignIn
 
     public function confirm(Request $request, Attempt $attempt): void
     {
-        $request->session()->regenerate();
+        $request->session()->regenerate(true);
         $this->assurance->confirm($attempt->verifications);
         $this->sessions->elevate($request, $this->assurance->level());
 
