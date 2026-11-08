@@ -6,12 +6,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Timebox;
 use Keyring\KeyringServiceProvider;
 use Keyring\Testing\InstantTimebox;
+use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
 use Orchestra\Testbench\TestCase as Orchestra;
 
 abstract class TestCase extends Orchestra
 {
-    use RefreshDatabase;
+    use InteractsWithKeyring, RefreshDatabase;
 
     protected function getPackageProviders($app): array
     {
