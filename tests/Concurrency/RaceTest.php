@@ -1,0 +1,66 @@
+<?php
+
+use Illuminate\Support\Facades\DB;
+use Keyring\Models\Authenticator;
+use Keyring\Models\PendingChange;
+
+beforeEach(function () {
+    if (DB::getDriverName() === 'sqlite') {
+        $this->markTestSkipped('SQLite has no row locks; CI runs these on PostgreSQL and MySQL.');
+    }
+
+    useRaceFactors();
+});
+
+it('never lets two removals at once take the last way in', function () {
+    $user = taylor(['password' => null]);
+    $first = Authenticator::factory()->passkey()->for($user, 'authenticatable')->create();
+    $second = Authenticator::factory()->passkey()->for($user, 'authenticatable')->create();
+
+    $results = contend($user, [
+        ['remove-authenticator', $user->id, $first->id],
+        ['remove-authenticator', $user->id, $second->id],
+    ]);
+
+    expect(outcomes($results, true))->toBe(1)
+        ->and(outcomes($results, 'refused'))->toBe(1)
+        ->and(Authenticator::query()->where('factor', 'passkey')->count())->toBe(1);
+});
+
+it('spends a recovery code once, however many requests bring it', function () {
+    $user = taylor();
+    $codes = Authenticator::factory()->recoveryCodes(['aaaaa-11111', 'bbbbb-22222'])->for($user, 'authenticatable')->create();
+
+    $results = contend($codes, [
+        ['use-recovery-code', $codes->id, 'aaaaa-11111'],
+        ['use-recovery-code', $codes->id, 'aaaaa-11111'],
+    ]);
+
+    expect(outcomes($results, true))->toBe(1)
+        ->and(outcomes($results, false))->toBe(1);
+});
+
+it('ends with the old address whichever of confirm and revert wins', function () {
+    $user = taylor();
+    $change = new PendingChange([
+        'attribute' => 'email',
+        'value' => 'new@example.com',
+        'previous_value' => 'taylor@example.com',
+        'confirm_token' => PendingChange::hashToken('confirm'),
+        'revert_token' => PendingChange::hashToken('revert'),
+        'expires_at' => now()->addDay(),
+    ]);
+    $change->authenticatable()->associate($user)->save();
+
+    [$confirmed, $reverted] = contend($change, [
+        ['confirm-email-change', $change->id, 'confirm'],
+        ['revert-email-change', $change->id, 'revert'],
+    ]);
+
+    // Confirming first applies the change and the revert undoes it; reverting
+    // first leaves nothing to confirm.
+    expect($confirmed)->toBeIn(['Applied', 'Invalid'])
+        ->and($reverted)->toBeTrue()
+        ->and($user->fresh()->email)->toBe('taylor@example.com')
+        ->and($change->fresh()->reverted_at)->not->toBeNull();
+});

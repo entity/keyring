@@ -37,7 +37,8 @@
             "App\\": "stubs/app/"
         },
         "files": [
-            "tests/Helpers.php"
+            "tests/Helpers.php",
+            "tests/Concurrency/Helpers.php"
         ]
     },
     "extra": {

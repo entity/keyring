@@ -3,13 +3,19 @@
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="vendor/autoload.php"
          colors="true"
-         cacheDirectory=".phpunit.cache">
+         cacheDirectory=".phpunit.cache"
+         defaultTestSuite="Unit,Feature">
     <testsuites>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
+        </testsuite>
+        <!-- Real races between processes. They need PostgreSQL or MySQL and
+             commit their data, so CI runs this suite on its own. -->
+        <testsuite name="Concurrency">
+            <directory>tests/Concurrency</directory>
         </testsuite>
     </testsuites>
     <source>
