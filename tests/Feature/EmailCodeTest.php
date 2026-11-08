@@ -142,3 +142,16 @@ it('enrolls email codes by confirming a sent code', function () {
 
     expect($this->user->keyring->refresh()->of('email-code'))->toHaveCount(1);
 });
+
+it('burns the enrollment code after too many wrong guesses', function () {
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+
+    foreach (range(1, 5) as $guess) {
+        $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
+    }
+
+    $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => sentCode($this->user)])->assertUnprocessable();
+
+    expect($this->user->keyring->refresh()->of('email-code'))->toBeEmpty();
+});

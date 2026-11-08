@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enrollment\Enrollment;
+use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Enums\Category;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
@@ -112,9 +113,12 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
-        [$valid] = $this->check($enrollment->state('code'), (string) $request->input('code'));
+        [$valid, $issued] = $this->check($enrollment->state('code'), (string) $request->input('code'));
 
         if (! $valid) {
+            // Keep the guess count, or enrollment codes could be guessed forever.
+            app(EnrollmentStore::class)->put($enrollment->with('code', $issued));
+
             return null;
         }
 
