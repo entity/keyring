@@ -15,6 +15,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Models\Device;
 
 /**
  * Sensible defaults for factors. Most factors only need key(), categories()
@@ -76,16 +77,15 @@ abstract class Factor implements FactorContract
      */
     protected function knownDevice(Request $request, ?Attempt $attempt, string $account): string
     {
-        $device = $account === '' ? null : app(DeviceManager::class)->recognise($request);
-        $user = $device?->user();
+        $device = $account === '' ? null : app(DeviceManager::class)->forBrowser($request)->first(function (Device $device) use ($attempt, $account) {
+            $user = $device->user();
 
-        $owner = match (true) {
-            $user === null => null,
-            $attempt !== null => (string) $user->getAuthIdentifier(),
-            default => $this->normalizeAccount((string) $user->getAttribute(config('keyring.username'))),
-        };
+            return $user !== null && $account === ($attempt !== null
+                ? (string) $user->getAuthIdentifier()
+                : $this->normalizeAccount((string) $user->getAttribute(config('keyring.username'))));
+        });
 
-        return $device !== null && $owner === $account ? '|device|'.$device->id : '';
+        return $device === null ? '' : '|device|'.$device->id;
     }
 
     protected function normalizeAccount(string $account): string
@@ -112,13 +112,7 @@ abstract class Factor implements FactorContract
      */
     protected function verified(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null): Verification
     {
-        return new Verification(
-            factor: $this->key(),
-            authenticator: $authenticator->isVirtual() ? null : $authenticator->id,
-            categories: $categories ?? $this->categories($authenticator),
-            phishingResistant: $phishingResistant ?? $this->phishingResistant($authenticator),
-            at: now()->getTimestamp(),
-        );
+        return Verification::of($authenticator, $categories, $phishingResistant);
     }
 
     /**

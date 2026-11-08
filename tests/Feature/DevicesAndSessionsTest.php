@@ -194,3 +194,22 @@ it('cycles the remember token when a device is revoked', function () {
 
     expect($this->user->fresh()->remember_token)->not->toBe($token);
 });
+
+it('keeps recognising two accounts that share a browser', function () {
+    Event::fake([NewDeviceSignedIn::class]);
+    User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    $abigail = fn (string $token) => test()->withHeader('User-Agent', FIREFOX)->withCookies(['keyring_device' => $token])
+        ->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
+
+    $token = deviceCookie(login());
+    $this->post('/logout');
+    $abigail($token);
+    $this->post('/logout');
+    $abigail($token);
+    $this->post('/logout');
+    login(['keyring_device' => $token]);
+
+    Event::assertDispatchedTimes(NewDeviceSignedIn::class, 2);
+    expect(Device::count())->toBe(2);
+});

@@ -4,6 +4,7 @@ namespace Keyring\Devices;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -31,22 +32,23 @@ class DeviceManager
      */
     public function find(Request $request, Authenticatable&Model $user): ?Device
     {
-        $device = $this->recognise($request);
-
-        return $device?->authenticatable()->is($user) ? $device : null;
+        return $this->forBrowser($request)->first(fn (Device $device) => $device->authenticatable()->is($user));
     }
 
     /**
-     * The device the request's cookie belongs to, whoever's it is.
+     * Every account's device for this browser. The cookie is shared by
+     * everyone who signs in on it, so there can be more than one.
+     *
+     * @return EloquentCollection<int, Device>
      */
-    public function recognise(Request $request): ?Device
+    public function forBrowser(Request $request): EloquentCollection
     {
         $token = $this->token($request);
 
-        return $token === null ? null : Device::query()
+        return $token === null ? new EloquentCollection : Device::query()
             ->where('token_hash', hash('sha256', $token))
             ->whereNull('revoked_at')
-            ->first();
+            ->get();
     }
 
     /**
