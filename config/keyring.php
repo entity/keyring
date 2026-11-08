@@ -220,15 +220,16 @@ return [
     | Security Emails
     |--------------------------------------------------------------------------
     |
-    | Which security emails Keyring sends. Off by default: your app may want
-    | to send its own. Call Keyring::notify() to turn them all on, or list
-    | types: new_device, password_changed, authenticator_added,
-    | authenticator_removed, second_factor_failed, recovery_code_used,
-    | suspicious_activity, clone_suspected.
+    | Which security notices Keyring sends. By default the ones NIST SP
+    | 800-63B requires (a sign-in method added, a recovery code used) and the
+    | other account changes. Set [] to send your own, or call Keyring::notify()
+    | to turn them all on. Types: new_device, password_changed,
+    | authenticator_added, authenticator_removed, second_factor_failed,
+    | recovery_code_used, suspicious_activity, clone_suspected.
     |
     */
 
-    'notifications' => [],
+    'notifications' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
 
     /*
     |--------------------------------------------------------------------------
