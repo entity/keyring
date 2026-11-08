@@ -5,10 +5,10 @@ namespace Keyring\Pipeline\Steps;
 use Closure;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Contracts\Cache\Repository;
 use Keyring\Events\Lockout;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
+use Keyring\Pipeline\SharedLimit;
 
 /**
  * Checks the factor's rate limits, counts attempts and locks out repeated failures.
@@ -17,7 +17,6 @@ class EnsureNotThrottled
 {
     public function __construct(
         protected RateLimiter $limiter,
-        protected Repository $cache,
     ) {}
 
     public function handle(Context $context, Closure $next): Context
@@ -25,10 +24,8 @@ class EnsureNotThrottled
         $limits = $context->factor->limits($context->request, $context->attempt);
 
         foreach ($limits as $limit) {
-            $lockedUntil = (int) $this->cache->get($this->key($limit).':locked', 0);
-
-            if ($lockedUntil > now()->getTimestamp()) {
-                return $this->lockout($context, $lockedUntil - now()->getTimestamp());
+            if ($this->limiter->tooManyAttempts($this->lock($limit), 1)) {
+                return $this->lockout($context, $this->limiter->availableIn($this->lock($limit)));
             }
         }
 
@@ -42,15 +39,12 @@ class EnsureNotThrottled
 
         $context = $next($context);
 
-        $succeeded = in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true);
-
         foreach ($limits as $limit) {
-            match (true) {
-                $context->outcome === Outcome::Failed => $this->failed($limit),
-                $succeeded && $this->shared($limit) => $this->limiter->decrement($this->key($limit), $limit->decaySeconds),
-                $succeeded => $this->limiter->clear($this->key($limit)),
-                default => null,
-            };
+            if ($context->outcome === Outcome::Failed) {
+                $this->failed($limit);
+            } elseif (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true)) {
+                $this->succeeded($limit);
+            }
         }
 
         return $context;
@@ -70,20 +64,21 @@ class EnsureNotThrottled
         }
 
         $lockouts = $this->limiter->hit($key.':lockouts', 86400);
-        $seconds = min(86400, $limit->decaySeconds * 2 ** ($lockouts - 1));
 
-        $this->cache->put($key.':locked', now()->getTimestamp() + $seconds, $seconds);
+        $this->limiter->hit($this->lock($limit), min(86400, $limit->decaySeconds * 2 ** ($lockouts - 1)));
         $this->limiter->clear($key);
     }
 
     /**
-     * Limits shared by every account (per IP). A success only takes back its
-     * own hit, so people signing in from one office IP don't use up its
-     * limit, and an attacker can't reset it with their own login.
+     * A success clears an account's count. On a shared limit it only takes
+     * back its own attempt: people signing in from one office address don't
+     * use it up, and an attacker can't reset it with their own login.
      */
-    protected function shared(Limit $limit): bool
+    protected function succeeded(Limit $limit): void
     {
-        return str_contains((string) $limit->key, '|ip|');
+        $limit instanceof SharedLimit
+            ? $this->limiter->decrement($this->key($limit), $limit->decaySeconds)
+            : $this->limiter->clear($this->key($limit));
     }
 
     protected function lockout(Context $context, int $retryAfter): Context
@@ -96,5 +91,10 @@ class EnsureNotThrottled
     protected function key(Limit $limit): string
     {
         return 'keyring:'.sha1((string) $limit->key);
+    }
+
+    protected function lock(Limit $limit): string
+    {
+        return $this->key($limit).':locked';
     }
 }
