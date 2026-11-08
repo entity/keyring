@@ -9,7 +9,9 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Facades\Keyring;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
+use Symfony\Component\Console\Attribute\AsCommand;
 
+#[AsCommand(name: 'keyring:prune')]
 #[Signature('keyring:prune')]
 #[Description('Forget old devices, email changes, security events and ended sessions')]
 class PruneCommand extends Command

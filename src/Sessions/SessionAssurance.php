@@ -12,7 +12,7 @@ use Keyring\Login\Verification;
  */
 class SessionAssurance
 {
-    public const KEY = 'keyring.verified';
+    public const string KEY = 'keyring.verified';
 
     public function __construct(
         protected Session $session,

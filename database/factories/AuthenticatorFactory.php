@@ -2,6 +2,7 @@
 
 namespace Keyring\Database\Factories;
 
+use Illuminate\Database\Eloquent\Factories\Attributes\UseModel;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Models\Authenticator;
@@ -10,11 +11,9 @@ use PragmaRX\Google2FA\Google2FA;
 /**
  * @extends Factory<Authenticator>
  */
+#[UseModel(Authenticator::class)]
 class AuthenticatorFactory extends Factory
 {
-    #[\Override]
-    protected $model = Authenticator::class;
-
     public function definition(): array
     {
         return [

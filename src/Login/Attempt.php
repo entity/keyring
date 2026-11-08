@@ -16,8 +16,8 @@ use Keyring\Support\Duration;
 use Keyring\UserKeyring;
 
 /**
- * A half-finished verification: a login waiting for a second factor, a
- * step-up confirmation, or an account recovery.
+ * A half-finished verification: a login waiting for a second factor, or a
+ * step-up confirmation.
  *
  * Stored encrypted in the session as plain JSON (never serialize()).
  */
