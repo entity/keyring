@@ -16,6 +16,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Pipeline\SharedLimit;
 use Keyring\Support\RowLock;
 
@@ -72,8 +73,11 @@ abstract class Factor implements FactorContract
 
         $bucket = $this->key().'|account|'.$account.$this->knownDevice($request, $attempt, $account);
 
+        $consecutive = config('keyring.limits.consecutive');
+
         return array_values(array_filter([
             $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($bucket),
+            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account),
             SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
         ]));
     }
@@ -94,12 +98,18 @@ abstract class Factor implements FactorContract
         return $device === null ? '' : '|device|'.$device->id;
     }
 
-    /**
-     * Transliterated too, so spelling variants of one address share a limit.
-     */
     protected function normalizeAccount(string $account): string
     {
-        return Str::transliterate(Keyring::normalizeUsername($account));
+        return static::accountKey($account);
+    }
+
+    /**
+     * How a typed username names its account in rate limits: transliterated
+     * too, so spelling variants of one address share a limit.
+     */
+    public static function accountKey(string $username): string
+    {
+        return Str::transliterate(Keyring::normalizeUsername($username));
     }
 
     public function errorKey(): string

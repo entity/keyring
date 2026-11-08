@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Keyring\Events\Lockout;
+use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
 use Keyring\Pipeline\SharedLimit;
@@ -24,16 +25,18 @@ class EnsureNotThrottled
         $limits = $context->factor->limits($context->request, $context->attempt);
 
         foreach ($limits as $limit) {
-            if ($this->limiter->tooManyAttempts($this->lock($limit), 1)) {
-                return $this->lockout($context, $this->limiter->availableIn($this->lock($limit)));
+            $key = $limit instanceof ConsecutiveLimit ? static::key($limit) : $this->lock($limit);
+
+            if ($this->limiter->tooManyAttempts($key, $limit instanceof ConsecutiveLimit ? $limit->maxAttempts : 1)) {
+                return $this->lockout($context, $this->limiter->availableIn($key));
             }
         }
 
         // Count the attempt before verifying it, so overlapping requests
         // can't all slip under the limit while they're being checked.
-        foreach ($limits as $limit) {
-            if ($this->limiter->hit($this->key($limit), $limit->decaySeconds) > $limit->maxAttempts) {
-                return $this->lockout($context, $this->limiter->availableIn($this->key($limit)));
+        foreach (array_filter($limits, fn (Limit $limit) => ! $limit instanceof ConsecutiveLimit) as $limit) {
+            if ($this->limiter->hit(static::key($limit), $limit->decaySeconds) > $limit->maxAttempts) {
+                return $this->lockout($context, $this->limiter->availableIn(static::key($limit)));
             }
         }
 
@@ -57,7 +60,15 @@ class EnsureNotThrottled
      */
     protected function failed(Limit $limit): void
     {
-        $key = $this->key($limit);
+        $key = static::key($limit);
+
+        // Counted here, not up front, so it's failures in a row: no window,
+        // no lock of its own, just refused at the cap until a success.
+        if ($limit instanceof ConsecutiveLimit) {
+            $this->limiter->hit($key, $limit->decaySeconds);
+
+            return;
+        }
 
         if ($this->limiter->attempts($key) < $limit->maxAttempts) {
             return;
@@ -77,8 +88,8 @@ class EnsureNotThrottled
     protected function succeeded(Limit $limit): void
     {
         $limit instanceof SharedLimit
-            ? $this->limiter->decrement($this->key($limit), $limit->decaySeconds)
-            : $this->limiter->clear($this->key($limit));
+            ? $this->limiter->decrement(static::key($limit), $limit->decaySeconds)
+            : $this->limiter->clear(static::key($limit));
     }
 
     protected function lockout(Context $context, int $retryAfter): Context
@@ -88,13 +99,16 @@ class EnsureNotThrottled
         return $context->lockout($retryAfter);
     }
 
-    protected function key(Limit $limit): string
+    /**
+     * The rate limiter key for a limit.
+     */
+    public static function key(Limit $limit): string
     {
         return 'keyring:'.sha1((string) $limit->key);
     }
 
     protected function lock(Limit $limit): string
     {
-        return $this->key($limit).':locked';
+        return static::key($limit).':locked';
     }
 }

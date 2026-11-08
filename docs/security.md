@@ -36,6 +36,7 @@ Every factor has its own limits, checked in the pipeline before the proof is loo
 
 - **Per account**: `limits.per_account` attempts a minute (5). Before the user is identified, the account is the typed username, lowercased and transliterated, so spelling variants of one address share a limit. After that, it's the user's ID. A browser the account has signed in from before (it carries the account's device cookie) counts in a bucket of its own, so someone guessing from elsewhere can't lock the owner out (OWASP's "device cookies").
 - **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address.
+- **In a row**: `limits.consecutive` failures (100, as NIST SP 800-63B caps them) on one account's factor, however slowly they come and from any browser. Only a success clears the count. At the cap that factor is refused for the account until a password reset, though the user can still sign in with another factor; `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop.
 
 How they count:
 
