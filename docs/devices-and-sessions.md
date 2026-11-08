@@ -55,7 +55,7 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->device()?->isTru
     : Requirement::aal2()->ifEnrolled());
 ```
 
-Revoking a device stops trusting it. Signing out everywhere else, including after a password change, stops trusting every other device. A password reset, a reverted email change and a critical risk sign out everywhere, so they stop trusting every device.
+Revoking a device stops trusting it. Signing out everywhere else, including after a password change, stops trusting every other device. A password reset, a reverted email change and a critical risk on a signed-in session sign out everywhere, so they stop trusting every device. A critical risk at login refuses the attempt and leaves the owner's sessions and trusted devices alone.
 
 ### New Device Sign Ins
 

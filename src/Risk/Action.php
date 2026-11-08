@@ -58,6 +58,12 @@ final readonly class Action
     }
 
     #[\NoDiscard]
+    public function withoutRevokingSessions(): self
+    {
+        return clone ($this, ['revokeSessions' => false]);
+    }
+
+    #[\NoDiscard]
     public function lockFor(string|int $duration): self
     {
         return clone ($this, ['lockSeconds' => Duration::seconds($duration)]);

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
@@ -8,6 +9,7 @@ use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
+use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
@@ -95,21 +97,77 @@ it('does not ask for more on a familiar device and country', function () {
     signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
 });
 
-it('refuses critical risk with the usual error and signs everything out', function () {
+/**
+ * Sign in and leave that session alive, with a remember token and a trusted
+ * device, as if the owner were still using it from another browser.
+ */
+function liveOwnerSession(): string
+{
     Keyring::risk([]);
     signInAs();
-    $existing = session(Sessions::KEY);
+    $session = session(Sessions::KEY);
 
-    // Sign in again from a fresh browser, leaving the first session alive.
-    $this->flushSession();
-    $this->app['auth']->forgetGuards();
+    test()->user->forceFill(['remember_token' => 'owners-token'])->save();
+    test()->user->devices()->firstOrFail()->forceFill(['trusted_until' => now()->addDay()])->save();
+
+    test()->flushSession();
+    app('auth')->forgetGuards();
+
+    return $session;
+}
+
+function expectOwnerStillSignedIn(string $session): void
+{
+    expect(app(SessionRegistry::class)->find($session)->revokedAt)->toBeNull()
+        ->and(test()->user->fresh()->remember_token)->toBe('owners-token')
+        ->and(test()->user->devices()->whereNotNull('trusted_until')->exists())->toBeTrue();
+}
+
+it('refuses critical risk with the usual error, tells the owner and leaves them signed in', function () {
+    Keyring::notify();
+    $existing = liveOwnerSession();
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    Event::listen(RiskAssessed::class, function (RiskAssessed $event) use (&$assessed) {
+        $assessed = $event;
+    });
 
     Keyring::risk([new AlwaysRisky]);
     signInAs()->assertSessionHasErrors(['email' => __('auth.failed')]);
 
     $this->assertGuest();
-    expect(app(SessionRegistry::class)->find($existing)->revokedAt)->not->toBeNull()
+    expectOwnerStillSignedIn($existing);
+    expect($assessed->checkpoint)->toBe(Checkpoint::Login)
+        ->and($assessed->action->deny)->toBeTrue()
+        ->and($assessed->action->revokeSessions)->toBeFalse()
         ->and(SecurityEvent::where('type', 'risk_denied')->exists())->toBeTrue();
+    Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'suspicious_activity');
+});
+
+it('does not let a custom responder sign the owner out from a login attempt', function () {
+    $existing = liveOwnerSession();
+
+    Keyring::risk([new AlwaysRisky])->respond(fn () => Action::deny()->revokeAllSessions()->notify());
+    signInAs()->assertSessionHasErrors('email');
+
+    expectOwnerStillSignedIn($existing);
+    expect(SecurityEvent::where('type', 'risk_denied')->exists())->toBeTrue();
+});
+
+it('still revokes everything when a signed-in session is critical', function () {
+    $existing = liveOwnerSession();
+
+    Keyring::risk([new SessionFingerprintChanged(score: 95)]);
+    signInAs()->assertRedirect('/dashboard');
+    $current = session(Sessions::KEY);
+
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertRedirect('/login');
+
+    $this->assertGuest();
+    expect(app(SessionRegistry::class)->find($existing)->revokedAt)->not->toBeNull()
+        ->and(app(SessionRegistry::class)->find($current)->revokedAt)->not->toBeNull()
+        ->and($this->user->fresh()->remember_token)->not->toBe('owners-token')
+        ->and($this->user->devices()->whereNotNull('trusted_until')->exists())->toBeFalse();
 });
 
 it('can lock sign in for a while', function () {

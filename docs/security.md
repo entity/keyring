@@ -27,6 +27,7 @@ The [conformance suite](testing.md#the-conformance-suite) tests several of these
 - Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, or as soon as the user's password changes.
 - The session ID is regenerated when a user signs in and when they step up.
 - A password reset never signs anyone in, so the policy still applies at the next login.
+- A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
 - Keyring's responses send `Cache-Control: no-store, private`, and signing out sends `Clear-Site-Data`.
 
 ### Rate Limiting
