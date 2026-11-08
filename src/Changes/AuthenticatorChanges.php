@@ -1,0 +1,150 @@
+<?php
+
+namespace Keyring\Changes;
+
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
+use Keyring\Contracts\Enrollable;
+use Keyring\Enums\Purpose;
+use Keyring\Events\AuthenticatorAdded;
+use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\RecoveryCodesGenerated;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\KeyringManager;
+use Keyring\Login\Attempt;
+use Keyring\Models\Authenticator;
+use Keyring\Support\RowLock;
+
+/**
+ * Adding, changing and removing a user's authenticators, and the rules that
+ * keep what's left usable.
+ */
+class AuthenticatorChanges
+{
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
+
+    /**
+     * Save a newly confirmed authenticator. A factor that allows one per user
+     * replaces the old one, the first sign-in method becomes the default, and
+     * the first extra factor comes with recovery codes, whose plain codes are
+     * returned to show once.
+     *
+     * @return list<string>|null
+     */
+    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator): ?array
+    {
+        $keyring = $this->keyring->for($user);
+        $isRecovery = $factor->key() === RecoveryCodes::KEY;
+        $recovery = ! $isRecovery && $keyring->of(RecoveryCodes::KEY)->isEmpty() ? $this->recoveryCodes() : null;
+
+        $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
+            if (! $factor->multiple()) {
+                $keyring->of($factor->key())->each->delete();
+            }
+
+            $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
+
+            if ($recovery !== null) {
+                $this->save($user, $recovery['authenticator']);
+            }
+        });
+
+        $isRecovery
+            ? RecoveryCodesGenerated::dispatch($user, $authenticator)
+            : AuthenticatorAdded::dispatch($user, $authenticator);
+
+        if ($recovery !== null) {
+            RecoveryCodesGenerated::dispatch($user, $recovery['authenticator']);
+        }
+
+        return $recovery['codes'] ?? null;
+    }
+
+    /**
+     * Rename an authenticator, or make it (or stop it being) the default.
+     *
+     * @param  array{name?: string, default?: bool}  $changes
+     */
+    public function update(Authenticator $authenticator, array $changes): void
+    {
+        $authenticator->getConnection()->transaction(function () use ($authenticator, $changes) {
+            if ($changes['default'] ?? false) {
+                $this->keyring->for($authenticator->user())->all()
+                    ->filter(fn (Authenticator $other) => $other->exists && $other->is_default)
+                    ->each(fn (Authenticator $other) => $other->forceFill(['is_default' => false])->save());
+            }
+
+            $authenticator->fill(array_intersect_key($changes, ['name' => true]));
+
+            if (array_key_exists('default', $changes)) {
+                $authenticator->is_default = (bool) $changes['default'];
+            }
+
+            $authenticator->save();
+        });
+    }
+
+    /**
+     * Remove an authenticator, unless that would leave the user unable to
+     * sign in the way their policy requires. One removal per user runs at a
+     * time, so two at once can't each count on the other's authenticator
+     * still being there.
+     *
+     * @throws ValidationException
+     */
+    public function remove(Authenticatable&Model $user, string $id): Authenticator
+    {
+        $removed = RowLock::hold($user, function () use ($user, $id) {
+            $authenticator = $this->keyring->authenticatorModel()::query()->ownedBy($user)->findOrFail($id)->setRelation('authenticatable', $user);
+            $remaining = $this->keyring->for($user)->without($authenticator);
+
+            // Recovery codes are only useful while there's a second factor to
+            // recover, so they go too when this was the last one. The policy
+            // is checked against what will actually be left.
+            $onlyRecoveryLeft = $remaining->all()->every(fn (Authenticator $other) => $other->isVirtual() || $other->factor === RecoveryCodes::KEY);
+            $cascade = $onlyRecoveryLeft ? $remaining->of(RecoveryCodes::KEY)->all() : [];
+            $left = $remaining->without(...$cascade);
+
+            $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
+
+            if (! $left->canSignIn() || (! $policy->onlyIfEnrolled && ! $left->canMeet($policy))) {
+                throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
+            }
+
+            collect([$authenticator, ...$cascade])->each->delete();
+
+            return $authenticator;
+        });
+
+        AuthenticatorRemoved::dispatch($user, $removed);
+
+        return $removed;
+    }
+
+    /**
+     * A fresh set of recovery codes to hand out with the first extra factor.
+     *
+     * @return array{codes: list<string>, authenticator: Authenticator}|null
+     */
+    protected function recoveryCodes(): ?array
+    {
+        $factor = $this->keyring->hasFactor(RecoveryCodes::KEY) ? $this->keyring->factor(RecoveryCodes::KEY) : null;
+
+        if (! $factor instanceof RecoveryCodes) {
+            return null;
+        }
+
+        ['codes' => $codes, 'secret' => $secret] = $factor->generate();
+
+        return ['codes' => $codes, 'authenticator' => $factor->make($secret)];
+    }
+
+    protected function save(Authenticatable&Model $user, Authenticator $authenticator, bool $default = false): void
+    {
+        $authenticator->authenticatable()->associate($user);
+        $authenticator->forceFill(['confirmed_at' => now(), 'is_default' => $default])->save();
+    }
+}
