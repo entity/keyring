@@ -1,0 +1,27 @@
+import type { Purpose } from './routes'
+
+export interface AuthenticatorSummary {
+  factor: string
+  id: string | null
+  name: string
+  hint?: string
+  remaining?: number
+}
+
+/**
+ * Props Keyring sends to the challenge and confirm pages.
+ */
+export interface ChallengeProps {
+  purpose: Purpose
+  factor: string
+  authenticator: AuthenticatorSummary
+  challenge: Record<string, any>
+  alternatives: AuthenticatorSummary[]
+  canTrustDevice: boolean
+  expiresAt: string
+}
+
+export interface Enrollment {
+  factor: string
+  enrollment: Record<string, any>
+}

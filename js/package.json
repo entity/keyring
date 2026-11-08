@@ -1,0 +1,40 @@
+{
+  "name": "@entity/keyring",
+  "version": "0.1.0",
+  "description": "Browser helpers for Keyring: WebAuthn ceremonies and Inertia bindings for Vue and React.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist"],
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./vue": { "types": "./dist/vue.d.ts", "import": "./dist/vue.js" },
+    "./react": { "types": "./dist/react.d.ts", "import": "./dist/react.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@inertiajs/core": "^3.0.0",
+    "@inertiajs/react": "^3.0.0",
+    "@inertiajs/vue3": "^3.0.0",
+    "react": "^19.0.0",
+    "vue": "^3.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@inertiajs/react": { "optional": true },
+    "@inertiajs/vue3": { "optional": true },
+    "react": { "optional": true },
+    "vue": { "optional": true }
+  },
+  "devDependencies": {
+    "@inertiajs/core": "^3.0.0",
+    "@inertiajs/react": "^3.0.0",
+    "@inertiajs/vue3": "^3.0.0",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "^5.9.0",
+    "vue": "^3.5.0"
+  }
+}
