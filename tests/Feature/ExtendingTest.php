@@ -12,10 +12,13 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
+use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Enums\Assurance;
+use Keyring\Exceptions\MissingAction;
+use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Sessions\RegisteredSession;
@@ -112,6 +115,59 @@ it('runs the app\'s own password action, with keyring\'s security work around it
     expect(Hash::check('a long passphrase, with symbols!', $this->user->fresh()->password))->toBeTrue()
         ->and(app(SessionRegistry::class)->find('other')->revokedAt)->not->toBeNull();
 });
+
+it('only lets the app\'s password action change the password', function () {
+    Keyring::updateUserPasswordsUsing(FillsEverything::class);
+
+    $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+    expect(fn () => $this->putJson(route('user-password.update'), ['password' => 'a much longer passphrase', 'email' => 'attacker@example.com']))
+        ->toThrow(ProtectedAttributeException::class);
+    expect($this->user->fresh()->email)->toBe('taylor@example.com');
+});
+
+it('refuses a password action that saves nothing, before signing anyone out', function () {
+    Keyring::updateUserPasswordsUsing(SavesNothing::class);
+    $other = new RegisteredSession('other', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
+    app(SessionRegistry::class)->save($other);
+
+    $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+    expect(fn () => $this->putJson(route('user-password.update'), ['password' => 'a much longer passphrase']))
+        ->toThrow(LogicException::class, 'without saving a new password');
+    expect(app(SessionRegistry::class)->find('other')->revokedAt)->toBeNull();
+});
+
+it('validates whether to sign out other sessions itself', function () {
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->putJson(route('user-password.update'), [
+            'current_password' => 'password',
+            'password' => 'a much longer passphrase',
+            'password_confirmation' => 'a much longer passphrase',
+            'sign_out_others' => 'garbage',
+        ])
+        ->assertJsonValidationErrors('sign_out_others');
+});
+
+it('says how to register an action the app has not registered', function () {
+    // A fresh app, without the registrations TestCase makes.
+    $this->refreshApplication();
+
+    expect(fn () => app(ResetsUserPasswords::class))->toThrow(MissingAction::class, 'Keyring::resetUserPasswordsUsing()');
+});
+
+class FillsEverything implements UpdatesUserPasswords
+{
+    public function update(Authenticatable&Model $user, array $input): void
+    {
+        $user->forceFill(['password' => Hash::make($input['password']), 'email' => $input['email']])->save();
+    }
+}
+
+class SavesNothing implements UpdatesUserPasswords
+{
+    public function update(Authenticatable&Model $user, array $input): void {}
+}
 
 class SymbolsRequired implements UpdatesUserPasswords
 {

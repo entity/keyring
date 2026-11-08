@@ -26,7 +26,7 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps.
+Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
 
 If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fortify.md) before migrating.
 
@@ -86,7 +86,7 @@ Keyring looks users up by the `email` attribute by default (see `username` in [C
 
 ## Frontend
 
-The published Inertia pages import from `@entity/keyring`, Keyring's browser package:
+Your pages can use `@entity/keyring`, Keyring's browser package, for WebAuthn and the challenge page (see [Frontend](frontend.md)):
 
 ```bash
 npm install @entity/keyring

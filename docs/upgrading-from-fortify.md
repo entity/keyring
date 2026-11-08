@@ -96,8 +96,8 @@ Things to know:
 | Fortify | Keyring |
 |---|---|
 | `Fortify::createUsersUsing(CreateNewUser::class)` | `Keyring::createUsersUsing(CreateNewUser::class)`, with an action implementing `Keyring\Contracts\CreatesNewUsers`. Your existing action's `create()` body mostly carries over. |
-| `Fortify::resetUserPasswordsUsing()` | `Keyring::resetUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\ResetsUserPasswords`. Your existing `reset()` body carries over. |
-| `Fortify::updateUserPasswordsUsing()` | `Keyring::updateUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\UpdatesUserPasswords`. Your existing `update()` body carries over. |
+| `Fortify::resetUserPasswordsUsing()` | `Keyring::resetUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\ResetsUserPasswords`. Your existing `reset()` body carries over; type the user as `Authenticatable&Model $user` (with a `@param User $user` docblock) to match the contract. |
+| `Fortify::updateUserPasswordsUsing()` | `Keyring::updateUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\UpdatesUserPasswords`. Same as above: keep the body, change the signature. |
 | `PasswordValidationRules` trait | The published `PasswordValidationRules` trait, built on [Keyring's rules](protected-changes.md#password-rules). |
 | `Fortify::updateUserProfileInformationUsing()` | Your own code. Email changes go through [Keyring's flow](protected-changes.md#changing-the-email-address), because `email` is protected; your `ValidateEmailChange` action holds their validation. |
 | `Fortify::authenticateUsing()` | A [pipeline step](sign-in-flow.md#writing-a-step) for extra checks, or your own [primary factor](factors.md#optional-contracts) for a different way of finding users. |

@@ -420,13 +420,14 @@ class KeyringManager
      * @template T
      *
      * @param  Closure(): T  $callback
+     * @param  list<string>|null  $only  the attributes it may change, or all
      * @return T
      *
      * @internal
      */
-    public function changing(Closure $callback): mixed
+    public function changing(Closure $callback, ?array $only = null): mixed
     {
-        return $this->protection->changing($callback);
+        return $this->protection->changing($callback, $only);
     }
 
     /**

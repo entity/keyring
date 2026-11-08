@@ -10,6 +10,7 @@ use Keyring\Events\PasswordReset;
 use Keyring\KeyringManager;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
+use LogicException;
 
 /**
  * What always happens around a new password, whatever the app's action does
@@ -60,13 +61,21 @@ class PasswordChanges
     }
 
     /**
-     * Run the app's action as a Keyring flow, so it may change the password.
+     * Run the app's action as a Keyring flow that may change the password and
+     * nothing else, and make sure it did: everything that follows (signing
+     * out, lifting locks, telling the user) assumes the password changed.
      *
      * @param  Closure(): void  $save
      */
     protected function save(Authenticatable&Model $user, Closure $save): void
     {
-        $this->keyring->changing($save);
+        $before = $user->getAuthPassword();
+
+        $this->keyring->changing($save, only: [$user->getAuthPasswordName()]);
+
+        if ($user->newQuery()->find($user->getKey())?->getAuthPassword() === $before) {
+            throw new LogicException('The password action returned without saving a new password. Throw a ValidationException to refuse it.');
+        }
 
         $this->emailChanges->cancel($user);
     }

@@ -20,6 +20,9 @@ class PasswordController
     {
         $user = $request->user();
 
+        // Keyring's own field; the rest of the request is the action's.
+        $request->validate(['sign_out_others' => ['sometimes', 'boolean']]);
+
         $passwords->change(
             $user,
             fn () => $updater->update($user, $request->all()),
