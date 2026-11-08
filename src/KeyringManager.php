@@ -29,6 +29,7 @@ use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\SecurityNotice;
 use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
@@ -280,6 +281,19 @@ class KeyringManager
         $this->container->singletonIf(KeyringFake::class);
 
         return $this->container->make(KeyringFake::class);
+    }
+
+    /**
+     * Send security notices with your own notification, e.g. one that extends
+     * Keyring's and adds Slack or the database to via().
+     *
+     * @param  class-string<SecurityNotice>  $notification
+     */
+    public function securityNoticesUsing(string $notification): static
+    {
+        $this->container->bind(SecurityNotice::class, $notification);
+
+        return $this;
     }
 
     /**
