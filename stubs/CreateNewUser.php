@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Keyring\Contracts\CreatesNewUsers;
+use Keyring\Rules\UnreservedAddress;
 use Keyring\Support\PasswordRules;
 
 class CreateNewUser implements CreatesNewUsers
@@ -21,7 +22,7 @@ class CreateNewUser implements CreatesNewUsers
 
         validator($input, [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class)],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
             'password' => PasswordRules::for(),
         ])->validate();
 

@@ -14,6 +14,7 @@ return new class extends Migration
             $table->string('attribute', 64);
             $table->text('value');
             $table->text('previous_value')->nullable();
+            $table->string('previous_value_hash', 64)->nullable()->index();
             $table->string('confirm_token', 64);
             $table->string('current_token', 64)->nullable();
             $table->string('revert_token', 64);

@@ -9,6 +9,7 @@
     - [Confirming](#confirming)
     - [The Emailed Links](#the-emailed-links)
     - [Reverting](#reverting)
+    - [The Old Address Is Reserved](#the-old-address-is-reserved)
     - [Checking and Cancelling](#checking-and-cancelling)
 - [Changing the Password](#changing-the-password)
 - [Password Rules](#password-rules)
@@ -31,7 +32,7 @@ Whoever controls the email address and password controls the account. Keyring on
 | `POST` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm.store` | limited |
 | `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited |
 | `POST` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert.store` | limited |
-| `PUT` | `/user/password` | `user-password.update` | `auth`, `manage_middleware` |
+| `PUT` | `/user/password` | `user-password.update` | `auth`, `manage_middleware`, limited |
 | `GET` | `/forgot-password` | `password.request` | guest |
 | `POST` | `/forgot-password` | `password.email` | guest, limited |
 | `GET` | `/reset-password/{token}` | `password.reset` | guest |
@@ -117,6 +118,16 @@ The current address can revert the change while it's pending, and for `email_cha
 - signs out every session, and changes the "remember me" token.
 
 The user is then redirected to the forgot password page (or the login page, when password resets are off) with `status` set to `email-change-reverted`, since whoever made the change may also know the password. Reverting doesn't change the password itself.
+
+### The Old Address Is Reserved
+
+While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. Another account asking to move to it gets the same "address in use" email as for any taken address. `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()` wherever users are created. The published `CreateNewUser` action does:
+
+```php
+'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
+```
+
+With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. The address is looked up by a keyed hash (`APP_KEY` and `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
 
 ### Checking and Cancelling
 
