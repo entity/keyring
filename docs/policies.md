@@ -4,6 +4,7 @@
 - [Requirements](#requirements)
 - [Assurance Levels](#assurance-levels)
 - [Only When Enrolled](#only-when-enrolled)
+- [Requiring a Second Factor](#requiring-a-second-factor)
 - [No Downgrade](#no-downgrade)
 - [Deciding Per User and Attempt](#deciding-per-user-and-attempt)
 - [How the Policy Is Applied](#how-the-policy-is-applied)
@@ -72,6 +73,30 @@ With `Requirement::aal2()->ifEnrolled()`, a user with only a password signs in w
 With `Requirement::aal2()->phishingResistant()->ifEnrolled()`, a user with a password and an authenticator app has no key to meet it, so they still need both. Recovery codes don't count as that second factor: a user with nothing else beyond a password signs in with the password rather than spending a code every time.
 
 Without `ifEnrolled()`, users who can't meet the requirement can't sign in at all. They see an error (`keyring::keyring.unavailable`) on the login page asking them to contact support. Use this only when every account is set up with the factors it needs before it signs in.
+
+## Requiring a Second Factor
+
+`ifEnrolled()` lets users without a second factor carry on with just a password. To make everyone add one (OWASP ASVS 6.3.3 asks for this at level 2), add the `keyring.enrolled` middleware to the routes they must not reach without one, usually the whole app:
+
+```php
+// bootstrap/app.php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->web(append: ['keyring.enrolled']);
+})
+```
+
+It lets guests through, leaving them to `auth`, so it can sit in the `web` group. It also works on a single route or group after `auth`.
+
+```php
+// config/keyring.php
+'enrollment_url' => '/settings/security',
+```
+
+Users still sign in with what they have, then every request under the middleware sends them to `enrollment_url` with the `enroll-first` status until they've set up enough to reach AAL2. JSON requests get a `403` with that status and the URL to send them to. Without an `enrollment_url`, they get a plain `403`.
+
+Recovery codes and email codes don't count, the same as for the [shorter password](configuration.md#passwords). `keyring.enrolled:aal3` asks for a passkey or security key that stays on its device instead.
+
+The enrollment page is always let through, and so are the routes users need to get there and back out: Keyring's own (adding authenticators and confirming), `logout`, email verification and changing the password. Keep anything else the enrollment page calls outside the middleware.
 
 ## No Downgrade
 
