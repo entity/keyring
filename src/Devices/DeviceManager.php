@@ -78,7 +78,7 @@ class DeviceManager
 
         $device->fill([
             'name' => UserAgent::describe($request->userAgent()),
-            'user_agent' => Str::limit((string) $request->userAgent(), 500, ''),
+            'user_agent' => UserAgent::from($request),
             'ip' => $request->ip(),
             'location' => $this->locator->locate($request) ?? $device->location,
             'last_seen_at' => now(),

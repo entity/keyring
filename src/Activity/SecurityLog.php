@@ -5,9 +5,8 @@ namespace Keyring\Activity;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
+use Keyring\Devices\UserAgent;
 use Keyring\Models\SecurityEvent;
 
 /**
@@ -16,10 +15,6 @@ use Keyring\Models\SecurityEvent;
  */
 class SecurityLog
 {
-    public function __construct(
-        protected Request $request,
-    ) {}
-
     /**
      * @param  array<string, mixed>  $meta
      */
@@ -29,8 +24,8 @@ class SecurityLog
             'type' => $type,
             'factor' => $factor,
             'device_id' => $device,
-            'ip' => $this->request->ip(),
-            'user_agent' => Str::limit((string) $this->request->userAgent(), 500, ''),
+            'ip' => request()->ip(),
+            'user_agent' => UserAgent::from(request()),
             'meta' => $meta === [] ? null : $meta,
             'created_at' => now(),
         ]);
