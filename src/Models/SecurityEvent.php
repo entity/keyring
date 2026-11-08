@@ -34,9 +34,6 @@ class SecurityEvent extends Model
 
     public const UPDATED_AT = null;
 
-    /** Event types worth showing the user at their next sign in. */
-    public const ALERTS = ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'];
-
     protected function casts(): array
     {
         return [

@@ -205,6 +205,9 @@ return [
     'events' => [
         'enabled' => true,
         'keep_for' => '180d',
+
+        // Shown once as "was this you?" at the next sign in (keyring.alerts).
+        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
     ],
 
     /*

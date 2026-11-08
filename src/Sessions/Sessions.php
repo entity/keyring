@@ -83,17 +83,22 @@ class Sessions
      */
     public function idle(Assurance $assurance): ?int
     {
-        $idle = config('keyring.sessions.levels.'.strtolower($assurance->name).'.idle', config('keyring.sessions.idle'));
+        $idle = $this->timeout($assurance, 'idle');
 
         return $idle === null ? null : Duration::seconds($idle);
     }
 
     public function absolute(Assurance $assurance): int
     {
-        return Duration::seconds(config(
-            'keyring.sessions.levels.'.strtolower($assurance->name).'.absolute',
-            config('keyring.sessions.absolute', '30d'),
-        ));
+        return Duration::seconds($this->timeout($assurance, 'absolute') ?? '30d');
+    }
+
+    /**
+     * The level's own timeout (sessions.levels.aal3.idle), else the default.
+     */
+    protected function timeout(Assurance $assurance, string $kind): int|string|null
+    {
+        return config('keyring.sessions.levels.'.strtolower($assurance->name).'.'.$kind, config('keyring.sessions.'.$kind));
     }
 
     /**

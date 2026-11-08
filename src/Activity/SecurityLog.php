@@ -54,10 +54,10 @@ class SecurityLog
      *
      * @return Collection<int, SecurityEvent>
      */
-    public function alerts(Authenticatable&Model $user): Collection
+    public function pullAlerts(Authenticatable&Model $user): Collection
     {
         $alerts = $this->query($user)
-            ->whereIn('type', SecurityEvent::ALERTS)
+            ->whereIn('type', config('keyring.events.alerts'))
             ->whereNull('seen_at')
             ->latest('created_at')
             ->get();
