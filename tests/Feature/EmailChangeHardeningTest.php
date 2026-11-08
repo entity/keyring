@@ -18,7 +18,6 @@ use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Rules\UnreservedAddress;
-use Keyring\Tests\Fixtures\CreateNewUser;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -222,7 +221,6 @@ describe('the address a change replaced', function () {
     });
 
     it('cannot be registered while the change can be reverted', function () {
-        Keyring::createUsersUsing(CreateNewUser::class);
         $this->post('/logout');
 
         $this->post('/register', [

@@ -6,15 +6,12 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
-use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
 use Keyring\Sessions\SessionAssurance;
-use Keyring\Tests\Fixtures\CreateNewUser;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     Notification::fake();
-    Keyring::createUsersUsing(CreateNewUser::class);
 });
 
 it('renders the register page', function () {

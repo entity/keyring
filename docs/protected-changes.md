@@ -78,7 +78,7 @@ Every use dispatches `Keyring\Events\ProtectionBypassed` with the reason, and lo
 
 ### Requesting a Change
 
-`POST /user/email` with `email` asks to change the address. It needs a [fresh verification](step-up.md#fresh-verification). The response is always the `email-change-requested` [status response](sign-in-flow.md#status-responses), whatever happens next, so it never reveals whether the new address already has an account.
+`POST /user/email` with `email` asks to change the address. It needs a [fresh verification](step-up.md#fresh-verification). Your `ValidatesEmailChanges` action (published to `app/Actions/Keyring/ValidateEmailChange.php`) validates the request and returns the new address, so add rules there, such as only allowing your company's domain. Don't check there whether the address is taken; Keyring handles that without revealing it. The response is always the `email-change-requested` [status response](sign-in-flow.md#status-responses), whatever happens next, so it never reveals whether the new address already has an account.
 
 Keyring then:
 
@@ -150,17 +150,16 @@ A password reset or a password change cancels any pending change, since whoever 
 
 ## Changing the Password
 
-`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification) and these fields:
+`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification). It passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates it and saves the new password. The published action takes these fields:
 
 | Field | |
 |---|---|
 | `current_password` | Required when the user has a password. |
 | `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
-| `sign_out_others` | Optional boolean, `true` by default. |
 
-A user without a password (for example, one who only uses passkeys) can set one here with just the fresh verification.
+A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
-Keyring regenerates the session ID and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+Keyring runs your action as one of its own flows, so it may change the protected `password` attribute. Afterwards, whatever the action did, Keyring regenerates the session ID and cancels any pending email change. `sign_out_others` (a boolean, `true` by default) decides whether it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Password Rules
 
@@ -173,18 +172,18 @@ Keyring regenerates the session ID and cancels any pending email change. With `s
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.
 
-Use the same rules in your own forms. `PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what the published registration action does.
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses.
 
-To add to the rule, pass a callback to `Keyring::passwordRulesUsing()` in your provider. It receives the `Illuminate\Validation\Rules\Password` rule Keyring built (with its length already set for the user) and the user, or `null` at registration, and returns the rule:
+The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:
 
 ```php
-use App\Models\User;
 use Illuminate\Validation\Rules\Password;
 
-Keyring::passwordRulesUsing(fn (Password $rule, ?User $user) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule);
+protected function passwordRules((Authenticatable&Model)|null $user = null): array
+{
+    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule);
+}
 ```
-
-The callback applies everywhere Keyring checks a new password: registration, password changes and resets.
 
 ## Resetting the Password
 
@@ -192,9 +191,8 @@ The callback applies everywhere Keyring checks a new password: registration, pas
 
 The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent through your user model's `sendPasswordResetNotification()`, so you change it the usual Laravel way. Keyring sets its link with `ResetPassword::createUrlUsing()`, built from `APP_URL`, never the `Host` header. If you've already set `createUrlUsing()` yourself, Keyring leaves it alone. The reset page is sent with `Referrer-Policy: no-referrer`, so the token doesn't leak to other sites through the referrer.
 
-`POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`, and the password rules only run once the token is accepted, so the form doesn't reveal which addresses have accounts or MFA. On success, Keyring:
+`POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`. Only once the token is accepted does Keyring pass the request to your `ResetsUserPasswords` action (published to `app/Actions/Keyring/ResetUserPassword.php`), which checks the password rules and saves the password, so the form doesn't reveal which addresses have accounts or MFA. Then Keyring:
 
-- saves the new password,
 - revokes every session and changes the "remember me" token,
 - cancels any pending email change,
 - lifts any [risk lock](risk.md#actions) on the account,

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
@@ -25,13 +26,11 @@ class EmailChangeController
      * Ask to change the email. Always answers the same way, whether or not
      * the address belongs to someone else.
      */
-    public function store(Request $request): StatusResponse
+    public function store(Request $request, ValidatesEmailChanges $validator): StatusResponse
     {
-        $validated = $request->validate([
-            'email' => ['required', 'string', 'email', 'max:255'],
-        ]);
+        $email = $validator->validate($request->user(), $request->all());
 
-        $this->changes->request($request->user(), $validated['email'], $request);
+        $this->changes->request($request->user(), $email, $request);
 
         return $this->status('email-change-requested');
     }

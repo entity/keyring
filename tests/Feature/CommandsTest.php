@@ -1,10 +1,17 @@
 <?php
 
+use App\Actions\Keyring\ResetUserPassword;
+use App\Actions\Keyring\UpdateUserPassword;
+use App\Actions\Keyring\ValidateEmailChange;
+use App\Providers\KeyringServiceProvider;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Contracts\UpdatesUserPasswords;
+use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
@@ -37,11 +44,13 @@ describe('keyring:install', function () {
         $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
     });
 
-    it('publishes a provider and registration action, and registers the provider', function () {
+    it('publishes a provider and the actions, and registers the provider', function () {
         $this->artisan('keyring:install')->assertSuccessful();
 
         expect(file_exists($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBeTrue()
-            ->and(file_exists($this->sandbox.'/app/Actions/Keyring/CreateNewUser.php'))->toBeTrue()
+            ->and(array_map(basename(...), glob($this->sandbox.'/app/Actions/Keyring/*.php')))->toEqualCanonicalizing([
+                'CreateNewUser.php', 'PasswordValidationRules.php', 'ResetUserPassword.php', 'UpdateUserPassword.php', 'ValidateEmailChange.php',
+            ])
             ->and(file_get_contents($this->sandbox.'/bootstrap/providers.php'))->toContain('App\Providers\KeyringServiceProvider::class');
     });
 
@@ -197,4 +206,13 @@ it('describes the setup in artisan about', function () {
         ->expectsOutputToContain('password, totp, recovery')
         ->expectsOutputToContain('registration, password_reset, email_verification')
         ->assertSuccessful();
+});
+
+it('publishes a provider that boots and registers the actions', function () {
+    new KeyringServiceProvider($this->app)->boot();
+
+    expect(app(UpdatesUserPasswords::class))->toBeInstanceOf(UpdateUserPassword::class)
+        ->and(app(ResetsUserPasswords::class))->toBeInstanceOf(ResetUserPassword::class)
+        ->and(app(ValidatesEmailChanges::class))->toBeInstanceOf(ValidateEmailChange::class)
+        ->and(Keyring::registered()->keys()->all())->toContain('passkey', 'security-key', 'email-code');
 });
