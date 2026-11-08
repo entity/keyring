@@ -221,6 +221,7 @@ The security emails to send. `Keyring::notify()` in your provider overrides this
 'limits' => [
     'per_account' => 5,
     'per_ip' => 20,
+    'consecutive' => 100,
 ],
 ```
 
@@ -228,7 +229,7 @@ The security emails to send. `Keyring::notify()` in your provider overrides this
 
 `timebox` is the minimum time, in microseconds, that a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address. See [Rate Limiting](security.md#rate-limiting).
+`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused until a password reset (`null` for no cap). See [Rate Limiting](security.md#rate-limiting).
 
 Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
 

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Password as PasswordBroker;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
@@ -149,4 +150,61 @@ it('lets the owner sign in from a known device while someone else is locked out'
     $this->withCookie('keyring_device', $device)
         ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
         ->assertRedirect('/dashboard');
+});
+
+describe('failures in a row, however slowly they come', function () {
+    beforeEach(function () {
+        config(['keyring.limits.consecutive' => 3]);
+        $this->user = account('taylor@example.com');
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    });
+
+    function guessTotp(string $code): void
+    {
+        test()->travel(3)->minutes();
+        test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        test()->post(route('keyring.login.verify', 'totp'), ['code' => $code]);
+    }
+
+    it('refuses the factor at the cap, even with the right code', function () {
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp('000000');
+
+        guessTotp(totpCode($this->totp->secret));
+
+        $this->assertGuest();
+    });
+
+    it('starts the count again after a success', function () {
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp(totpCode($this->totp->secret));
+        $this->assertAuthenticatedAs($this->user);
+        $this->post('/logout');
+
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp(totpCode($this->totp->secret, 1));
+
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('lets a password reset clear it', function () {
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp('000000');
+
+        $this->post(route('password.update'), [
+            'token' => PasswordBroker::broker()->createToken($this->user),
+            'email' => 'taylor@example.com',
+            'password' => 'a brand new passphrase',
+            'password_confirmation' => 'a brand new passphrase',
+        ])->assertRedirect(route('login'));
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase']);
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+
+        $this->assertAuthenticatedAs($this->user);
+    });
 });
