@@ -29,6 +29,6 @@ class RequireAssurance
             return $next($request);
         }
 
-        return $this->stepUp->require($request, Requirement::for($level), building: true);
+        return $this->stepUp->require($request, Requirement::for($level), $this->assurance->countingToward($level));
     }
 }

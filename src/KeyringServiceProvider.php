@@ -35,6 +35,7 @@ use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
+use Keyring\Support\Duration;
 use Keyring\Support\Features;
 use Keyring\Support\Url;
 use Keyring\WebAuthn\Ceremonies;
@@ -99,6 +100,7 @@ class KeyringServiceProvider extends ServiceProvider
         $this->registerListeners();
         $this->configureEmailLinks();
         $this->configureRateLimiting();
+        $this->configureRememberMe();
 
         if (config('keyring.routes')) {
             $this->registerRoutes();
@@ -163,6 +165,19 @@ class KeyringServiceProvider extends ServiceProvider
     protected function configureRateLimiting(): void
     {
         RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip()));
+    }
+
+    /**
+     * "Remember me" can't outlast a session: Laravel's cookie lasts 400 days
+     * otherwise. An app that sets its guard's "remember" keeps its own.
+     */
+    protected function configureRememberMe(): void
+    {
+        $key = 'auth.guards.'.config('keyring.guard').'.remember';
+
+        if (config($key) === null) {
+            config([$key => intdiv(Duration::seconds(config('keyring.sessions.absolute') ?? '30d'), 60)]);
+        }
     }
 
     protected function registerRoutes(): void

@@ -253,16 +253,17 @@ A signed-out request is sent to the login page with the `signed-out` status, and
     'idle' => null,
     'absolute' => '30d',
     'levels' => [
-        'aal3' => ['idle' => '15m', 'absolute' => '8h'],
+        'aal2' => ['idle' => '1h', 'absolute' => '24h'],
+        'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
 ],
 ```
 
 - **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
-- **`absolute`** ends a session this long after sign in, however active it is.
-- **`levels`** override either for sessions at an assurance level: `none`, `aal1`, `aal2` or `aal3`.
+- **`absolute`** ends a session this long after sign in, however active it is. "Remember me" lasts no longer either, unless you set your guard's `remember` (in minutes) yourself.
+- **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
 
-A session takes the level it reached at sign in. If [step-up](step-up.md) raises it, the session takes the new level's idle timeout, and its absolute timeout can get shorter (never longer), still counted from sign in.
+A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one. Verifying again resets both clocks.
 
 ## Pruning
 

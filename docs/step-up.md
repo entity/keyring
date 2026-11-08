@@ -43,7 +43,7 @@ Route::delete('/account', [AccountController::class, 'destroy'])
 
 It counts everything proved so far this session, so it only asks for what's missing. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL2, and at AAL3 if the passkey stays on its device.
 
-The level stays reached for the rest of the session, unless a [risk response](risk.md#checkpoints) clears it.
+A level doesn't last the whole session. It lapses after its idle and overall limits (an hour without a request, or 24 hours, at AAL2 by default, as NIST SP 800-63B asks), and the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts). A [risk response](risk.md#checkpoints) can also clear it.
 
 Users who don't have the authenticators to reach the level get a `403` with `keyring::keyring.needs_factor`, since confirming couldn't help them. Send these users to set up a factor first, for example by checking `$request->user()->keyring->canMeet(Requirement::aal2())` before linking to the route.
 

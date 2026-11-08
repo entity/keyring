@@ -24,16 +24,16 @@ class StepUp
     ) {}
 
     /**
-     * @param  bool  $building  count what the user already proved this session (raising assurance),
-     *                          rather than asking for a fresh verification
+     * @param  list<Verification>  $proved  what still counts from this session, to build on
+     *                                      (raising assurance), or nothing to ask afresh
      */
-    public function require(Request $request, Requirement $requirement, bool $building): Response
+    public function require(Request $request, Requirement $requirement, array $proved = []): Response
     {
         // Without the sign-in methods to meet it, confirming can't help, and
         // would only send the user round in a loop.
         abort_unless($this->keyring->for($this->keyring->user())->canMeet($requirement), 403, __('keyring::keyring.needs_factor'));
 
-        $this->begin($request, $requirement, $building);
+        $this->begin($request, $requirement, $proved);
 
         $url = route('keyring.confirm.challenge');
 
@@ -47,13 +47,16 @@ class StepUp
         return redirect()->guest($url);
     }
 
-    public function begin(Request $request, Requirement $requirement, bool $building): Attempt
+    /**
+     * @param  list<Verification>  $proved
+     */
+    public function begin(Request $request, Requirement $requirement, array $proved = []): Attempt
     {
         return $this->attempts->start(
             Purpose::Confirm,
             $this->keyring->user(),
             requirement: $requirement,
-            verifications: $building ? $this->assurance->all() : [],
+            verifications: $proved,
         );
     }
 }

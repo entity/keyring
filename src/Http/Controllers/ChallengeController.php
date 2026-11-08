@@ -39,7 +39,7 @@ class ChallengeController
     {
         $purpose = $this->purpose($request);
         $attempt = $this->attempts->current($purpose)
-            ?? ($purpose === Purpose::Confirm ? $this->stepUp->begin($request, Requirement::aal1(), building: false) : null);
+            ?? ($purpose === Purpose::Confirm ? $this->stepUp->begin($request, Requirement::aal1()) : null);
 
         if ($attempt === null) {
             return $this->expired($purpose);

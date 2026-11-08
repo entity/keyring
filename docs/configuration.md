@@ -145,7 +145,7 @@ Extra middleware for adding, renaming and removing authenticators, revoking devi
 | `store` | The cache store used by the `cache` driver. `null` is your default store. |
 | `idle` | Inactivity allowed before a session ends. `null` leaves it to Laravel's session lifetime. |
 | `absolute` | The longest a session can last, however active it is. |
-| `levels` | Per-assurance overrides for `idle` and `absolute`, keyed `none`, `aal1`, `aal2` or `aal3`. |
+| `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
