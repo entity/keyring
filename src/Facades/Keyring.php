@@ -35,9 +35,9 @@ use Keyring\KeyringManager;
  * @method static array protectedAttributes()
  * @method static mixed withoutProtection(\Closure $callback, string|null $reason = null)
  * @method static \Keyring\KeyringManager useAuthenticatorModel(string $model)
- * @method static string authenticatorModel()
+ * @method static class-string<\Keyring\Models\Authenticator> authenticatorModel()
  * @method static \Keyring\KeyringManager useDeviceModel(string $model)
- * @method static string deviceModel()
+ * @method static class-string<\Keyring\Models\Device> deviceModel()
  *
  * @see KeyringManager
  */
