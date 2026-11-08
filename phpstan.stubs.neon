@@ -1,0 +1,12 @@
+# The code keyring:install publishes into apps, at the strictest level, since
+# it becomes the app's own and apps often run Larastan high.
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 9
+    paths:
+        - stubs/app
+    bootstrapFiles:
+        # Aliases App\Models\User to the test user.
+        - tests/Helpers.php
