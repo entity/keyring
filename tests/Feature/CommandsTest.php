@@ -12,6 +12,8 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Models\Authenticator;
+use Keyring\Models\PendingChange;
+use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
@@ -149,12 +151,39 @@ describe('keyring:import fortify', function () {
     });
 });
 
-it('prunes old devices, email changes and ended sessions', function () {
+it('prunes old devices, email changes, security events and ended sessions', function () {
     $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
     $old = Keyring::deviceModel()::make(['token_hash' => 'a', 'revoked_at' => now()->subDays(31)]);
     $old->authenticatable()->associate($user)->save();
     $current = Keyring::deviceModel()::make(['token_hash' => 'b']);
     $current->authenticatable()->associate($user)->save();
+
+    $change = function (array $attributes) use ($user): PendingChange {
+        $change = new PendingChange(['attribute' => 'email', 'value' => 'new@example.com', 'confirm_token' => 'c', 'revert_token' => 'r', 'expires_at' => now()->addDay(), ...$attributes]);
+        $change->authenticatable()->associate($user)->save();
+
+        return $change;
+    };
+    $ended = [
+        $change(['expires_at' => now()->subDays(31)]),
+        $change(['cancelled_at' => now()->subDays(31)]),
+        $change(['reverted_at' => now()->subDays(31)]),
+        $change(['applied_at' => now()->subDays(40), 'revertable_until' => now()->subDays(31)]),
+    ];
+    $kept = [
+        $change([]),
+        $change(['expires_at' => now()->subDay()]),
+        $change(['applied_at' => now()->subDays(40), 'expires_at' => now()->subDays(40), 'revertable_until' => now()->subDay()]),
+    ];
+
+    $event = fn (int $daysAgo) => SecurityEvent::query()->forceCreate([
+        'authenticatable_type' => $user->getMorphClass(),
+        'authenticatable_id' => $user->id,
+        'type' => 'signed_in',
+        'created_at' => now()->subDays($daysAgo),
+    ]);
+    $event(181);
+    $recent = $event(1);
 
     $registry = app(SessionRegistry::class);
     $registry->save(new RegisteredSession('ended', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
@@ -163,6 +192,15 @@ it('prunes old devices, email changes and ended sessions', function () {
     $this->artisan('keyring:prune')->assertSuccessful();
 
     expect(Keyring::deviceModel()::pluck('id')->all())->toBe([$current->id])
+        ->and(PendingChange::pluck('id')->sort()->values()->all())->toBe(collect($kept)->pluck('id')->sort()->values()->all())
+        ->and(SecurityEvent::pluck('id')->all())->toBe([$recent->id])
         ->and($registry->find('ended'))->toBeNull()
         ->and($registry->find('live'))->not->toBeNull();
+});
+
+it('describes the setup in artisan about', function () {
+    $this->artisan('about', ['--only' => 'keyring'])
+        ->expectsOutputToContain('password, totp, recovery')
+        ->expectsOutputToContain('registration, password_reset, email_verification')
+        ->assertSuccessful();
 });

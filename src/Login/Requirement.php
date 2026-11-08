@@ -147,10 +147,8 @@ final readonly class Requirement
             return false;
         }
 
-        foreach ($this->categories as $required) {
-            if (! in_array($required, $verified, true) && in_array($required, $new, true)) {
-                return true;
-            }
+        if (array_any($this->categories, fn (Category $required) => ! in_array($required, $verified, true) && in_array($required, $new, true))) {
+            return true;
         }
 
         // Only offer it if the requirement can still be met afterwards: the

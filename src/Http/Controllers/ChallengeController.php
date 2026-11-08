@@ -22,8 +22,8 @@ use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
 
 /**
- * One controller for every factor and every purpose (login, step-up,
- * recovery). Adding a factor never needs a new route.
+ * One controller for every factor and both purposes (login and step-up).
+ * Adding a factor never needs a new route.
  */
 class ChallengeController
 {

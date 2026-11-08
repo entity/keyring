@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
@@ -83,6 +84,7 @@ class KeyringServiceProvider extends ServiceProvider
 
         if ($this->app->runningInConsole()) {
             $this->registerPublishing();
+            $this->registerAboutSection();
         }
     }
 
@@ -150,6 +152,23 @@ class KeyringServiceProvider extends ServiceProvider
         Route::prefix(config('keyring.prefix'))
             ->domain(config('keyring.domain'))
             ->group(fn () => $this->app->make(KeyringManager::class)->routes());
+    }
+
+    /**
+     * Keyring's setup in `php artisan about`.
+     */
+    protected function registerAboutSection(): void
+    {
+        if (! class_exists(AboutCommand::class)) {
+            return;
+        }
+
+        AboutCommand::add('Keyring', fn () => [
+            'Guard' => config('keyring.guard'),
+            'Factors' => $this->app->make(KeyringManager::class)->registered()->keys()->implode(', '),
+            'Features' => collect(config('keyring.features'))->filter()->keys()->implode(', ') ?: 'none',
+            'Session registry' => config('keyring.sessions.driver'),
+        ]);
     }
 
     protected function registerPublishing(): void

@@ -1,7 +1,6 @@
 <?php
 
 use Rector\CodeQuality\Rector\FuncCall\SortCallLikeNamedArgsRector;
-use Rector\CodeQuality\Rector\Identical\FlipTypeControlToUseExclusiveTypeRector;
 use Rector\CodeQuality\Rector\If_\ExplicitNullableObjectInstanceRector;
 use Rector\CodingStyle\Rector\ArrowFunction\ArrowFunctionDelegatingCallToFirstClassCallableRector;
 use Rector\Config\RectorConfig;
@@ -53,7 +52,6 @@ return RectorConfig::configure()
         ClosureReturnTypeRector::class,
         AddArrayFunctionClosureParamTypeRector::class,
         // `$attempt === null` reads better than `! $attempt instanceof Attempt`.
-        FlipTypeControlToUseExclusiveTypeRector::class,
         ExplicitNullableObjectInstanceRector::class,
         // now() and Carbon, as in Laravel's docs; named arguments in the order that reads best.
         CarbonToDateFacadeRector::class,

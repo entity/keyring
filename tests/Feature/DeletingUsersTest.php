@@ -1,10 +1,14 @@
 <?php
 
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\User;
 
 it('removes sign-in methods, devices, pending changes and sessions with the user', function () {
     $user = taylor();
@@ -24,3 +28,20 @@ it('removes sign-in methods, devices, pending changes and sessions with the user
         ->and(PendingChange::count())->toBe(0)
         ->and(app(SessionRegistry::class)->find($session)?->revokedAt)->not->toBeNull();
 });
+
+it('keeps everything while the user is only soft deleted', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    $user->delete();
+    expect(Authenticator::count())->toBe(1);
+
+    $user->forceDelete();
+    expect(Authenticator::count())->toBe(0);
+});
+
+class SoftDeletingUser extends User
+{
+    use SoftDeletes;
+}
