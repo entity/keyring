@@ -8,7 +8,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 - **Factors are drivers:** password, TOTP, passkeys, security keys, email codes and recovery codes all share one contract. You can add SMS, push or anything else without new routes, controllers or tables.
 - **Passkeys and security keys work as either factor:** one WebAuthn driver with two profiles. Inherence only counts when the key actually verified the user.
 - **Devices and sessions are built in:** new-device events, "this wasn't me" links, a sessions list, and "sign out everywhere else". It works with **any session driver** (database, Redis, file, cookie).
-- **Step-up:** `keyring:aal2` and `keyring.fresh:15m` middleware. Any enrolled factor counts, not just the password.
+- **Step-up:** `keyring:aal2` and `keyring.fresh:15m` middleware. A passkey or code counts, not just the password, and users with a second factor must use it.
 - **Protected account changes:** `email` and `password` can only change through Keyring's flows (OWASP). Email changes are confirmed from both addresses and can be reverted.
 - **Risk signals:** new device, new country, impossible travel, a session cookie showing up in another browser, repeated failures. Each level maps to an action.
 - **A security log and opt-in security emails.**
@@ -145,7 +145,8 @@ class BillingController
 ```
 
 - `keyring:aal2` asks for whatever is missing to reach that level.
-- `keyring.fresh:15m` asks for a verification within the window. The window is fixed from the moment of verification and doesn't slide with activity.
+- `keyring.fresh:15m` asks for a verification within the window. Password-only users confirm with their password. Users who have a second factor must use one, so a stolen session plus a phished password can't add or remove factors. The window is fixed from the moment of verification and doesn't slide with activity.
+- Adding a sign-in method needs a verified email address, so someone who registers an address first can't plant a factor that survives the real owner's password reset.
 
 Both use the same challenge page with `purpose: "confirm"`. Confirming also satisfies Laravel's own `password.confirm`.
 

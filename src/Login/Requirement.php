@@ -149,7 +149,13 @@ final readonly class Requirement
             }
         }
 
-        return count($verified) < $this->factors;
+        // Only offer it if the requirement can still be met afterwards: the
+        // categories still missing must fit in the slots that remain.
+        $after = array_unique([...$verified, ...$new], SORT_REGULAR);
+        $missing = array_filter($this->categories, fn (Category $category) => ! in_array($category, $after, true));
+
+        return count($verified) < $this->factors
+            && count($missing) <= max(0, $this->factors - count($after));
     }
 
     /**

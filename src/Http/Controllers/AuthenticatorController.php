@@ -2,8 +2,10 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
@@ -17,6 +19,7 @@ use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use Keyring\UserKeyring;
 
 /**
  * Adding, renaming, choosing the default and removing authenticators. One
@@ -36,6 +39,7 @@ class AuthenticatorController
      */
     public function store(Request $request, string $factor): mixed
     {
+        $this->ensureEmailVerified($request);
         $factor = $this->enrollable($factor);
         $enrollment = $factor->beginEnrollment($request->user(), $request);
 
@@ -49,6 +53,7 @@ class AuthenticatorController
      */
     public function confirm(Request $request, string $factor): mixed
     {
+        $this->ensureEmailVerified($request);
         $factor = $this->enrollable($factor);
         $user = $request->user();
 
@@ -122,21 +127,23 @@ class AuthenticatorController
         $authenticator = $this->find($request, $authenticator);
         $user = $request->user();
         $remaining = $this->keyring->for($user)->without($authenticator);
+
+        // Recovery codes are only useful while there's a second factor to
+        // recover, so they go too when this was the last one. Check the policy
+        // against what will actually be left.
+        $others = $remaining->all()->reject(fn (Authenticator $other) => $other->isVirtual() || $other->factor === 'recovery');
+        $cascade = $others->isEmpty() ? $remaining->of('recovery') : new Collection;
+        $left = $cascade->reduce(fn (UserKeyring $keyring, Authenticator $recovery) => $keyring->without($recovery), $remaining);
+
         $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
 
-        if (! $remaining->canSignIn() || (! $policy->onlyIfEnrolled && ! $remaining->canMeet($policy))) {
+        if (! $left->canSignIn() || (! $policy->onlyIfEnrolled && ! $left->canMeet($policy))) {
             throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
         }
 
-        DB::transaction(function () use ($authenticator, $remaining) {
+        DB::transaction(function () use ($authenticator, $cascade) {
             $authenticator->delete();
-
-            // Recovery codes are only useful while there's a second factor to recover.
-            $others = $remaining->all()->reject(fn (Authenticator $other) => $other->isVirtual() || $other->factor === 'recovery');
-
-            if ($others->isEmpty()) {
-                $remaining->of('recovery')->each->delete();
-            }
+            $cascade->each->delete();
         });
 
         AuthenticatorRemoved::dispatch($user, $authenticator);
@@ -170,6 +177,20 @@ class AuthenticatorController
         RecoveryCodesGenerated::dispatch($user, $authenticator);
 
         return $codes;
+    }
+
+    /**
+     * Until the email address is proven, the account may belong to someone
+     * who registered it first. Factors added then would survive the real
+     * owner's password reset.
+     */
+    protected function ensureEmailVerified(Request $request): void
+    {
+        $user = $request->user();
+
+        if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
+            abort(403, __('keyring::keyring.verify_email_first'));
+        }
     }
 
     protected function enrollable(string $key): Enrollable

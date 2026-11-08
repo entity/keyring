@@ -33,7 +33,8 @@ trait KeyringConformance
     use InteractsWithKeyring;
 
     /**
-     * A user whose password is "password" and who has no extra factors.
+     * A user whose password is "password", whose email is verified, and who
+     * has no extra factors.
      */
     abstract protected function keyringUser(): Authenticatable&Model;
 
