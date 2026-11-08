@@ -79,6 +79,8 @@ class KeyringServiceProvider extends ServiceProvider
         }
 
         if ($this->app->runningInConsole()) {
+            $this->commands([Console\InstallCommand::class, Console\ImportCommand::class]);
+
             $this->publishes([
                 __DIR__.'/../config/keyring.php' => config_path('keyring.php'),
             ], 'keyring-config');

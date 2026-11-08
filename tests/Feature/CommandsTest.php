@@ -1,0 +1,122 @@
+<?php
+
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
+use Keyring\Models\Authenticator;
+use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\User;
+use PragmaRX\Google2FA\Google2FA;
+
+describe('keyring:install', function () {
+    beforeEach(function () {
+        $this->sandbox = sys_get_temp_dir().'/keyring-install-'.uniqid();
+        $files = new Filesystem;
+        $files->ensureDirectoryExists($this->sandbox.'/bootstrap');
+        $files->put($this->sandbox.'/bootstrap/providers.php', "<?php\n\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n");
+
+        $this->app->useAppPath($this->sandbox.'/app');
+        $this->app->useBootstrapPath($this->sandbox.'/bootstrap');
+    });
+
+    afterEach(function () {
+        $files = new Filesystem;
+        $files->deleteDirectory($this->sandbox);
+        $files->delete(config_path('keyring.php'));
+        $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
+    });
+
+    it('publishes a provider and registration action, and registers the provider', function () {
+        $this->artisan('keyring:install')->assertSuccessful();
+
+        expect(file_exists($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBeTrue()
+            ->and(file_exists($this->sandbox.'/app/Actions/Keyring/CreateNewUser.php'))->toBeTrue()
+            ->and(file_get_contents($this->sandbox.'/bootstrap/providers.php'))->toContain('App\Providers\KeyringServiceProvider::class');
+    });
+
+    it('rejects unknown frontend stacks', function () {
+        $this->artisan('keyring:install', ['--inertia' => 'angular'])->assertFailed();
+    });
+});
+
+describe('keyring:import fortify', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, Totp::class, WebAuthn::passkeys(), RecoveryCodes::class]);
+
+        Schema::table('users', function (Blueprint $table) {
+            $table->text('two_factor_secret')->nullable();
+            $table->text('two_factor_recovery_codes')->nullable();
+            $table->timestamp('two_factor_confirmed_at')->nullable();
+        });
+
+        $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    });
+
+    it('imports fortify two factor and recovery codes, once', function () {
+        $secret = app(Google2FA::class)->generateSecretKey();
+
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt($secret),
+            'two_factor_recovery_codes' => encrypt(json_encode(['abcde-12345', 'fghij-67890'])),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify', '--dry-run' => true])->assertSuccessful();
+        expect(Authenticator::count())->toBe(0);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $keyring = $this->user->keyring->refresh();
+        expect($keyring->of('totp'))->toHaveCount(1)
+            ->and($keyring->of('totp')->first()->secret)->toBe($secret)
+            ->and($keyring->of('recovery'))->toHaveCount(1);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->get(route('keyring.login.challenge', ['recovery']));
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcde-12345'])->assertRedirect('/dashboard');
+    });
+
+    it('imports laravel passkeys so they keep working', function () {
+        $key = new VirtualAuthenticator;
+
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options), 'name' => 'MacBook']);
+        $this->post('/logout');
+
+        // Pretend that passkey was made by laravel/passkeys instead.
+        $made = Authenticator::where('factor', 'passkey')->sole();
+        Schema::create('passkeys', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id');
+            $table->string('name');
+            $table->string('credential_id');
+            $table->json('credential');
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamps();
+        });
+        DB::table('passkeys')->insert([
+            'user_id' => $this->user->id,
+            'name' => 'MacBook',
+            'credential_id' => $made->credential_id,
+            'credential' => $made->public_key,
+            'created_at' => now(),
+        ]);
+        $made->delete();
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+
+        expect($this->user->keyring->refresh()->of('passkey')->first()->name)->toBe('MacBook');
+    });
+});
