@@ -60,6 +60,15 @@ it('verifies email addresses', function () {
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
 });
 
+it('adds the verified flag to a home url that has a query of its own', function () {
+    config(['keyring.home' => '/dashboard?tab=security']);
+    $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+
+    $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
+
+    $this->actingAs($user)->get($url)->assertRedirect('/dashboard?tab=security&verified=1');
+});
+
 it('can turn registration off', function () {
     config(['keyring.features.registration' => false]);
 
