@@ -27,7 +27,7 @@ One set of routes adds, renames and removes authenticators for every factor. The
 | `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Rename, or make it the default. |
 | `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. |
 
-These routes need `auth:{guard}`, plus the `manage_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified a factor in the last 15 minutes, and users with a second factor must have used it. See [Fresh Verification](step-up.md#fresh-verification).
+These routes need `auth:{guard}`, plus the `manage_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified, in the last 15 minutes, as much as signing in would ask of them. See [Fresh Verification](step-up.md#fresh-verification).
 
 `{factor}` must be a registered factor that implements `Enrollable`; otherwise the route returns a 404. Users can only see and change their own authenticators; anyone else's ID returns a 404.
 

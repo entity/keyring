@@ -71,7 +71,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 ### Sessions and Devices
 
 - Every signed-in Keyring route checks Keyring's guard (`auth:{guard}`), and the step-up middleware reads the user from it, so another guard's user can't stand in.
-- Every signed-in session is in Keyring's registry and is checked on every request, so revoking one takes effect on its next request with any session driver.
+- Every signed-in session is in Keyring's registry and is checked on every `web` request (and any other group you add `keyring.session` to), so revoking one takes effect on its next request with any session driver.
 - Sessions have idle and absolute timeouts, and each assurance level lapses on NIST SP 800-63B's clock (AAL2: 1 hour idle or 24 hours; AAL3: 15 minutes or 12 hours) until the user verifies again. "Remember me" lasts no longer than a session.
 - A session whose registry record has gone missing is signed out rather than started over.
 - A revocation can't be undone by a request saving a stale copy of its session.

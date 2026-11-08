@@ -14,8 +14,13 @@ use Keyring\Exceptions\UnknownFactor;
  */
 class FactorRegistry
 {
-    /** @var list<class-string<Factor>|Factor|Closure(Container): Factor> */
-    protected array $definitions = [Password::class, Totp::class, RecoveryCodes::class];
+    /**
+     * Until the app chooses its own: NIST SP 800-63B asks for at least one
+     * phishing-resistant option, so passkeys are among them.
+     *
+     * @var list<class-string<Factor>|Factor|Closure(Container): Factor>
+     */
+    protected array $definitions;
 
     /** @var array<string, Closure(Container): Factor> */
     protected array $extensions = [];
@@ -25,7 +30,9 @@ class FactorRegistry
 
     public function __construct(
         protected Container $container,
-    ) {}
+    ) {
+        $this->definitions = [Password::class, WebAuthn::passkeys(...), Totp::class, RecoveryCodes::class];
+    }
 
     /**
      * @param  list<class-string<Factor>|Factor|Closure(Container): Factor>  $factors

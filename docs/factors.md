@@ -42,6 +42,8 @@ Keyring::factors([
 ]);
 ```
 
+Without `Keyring::factors()`, Keyring uses the password, passkeys, TOTP and recovery codes. NIST SP 800-63B asks for at least one phishing-resistant option, which passkeys are.
+
 The list accepts class names (resolved from the container), instances, and closures that receive the container:
 
 ```php
@@ -85,7 +87,7 @@ When a login starts with an unknown address, Keyring still runs a password hash,
 
 ### Authenticator Apps (TOTP)
 
-Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code. Codes are accepted one time step either side of now by default (the `window` constructor argument).
+Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code. Codes are accepted one time step either side of now by default (the `window` constructor argument), so a code works for up to 90 seconds and a phone whose clock is a little off still works. OWASP ASVS prefers a single 30 second step: register `fn ($app) => $app->make(Totp::class, ['window' => 0])` for that.
 
 Each authenticator remembers the last time step it accepted, under a row lock, so a code can't be used twice, even by two requests at the same moment.
 
