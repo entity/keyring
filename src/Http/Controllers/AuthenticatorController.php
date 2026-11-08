@@ -217,6 +217,8 @@ class AuthenticatorController
             return new JsonResponse(['status' => $status, ...$data]);
         }
 
-        return back()->with('status', $status)->with('keyring', $data);
+        // Under keyring.result: flashing "keyring" itself would replace the
+        // session's verifications and registry ID, which live under keyring.*.
+        return back()->with('status', $status)->with('keyring.result', $data);
     }
 }

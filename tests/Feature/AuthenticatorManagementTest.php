@@ -123,3 +123,13 @@ it('404s for factors that cannot be enrolled', function () {
     $this->postJson(route('keyring.authenticators.store', 'password'))->assertNotFound();
     $this->postJson(route('keyring.authenticators.store', 'nope'))->assertNotFound();
 });
+
+it('keeps the session verified when enrolling from an inertia page', function () {
+    $this->inertia()->post(route('keyring.authenticators.store', 'totp'))->assertRedirect();
+    $this->flushHeaders();
+
+    // The enrollment details are flashed for the page, without wiping
+    // Keyring's other session data (verifications, the session registry).
+    expect(session('keyring.result.enrollment.secret'))->not->toBeNull();
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+});
