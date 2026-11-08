@@ -14,7 +14,9 @@ return new class extends Migration
             $table->string('factor', 64);
             $table->string('name');
             $table->text('secret')->nullable();
-            $table->string('credential_id')->nullable()->unique();
+            // WebAuthn allows longer IDs, but real keys stay well under this,
+            // and it keeps the unique index within MySQL's limit.
+            $table->string('credential_id', 512)->nullable()->unique();
             $table->text('public_key')->nullable();
             $table->unsignedBigInteger('sign_count')->default(0);
             $table->uuid('aaguid')->nullable();

@@ -220,7 +220,8 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
         $id = $this->ceremonies()->credentialId($this->credential($request));
 
-        if (Keyring::authenticatorModel()::query()->where('credential_id', $id)->exists()) {
+        // Already registered (to anyone), or longer than the column allows.
+        if ($id === null || strlen($id) > 512 || Keyring::authenticatorModel()::query()->where('credential_id', $id)->exists()) {
             return null;
         }
 
