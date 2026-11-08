@@ -30,14 +30,15 @@ trait HasKeyring
             app(ReservedAddresses::class)->guard($user);
         });
 
-        // Clean up once the user is really gone (not when soft deleted), so a
-        // passkey can be registered again on a new account.
+        // Signed out everywhere either way. A soft deleted user keeps their
+        // sign-in methods in case they're restored; once really gone, they go
+        // too, so a passkey can be registered again on a new account.
         static::deleted(function (self $user) {
+            app(Sessions::class)->registry()->revokeAll($user);
+
             if (method_exists($user, 'isForceDeleting') && ! $user->isForceDeleting()) {
                 return;
             }
-
-            app(Sessions::class)->registry()->revokeAll($user);
 
             $user->authenticators()->delete();
             $user->devices()->delete();

@@ -431,6 +431,7 @@ All in `Keyring\Events`:
 | `Authenticated` | A login completed. | `user`, `attempt`, `device` |
 | `Confirmed` | A step-up completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |
+| `SessionEnded` | Keyring signed a session out on its own: revoked, timed out, or ended by a risk response. | `user`, `reason` |
 
 Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyring signs users in and out through the guard. Like Fortify, Keyring also dispatches Laravel's other auth events next to its own, so listeners and packages built for them keep working:
 

@@ -46,6 +46,7 @@ Set `enabled` to `false` to stop logging. "Was this you?" alerts and the `Repeat
 | `device_revoked` | A device was signed out. | `device` |
 | `device_reported` | A device was signed out from the "this wasn't me" link. | `device` |
 | `sessions_revoked` | "Sign out everywhere else". | `count` |
+| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user` or `risk` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |
 | `password_changed`, `password_reset` | | |
 | `protection_bypassed` | `Keyring::withoutProtection()` was used. Linked to the signed-in user who did it. | `reason` |

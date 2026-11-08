@@ -244,7 +244,7 @@ On each signed-in request it:
 
 A session whose record has gone missing is signed out rather than registered again, so clearing records can't restart a session's window.
 
-A signed-out request is sent to the login page with the `signed-out` status, and comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`.
+A signed-out request is sent to the login page with the `signed-out` status, and comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, and `Keyring\Events\SessionEnded` is dispatched with the reason, logged as `session_ended`.
 
 ## Timeouts
 

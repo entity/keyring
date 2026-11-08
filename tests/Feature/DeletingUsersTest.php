@@ -3,9 +3,11 @@
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SoftDeletingUser;
 
@@ -28,13 +30,18 @@ it('removes sign-in methods, devices, pending changes and sessions with the user
         ->and(app(SessionRegistry::class)->find($session)?->revokedAt)->not->toBeNull();
 });
 
-it('keeps everything while the user is only soft deleted', function () {
+it('signs a soft deleted user out but keeps their sign-in methods', function () {
     Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
     $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
     Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+    $session = new RegisteredSession('kept', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
+    app(SessionRegistry::class)->save($session);
 
     $user->delete();
-    expect(Authenticator::count())->toBe(1);
+
+    // Signed out at once, but the sign-in methods stay in case of a restore.
+    expect(app(SessionRegistry::class)->find('kept')->revokedAt)->not->toBeNull()
+        ->and(Authenticator::count())->toBe(1);
 
     $user->forceDelete();
     expect(Authenticator::count())->toBe(0);

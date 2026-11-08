@@ -35,6 +35,7 @@ class RecordSecurityEvents
             Events\NewDeviceSignedIn::class => 'newDevice',
             Events\DeviceRevoked::class => 'deviceRevoked',
             Events\SessionsRevoked::class => 'sessionsRevoked',
+            Events\SessionEnded::class => 'sessionEnded',
             Events\EmailChangeRequested::class => 'emailChangeRequested',
             Events\EmailChanged::class => 'emailChanged',
             Events\EmailChangeReverted::class => 'emailChangeReverted',
@@ -118,6 +119,11 @@ class RecordSecurityEvents
     public function sessionsRevoked(Events\SessionsRevoked $event): void
     {
         $this->log->record('sessions_revoked', $event->user, meta: ['count' => $event->count]);
+    }
+
+    public function sessionEnded(Events\SessionEnded $event): void
+    {
+        $this->log->record('session_ended', $event->user, meta: ['reason' => $event->reason]);
     }
 
     public function emailChangeRequested(Events\EmailChangeRequested $event): void
