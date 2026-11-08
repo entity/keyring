@@ -25,7 +25,7 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
 
    ```bash
    composer require entity/keyring
-   php artisan keyring:install --inertia=vue
+   php artisan keyring:install
    php artisan migrate
    ```
 

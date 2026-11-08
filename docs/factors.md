@@ -300,13 +300,12 @@ public function beginEnrollment(Authenticatable&Model $user, Request $request): 
 
 ## Showing a Factor in the Frontend
 
-The challenge page picks a component by factor key. Add one line to `resources/js/keyring/factors.ts` for each new factor. A code factor can reuse the published `Code` component:
+The challenge page picks a component by factor key (see [Frontend](frontend.md#the-challenge-page)). Add one line to your factor map for each new factor. A code factor can reuse the component you use for TOTP:
 
 ```ts
 'sms': defineAsyncComponent(() => import('./factors/Code.vue')),
 ```
 
-See [Frontend](frontend.md#the-challenge-page).
 
 ## Using Your Own Authenticator Model
 

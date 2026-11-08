@@ -86,7 +86,7 @@ Route::prefix('account')->middleware('throttle:60,1')->group(fn () => Keyring::r
 
 `Keyring::routes()` adds the `middleware` option and the no-cache middleware, but not `prefix` or `domain`; your group decides those. To change the routes themselves, copy `vendor/entity/keyring/routes/keyring.php` into your app instead, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
 
-The browser package uses Keyring's default paths. If you change the prefix, tell it with [`configureRoutes()`](frontend.md#changing-routes). The published pages also contain a few hard-coded paths such as `/login` and `/register`.
+The browser package uses Keyring's default paths. If you change the prefix, tell it with [`configureRoutes()`](frontend.md#changing-routes).
 
 ## WebAuthn
 
