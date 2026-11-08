@@ -22,6 +22,7 @@
         "illuminate/routing": "^13.0",
         "illuminate/session": "^13.0",
         "illuminate/support": "^13.0",
+        "paragonie/constant_time_encoding": "^3.0",
         "pragmarx/google2fa": "^9.0",
         "web-auth/webauthn-lib": "^5.3"
     },
