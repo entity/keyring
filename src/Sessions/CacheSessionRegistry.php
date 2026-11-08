@@ -11,6 +11,9 @@ use Keyring\Contracts\SessionRegistry;
 /**
  * Keeps the registry in a cache store (Redis, Valkey, ...). No table needed.
  * Use a persistent store: if the cache is cleared, everyone is signed out.
+ *
+ * Revocations live in their own key that saves never write, so a request
+ * saving a stale copy of its session can't undo a revocation.
  */
 class CacheSessionRegistry implements SessionRegistry
 {
@@ -21,14 +24,11 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function save(RegisteredSession $session): void
     {
-        // Never clear a revocation from a stale copy of the record.
-        $stored = $this->find($session->id);
+        $this->cache->put($this->key($session->id), $session->with(['revokedAt' => null])->toArray(), $this->ttl($session));
 
-        if ($stored?->revokedAt !== null && $session->revokedAt === null) {
-            $session = $session->with(['revokedAt' => $stored->revokedAt]);
+        if ($session->revokedAt !== null) {
+            $this->cache->add($this->key($session->id).':revoked', $session->revokedAt, $this->ttl($session));
         }
-
-        $this->cache->put($this->key($session->id), $session->toArray(), $this->ttl($session));
 
         $this->index($session->userId, function (array $ids) use ($session) {
             $ids[$session->id] = $session->expiresAt;
@@ -41,7 +41,14 @@ class CacheSessionRegistry implements SessionRegistry
     {
         $data = $this->cache->get($this->key($id));
 
-        return is_array($data) ? RegisteredSession::fromArray($data) : null;
+        if (! is_array($data)) {
+            return null;
+        }
+
+        $session = RegisteredSession::fromArray($data);
+        $revokedAt = $this->cache->get($this->key($id).':revoked');
+
+        return $revokedAt === null ? $session : $session->with(['revokedAt' => (int) $revokedAt]);
     }
 
     public function forUser(Authenticatable $user): Collection
@@ -64,8 +71,8 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function revoke(string $id): void
     {
-        if (($session = $this->find($id)) && $session->revokedAt === null) {
-            $this->cache->put($this->key($id), $session->with(['revokedAt' => now()->getTimestamp()])->toArray(), $this->ttl($session));
+        if ($session = $this->find($id)) {
+            $this->cache->add($this->key($id).':revoked', now()->getTimestamp(), $this->ttl($session));
         }
     }
 
