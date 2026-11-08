@@ -78,6 +78,7 @@ Things to know:
 |---|---|
 | `fortify.guard` | `keyring.guard` |
 | `fortify.username` | `keyring.username` |
+| `fortify.lowercase_usernames` | Always on. Keyring lowercases what users type, so addresses must be stored lowercased. If you turned the option off, lowercase existing addresses before switching, or those users can't sign in. |
 | `fortify.home` | `keyring.home` |
 | `fortify.prefix`, `fortify.domain`, `fortify.middleware` | `keyring.prefix`, `keyring.domain`, `keyring.middleware` |
 | `fortify.passwords` | `keyring.passwords.broker` |

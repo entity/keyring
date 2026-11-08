@@ -24,7 +24,7 @@ The [conformance suite](testing.md#the-conformance-suite) tests several of these
 
 - A wrong password and an unknown account give the same error, on the same field, with the same status code.
 - Every failed factor check takes at least `timebox` microseconds (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist.
-- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`.
+- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, or as soon as the user's password changes.
 - The session ID is regenerated when a user signs in and when they step up.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - Keyring's responses send `Cache-Control: no-store, private`, and signing out sends `Clear-Site-Data`.
@@ -39,12 +39,12 @@ Every factor has its own limits, checked in the pipeline before the proof is loo
 How they count:
 
 - Each attempt is counted before it's verified, so overlapping requests can't all slip under the limit while they're being checked.
-- Routes that spend session state (sign in, challenges, enrollment) take Laravel's session lock (`->block()`), so parallel requests in one session can't reuse an email code's guesses or a WebAuthn challenge. Your cache store must support locks, as the database, Redis, file and array stores do.
+- Routes that spend session state (sign in, challenge pages and verifications, enrollment) take Laravel's session lock (`->block()`), so parallel requests in one session can't reuse an email code's guesses or a WebAuthn challenge. Your cache store must support locks, as the database, Redis, file and array stores do.
 - When failures reach a limit, that key is locked. Each lock lasts twice as long as the one before (one minute, then two, then four...), up to a day. The count of lockouts resets a day after the first one.
 - A success clears the account's count. On the per-IP count, a success only takes back its own attempt. People signing in from one office address don't use up its limit, and an attacker can't reset the limit by signing in to an account of their own between guesses.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
 
-Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
+Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
 
 ### Single-Use Codes
 
@@ -61,7 +61,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification. Users with a possession factor must use one, so a stolen session plus a phished password isn't enough.
 - The fresh window is fixed from the moment of verification and doesn't slide with activity.
 - Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset.
-- Users can't remove authenticators below what they need to sign in.
+- Users can't remove authenticators below what they need to sign in, even with several removals at once.
 
 ### Sessions and Devices
 
@@ -72,6 +72,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - A revocation can't be undone by a request saving a stale copy of its session.
 - Laravel's session ID is never stored by Keyring or written to the security log.
 - Devices are recognised by a random, httpOnly cookie, stored as a hash. A device is never a factor, only an input to your policy and risk signals.
+- Signing out everywhere also stops trusting the other devices, so a device trusted by whoever had the account can't skip the second factor afterwards.
 
 ### Account Changes
 
@@ -82,6 +83,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing.
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
 - Reverting an email change signs out every session, closes later changes and removes sign-in methods added since.
+- While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes and lift risk locks.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
 - New passwords follow OWASP's length rules, are checked against breach lists, and are refused rather than silently cut short by bcrypt.
@@ -108,7 +110,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - **No attestation.** Any WebAuthn authenticator is accepted, and AAGUIDs aren't verified, so you can't restrict which key models users register. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
-- **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and new passkeys get a different user handle. Recovery codes keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
+- **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and new passkeys get a different user handle. Recovery codes and reserved email addresses keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
 - **"Remember me" is all or nothing.** Laravel has one remember token per user, so revoking any device or signing out other sessions ends every remembered browser.
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
