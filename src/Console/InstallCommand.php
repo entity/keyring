@@ -33,7 +33,7 @@ class InstallCommand extends Command
                 return self::FAILURE;
             }
 
-            $files->copyDirectory(__DIR__."/../../stubs/inertia/{$stack}/pages", resource_path('js/pages/auth'));
+            $files->copyDirectory(__DIR__."/../../stubs/inertia/{$stack}/pages", resource_path('js/pages'));
             $files->copyDirectory(__DIR__."/../../stubs/inertia/{$stack}/keyring", resource_path('js/keyring'));
 
             $this->components->info("Inertia {$stack} pages published to resources/js/pages/auth.");
