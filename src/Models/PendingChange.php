@@ -2,6 +2,7 @@
 
 namespace Keyring\Models;
 
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\Table;
@@ -10,8 +11,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Str;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Support\KeyedHash;
 
@@ -29,14 +29,14 @@ use Keyring\Support\KeyedHash;
  * @property string $confirm_token
  * @property string|null $current_token
  * @property string $revert_token
- * @property Carbon|null $confirmed_at
- * @property Carbon|null $current_confirmed_at
- * @property Carbon|null $applied_at
- * @property Carbon|null $reverted_at
- * @property Carbon|null $cancelled_at
- * @property Carbon $expires_at
- * @property Carbon|null $revertable_until
- * @property Carbon|null $created_at
+ * @property CarbonInterface|null $confirmed_at
+ * @property CarbonInterface|null $current_confirmed_at
+ * @property CarbonInterface|null $applied_at
+ * @property CarbonInterface|null $reverted_at
+ * @property CarbonInterface|null $cancelled_at
+ * @property CarbonInterface $expires_at
+ * @property CarbonInterface|null $revertable_until
+ * @property CarbonInterface|null $created_at
  */
 #[Table('keyring_pending_changes')]
 #[Unguarded]
@@ -73,12 +73,12 @@ class PendingChange extends Model
     }
 
     /**
-     * How a previous value is found while it's reserved: lowercased, and
-     * keyed with APP_KEY since the value itself is encrypted.
+     * How a previous value is found while it's reserved: normalised like a
+     * username, and keyed with APP_KEY since the value itself is encrypted.
      */
     public static function lookupHash(string $value): string
     {
-        return KeyedHash::make(Str::lower($value));
+        return KeyedHash::make(Keyring::normalizeUsername($value));
     }
 
     protected function casts(): array
@@ -153,7 +153,7 @@ class PendingChange extends Model
     #[Scope]
     protected function reserving(Builder $query, string $value): void
     {
-        $query->whereIn('previous_value_hash', KeyedHash::candidates(Str::lower($value)))
+        $query->whereIn('previous_value_hash', KeyedHash::candidates(Keyring::normalizeUsername($value)))
             ->whereNotNull('applied_at')
             ->whereNull('cancelled_at')
             ->whereNull('reverted_at')

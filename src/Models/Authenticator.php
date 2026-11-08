@@ -2,6 +2,7 @@
 
 namespace Keyring\Models;
 
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -12,7 +13,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
 use Keyring\Contracts\Factor;
 use Keyring\Database\Factories\AuthenticatorFactory;
 use Keyring\Facades\Keyring;
@@ -35,9 +35,9 @@ use LogicException;
  * @property list<string>|null $transports
  * @property array<string, mixed>|null $meta
  * @property bool $is_default
- * @property Carbon|null $confirmed_at
- * @property Carbon|null $last_used_at
- * @property Carbon|null $created_at
+ * @property CarbonInterface|null $confirmed_at
+ * @property CarbonInterface|null $last_used_at
+ * @property CarbonInterface|null $created_at
  */
 #[Table('keyring_authenticators')]
 #[Unguarded]

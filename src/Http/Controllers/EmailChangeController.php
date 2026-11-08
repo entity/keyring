@@ -60,8 +60,9 @@ class EmailChangeController
      * links on their own, so the change only happens when the person presses
      * the button, which POSTs back to the same URL.
      */
-    public function page(Request $request, PendingChange $change, string $token): mixed
+    public function page(Request $request, string $change, string $token): mixed
     {
+        $change = PendingChange::query()->findOrFail($change);
         $action = $request->routeIs('keyring.email.revert') ? 'revert' : 'confirm';
 
         return $this->keyring->render('email-change', [
@@ -74,8 +75,10 @@ class EmailChangeController
      * Confirm from either address. Works signed out, since the link may open
      * in another browser.
      */
-    public function confirm(PendingChange $change, string $token): StatusResponse
+    public function confirm(string $change, string $token): StatusResponse
     {
+        $change = PendingChange::query()->findOrFail($change);
+
         $status = match ($this->changes->confirm($change, $token)) {
             EmailConfirmation::Applied => 'email-changed',
             EmailConfirmation::NeedsOtherAddress => 'email-change-confirmed',
@@ -85,8 +88,10 @@ class EmailChangeController
         return $this->status($status, redirect: $this->keyring->guard()->check() ? config('keyring.home') : route('login'));
     }
 
-    public function revert(PendingChange $change, string $token): StatusResponse
+    public function revert(string $change, string $token): StatusResponse
     {
+        $change = PendingChange::query()->findOrFail($change);
+
         // Send them to reset their password, when the app has that flow.
         return $this->changes->revert($change, $token)
             ? $this->status('email-change-reverted', redirect: route(Route::has('password.request') ? 'password.request' : 'login'))

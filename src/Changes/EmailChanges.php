@@ -7,7 +7,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Keyring\Enums\Category;
@@ -58,7 +57,7 @@ class EmailChanges
         $email = $this->keyring->normalizeUsername($email);
         $current = (string) $user->getAttribute($this->attribute());
 
-        if ($email === Str::lower($current)) {
+        if ($email === $this->keyring->normalizeUsername($current)) {
             return null;
         }
 
@@ -74,7 +73,7 @@ class EmailChanges
 
         $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor();
 
-        $change = DB::transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
+        $change = PendingChange::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
             $this->cancel($user);
 
             $change = new PendingChange([
@@ -247,7 +246,7 @@ class EmailChanges
         return $user !== null && RowLock::hold($user, function (?Model $user) use ($change) {
             if (
                 $user === null
-                || Str::lower((string) $user->getAttribute($change->attribute)) !== Str::lower((string) $change->previous_value)
+                || $this->keyring->normalizeUsername((string) $user->getAttribute($change->attribute)) !== $this->keyring->normalizeUsername((string) $change->previous_value)
                 || $this->taken($user, $change->value)
             ) {
                 $change->forceFill(['cancelled_at' => now()])->save();

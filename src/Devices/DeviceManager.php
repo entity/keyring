@@ -68,7 +68,7 @@ class DeviceManager
                 $token = Str::random(40);
             }
 
-            $device = Keyring::deviceModel()::make(['token_hash' => Device::hashToken($token), 'first_seen_at' => now()]);
+            $device = Keyring::deviceModel()::make(['token_hash' => Keyring::deviceModel()::hashToken($token), 'first_seen_at' => now()]);
             $device->authenticatable()->associate($user);
 
             $this->queueCookie($token);
