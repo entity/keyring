@@ -35,7 +35,7 @@ class RequireFreshVerification
             return $next($request);
         }
 
-        return $this->stepUp->require($request, $requirement, building: false);
+        return $this->stepUp->require($request, $requirement);
     }
 
     /**

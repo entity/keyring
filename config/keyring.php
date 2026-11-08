@@ -119,9 +119,11 @@ return [
     | listed and revoked on any session driver. Drivers: "database" (the
     | keyring_sessions table) or "cache" (any persistent cache store).
     |
-    | Timeouts accept "30m", "12h", "30d"... "idle" null leaves inactivity to
-    | Laravel's session lifetime. Levels can override them, e.g.
-    | 'levels' => ['aal3' => ['idle' => '15m', 'absolute' => '8h']].
+    | Timeouts accept "30m", "12h", "30d"... "idle" and "absolute" end the
+    | session ("idle" null leaves inactivity to Laravel's session lifetime).
+    | "levels" are how long each assurance level keeps counting: past them the
+    | user stays signed in, and routes that need the level ask them to verify
+    | again. The defaults are NIST SP 800-63B's reauthentication limits.
     |
     */
 
@@ -132,7 +134,10 @@ return [
         'store' => null,
         'idle' => null,
         'absolute' => '30d',
-        'levels' => [],
+        'levels' => [
+            'aal2' => ['idle' => '1h', 'absolute' => '24h'],
+            'aal3' => ['idle' => '15m', 'absolute' => '12h'],
+        ],
         'middleware' => true,
     ],
 

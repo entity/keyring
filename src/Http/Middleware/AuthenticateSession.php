@@ -57,12 +57,13 @@ class AuthenticateSession
 
             // Signed in some other way (e.g. a "remember me" cookie): register it.
             $this->sessions->start($request, $user, $this->devices->find($request, $user), $this->assurance->level());
+            $this->assurance->touch();
 
             return $next($request);
         }
 
         $now = now()->getTimestamp();
-        $idle = $this->sessions->idle($session->assurance);
+        $idle = $this->sessions->idle();
 
         if (
             ! $session->isActive($now)
@@ -71,6 +72,9 @@ class AuthenticateSession
         ) {
             return $this->signOut($request);
         }
+
+        // Before anything checks the level, so inactivity lapses it first.
+        $this->assurance->touch();
 
         if ($this->risk->signalsFor(Checkpoint::Request) !== [] && ($response = $this->assessRisk($request, $user, $session)) !== null) {
             return $response;
