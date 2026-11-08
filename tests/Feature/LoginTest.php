@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Events\Authenticated;
@@ -208,4 +209,34 @@ it('signs out', function () {
     $this->actingAs($user)->post('/logout')->assertRedirect('/');
 
     $this->assertGuest();
+});
+
+it('ends a half-finished sign in when the password changes meanwhile', function () {
+    $user = taylor();
+    $totp = totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    // The owner resets their password somewhere else.
+    Keyring::withoutProtection(fn () => $user->update(['password' => 'a brand new passphrase']));
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect(route('login'))
+        ->assertSessionHasErrors('email');
+    $this->assertGuest();
+});
+
+it('keeps a half-finished sign in when checking the password rehashes it', function () {
+    $user = taylor();
+    $totp = totpFor($user);
+    Hash::driver('bcrypt')->setRounds(5);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+    expect(password_get_info($user->fresh()->password)['options']['cost'])->toBe(5);
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($user);
 });
