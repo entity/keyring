@@ -2,9 +2,9 @@
 
 namespace Keyring\Changes;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Hash;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
 use Keyring\KeyringManager;
@@ -12,9 +12,10 @@ use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 
 /**
- * Setting a new password, the same way wherever it happens. Whoever knew the
- * old one shouldn't keep what they did with it: pending email changes are
- * cancelled, and other sessions are signed out.
+ * What always happens around a new password, whatever the app's action does
+ * to validate and save it. Whoever knew the old one shouldn't keep what they
+ * did with it: pending email changes are cancelled, and other sessions are
+ * signed out.
  */
 class PasswordChanges
 {
@@ -26,12 +27,14 @@ class PasswordChanges
     ) {}
 
     /**
-     * The signed-in user chose a new password. Every other session is signed
-     * out, unless they asked to stay signed in elsewhere.
+     * The signed-in user chose a new password, saved by $save. Every other
+     * session is signed out, unless they asked to stay signed in elsewhere.
+     *
+     * @param  Closure(): void  $save
      */
-    public function change(Authenticatable&Model $user, string $password, ?string $currentSession, bool $signOutOthers = true): void
+    public function change(Authenticatable&Model $user, Closure $save, ?string $currentSession, bool $signOutOthers = true): void
     {
-        $this->update($user, $password);
+        $this->save($user, $save);
 
         if ($signOutOthers) {
             $this->sessions->revokeAll($user, except: $currentSession);
@@ -41,22 +44,29 @@ class PasswordChanges
     }
 
     /**
-     * The user proved they own the address with a reset link. Every session
-     * is signed out, and risk locks are lifted so a lock can't keep the owner
-     * out for good.
+     * The user proved they own the address with a reset link, and $save set
+     * the new password. Every session is signed out, and risk locks are
+     * lifted so a lock can't keep the owner out for good.
+     *
+     * @param  Closure(): void  $save
      */
-    public function reset(Authenticatable&Model $user, string $password): void
+    public function reset(Authenticatable&Model $user, Closure $save): void
     {
-        $this->update($user, $password);
+        $this->save($user, $save);
         $this->sessions->revokeAll($user);
         $this->locks->unlock($user);
 
         PasswordReset::dispatch($user);
     }
 
-    protected function update(Authenticatable&Model $user, string $password): void
+    /**
+     * Run the app's action as a Keyring flow, so it may change the password.
+     *
+     * @param  Closure(): void  $save
+     */
+    protected function save(Authenticatable&Model $user, Closure $save): void
     {
-        $this->keyring->changing(fn () => $user->forceFill(['password' => Hash::make($password)])->save());
+        $this->keyring->changing($save);
 
         $this->emailChanges->cancel($user);
     }

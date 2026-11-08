@@ -2,16 +2,24 @@
 
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Contracts\SessionRegistry;
+use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Sessions\RegisteredSession;
+use Keyring\Support\PasswordRules;
 
 beforeEach(function () {
     $this->user = taylor();
@@ -90,14 +98,27 @@ it('raises laravel\'s own auth events for listeners built for them', function ()
     Event::assertDispatched(Lockout::class);
 });
 
-it('lets apps adjust the password rules', function () {
-    Keyring::passwordRulesUsing(fn (Password $rule) => $rule->symbols());
+it('runs the app\'s own password action, with keyring\'s security work around it', function () {
+    Keyring::updateUserPasswordsUsing(SymbolsRequired::class);
+    $other = new RegisteredSession('other', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
+    app(SessionRegistry::class)->save($other);
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->putJson(route('user-password.update'), [
-            'current_password' => 'password',
-            'password' => 'alongpassphrasewithoutsymbols',
-            'password_confirmation' => 'alongpassphrasewithoutsymbols',
-        ])
+        ->putJson(route('user-password.update'), ['password' => 'alongpassphrasewithoutsymbols', 'password_confirmation' => 'alongpassphrasewithoutsymbols'])
         ->assertJsonValidationErrors('password');
+
+    $this->putJson(route('user-password.update'), ['password' => 'a long passphrase, with symbols!', 'password_confirmation' => 'a long passphrase, with symbols!'])->assertOk();
+
+    expect(Hash::check('a long passphrase, with symbols!', $this->user->fresh()->password))->toBeTrue()
+        ->and(app(SessionRegistry::class)->find('other')->revokedAt)->not->toBeNull();
 });
+
+class SymbolsRequired implements UpdatesUserPasswords
+{
+    public function update(Authenticatable&Model $user, array $input): void
+    {
+        Validator::make($input, ['password' => PasswordRules::for($user, fn (Password $rule) => $rule->symbols())])->validate();
+
+        $user->forceFill(['password' => Hash::make($input['password'])])->save();
+    }
+}

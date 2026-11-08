@@ -10,7 +10,7 @@ use Illuminate\Support\ServiceProvider;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 #[AsCommand(name: 'keyring:install')]
-#[Description('Install Keyring: config, migrations, a service provider and your registration action')]
+#[Description('Install Keyring: config, migrations, a service provider and your actions')]
 #[Signature('keyring:install
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
@@ -24,8 +24,10 @@ class InstallCommand extends Command
             $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations']);
         }
 
-        $this->copy($files, $this->stub('KeyringServiceProvider.php'), app_path('Providers/KeyringServiceProvider.php'));
-        $this->copy($files, $this->stub('CreateNewUser.php'), app_path('Actions/Keyring/CreateNewUser.php'));
+        // The provider and actions are your code from here on.
+        foreach ($files->allFiles(__DIR__.'/../../stubs/app') as $file) {
+            $this->copy($files, $file->getPathname(), app_path($file->getRelativePathname()));
+        }
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
 
@@ -53,10 +55,5 @@ class InstallCommand extends Command
 
         $files->ensureDirectoryExists(dirname($to));
         $files->copy($from, $to);
-    }
-
-    protected function stub(string $path): string
-    {
-        return __DIR__.'/../../stubs/'.$path;
     }
 }

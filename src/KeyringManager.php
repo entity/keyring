@@ -14,14 +14,16 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rules\Password as PasswordRule;
 use Inertia\Inertia;
 use InvalidArgumentException;
 use Keyring\Activity\SecurityLog;
 use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
+use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Signal;
+use Keyring\Contracts\UpdatesUserPasswords;
+use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Login\Attempt;
@@ -51,9 +53,6 @@ class KeyringManager
 
     /** @var class-string<Device> */
     protected string $deviceModel = Device::class;
-
-    /** @var (Closure(PasswordRule, (Authenticatable&Model)|null): PasswordRule)|null */
-    protected ?Closure $passwordRules = null;
 
     /** @var list<string>|null Security emails to send, null for the config value. */
     protected ?array $notifications = null;
@@ -253,27 +252,6 @@ class KeyringManager
     }
 
     /**
-     * Adjust the password rule Keyring builds (its length depends on whether
-     * the user has MFA), e.g. fn (Password $rule, ?User $user) => $rule->mixedCase().
-     *
-     * @param  Closure(PasswordRule, (Authenticatable&Model)|null): PasswordRule  $callback
-     */
-    public function passwordRulesUsing(Closure $callback): static
-    {
-        $this->passwordRules = $callback;
-
-        return $this;
-    }
-
-    /**
-     * @internal
-     */
-    public function adjustPasswordRule(PasswordRule $rule, (Authenticatable&Model)|null $user): PasswordRule
-    {
-        return $this->passwordRules === null ? $rule : ($this->passwordRules)($rule, $user);
-    }
-
-    /**
      * Pass or fail factor checks in tests without real codes or signatures.
      */
     public function fake(): KeyringFake
@@ -297,13 +275,52 @@ class KeyringManager
     }
 
     /**
-     * Use your action to create users at registration.
+     * Your action that validates and creates users at registration.
      *
      * @param  class-string<CreatesNewUsers>  $action
      */
     public function createUsersUsing(string $action): static
     {
-        $this->container->singleton(CreatesNewUsers::class, $action);
+        return $this->useAction(CreatesNewUsers::class, $action);
+    }
+
+    /**
+     * Your action that validates and saves a password from a reset link.
+     *
+     * @param  class-string<ResetsUserPasswords>  $action
+     */
+    public function resetUserPasswordsUsing(string $action): static
+    {
+        return $this->useAction(ResetsUserPasswords::class, $action);
+    }
+
+    /**
+     * Your action that validates and saves a password the user changed.
+     *
+     * @param  class-string<UpdatesUserPasswords>  $action
+     */
+    public function updateUserPasswordsUsing(string $action): static
+    {
+        return $this->useAction(UpdatesUserPasswords::class, $action);
+    }
+
+    /**
+     * Your action that validates a requested email change.
+     *
+     * @param  class-string<ValidatesEmailChanges>  $action
+     */
+    public function validateEmailChangesUsing(string $action): static
+    {
+        return $this->useAction(ValidatesEmailChanges::class, $action);
+    }
+
+    /**
+     * @param  class-string  $contract
+     * @param  class-string  $action
+     */
+    protected function useAction(string $contract, string $action): static
+    {
+        $this->container->singleton($contract, $action);
 
         return $this;
     }

@@ -39,7 +39,7 @@ If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fort
 | `config/keyring.php` | The configuration file. |
 | `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. |
 | `app/Providers/KeyringServiceProvider.php` | Where you register factors and the policy. It's added to `bootstrap/providers.php` for you. |
-| `app/Actions/Keyring/CreateNewUser.php` | Your registration logic. |
+| `app/Actions/Keyring/*.php` | Your code for registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
 
 You can publish the same files on their own with the `keyring-config`, `keyring-migrations` and `keyring-lang` tags:
 
@@ -78,7 +78,7 @@ The trait does three things:
 - It stops the `email` and `password` attributes from changing outside Keyring's own flows. See [Protected Changes](protected-changes.md).
 - When the user is deleted, it revokes their sessions and deletes their authenticators, devices and pending changes. With soft deletes, this only happens on a force delete.
 
-The published `CreateNewUser` action passes the plain password to `User::create()`, so it relies on the `hashed` cast shown above.
+The published `CreateNewUser` action passes the plain password to `User::create()`, so it relies on the `hashed` cast shown above. The password actions hash it themselves.
 
 Implementing `MustVerifyEmail` is recommended. Users who implement it must verify their address before they can add a sign-in method. See [Managing Authenticators](authenticators.md#email-verification).
 

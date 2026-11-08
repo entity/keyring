@@ -10,10 +10,10 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\PasswordChanges;
+use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Support\PasswordRules;
 use Symfony\Component\HttpFoundation\Response;
 
 use function Illuminate\Support\defer;
@@ -63,11 +63,12 @@ class PasswordResetController
         return $response;
     }
 
-    public function update(Request $request): StatusResponse
+    public function update(Request $request, ResetsUserPasswords $resetter): StatusResponse
     {
-        // The password rules depend on the account (shorter with MFA), so they
-        // only run once the broker has accepted the token. Checking them first
-        // would tell anyone whether an address has an account, and MFA.
+        // The app's action checks the password rules, which depend on the
+        // account (shorter with MFA). They only run once the broker has
+        // accepted the token: checking them first would tell anyone whether
+        // an address has an account, and MFA.
         $request->validate([
             'token' => ['required', 'string'],
             $this->keyring->username() => ['required', 'string', 'email'],
@@ -78,11 +79,10 @@ class PasswordResetController
             $this->keyring->username() => $this->keyring->normalizeUsername((string) $request->input($this->keyring->username())),
             'token' => $request->input('token'),
             'password' => $request->input('password'),
-        ], function (Authenticatable&Model $user, string $password) use ($request) {
-            $request->validate(['password' => PasswordRules::for($user)]);
-
-            $this->passwords->reset($user, $password);
-        });
+        ], fn (Authenticatable&Model $user) => $this->passwords->reset(
+            $user,
+            fn () => $resetter->reset($user, $request->all()),
+        ));
 
         // Laravel says "no user with that address" for unknown accounts. Answer
         // every failure like a bad token instead.

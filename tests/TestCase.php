@@ -2,9 +2,14 @@
 
 namespace Keyring\Tests;
 
+use App\Actions\Keyring\CreateNewUser;
+use App\Actions\Keyring\ResetUserPassword;
+use App\Actions\Keyring\UpdateUserPassword;
+use App\Actions\Keyring\ValidateEmailChange;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
+use Keyring\Facades\Keyring;
 use Keyring\KeyringServiceProvider;
 use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
@@ -29,6 +34,17 @@ abstract class TestCase extends Orchestra
         $app['config']->set('database.default', getenv('DB_CONNECTION') ?: 'testing');
         $app['config']->set('auth.providers.users.model', User::class);
         $app['config']->set('keyring.passwords.uncompromised', false);
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Registered like the published provider does.
+        Keyring::createUsersUsing(CreateNewUser::class)
+            ->resetUserPasswordsUsing(ResetUserPassword::class)
+            ->updateUserPasswordsUsing(UpdateUserPassword::class)
+            ->validateEmailChangesUsing(ValidateEmailChange::class);
     }
 
     protected function defineDatabaseMigrations(): void

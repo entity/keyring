@@ -33,7 +33,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "Keyring\\Tests\\": "tests/"
+            "Keyring\\Tests\\": "tests/",
+            "App\\": "stubs/app/"
         },
         "files": [
             "tests/Helpers.php"

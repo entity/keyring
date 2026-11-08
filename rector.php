@@ -4,6 +4,7 @@ use Rector\CodeQuality\Rector\FuncCall\SortCallLikeNamedArgsRector;
 use Rector\CodeQuality\Rector\If_\ExplicitNullableObjectInstanceRector;
 use Rector\CodingStyle\Rector\ArrowFunction\ArrowFunctionDelegatingCallToFirstClassCallableRector;
 use Rector\Config\RectorConfig;
+use Rector\Php55\Rector\String_\StringClassNameToClassConstantRector;
 use Rector\TypeDeclaration\Rector\ArrowFunction\AddArrowFunctionReturnTypeRector;
 use Rector\TypeDeclaration\Rector\Closure\AddClosureVoidReturnTypeWhereNoReturnRector;
 use Rector\TypeDeclaration\Rector\Closure\ClosureReturnTypeRector;
@@ -60,6 +61,8 @@ return RectorConfig::configure()
         ApplyDefaultInsteadOfNullCoalesceRector::class,
         // A plain if reads better than throw_unless(preg_match(...)).
         ThrowIfRector::class,
+        // The provider it registers is the app's, which only exists once published.
+        StringClassNameToClassConstantRector::class => [__DIR__.'/src/Console/InstallCommand.php'],
         // Pest datasets treat closures and first-class callables differently.
         ArrowFunctionDelegatingCallToFirstClassCallableRector::class => [__DIR__.'/tests'],
     ]);

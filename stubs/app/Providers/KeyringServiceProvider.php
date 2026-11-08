@@ -3,6 +3,12 @@
 namespace App\Providers;
 
 use App\Actions\Keyring\CreateNewUser;
+use App\Actions\Keyring\ResetUserPassword;
+use App\Actions\Keyring\UpdateUserPassword;
+use App\Actions\Keyring\ValidateEmailChange;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
@@ -37,10 +43,25 @@ class KeyringServiceProvider extends ServiceProvider
         //     default => Requirement::aal2()->ifEnrolled(),
         // });
 
+        // Your code for the account changes: validation and saving live in
+        // app/Actions/Keyring. Keyring does the security work around them.
         Keyring::createUsersUsing(CreateNewUser::class);
+        Keyring::resetUserPasswordsUsing(ResetUserPassword::class);
+        Keyring::updateUserPasswordsUsing(UpdateUserPassword::class);
+        Keyring::validateEmailChangesUsing(ValidateEmailChange::class);
 
-        // Security emails (new sign in, password changed, failed second factor...).
+        // The limit on registration, password resets and changes, enrollment
+        // and emailed links. Sign in attempts use the "limits" config instead.
+        RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by(Keyring::guard()->id() ?: $request->ip()));
+
+        // Keyring renders your Inertia pages auth/login, auth/challenge... (or
+        // Blade views auth.login...). Point any of them elsewhere:
+        // Keyring::page('confirm', 'auth/challenge');
+
+        // Security notices (new sign in, password changed, failed second
+        // factor...), by email unless you extend SecurityNotice for Slack & co.
         // Keyring::notify();
+        // Keyring::securityNoticesUsing(\App\Notifications\SecurityNotice::class);
 
         // Risk signals and what to do about them.
         // Keyring::risk([NewDevice::class, NewCountry::class, ImpossibleTravel::class])

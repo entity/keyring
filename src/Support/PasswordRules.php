@@ -18,9 +18,13 @@ use Keyring\Login\Requirement;
 final class PasswordRules
 {
     /**
+     * The rules for a new password. Pass a callback to adjust the Password
+     * rule Keyring builds, e.g. fn (Password $rule) => $rule->mixedCase().
+     *
+     * @param  (Closure(Password): Password)|null  $adjust
      * @return list<mixed>
      */
-    public static function for((Authenticatable&Model)|null $user = null): array
+    public static function for((Authenticatable&Model)|null $user = null, ?Closure $adjust = null): array
     {
         $hasMfa = $user !== null && Keyring::for($user)->canMeet(Requirement::aal2()->including(Category::Possession));
 
@@ -31,8 +35,9 @@ final class PasswordRules
             $rule->uncompromised();
         }
 
-        // The app's adjustments, from Keyring::passwordRulesUsing().
-        $rule = Keyring::adjustPasswordRule($rule, $user);
+        if ($adjust !== null) {
+            $rule = $adjust($rule);
+        }
 
         return ['required', 'string', 'confirmed', $rule, self::bcryptLimit()];
     }
