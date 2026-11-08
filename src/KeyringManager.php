@@ -18,15 +18,11 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
 use Inertia\Inertia;
 use InvalidArgumentException;
 use Keyring\Activity\SecurityLog;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\Signal;
-use Keyring\Events\ProtectionBypassed;
-use Keyring\Exceptions\ProtectedAttributeException;
-use Keyring\Exceptions\UnknownFactor;
-use Keyring\Factors\Password;
-use Keyring\Factors\RecoveryCodes;
-use Keyring\Factors\Totp;
+use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
@@ -40,15 +36,6 @@ use Keyring\Testing\KeyringFake;
 
 class KeyringManager
 {
-    /** @var list<class-string<Factor>|Factor|Closure(Container): Factor> */
-    protected array $factorDefinitions = [Password::class, Totp::class, RecoveryCodes::class];
-
-    /** @var array<string, Factor>|null */
-    protected ?array $resolvedFactors = null;
-
-    /** @var array<string, Closure(Container): Factor> */
-    protected array $extensions = [];
-
     /** @var Closure(Authenticatable&Model, Attempt): Requirement|Requirement */
     protected Closure|Requirement $policy;
 
@@ -70,11 +57,10 @@ class KeyringManager
     /** @var list<string>|null Security emails to send, null for the config value. */
     protected ?array $notifications = null;
 
-    /** How many Keyring flows are currently allowed to change protected attributes. */
-    protected int $changing = 0;
-
     public function __construct(
         protected Container $container,
+        protected FactorRegistry $factors,
+        protected ProtectedAttributes $protection,
     ) {
         $this->policy = Requirement::aal2()->ifEnrolled();
     }
@@ -86,8 +72,7 @@ class KeyringManager
      */
     public function factors(array $factors): static
     {
-        $this->factorDefinitions = $factors;
-        $this->resolvedFactors = null;
+        $this->factors->set($factors);
 
         return $this;
     }
@@ -99,20 +84,19 @@ class KeyringManager
      */
     public function extend(string $key, Closure $resolver): static
     {
-        $this->extensions[$key] = $resolver;
-        $this->resolvedFactors = null;
+        $this->factors->extend($key, $resolver);
 
         return $this;
     }
 
     public function factor(string $key): Factor
     {
-        return $this->registered()->get($key) ?? throw UnknownFactor::named($key);
+        return $this->factors->get($key);
     }
 
     public function hasFactor(string $key): bool
     {
-        return $this->registered()->has($key);
+        return $this->factors->has($key);
     }
 
     /**
@@ -120,38 +104,7 @@ class KeyringManager
      */
     public function registered(): Collection
     {
-        if ($this->resolvedFactors === null) {
-            $this->resolvedFactors = [];
-
-            foreach ($this->factorDefinitions as $definition) {
-                $factor = $this->resolveFactor($definition);
-                $this->resolvedFactors[$factor->key()] = $factor;
-            }
-
-            foreach ($this->extensions as $key => $resolver) {
-                $factor = $this->resolveFactor($resolver);
-
-                if ($factor->key() !== $key) {
-                    throw new InvalidArgumentException("Factor registered as [{$key}] reports the key [{$factor->key()}].");
-                }
-
-                $this->resolvedFactors[$key] = $factor;
-            }
-        }
-
-        return new Collection($this->resolvedFactors);
-    }
-
-    /**
-     * @param  class-string<Factor>|Factor|Closure(Container): Factor  $definition
-     */
-    protected function resolveFactor(string|Factor|Closure $definition): Factor
-    {
-        return match (true) {
-            $definition instanceof Factor => $definition,
-            $definition instanceof Closure => $definition($this->container),
-            default => $this->container->make($definition),
-        };
+        return $this->factors->all();
     }
 
     /**
@@ -427,7 +380,7 @@ class KeyringManager
      */
     public function protectedAttributes(): array
     {
-        return config('keyring.protected', ['email', 'password']);
+        return $this->protection->all();
     }
 
     /**
@@ -442,13 +395,7 @@ class KeyringManager
      */
     public function changing(Closure $callback): mixed
     {
-        $this->changing++;
-
-        try {
-            return $callback();
-        } finally {
-            $this->changing--;
-        }
+        return $this->protection->changing($callback);
     }
 
     /**
@@ -462,9 +409,7 @@ class KeyringManager
      */
     public function withoutProtection(Closure $callback, ?string $reason = null): mixed
     {
-        ProtectionBypassed::dispatch($reason);
-
-        return $this->changing($callback);
+        return $this->protection->bypass($callback, $reason);
     }
 
     /**
@@ -474,15 +419,7 @@ class KeyringManager
      */
     public function guardProtectedAttributes(Model $model): void
     {
-        if ($this->changing > 0) {
-            return;
-        }
-
-        $changed = array_values(array_filter($this->protectedAttributes(), $model->isDirty(...)));
-
-        if ($changed !== []) {
-            throw ProtectedAttributeException::for($model, $changed);
-        }
+        $this->protection->guard($model);
     }
 
     /**

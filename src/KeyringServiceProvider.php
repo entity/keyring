@@ -18,10 +18,12 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Activity\DispatchLaravelEvents;
 use Keyring\Activity\RecordSecurityEvents;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireFreshVerification;
@@ -56,6 +58,8 @@ class KeyringServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/keyring.php', 'keyring');
 
         $this->app->singleton(KeyringManager::class);
+        $this->app->singleton(FactorRegistry::class);
+        $this->app->singleton(ProtectedAttributes::class);
         $this->app->singleton(Ceremonies::class);
         $this->app->singleton(SessionRegistryManager::class);
         $this->app->singleton(RiskEngine::class);
