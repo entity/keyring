@@ -22,7 +22,8 @@ class ImportCommand extends Command
 {
     protected $signature = 'keyring:import
         {source : Where to import from (only "fortify" for now)}
-        {--dry-run : Show what would be imported without writing anything}';
+        {--dry-run : Show what would be imported without writing anything}
+        {--unconfirmed : Also import two factor secrets that were never confirmed (Fortify without its "confirm" option)}';
 
     protected $description = 'Import authenticators from Fortify (TOTP, recovery codes and passkeys)';
 
@@ -38,7 +39,8 @@ class ImportCommand extends Command
         $counts = ['totp' => 0, 'recovery' => 0, 'passkey' => 0, 'skipped' => 0];
 
         if (Schema::hasColumn((new $model)->getTable(), 'two_factor_secret')) {
-            $model::query()->whereNotNull('two_factor_secret')->whereNotNull('two_factor_confirmed_at')
+            $model::query()->whereNotNull('two_factor_secret')
+                ->unless($this->option('unconfirmed'), fn ($query) => $query->whereNotNull('two_factor_confirmed_at'))
                 ->chunkById(200, function ($users) use (&$counts) {
                     foreach ($users as $user) {
                         $this->importTwoFactor($user, $counts);
@@ -97,8 +99,8 @@ class ImportCommand extends Command
             'factor' => 'totp',
             'name' => __('Authenticator app'),
             'secret' => $secret,
-            'is_default' => true,
-            'confirmed_at' => $user->getAttribute('two_factor_confirmed_at'),
+            'is_default' => ! $this->hasDefault($user),
+            'confirmed_at' => $user->getAttribute('two_factor_confirmed_at') ?? now(),
             'meta' => ['imported_from' => 'fortify'],
         ]);
 
@@ -148,6 +150,11 @@ class ImportCommand extends Command
             'last_used_at' => $passkey->last_used_at ?? null,
             'meta' => ['imported_from' => 'laravel/passkeys', 'user_verified' => (bool) ($credential['uvInitialized'] ?? true)],
         ]);
+    }
+
+    protected function hasDefault(Model $user): bool
+    {
+        return Keyring::authenticatorModel()::query()->whereMorphedTo('authenticatable', $user)->where('is_default', true)->exists();
     }
 
     protected function imported(Model $user, string $factor, string $source): bool

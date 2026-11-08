@@ -84,6 +84,20 @@ describe('keyring:import fortify', function () {
         $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcde-12345'])->assertRedirect('/dashboard');
     });
 
+    it('imports unconfirmed secrets only when asked, without adding a second default', function () {
+        DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey())]);
+        $existing = Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->default()->create(['factor' => 'passkey']);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+        expect($this->user->keyring->refresh()->of('totp'))->toBeEmpty();
+
+        $this->artisan('keyring:import', ['source' => 'fortify', '--unconfirmed' => true])->assertSuccessful();
+
+        $keyring = $this->user->keyring->refresh();
+        expect($keyring->of('totp'))->toHaveCount(1)
+            ->and($keyring->default()->id)->toBe($existing->id);
+    });
+
     it('imports laravel passkeys so they keep working', function () {
         $key = new VirtualAuthenticator;
 

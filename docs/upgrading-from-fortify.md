@@ -63,7 +63,8 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
 Things to know:
 
 - It reads your guard's user model, and needs `APP_KEY` to be the key Fortify encrypted the secrets with. Rows it can't decrypt are skipped and counted.
-- Only users with `two_factor_confirmed_at` set are imported. If you never turned on Fortify's `confirm` option, that column is empty for everyone; set it for users who have a secret before importing.
+- Only users with `two_factor_confirmed_at` set are imported. If you never turned on Fortify's `confirm` option, that column is empty for everyone, so pass `--unconfirmed` to import every user with a secret.
+- An imported authenticator app only becomes the default when the user doesn't already have one.
 - It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Already imported authenticator apps and passkeys are skipped.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
 - Recovery codes become case-insensitive, and spaces and dashes in them are ignored.
