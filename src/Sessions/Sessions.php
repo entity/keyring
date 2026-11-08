@@ -3,12 +3,14 @@
 namespace Keyring\Sessions;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
 
@@ -17,7 +19,7 @@ use Keyring\Support\Duration;
  */
 class Sessions
 {
-    public const KEY = 'keyring.session';
+    public const string KEY = 'keyring.session';
 
     public function __construct(
         protected SessionRegistry $registry,
@@ -102,15 +104,18 @@ class Sessions
     }
 
     /**
-     * Sign the user out everywhere but the given session. Laravel keeps one
-     * remember token per user, so it's cycled too: every "remember me"
-     * cookie stops working.
+     * Sign the user out everywhere but the given session, and close the other
+     * ways back in without a full sign in: Laravel keeps one remember token
+     * per user, so cycling it stops every "remember me" cookie, and no other
+     * device stays trusted.
      */
     public function revokeAll(Authenticatable $user, ?string $except = null): int
     {
+        $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
         $count = $this->registry->revokeAll($user, $except);
 
         $this->cycleRememberToken($user);
+        $this->distrustDevices($user, except: $keptDevice);
 
         return $count;
     }
@@ -123,6 +128,17 @@ class Sessions
             if ($user instanceof Model) {
                 $user->save();
             }
+        }
+    }
+
+    protected function distrustDevices(Authenticatable $user, ?string $except): void
+    {
+        if ($user instanceof Model) {
+            Keyring::deviceModel()::query()
+                ->ownedBy($user)
+                ->whereNotNull('trusted_until')
+                ->when($except, fn (Builder $query) => $query->whereKeyNot($except))
+                ->update(['trusted_until' => null]);
         }
     }
 
