@@ -106,13 +106,33 @@ final readonly class Requirement
     }
 
     /**
-     * Only apply this requirement when the user has enrolled enough factors to
-     * meet it. Otherwise one factor is enough. This is Fortify's behaviour.
+     * Apply this requirement as far as the user's authenticators can meet it.
+     * A user with nothing beyond one factor signs in with that, which is
+     * Fortify's behaviour.
      */
     #[\NoDiscard]
     public function ifEnrolled(): static
     {
         return clone ($this, ['onlyIfEnrolled' => true]);
+    }
+
+    /**
+     * What's left of this requirement for a user who can't meet all of it:
+     * the categories and phishing resistance they can give, and as many
+     * factors as they can, never one while they have a second.
+     *
+     * @internal
+     *
+     * @param  list<Category>  $categories  the categories the user can prove
+     */
+    #[\NoDiscard]
+    public function limitedTo(array $categories, bool $phishingResistant): static
+    {
+        return clone ($this, [
+            'factors' => max(1, min(max($this->factors, 2), count($categories))),
+            'categories' => array_values(array_filter($this->categories, fn (Category $category) => in_array($category, $categories, true))),
+            'requiresPhishingResistance' => $this->requiresPhishingResistance && $phishingResistant,
+        ]);
     }
 
     /**

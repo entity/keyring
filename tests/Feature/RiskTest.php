@@ -86,6 +86,15 @@ it('asks for another factor when risk is medium', function () {
     expect(SecurityEvent::where('type', 'risk_step_up')->exists())->toBeTrue();
 });
 
+it('does not turn away a password-only user when risk steps up under a policy out of reach', function () {
+    Keyring::require(Requirement::aal2()->phishingResistant()->ifEnrolled());
+    Keyring::risk([new AlwaysRisky(50)]);
+
+    signInAs()->assertRedirect('/dashboard');
+
+    $this->assertAuthenticatedAs($this->user);
+});
+
 it('does not ask for more on a familiar device and country', function () {
     Keyring::require(Requirement::aal1());
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();

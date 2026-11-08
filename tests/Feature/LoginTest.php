@@ -9,6 +9,10 @@ use Keyring\Events\Authenticated;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
@@ -183,6 +187,76 @@ it('turns users away when the policy needs factors they do not have', function (
     $this->get(route('keyring.login.challenge'))
         ->assertRedirect('/login')
         ->assertSessionHasErrors(['email' => __('keyring::keyring.unavailable')]);
+});
+
+it('asks for the enrolled second factor when the policy wants more than the user can give', function (Requirement $policy) {
+    Keyring::require($policy);
+    $user = taylor();
+    $totp = totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->assertGuest();
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect('/dashboard');
+
+    $this->assertAuthenticatedAs($user);
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+})->with([
+    'phishing resistant' => fn () => Requirement::aal2()->phishingResistant()->ifEnrolled(),
+    'aal3' => fn () => Requirement::aal3()->ifEnrolled(),
+    'three factors' => fn () => Requirement::factors(3)->ifEnrolled(),
+    'a category they lack' => fn () => Requirement::aal2()->including(Category::Inherence)->ifEnrolled(),
+    'one phishing resistant factor' => fn () => Requirement::aal1()->phishingResistant()->ifEnrolled(),
+]);
+
+it('signs in with just a password under a stricter policy when there is no real second factor', function (?array $codes) {
+    Keyring::require(Requirement::aal2()->phishingResistant()->ifEnrolled());
+    $user = taylor();
+
+    if ($codes !== null) {
+        Authenticator::factory()->recoveryCodes($codes)->for($user, 'authenticatable')->create();
+    }
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect('/dashboard');
+
+    $this->assertAuthenticatedAs($user);
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+})->with([
+    'only a password' => [null],
+    'a used-up recovery set' => [[]],
+    'only recovery codes' => [['aaaaa-11111']],
+]);
+
+it('still accepts a recovery code when the policy is out of reach', function () {
+    Keyring::require(Requirement::aal2()->phishingResistant()->ifEnrolled());
+    $user = taylor();
+    totpFor($user);
+    Authenticator::factory()->recoveryCodes()->for($user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->get(route('keyring.login.challenge', ['recovery']));
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect('/dashboard');
+
+    $this->assertAuthenticatedAs($user);
+});
+
+it('keeps no-downgrade when the rest of the policy is out of reach', function () {
+    Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
+    Keyring::require(Requirement::factors(3)->ifEnrolled()->noDowngrade());
+    $user = taylor();
+    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->inertia()->get(route('keyring.login.challenge'))
+        ->assertJsonPath('props.factor', 'security-key')
+        ->assertJsonPath('props.alternatives', []);
 });
 
 it('sends people back to login when the attempt has expired', function () {
