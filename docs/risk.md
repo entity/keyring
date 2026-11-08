@@ -55,6 +55,8 @@ Without your own responder, Keyring does this at every checkpoint:
 | High | `Action::stepUp()->notify()` |
 | Critical | `Action::deny()->revokeAllSessions()->notify()` |
 
+At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's turned on, but the owner stays signed in everywhere else.
+
 Set your own in `KeyringServiceProvider`:
 
 ```php
@@ -91,7 +93,7 @@ Build an action with one of the static constructors and chain extras:
 | `Action::stepUp()` | Ask for a second factor, if the user has one (the requirement becomes at least AAL2). | Forget what the session has proved, so step-up middleware asks again. |
 | `Action::reauthenticate()` | Nothing. | Sign the session out. |
 | `Action::deny()` | Refuse the sign in with the usual "these credentials don't match" error. | Sign the session out. |
-| `->revokeAllSessions()` | Sign out every session of the user, change their "remember me" token and stop trusting their devices (`Sessions::revokeAll()`). | The same, and sign this session out. |
+| `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token and stop trusting their devices (`Sessions::revokeAll()`). |
 | `->lockFor('1h')` | Refuse sign ins for that long. | The same, from now. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 
@@ -189,7 +191,7 @@ $risk = $engine->assess(new Assessment(Checkpoint::Login, $request, $user, $atte
 $action = $engine->enforce($user, $risk, Checkpoint::Login);
 ```
 
-`enforce()` asks the responder and carries out the parts that don't depend on where you are: it dispatches `RiskAssessed`, revokes sessions and places the lock. Denying, stepping up and signing out are up to you, from the returned `Action`. `decide()` only asks the responder, and `signalsFor($checkpoint)` returns the signals that run at a checkpoint.
+`enforce()` asks the responder and carries out the parts that don't depend on where you are: it dispatches `RiskAssessed`, revokes sessions (never at `Checkpoint::Login`) and places the lock. Denying, stepping up and signing out are up to you, from the returned `Action`. `decide()` only asks the responder, dropping any revocation at login, and `signalsFor($checkpoint)` returns the signals that run at a checkpoint.
 
 ## Using Risk in Your Policy
 

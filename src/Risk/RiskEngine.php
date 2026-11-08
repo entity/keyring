@@ -86,16 +86,19 @@ class RiskEngine
 
     public function decide(Risk $risk, Checkpoint $checkpoint): Action
     {
-        if ($this->responder !== null) {
-            return ($this->responder)($risk, $checkpoint);
-        }
+        $action = $this->responder !== null
+            ? ($this->responder)($risk, $checkpoint)
+            : match ($risk->level) {
+                Level::Low => Action::allow(),
+                Level::Medium => Action::stepUp(),
+                Level::High => Action::stepUp()->notify(),
+                Level::Critical => Action::deny()->revokeAllSessions()->notify(),
+            };
 
-        return match ($risk->level) {
-            Level::Low => Action::allow(),
-            Level::Medium => Action::stepUp(),
-            Level::High => Action::stepUp()->notify(),
-            Level::Critical => Action::deny()->revokeAllSessions()->notify(),
-        };
+        // A login attempt hasn't proved who's behind it. If it could revoke
+        // anything, someone with only the password could sign the owner out
+        // as often as they liked.
+        return $checkpoint === Checkpoint::Login ? $action->withoutRevokingSessions() : $action;
     }
 
     /**
