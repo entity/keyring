@@ -12,6 +12,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Risk\Risk;
+use Keyring\Support\Duration;
 use Keyring\UserKeyring;
 
 /**
@@ -82,7 +83,7 @@ final class Attempt
             purpose: $purpose,
             guard: config('keyring.guard'),
             userId: $user->getAuthIdentifier(),
-            expiresAt: now()->addSeconds(config('keyring.pending_login_ttl'))->getTimestamp(),
+            expiresAt: now()->addSeconds(Duration::seconds(config('keyring.pending_login_ttl')))->getTimestamp(),
             remember: $remember,
             verifications: $verifications,
             requirement: $requirement,

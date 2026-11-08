@@ -35,18 +35,18 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 {
     protected const LOGIN_OPTIONS = 'keyring.webauthn.login';
 
-    public function __construct(
+    final public function __construct(
         protected Profile $profile,
     ) {}
 
-    public static function passkeys(): self
+    public static function passkeys(): static
     {
-        return new self(Profile::passkeys());
+        return new static(Profile::passkeys());
     }
 
-    public static function securityKeys(): self
+    public static function securityKeys(): static
     {
-        return new self(Profile::securityKeys());
+        return new static(Profile::securityKeys());
     }
 
     /**
@@ -108,7 +108,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     {
         $options = $this->ceremonies()->requestOptions([], AuthenticatorSelectionCriteria::USER_VERIFICATION_REQUIREMENT_REQUIRED);
 
-        $request->session()->put(self::LOGIN_OPTIONS.'.'.$this->key(), $this->ceremonies()->toJson($options));
+        $request->session()->put(static::LOGIN_OPTIONS.'.'.$this->key(), $this->ceremonies()->toJson($options));
 
         return $this->ceremonies()->toBrowser($options);
     }
@@ -145,7 +145,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $options = $attempt->state($this->key(), 'options')
-            ?? $request->session()->pull(self::LOGIN_OPTIONS.'.'.$this->key());
+            ?? $request->session()->pull(static::LOGIN_OPTIONS.'.'.$this->key());
         $credential = $this->credential($request);
 
         // The browser may answer with any of the user's keys, not just the one shown.

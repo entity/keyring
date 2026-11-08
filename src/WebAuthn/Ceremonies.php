@@ -69,7 +69,8 @@ class Ceremonies
                 userVerification: $profile->userVerification,
                 residentKey: $profile->residentKey,
             ),
-            attestation: $profile->attestation,
+            // No attestation: any authenticator is accepted, like Fortify.
+            attestation: PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
             excludeCredentials: $exclude,
             timeout: config('keyring.webauthn.timeout'),
         );

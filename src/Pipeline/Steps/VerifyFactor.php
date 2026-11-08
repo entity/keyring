@@ -27,7 +27,7 @@ class VerifyFactor
 
     public function handle(Context $context, Closure $next): Context
     {
-        if (! $this->faked($context)) {
+        if ($this->fakeDecision($context) === null) {
             $context->request->validate($this->rules($context));
         }
 
@@ -81,23 +81,23 @@ class VerifyFactor
         return $next($context);
     }
 
-    protected function faked(Context $context): bool
+    /**
+     * What Keyring::fake() decided for this factor, if it's faked.
+     */
+    protected function fakeDecision(Context $context): ?bool
     {
         return $this->container->bound(KeyringFake::class)
-            && $this->container->make(KeyringFake::class)->decision($context->factor->key()) !== null;
+            ? $this->container->make(KeyringFake::class)->decision($context->factor->key())
+            : null;
     }
 
     protected function check(Context $context): ?Verification
     {
-        $decision = $this->container->bound(KeyringFake::class)
-            ? $this->container->make(KeyringFake::class)->decision($context->factor->key())
-            : null;
-
-        if ($decision === null) {
-            return $context->factor->verify($context->attempt, $context->authenticator, $context->request);
-        }
-
-        return $decision ? Verification::of($context->authenticator) : null;
+        return match ($this->fakeDecision($context)) {
+            null => $context->factor->verify($context->attempt, $context->authenticator, $context->request),
+            true => Verification::of($context->authenticator),
+            false => null,
+        };
     }
 
     /**

@@ -3,7 +3,6 @@
 namespace Keyring\WebAuthn;
 
 use Webauthn\AuthenticatorSelectionCriteria;
-use Webauthn\PublicKeyCredentialCreationOptions;
 
 /**
  * How a WebAuthn factor asks for credentials. Passkeys and security keys use
@@ -17,7 +16,6 @@ final readonly class Profile
         public string $userVerification,
         public bool $primary,
         public ?string $attachment = null,
-        public string $attestation = PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
         public int $priority = 90,
     ) {}
 

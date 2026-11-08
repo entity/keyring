@@ -61,9 +61,4 @@ final class Context
 
         return $this->factor->errorKey();
     }
-
-    public function failed(): bool
-    {
-        return in_array($this->outcome, [Outcome::Failed, Outcome::LockedOut], true);
-    }
 }

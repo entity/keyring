@@ -322,9 +322,7 @@ class KeyringManager
      */
     public function fake(): KeyringFake
     {
-        if (! $this->container->bound(KeyringFake::class)) {
-            $this->container->instance(KeyringFake::class, new KeyringFake);
-        }
+        $this->container->singletonIf(KeyringFake::class);
 
         return $this->container->make(KeyringFake::class);
     }

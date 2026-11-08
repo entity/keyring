@@ -172,6 +172,12 @@ final readonly class Requirement
             'factors' => max($this->factors, $other->factors),
             'categories' => array_values(array_unique([...$this->categories, ...$other->categories], SORT_REGULAR)),
             'requiresPhishingResistance' => $this->requiresPhishingResistance || $other->requiresPhishingResistance,
+            'noDowngrade' => $this->noDowngrade || $other->noDowngrade,
+            'downgradeExceptions' => match (true) {
+                $this->noDowngrade && $other->noDowngrade => array_values(array_intersect($this->downgradeExceptions, $other->downgradeExceptions)),
+                $this->noDowngrade => $this->downgradeExceptions,
+                default => $other->downgradeExceptions,
+            },
             'phishingResistanceExceptions' => match (true) {
                 $this->requiresPhishingResistance && $other->requiresPhishingResistance => array_values(array_intersect($this->phishingResistanceExceptions, $other->phishingResistanceExceptions)),
                 $this->requiresPhishingResistance => $this->phishingResistanceExceptions,
