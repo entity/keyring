@@ -67,14 +67,21 @@ class UserKeyring
     }
 
     /**
-     * Whether the user has a real second factor: more than recovery codes
-     * (a fallback), and better than email codes (below NIST AAL2). A
-     * password used with one may be shorter.
+     * Whether the user has a real second factor. A password used with one
+     * may be shorter.
      */
     public function hasSecondFactor(): bool
     {
-        return $this->without(...$this->of(RecoveryCodes::KEY)->all(), ...$this->of(EmailCode::KEY)->all())
-            ->canMeet(Requirement::aal2()->including(Category::Possession));
+        return $this->withoutFallbacks()->canMeet(Requirement::aal2()->including(Category::Possession));
+    }
+
+    /**
+     * The keyring without recovery codes (a way back in, not a factor to
+     * rely on) or email codes (below NIST AAL2).
+     */
+    public function withoutFallbacks(): static
+    {
+        return $this->without(...$this->of(RecoveryCodes::KEY)->all(), ...$this->of(EmailCode::KEY)->all());
     }
 
     /**
