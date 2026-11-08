@@ -149,6 +149,10 @@ class KeyringManager
     {
         $requirement = $this->policy($user, $attempt);
 
+        if ($requirement->noDowngrade && $attempt->keyring()->canMeet(Requirement::aal1()->phishingResistant())) {
+            $requirement = $requirement->phishingResistant();
+        }
+
         if ($requirement->onlyIfEnrolled && ! $attempt->keyring()->canMeet($requirement)) {
             return Requirement::aal1();
         }

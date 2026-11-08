@@ -21,6 +21,7 @@ final readonly class Requirement
         public array $categories = [],
         public bool $requiresPhishingResistance = false,
         public bool $onlyIfEnrolled = false,
+        public bool $noDowngrade = false,
     ) {}
 
     public static function aal1(): self
@@ -76,6 +77,16 @@ final readonly class Requirement
      * Only apply this requirement when the user has enrolled enough factors to
      * meet it. Otherwise one factor is enough. This is Fortify's behaviour.
      */
+    /**
+     * Users who have a phishing-resistant factor (a passkey or security key)
+     * must use one. "Try another way" won't offer weaker fallbacks (OWASP).
+     */
+    #[\NoDiscard]
+    public function noDowngrade(): static
+    {
+        return clone ($this, ['noDowngrade' => true]);
+    }
+
     #[\NoDiscard]
     public function ifEnrolled(): static
     {
@@ -173,6 +184,7 @@ final readonly class Requirement
             'categories' => array_map(fn (Category $category) => $category->value, $this->categories),
             'phishing_resistant' => $this->requiresPhishingResistance,
             'if_enrolled' => $this->onlyIfEnrolled,
+            'no_downgrade' => $this->noDowngrade,
         ];
     }
 
@@ -186,6 +198,7 @@ final readonly class Requirement
             categories: array_map(Category::from(...), $data['categories']),
             requiresPhishingResistance: $data['phishing_resistant'],
             onlyIfEnrolled: $data['if_enrolled'],
+            noDowngrade: $data['no_downgrade'] ?? false,
         );
     }
 
