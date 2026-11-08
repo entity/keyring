@@ -180,6 +180,8 @@ $user->keyring->of('security-key');
 $user->keyring->has(Category::Possession);
 ```
 
+Like Fortify, passkeys and security keys are registered without attestation, so any authenticator is accepted, including synced passkeys (iCloud Keychain, Google Password Manager, 1Password). Each key's AAGUID is stored, but it's what the key says about itself, so it's fine for showing "YubiKey 5" and not for allowing only certain models. That would need attestation checked against the FIDO Metadata Service.
+
 ## Writing a factor
 
 Code factors only need a key and a way to deliver the code. The base class handles the OWASP rules: random codes, short expiry, single use, limited guesses, a resend replacing the old code, and hashed storage.
