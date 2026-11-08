@@ -24,6 +24,8 @@ use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 
+use function Illuminate\Support\defer;
+
 /**
  * Changing the email address the OWASP way:
  *
@@ -55,7 +57,9 @@ class EmailChanges
         }
 
         if ($this->taken($user, $email)) {
-            Notification::route('mail', $email)->notify(new EmailAddressInUse);
+            // After the response, like the emails for a real change, so timing
+            // doesn't give away that the address is taken.
+            defer(fn () => Notification::route('mail', $email)->notify(app(EmailAddressInUse::class)));
 
             return null;
         }
@@ -82,10 +86,15 @@ class EmailChanges
             return $change;
         });
 
-        Notification::route('mail', $email)->notify(new ConfirmEmailChange($change, $tokens['confirm']));
-        Notification::route('mail', $current)->notify(
-            new EmailChangeNotice($change, $tokens['revert'], $needsCurrent ? $tokens['current'] : null),
-        );
+        defer(function () use ($change, $email, $current, $tokens, $needsCurrent) {
+            Notification::route('mail', $email)->notify(app(ConfirmEmailChange::class, ['change' => $change, 'token' => $tokens['confirm']]));
+
+            Notification::route('mail', $current)->notify(app(EmailChangeNotice::class, [
+                'change' => $change,
+                'revertToken' => $tokens['revert'],
+                'confirmToken' => $needsCurrent ? $tokens['current'] : null,
+            ]));
+        });
 
         EmailChangeRequested::dispatch($user, $change);
 

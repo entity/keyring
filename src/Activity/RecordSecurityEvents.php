@@ -4,8 +4,6 @@ namespace Keyring\Activity;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
-use Keyring\Enums\Category;
-use Keyring\Enums\Purpose;
 use Keyring\Events;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Verification;
@@ -72,11 +70,7 @@ class RecordSecurityEvents
 
         $this->log->record('factor_failed', $user, $event->factor);
 
-        $passwordKnown = $event->attempt !== null
-            && $event->attempt->purpose === Purpose::Login
-            && array_any($event->attempt->verifications, fn (Verification $verification) => in_array(Category::Knowledge, $verification->categories, true));
-
-        if ($passwordKnown) {
+        if ($event->afterPassword()) {
             $this->log->record('second_factor_failed', $user, $event->factor);
         }
     }

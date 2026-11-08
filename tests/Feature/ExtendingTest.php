@@ -2,10 +2,12 @@
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
+use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -42,3 +44,24 @@ it('answers unknown factors with a 404', function () {
     $this->postJson('/login/sms')->assertNotFound();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->postJson('/user/authenticators/sms')->assertNotFound();
 });
+
+it('lets apps swap a notification through the container', function () {
+    Notification::fake();
+    app()->bind(ConfirmEmailChange::class, CustomConfirmEmailChange::class);
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])
+        ->assertOk();
+
+    Notification::assertSentOnDemand(CustomConfirmEmailChange::class);
+});
+
+it('refuses security email types it does not know', function () {
+    expect(fn () => Keyring::notify(['new_device', 'new_devise']))
+        ->toThrow(InvalidArgumentException::class, 'Unknown security email types: new_devise.');
+});
+
+class CustomConfirmEmailChange extends ConfirmEmailChange
+{
+    //
+}

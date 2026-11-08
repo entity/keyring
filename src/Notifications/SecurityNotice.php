@@ -17,7 +17,7 @@ class SecurityNotice extends Notification implements ShouldQueue
     use Queueable;
 
     /**
-     * @param  array<string, string|int|null>  $details  shown as "Label: value" lines
+     * @param  array<string, string|int|null>  $details  shown as "Label: value" lines, keyed by keyring::notifications.details
      * @param  array<string, string|int>  $replace  placeholders for the copy
      */
     public function __construct(
@@ -41,7 +41,7 @@ class SecurityNotice extends Notification implements ShouldQueue
             ->line(__($key.'.intro', $this->replace));
 
         foreach (array_filter($this->details, fn ($value) => $value !== null && $value !== '') as $label => $value) {
-            $message->line(__($label).': '.$value);
+            $message->line(__('keyring::notifications.details.'.$label).': '.$value);
         }
 
         if ($this->actionUrl !== null) {

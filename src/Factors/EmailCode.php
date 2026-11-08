@@ -36,7 +36,7 @@ class EmailCode extends CodeFactor
     protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, string $code): void
     {
         // An authenticator that isn't saved yet means this code confirms enrollment.
-        Notification::send($user, new VerificationCode($code, $this->ttl, enrolling: ! $authenticator->exists));
+        Notification::send($user, app(VerificationCode::class, ['code' => $code, 'ttl' => $this->ttl, 'enrolling' => ! $authenticator->exists]));
     }
 
     protected function defaultName(Authenticatable&Model $user): string

@@ -27,12 +27,10 @@ class VerificationCode extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         return new MailMessage()
-            ->subject(__('Your verification code'))
-            ->line(__('Your verification code is:'))
+            ->subject(__('keyring::notifications.verification_code.subject'))
+            ->line(__('keyring::notifications.verification_code.intro'))
             ->line('**'.trim(chunk_split($this->code, 4, ' ')).'**')
-            ->line(__('It expires in :minutes minutes.', ['minutes' => intdiv($this->ttl, 60)]))
-            ->line($this->enrolling
-                ? __('If you didn\'t ask to add this email as a sign-in method, someone may be signed in to your account. Please change your password.')
-                : __('If you didn\'t try to sign in, someone may know your password. Please change it.'));
+            ->line(__('keyring::notifications.verification_code.expires', ['minutes' => intdiv($this->ttl, 60)]))
+            ->line(__('keyring::notifications.verification_code.'.($this->enrolling ? 'outro_enrolling' : 'outro')));
     }
 }

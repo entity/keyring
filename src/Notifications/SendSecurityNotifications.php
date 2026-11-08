@@ -4,23 +4,21 @@ namespace Keyring\Notifications;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Notification;
 use Keyring\Devices\UserAgent;
-use Keyring\Enums\Category;
-use Keyring\Enums\Purpose;
 use Keyring\Events;
 use Keyring\Facades\Keyring;
-use Keyring\Login\Verification;
 
 /**
  * Sends the security emails the app has opted into with Keyring::notify().
  */
 class SendSecurityNotifications
 {
-    public function __construct(
-        protected Request $request,
-    ) {}
+    /** Every type Keyring::notify() accepts. */
+    public const array TYPES = [
+        'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
+        'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
+    ];
 
     /**
      * @return array<class-string, string>
@@ -67,14 +65,8 @@ class SendSecurityNotifications
 
     public function factorFailed(Events\FactorFailed $event): void
     {
-        $attempt = $event->attempt;
-
-        $passwordKnown = $attempt !== null
-            && $attempt->purpose === Purpose::Login
-            && array_any($attempt->verifications, fn (Verification $verification) => in_array(Category::Knowledge, $verification->categories, true));
-
-        if ($passwordKnown) {
-            $this->send($attempt->user(), 'second_factor_failed');
+        if ($event->afterPassword()) {
+            $this->send($event->attempt->user(), 'second_factor_failed');
         }
     }
 
@@ -104,10 +96,18 @@ class SendSecurityNotifications
             return;
         }
 
-        Notification::send($user, new SecurityNotice($type, [
-            'When' => now()->toDayDateTimeString(),
-            'Device' => UserAgent::describe($this->request->userAgent()),
-            'IP address' => $this->request->ip(),
-        ], $replace, $actionUrl));
+        // The current request, not one captured at boot (Octane).
+        $request = request();
+
+        Notification::send($user, app(SecurityNotice::class, [
+            'type' => $type,
+            'details' => [
+                'when' => now()->toDayDateTimeString(),
+                'device' => UserAgent::describe($request->userAgent()),
+                'ip' => $request->ip(),
+            ],
+            'replace' => $replace,
+            'actionUrl' => $actionUrl,
+        ]));
     }
 }

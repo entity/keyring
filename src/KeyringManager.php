@@ -30,6 +30,7 @@ use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
 use Keyring\Testing\KeyringFake;
@@ -275,10 +276,13 @@ class KeyringManager
      */
     public function notify(?array $types = null): static
     {
-        $this->notifications = $types ?? [
-            'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
-            'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
-        ];
+        $types ??= SendSecurityNotifications::TYPES;
+
+        if ($unknown = array_diff($types, SendSecurityNotifications::TYPES)) {
+            throw new InvalidArgumentException('Unknown security email types: '.implode(', ', $unknown).'.');
+        }
+
+        $this->notifications = $types;
 
         return $this;
     }

@@ -19,8 +19,8 @@ class EmailAddressInUse extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         return new MailMessage()
-            ->subject(__('Someone tried to use your email address'))
-            ->line(__('Someone tried to change another account\'s email address to this one. This address already has an account, so nothing was changed.'))
-            ->line(__('If this was you, sign in to your existing account instead. Otherwise, you can ignore this email.'));
+            ->subject(__('keyring::notifications.email_address_in_use.subject'))
+            ->line(__('keyring::notifications.email_address_in_use.intro'))
+            ->line(__('keyring::notifications.email_address_in_use.outro'));
     }
 }

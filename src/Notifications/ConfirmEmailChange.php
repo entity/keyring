@@ -25,10 +25,10 @@ class ConfirmEmailChange extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         return new MailMessage()
-            ->subject(__('Confirm your new email address'))
-            ->line(__('Please confirm this is the new email address for your account.'))
-            ->action(__('Confirm email address'), Url::route('keyring.email.confirm', ['change' => $this->change->id, 'token' => $this->token]))
-            ->line(__('This link expires :when.', ['when' => $this->change->expires_at->diffForHumans()]))
-            ->line(__('If you didn\'t ask for this, you can ignore this email.'));
+            ->subject(__('keyring::notifications.confirm_email_change.subject'))
+            ->line(__('keyring::notifications.confirm_email_change.intro'))
+            ->action(__('keyring::notifications.confirm_email_change.action'), Url::route('keyring.email.confirm', ['change' => $this->change->id, 'token' => $this->token]))
+            ->line(__('keyring::notifications.confirm_email_change.expires', ['when' => $this->change->expires_at->diffForHumans()]))
+            ->line(__('keyring::notifications.confirm_email_change.outro'));
     }
 }

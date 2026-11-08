@@ -27,16 +27,16 @@ class EmailChangeNotice extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         $message = new MailMessage()
-            ->subject(__('Your email address is being changed'))
-            ->line(__('Someone asked to change the email address on your account to :email.', ['email' => $this->masked()]));
+            ->subject(__('keyring::notifications.email_change_notice.subject'))
+            ->line(__('keyring::notifications.email_change_notice.intro', ['email' => $this->masked()]));
 
         if ($this->confirmToken !== null) {
-            $message->line(__('To finish the change, confirm it from this address too.'))
-                ->action(__('Confirm the change'), Url::route('keyring.email.confirm', ['change' => $this->change->id, 'token' => $this->confirmToken]));
+            $message->line(__('keyring::notifications.email_change_notice.confirm'))
+                ->action(__('keyring::notifications.email_change_notice.action'), Url::route('keyring.email.confirm', ['change' => $this->change->id, 'token' => $this->confirmToken]));
         }
 
         return $message
-            ->line(__('Wasn\'t you? This link cancels the change and signs you out everywhere:'))
+            ->line(__('keyring::notifications.email_change_notice.revert'))
             ->line(Url::route('keyring.email.revert', ['change' => $this->change->id, 'token' => $this->revertToken]));
     }
 
