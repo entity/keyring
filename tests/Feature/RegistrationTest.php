@@ -54,7 +54,7 @@ it('verifies email addresses', function () {
 
     $this->post('/email/verification-notification')->assertSessionHas('status', 'verification-link-sent');
 
-    $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)]);
+    $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
 
     $this->get($url)->assertRedirect('/dashboard?verified=1');
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();

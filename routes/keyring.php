@@ -71,7 +71,7 @@ Route::middleware(config('keyring.manage_middleware'))->group(function () {
 if (Features::enabled('email_verification')) {
     Route::middleware('auth:'.$guard)->group(function () {
         Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
-        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
+        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['signed:relative', 'throttle:6,1'])->name('verification.verify');
         Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware('throttle:6,1')->name('verification.send');
     });
 }
@@ -93,7 +93,7 @@ Route::middleware('throttle:12,1')->group(function () {
 Route::get('/user/devices', [DeviceController::class, 'index'])->middleware('auth:'.$guard)->name('keyring.devices.index');
 
 Route::get('/devices/{device}/report', [DeviceController::class, 'report'])
-    ->middleware(['signed', 'throttle:6,1'])
+    ->middleware(['signed:relative', 'throttle:6,1'])
     ->name('keyring.devices.report');
 
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])

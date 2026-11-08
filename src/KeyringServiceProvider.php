@@ -2,8 +2,11 @@
 
 namespace Keyring;
 
+use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -23,6 +26,8 @@ use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
 use Keyring\Session\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
+use Keyring\Support\Features;
+use Keyring\Support\Url;
 use Keyring\WebAuthn\Ceremonies;
 
 class KeyringServiceProvider extends ServiceProvider
@@ -73,6 +78,14 @@ class KeyringServiceProvider extends ServiceProvider
         }
 
         Event::subscribe(SendSecurityNotifications::class);
+
+        if (Features::enabled('email_verification') && VerifyEmail::$createUrlCallback === null) {
+            VerifyEmail::createUrlUsing(fn (MustVerifyEmail&Model $notifiable) => Url::signed(
+                'verification.verify',
+                now()->addMinutes((int) config('auth.verification.expire', 60)),
+                ['id' => $notifiable->getKey(), 'hash' => sha1($notifiable->getEmailForVerification())],
+            ));
+        }
 
         if (config('keyring.routes')) {
             $this->registerRoutes();

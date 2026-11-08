@@ -223,7 +223,7 @@ Keyring keeps its own **session registry**, so sessions can be listed and revoke
 ],
 ```
 
-The routes are `GET /user/devices`, `DELETE /user/devices/{id}` and `DELETE /user/devices` (sign out everywhere else). The signed `GET /devices/{id}/report` link is the "this wasn't me" action.
+The routes are `GET /user/devices`, `DELETE /user/devices/{id}` and `DELETE /user/devices` (sign out everywhere else). The signed `GET /devices/{id}/report` link is the "this wasn't me" action. It and the email verification link are built from `APP_URL` with relative signatures, so a forged `Host` header can't redirect them.
 
 ## Protected changes
 

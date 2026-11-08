@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\URL;
+use Keyring\Support\Url;
 
 /**
  * A browser or app the user has signed in from, recognised by a long-lived
@@ -76,7 +76,7 @@ class Device extends Model
      */
     public function revokeUrl(int $days = 7): string
     {
-        return URL::temporarySignedRoute('keyring.devices.report', now()->addDays($days), ['device' => $this->id]);
+        return Url::signed('keyring.devices.report', now()->addDays($days), ['device' => $this->id]);
     }
 
     /**
