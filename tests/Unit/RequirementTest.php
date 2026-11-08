@@ -56,6 +56,22 @@ it('knows whether another verification would help', function () {
         ->and(Requirement::aal2()->phishingResistant()->wouldProgress([$password], [Category::Possession], true))->toBeTrue();
 });
 
+it('limits itself to what a user can prove', function () {
+    $can = [Category::Knowledge, Category::Possession];
+
+    expect(Requirement::aal3()->limitedTo($can, false))
+        ->factors->toBe(2)
+        ->categories->toBe([Category::Possession])
+        ->requiresPhishingResistance->toBeFalse()
+        ->and(Requirement::factors(3)->phishingResistant()->limitedTo($can, true))
+        ->factors->toBe(2)
+        ->requiresPhishingResistance->toBeTrue()
+        ->and(Requirement::aal1()->phishingResistant()->limitedTo($can, false)->factors)->toBe(2)
+        ->and(Requirement::aal2()->including(Category::Possession)->limitedTo([Category::Knowledge], false))
+        ->factors->toBe(1)
+        ->categories->toBe([]);
+});
+
 it('round trips through an array', function () {
     $requirement = Requirement::aal2()->including(Category::Possession)->phishingResistant()->ifEnrolled();
 

@@ -59,6 +59,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - Policies count distinct categories, so two factors of the same kind are never treated as multi-factor.
 - A passkey or security key only counts as inherence when it actually verified the user that time.
 - With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in. Recovery codes stay on offer as the way back in, unless you pass `except: []`.
+- With `ifEnrolled()`, a policy the user can't fully meet still asks for the strongest version they can give, so a user with a second factor never signs in with one factor.
 - Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification. Users with a possession factor must use one, so a stolen session plus a phished password isn't enough.
 - The fresh window is fixed from the moment of verification and doesn't slide with activity.
 - Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset.

@@ -25,7 +25,9 @@ use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Signal;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
+use Keyring\Enums\Category;
 use Keyring\Factors\FactorRegistry;
+use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
@@ -159,7 +161,14 @@ class KeyringManager
         }
 
         if ($requirement->onlyIfEnrolled && ! $attempt->keyring()->canMeet($requirement)) {
-            return Requirement::aal1();
+            // Recovery codes alone aren't a second factor: asking for them
+            // here would spend one on every login.
+            $keyring = $attempt->keyring()->without(...$attempt->keyring()->of(RecoveryCodes::KEY)->all());
+
+            return $requirement->limitedTo(
+                array_values(array_filter(Category::cases(), $keyring->has(...))),
+                $keyring->canMeet(Requirement::aal1()->phishingResistant()),
+            );
         }
 
         return $requirement;
