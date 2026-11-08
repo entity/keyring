@@ -5,12 +5,15 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
 use Keyring\Http\Controllers\Concerns\RespondsToVerification;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\Requirement;
+use Keyring\Login\StepUp;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
 
@@ -25,12 +28,14 @@ class ChallengeController
     public function __construct(
         protected KeyringManager $keyring,
         protected AttemptStore $attempts,
+        protected StepUp $stepUp,
     ) {}
 
     public function show(Request $request, ?string $factor = null): mixed
     {
         $purpose = $this->purpose($request);
-        $attempt = $this->attempts->current($purpose);
+        $attempt = $this->attempts->current($purpose)
+            ?? ($purpose === Purpose::Confirm ? $this->stepUp->begin($request, Requirement::aal1(), building: false) : null);
 
         if ($attempt === null) {
             return $this->expired($purpose);
@@ -104,9 +109,12 @@ class ChallengeController
             ?? $candidates->first();
     }
 
+    /**
+     * The purpose comes from the route name: keyring.{purpose}.challenge.
+     */
     protected function purpose(Request $request): Purpose
     {
-        return Purpose::from($request->route('purpose', Purpose::Login->value));
+        return Purpose::from(Str::between((string) $request->route()?->getName(), 'keyring.', '.'));
     }
 
     protected function expired(Purpose $purpose, ?string $message = null): RedirectResponse

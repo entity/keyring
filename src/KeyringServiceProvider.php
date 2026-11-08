@@ -6,6 +6,8 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Contracts\Responses;
+use Keyring\Http\Middleware\RequireAssurance;
+use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Login\AttemptStore;
 use Keyring\Session\SessionAssurance;
@@ -36,6 +38,10 @@ class KeyringServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'keyring');
+
+        $router = $this->app['router'];
+        $router->aliasMiddleware('keyring', RequireAssurance::class);
+        $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);
 
         if (config('keyring.routes')) {
             $this->registerRoutes();

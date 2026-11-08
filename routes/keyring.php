@@ -16,6 +16,11 @@ Route::middleware('guest:'.$guard)->group(function () {
     });
 });
 
+Route::middleware('auth:'.$guard)->prefix('/confirm')->name('keyring.confirm.')->group(function () {
+    Route::get('/{factor?}', [ChallengeController::class, 'show'])->name('challenge');
+    Route::post('/{factor}', [ChallengeController::class, 'verify'])->name('verify');
+});
+
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth:'.$guard)
     ->name('logout');

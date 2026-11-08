@@ -51,8 +51,16 @@ final class Attempt
         public private(set) array $presented = [],
     ) {}
 
-    public static function start(Purpose $purpose, Authenticatable&Model $user, bool $remember = false): self
-    {
+    /**
+     * @param  list<Verification>  $verifications  what the user has already proved, for step-up
+     */
+    public static function start(
+        Purpose $purpose,
+        Authenticatable&Model $user,
+        bool $remember = false,
+        ?Requirement $requirement = null,
+        array $verifications = [],
+    ): self {
         $attempt = new self(
             id: Str::random(40),
             purpose: $purpose,
@@ -60,6 +68,8 @@ final class Attempt
             userId: $user->getAuthIdentifier(),
             expiresAt: now()->addSeconds(config('keyring.pending_login_ttl'))->getTimestamp(),
             remember: $remember,
+            verifications: $verifications,
+            requirement: $requirement,
         );
 
         $attempt->resolvedUser = $user;

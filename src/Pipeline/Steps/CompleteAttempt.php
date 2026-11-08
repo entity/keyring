@@ -47,6 +47,9 @@ class CompleteAttempt
             $context->request->session()->regenerate();
             $this->assurance->record($attempt->verifications);
 
+            // Keep Laravel's own password.confirm middleware happy too.
+            $context->request->session()->put('auth.password_confirmed_at', now()->getTimestamp());
+
             Confirmed::dispatch($attempt->user(), $attempt);
         }
 

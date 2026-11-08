@@ -18,9 +18,17 @@ class AttemptStore
         protected Session $session,
     ) {}
 
-    public function start(Purpose $purpose, Authenticatable&Model $user, bool $remember = false): Attempt
-    {
-        return tap(Attempt::start($purpose, $user, $remember), $this->save(...));
+    /**
+     * @param  list<Verification>  $verifications
+     */
+    public function start(
+        Purpose $purpose,
+        Authenticatable&Model $user,
+        bool $remember = false,
+        ?Requirement $requirement = null,
+        array $verifications = [],
+    ): Attempt {
+        return tap(Attempt::start($purpose, $user, $remember, $requirement, $verifications), $this->save(...));
     }
 
     public function current(Purpose $purpose): ?Attempt
