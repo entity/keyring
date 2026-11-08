@@ -131,26 +131,35 @@ class AuthenticatorController
      */
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
-        $authenticator = $this->find($request, $authenticator);
         $user = $request->user();
-        $remaining = $this->keyring->for($user)->without($authenticator);
 
-        // Recovery codes are only useful while there's a second factor to
-        // recover, so they go too when this was the last one. The policy is
-        // checked against what will actually be left.
-        $onlyRecoveryLeft = $remaining->all()->every(fn (Authenticator $other) => $other->isVirtual() || $other->factor === RecoveryCodes::KEY);
-        $cascade = $onlyRecoveryLeft ? $remaining->of(RecoveryCodes::KEY)->all() : [];
-        $left = $remaining->without(...$cascade);
+        $removed = DB::transaction(function () use ($request, $user, $authenticator) {
+            // One removal per user at a time, so two at once can't each count
+            // on the other's authenticator still being there.
+            $user->newQuery()->lockForUpdate()->find($user->getKey());
 
-        $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
+            $authenticator = $this->find($request, $authenticator);
+            $remaining = $this->keyring->for($user)->without($authenticator);
 
-        if (! $left->canSignIn() || (! $policy->onlyIfEnrolled && ! $left->canMeet($policy))) {
-            throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
-        }
+            // Recovery codes are only useful while there's a second factor to
+            // recover, so they go too when this was the last one. The policy
+            // is checked against what will actually be left.
+            $onlyRecoveryLeft = $remaining->all()->every(fn (Authenticator $other) => $other->isVirtual() || $other->factor === RecoveryCodes::KEY);
+            $cascade = $onlyRecoveryLeft ? $remaining->of(RecoveryCodes::KEY)->all() : [];
+            $left = $remaining->without(...$cascade);
 
-        DB::transaction(fn () => collect([$authenticator, ...$cascade])->each->delete());
+            $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
 
-        AuthenticatorRemoved::dispatch($user, $authenticator);
+            if (! $left->canSignIn() || (! $policy->onlyIfEnrolled && ! $left->canMeet($policy))) {
+                throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
+            }
+
+            collect([$authenticator, ...$cascade])->each->delete();
+
+            return $authenticator;
+        });
+
+        AuthenticatorRemoved::dispatch($user, $removed);
 
         return $this->status('authenticator-removed');
     }
@@ -198,7 +207,7 @@ class AuthenticatorController
     protected function find(Request $request, string $id): Authenticator
     {
         return $this->keyring->authenticatorModel()::query()
-            ->whereMorphedTo('authenticatable', $request->user())
+            ->ownedBy($request->user())
             ->findOrFail($id)
             ->setRelation('authenticatable', $request->user());
     }
