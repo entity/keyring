@@ -1,0 +1,28 @@
+<?php
+
+namespace Keyring\Contracts;
+
+use Illuminate\Http\Request;
+use Keyring\Models\Authenticator;
+
+/**
+ * A factor that can start a login by identifying the user, like a password
+ * (via their email) or a discoverable passkey (via its credential).
+ */
+interface PrimaryFactor extends Factor
+{
+    /**
+     * Find the authenticator the request is aimed at.
+     *
+     * Implementations must take the same time whether or not a user is found,
+     * so the response doesn't reveal which accounts exist.
+     */
+    public function identify(Request $request): ?Authenticator;
+
+    /**
+     * Validation rules for the fields used to identify the user.
+     *
+     * @return array<string, mixed>
+     */
+    public function identificationRules(): array;
+}

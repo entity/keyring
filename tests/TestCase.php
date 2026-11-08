@@ -3,7 +3,9 @@
 namespace Keyring\Tests;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Timebox;
 use Keyring\KeyringServiceProvider;
+use Keyring\Testing\InstantTimebox;
 use Keyring\Tests\Fixtures\User;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -26,6 +28,22 @@ abstract class TestCase extends Orchestra
 
     protected function defineDatabaseMigrations(): void
     {
-        $this->loadLaravelMigrations();
+        $this->loadMigrationsFrom(__DIR__.'/database/migrations');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->bind(Timebox::class, InstantTimebox::class);
+    }
+
+    /**
+     * Make requests the way an Inertia page visit would, so pages come back as JSON.
+     */
+    protected function inertia(): static
+    {
+        return $this->withHeaders(['X-Inertia' => 'true']);
     }
 }

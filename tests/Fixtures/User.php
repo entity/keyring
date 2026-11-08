@@ -6,12 +6,13 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Keyring\Concerns\HasKeyring;
 
 #[Unguarded]
 #[Hidden('password', 'remember_token')]
 class User extends Authenticatable
 {
-    use Notifiable;
+    use HasKeyring, Notifiable;
 
     protected $table = 'users';
 
