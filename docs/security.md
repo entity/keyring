@@ -33,12 +33,13 @@ The [conformance suite](testing.md#the-conformance-suite) tests several of these
 
 Every factor has its own limits, checked in the pipeline before the proof is looked at:
 
-- **Per account**: `limits.per_account` attempts a minute (5). Before the user is identified, the account is the typed username, lowercased and transliterated, so spelling variants of one address share a limit. After that, it's the user's ID.
+- **Per account**: `limits.per_account` attempts a minute (5). Before the user is identified, the account is the typed username, lowercased and transliterated, so spelling variants of one address share a limit. After that, it's the user's ID. A browser the account has signed in from before (it carries the account's device cookie) counts in a bucket of its own, so someone guessing from elsewhere can't lock the owner out (OWASP's "device cookies").
 - **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address.
 
 How they count:
 
 - Each attempt is counted before it's verified, so overlapping requests can't all slip under the limit while they're being checked.
+- Routes that spend session state (sign in, challenges, enrollment) take Laravel's session lock (`->block()`), so parallel requests in one session can't reuse an email code's guesses or a WebAuthn challenge. Your cache store must support locks, as the database, Redis, file and array stores do.
 - When failures reach a limit, that key is locked. Each lock lasts twice as long as the one before (one minute, then two, then four...), up to a day. The count of lockouts resets a day after the first one.
 - A success clears the account's count. On the per-IP count, a success only takes back its own attempt. People signing in from one office address don't use up its limit, and an attacker can't reset the limit by signing in to an account of their own between guesses.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
@@ -100,13 +101,11 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ## Known Limitations
 
-- **Account lockouts can be triggered by anyone.** Per-account limits mean someone who knows a user's email can keep that account locked by typing wrong passwords. Locks double up to a day. A password reset doesn't lift them.
+- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked for browsers it hasn't signed in from before. Known devices keep working, and so does a password reset.
 - **No attestation.** Any WebAuthn authenticator is accepted, and AAGUIDs aren't verified, so you can't restrict which key models users register. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
-- **No downgrade has no recovery path.** With `noDowngrade()`, a user who loses their only passkey or security key isn't offered recovery codes and needs support's help. See [No Downgrade](policies.md#no-downgrade).
-- **Session-held state isn't locked.** Pending email codes, their guess counts and WebAuthn challenges live in the session. Laravel doesn't lock sessions between concurrent requests by default, so parallel requests in one session can each spend a guess from the same count, or present the same response, within the rate limits. TOTP and recovery codes don't have this problem, since they're used up under a database lock.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
-- **Changing `APP_KEY` breaks hashed and encrypted data.** Recovery codes stop working, pending email codes become invalid, and the WebAuthn user handle for new keys changes. Laravel's previous keys only help with encrypted values such as TOTP secrets.
+- **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and new passkeys get a different user handle. Recovery codes keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
 - **"Remember me" is all or nothing.** Laravel has one remember token per user, so revoking any device or signing out other sessions ends every remembered browser.
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
