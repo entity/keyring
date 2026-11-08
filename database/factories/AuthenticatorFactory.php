@@ -12,6 +12,7 @@ use PragmaRX\Google2FA\Google2FA;
  */
 class AuthenticatorFactory extends Factory
 {
+    #[\Override]
     protected $model = Authenticator::class;
 
     public function definition(): array

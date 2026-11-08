@@ -2,6 +2,8 @@
 
 namespace Keyring\Console;
 
+use Illuminate\Console\Attributes\Description;
+use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Model;
@@ -18,15 +20,13 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * deletes anything, so drop Fortify's columns yourself when you're happy.
  */
 #[AsCommand(name: 'keyring:import')]
-class ImportCommand extends Command
-{
-    protected $signature = 'keyring:import
+#[Description('Import authenticators from Fortify (TOTP, recovery codes and passkeys)')]
+#[Signature('keyring:import
         {source : Where to import from (only "fortify" for now)}
         {--dry-run : Show what would be imported without writing anything}
-        {--unconfirmed : Also import two factor secrets that were never confirmed (Fortify without its "confirm" option)}';
-
-    protected $description = 'Import authenticators from Fortify (TOTP, recovery codes and passkeys)';
-
+        {--unconfirmed : Also import two factor secrets that were never confirmed (Fortify without its "confirm" option)}')]
+class ImportCommand extends Command
+{
     public function handle(): int
     {
         if ($this->argument('source') !== 'fortify') {

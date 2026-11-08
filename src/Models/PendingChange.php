@@ -94,7 +94,7 @@ class PendingChange extends Model
     /**
      * @param  Builder<static>  $query
      */
-    public function scopePending(Builder $query): void
+    protected function scopePending(Builder $query): void
     {
         $query->whereNull('applied_at')->whereNull('cancelled_at')->whereNull('reverted_at')->where('expires_at', '>', now());
     }

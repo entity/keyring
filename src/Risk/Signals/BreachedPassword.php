@@ -23,7 +23,7 @@ class BreachedPassword implements Signal
 
     public function assess(Assessment $assessment): ?Finding
     {
-        $verifications = $assessment->attempt === null ? [] : $assessment->attempt->verifications;
+        $verifications = $assessment->attempt->verifications ?? [];
         $usedPassword = array_any($verifications, fn (Verification $verification) => $verification->factor === 'password');
         $password = $assessment->request->input('password');
 

@@ -20,7 +20,7 @@ class HeaderLocator implements LocatesIps
             'city' => $request->header('CF-IPCity'),
             'latitude' => $request->header('CF-IPLatitude') === null ? null : (float) $request->header('CF-IPLatitude'),
             'longitude' => $request->header('CF-IPLongitude') === null ? null : (float) $request->header('CF-IPLongitude'),
-        ], fn ($value) => $value !== null && $value !== '' && $value !== 'XX');
+        ], fn ($value) => ! in_array($value, [null, '', 'XX'], true));
 
         return $location === [] ? null : $location;
     }

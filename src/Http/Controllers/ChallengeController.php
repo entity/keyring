@@ -56,7 +56,7 @@ class ChallengeController
         $authenticator = $this->choose($attempt, $options, $factor, $request->query('authenticator'));
 
         if ($authenticator === null) {
-            return redirect()->route("keyring.{$purpose->value}.challenge");
+            return to_route("keyring.{$purpose->value}.challenge");
         }
 
         $attempt->present($authenticator);
@@ -172,8 +172,7 @@ class ChallengeController
 
     protected function expired(Purpose $purpose, ?string $message = null): RedirectResponse
     {
-        return redirect()
-            ->route($purpose === Purpose::Login ? 'login' : 'keyring.confirm.challenge')
+        return to_route($purpose === Purpose::Login ? 'login' : 'keyring.confirm.challenge')
             ->withErrors([config('keyring.username') => $message ?? __('keyring::keyring.expired')]);
     }
 }

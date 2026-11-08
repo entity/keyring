@@ -37,7 +37,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->where('user_id', (string) $user->getAuthIdentifier())
             ->whereNull('revoked_at')
             ->where('expires_at', '>', now()->getTimestamp())
-            ->orderByDesc('last_activity_at')
+            ->latest('last_activity_at')
             ->get()
             ->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
     }

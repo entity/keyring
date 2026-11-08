@@ -241,9 +241,7 @@ describe('resetting password', function () {
 
         $this->withHeader('Host', 'evil.example')->post(route('password.email'), ['email' => 'taylor@example.com']);
 
-        Notification::assertSentTo($this->user, ResetPassword::class, function (ResetPassword $notification) {
-            return str_starts_with($notification->toMail($this->user)->actionUrl, 'https://app.example.com/reset-password/');
-        });
+        Notification::assertSentTo($this->user, ResetPassword::class, fn (ResetPassword $notification) => str_starts_with($notification->toMail($this->user)->actionUrl, 'https://app.example.com/reset-password/'));
     });
 
     it('resets without signing in, and signs out every session', function () {

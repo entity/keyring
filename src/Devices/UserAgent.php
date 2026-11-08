@@ -8,7 +8,7 @@ namespace Keyring\Devices;
  */
 final class UserAgent
 {
-    private const BROWSERS = [
+    private const array BROWSERS = [
         'Edge' => '/Edg(e|A|iOS)?\//',
         'Opera' => '/OPR\/|Opera/',
         'Samsung Internet' => '/SamsungBrowser/',
@@ -17,7 +17,7 @@ final class UserAgent
         'Safari' => '/Safari\//',
     ];
 
-    private const PLATFORMS = [
+    private const array PLATFORMS = [
         'iPhone' => '/iPhone/',
         'iPad' => '/iPad/',
         'Android' => '/Android/',

@@ -264,7 +264,7 @@ class EmailChanges
     protected function apply(PendingChange $change): bool
     {
         $user = $change->user();
-        $user = $user === null ? null : $user->newQuery()->lockForUpdate()->find($user->getKey());
+        $user = $user?->newQuery()->lockForUpdate()->find($user->getKey());
 
         if (
             $user === null

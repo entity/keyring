@@ -68,7 +68,7 @@ class Password extends Factor implements PrimaryFactor
             Keyring::username() => Str::lower($request->string(Keyring::username())),
         ]);
 
-        if (! $user instanceof Model || ! filled($user->getAuthPassword())) {
+        if (! $user instanceof Model || blank($user->getAuthPassword())) {
             // Spend the same time hashing as a real check would.
             Hash::check($request->string('password'), self::$dummyHash ??= Hash::make(Str::random(32)));
 

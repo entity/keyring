@@ -2,20 +2,20 @@
 
 namespace Keyring\Console;
 
+use Illuminate\Console\Attributes\Description;
+use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\ServiceProvider;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 #[AsCommand(name: 'keyring:install')]
+#[Description('Install Keyring: config, migrations, a service provider and your registration action')]
+#[Signature('keyring:install
+        {--inertia= : Also publish Inertia pages for "vue" or "react"}
+        {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
 {
-    protected $signature = 'keyring:install
-        {--inertia= : Also publish Inertia pages for "vue" or "react"}
-        {--force : Overwrite files that already exist}';
-
-    protected $description = 'Install Keyring: config, migrations, a service provider and your registration action';
-
     public function handle(Filesystem $files): int
     {
         $this->callSilently('vendor:publish', ['--tag' => 'keyring-config', '--force' => $this->option('force')]);

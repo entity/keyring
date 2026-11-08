@@ -128,7 +128,7 @@ class Authenticator extends Model
     /**
      * @param  Builder<static>  $query
      */
-    public function scopeConfirmed(Builder $query): void
+    protected function scopeConfirmed(Builder $query): void
     {
         $query->whereNotNull('confirmed_at');
     }
