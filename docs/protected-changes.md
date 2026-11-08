@@ -172,11 +172,13 @@ Keyring runs your action as one of its own flows, so it may change the protected
 - at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)),
 - at most `max` characters (128),
 - no composition rules by default (no "one uppercase, one symbol"),
-- breached passwords rejected, when `uncompromised` is on,
+- breached passwords rejected, when `uncompromised` is on (Laravel lets them through when Have I Been Pwned can't be reached),
+- the most common passwords rejected always, from a list bundled with Keyring (the long-enough entries of SecLists' 10,000 most common, MIT licensed),
+- no passwords containing the site's name, or the user's name or email username (words of four characters or more),
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.
 
-`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses.
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:
 

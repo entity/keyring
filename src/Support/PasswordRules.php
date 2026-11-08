@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Facades\Keyring;
 
@@ -15,14 +16,23 @@ use Keyring\Facades\Keyring;
  */
 final class PasswordRules
 {
+    /** The most common passwords long enough to pass the length rules (from SecLists, MIT). */
+    private const string COMMON = __DIR__.'/../../resources/passwords/common.txt';
+
+    /** @var array<string, int>|null */
+    private static ?array $common = null;
+
     /**
      * The rules for a new password. Pass a callback to adjust the Password
-     * rule Keyring builds, e.g. fn (Password $rule) => $rule->mixedCase().
+     * rule Keyring builds, e.g. fn (Password $rule) => $rule->mixedCase(),
+     * and $context for words a password mustn't contain at registration,
+     * when there's no user yet (their name and email).
      *
      * @param  (Closure(Password): Password)|null  $adjust
+     * @param  list<mixed>  $context
      * @return list<mixed>
      */
-    public static function for((Authenticatable&Model)|null $user = null, ?Closure $adjust = null): array
+    public static function for((Authenticatable&Model)|null $user = null, ?Closure $adjust = null, array $context = []): array
     {
         $hasMfa = $user !== null && Keyring::for($user)->hasSecondFactor();
 
@@ -37,7 +47,47 @@ final class PasswordRules
             $rule = $adjust($rule);
         }
 
-        return ['required', 'string', 'confirmed', $rule, self::bcryptLimit()];
+        $context = [...$context, config('app.name'), $user?->getAttribute('name'), $user?->getAttribute(Keyring::username())];
+
+        return ['required', 'string', 'confirmed', $rule, self::notCommon(), self::withoutContext($context), self::bcryptLimit()];
+    }
+
+    /**
+     * The breached-password check needs Have I Been Pwned, and lets
+     * passwords through when it can't be reached. These are refused anyway
+     * (OWASP ASVS: at least the 3,000 most common).
+     */
+    private static function notCommon(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) {
+            self::$common ??= array_flip(file(self::COMMON, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
+
+            if (is_string($value) && isset(self::$common[Str::lower($value)])) {
+                $fail(__('keyring::keyring.password_common'));
+            }
+        };
+    }
+
+    /**
+     * Not the app's name, or the user's name or email username (OWASP ASVS).
+     * Words shorter than four characters don't count.
+     *
+     * @param  list<mixed>  $context
+     */
+    private static function withoutContext(array $context): Closure
+    {
+        $words = collect($context)
+            ->filter(fn (mixed $value) => is_string($value))
+            ->flatMap(fn (string $value) => preg_split('/[\s@._+-]+/', Str::lower(Str::before($value, '@'))) ?: [])
+            ->filter(fn (string $word) => mb_strlen($word) >= 4)
+            ->unique()
+            ->values();
+
+        return function (string $attribute, mixed $value, Closure $fail) use ($words) {
+            if (is_string($value) && $words->contains(fn (string $word) => str_contains(Str::lower($value), $word))) {
+                $fail(__('keyring::keyring.password_context'));
+            }
+        };
     }
 
     /**
