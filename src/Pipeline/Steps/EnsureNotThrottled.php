@@ -11,7 +11,7 @@ use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
 
 /**
- * Checks the factor's rate limits, counts failures and clears them on success.
+ * Checks the factor's rate limits, counts attempts and locks out repeated failures.
  */
 class EnsureNotThrottled
 {
@@ -42,12 +42,15 @@ class EnsureNotThrottled
 
         $context = $next($context);
 
+        $succeeded = in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true);
+
         foreach ($limits as $limit) {
-            if ($context->outcome === Outcome::Failed) {
-                $this->failed($limit);
-            } elseif (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true) && ! $this->shared($limit)) {
-                $this->limiter->clear($this->key($limit));
-            }
+            match (true) {
+                $context->outcome === Outcome::Failed => $this->failed($limit),
+                $succeeded && $this->shared($limit) => $this->limiter->decrement($this->key($limit), $limit->decaySeconds),
+                $succeeded => $this->limiter->clear($this->key($limit)),
+                default => null,
+            };
         }
 
         return $context;
@@ -74,8 +77,9 @@ class EnsureNotThrottled
     }
 
     /**
-     * Limits shared by every account (per IP) are never cleared by one
-     * account's success, or an attacker could reset them with their own login.
+     * Limits shared by every account (per IP). A success only takes back its
+     * own hit, so people signing in from one office IP don't use up its
+     * limit, and an attacker can't reset it with their own login.
      */
     protected function shared(Limit $limit): bool
     {

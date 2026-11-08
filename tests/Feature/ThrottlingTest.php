@@ -117,3 +117,16 @@ it('still escalates lockouts after a burst', function () {
     $this->travel(61)->seconds();
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
 });
+
+it('does not count successful sign-ins against the ip limit', function () {
+    config(['keyring.limits.per_ip' => 3, 'keyring.limits.per_account' => 100]);
+    account('taylor@example.com');
+
+    foreach (range(1, 5) as $signIn) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+        $this->post('/logout');
+    }
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])
+        ->assertSessionHasErrors(['email' => __('auth.failed')]);
+});
