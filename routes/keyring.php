@@ -15,8 +15,9 @@ use Keyring\Support\Features;
 $guard = config('keyring.guard');
 
 // Routes that read and then write Keyring's session state (pending logins,
-// code guesses, WebAuthn challenges) call block() to take the session lock,
-// so parallel requests can't each spend the same state.
+// code guesses, WebAuthn challenges, and the challenge pages that save them)
+// call block() to take the session lock, so parallel requests can't each
+// spend the same state or write back a stale copy of it.
 
 Route::middleware('guest:'.$guard)->group(function () {
     if (Features::enabled('registration')) {
@@ -35,7 +36,7 @@ Route::middleware('guest:'.$guard)->group(function () {
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->block()->name('login.store');
 
     Route::prefix('/login/challenge')->name('keyring.login.')->group(function () {
-        Route::get('/{factor?}', [ChallengeController::class, 'show'])->name('challenge');
+        Route::get('/{factor?}', [ChallengeController::class, 'show'])->block()->name('challenge');
         Route::post('/{factor}', [ChallengeController::class, 'verify'])->block()->name('verify');
         Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
     });
@@ -52,7 +53,7 @@ Route::middleware('guest:'.$guard)->group(function () {
 
 Route::middleware('auth:'.$guard)->group(function () {
     Route::prefix('/confirm')->name('keyring.confirm.')->group(function () {
-        Route::get('/{factor?}', [ChallengeController::class, 'show'])->name('challenge');
+        Route::get('/{factor?}', [ChallengeController::class, 'show'])->block()->name('challenge');
         Route::post('/{factor}', [ChallengeController::class, 'verify'])->block()->name('verify');
         Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
     });
@@ -68,7 +69,7 @@ Route::middleware('auth:'.$guard)->group(function () {
 
         Route::delete('/user/devices', [DeviceController::class, 'destroyOthers'])->name('keyring.devices.destroy-others');
         Route::delete('/user/devices/{device}', [DeviceController::class, 'destroy'])->name('keyring.devices.destroy');
-        Route::put('/user/password', [PasswordController::class, 'update'])->name('user-password.update');
+        Route::put('/user/password', [PasswordController::class, 'update'])->middleware('throttle:keyring')->name('user-password.update');
         Route::post('/user/email', [EmailChangeController::class, 'store'])->middleware('throttle:keyring')->name('keyring.email.store');
     });
 

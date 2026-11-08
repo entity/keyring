@@ -13,8 +13,15 @@ it('lets apps register the routes themselves, e.g. under a prefix', function () 
 it('takes the session lock on routes that spend session state', function (string $name) {
     expect(Route::getRoutes()->getByName($name)->locksFor())->toBeGreaterThan(0);
 })->with([
-    'login.store', 'keyring.login.factor', 'keyring.login.verify', 'keyring.login.send',
-    'keyring.confirm.verify', 'keyring.confirm.send', 'keyring.authenticators.confirm',
+    'login.store', 'keyring.login.factor', 'keyring.login.challenge', 'keyring.login.verify', 'keyring.login.send',
+    'keyring.confirm.challenge', 'keyring.confirm.verify', 'keyring.confirm.send', 'keyring.authenticators.confirm',
+]);
+
+it('limits routes that check a secret outside the sign in limits', function (string $name) {
+    expect(Route::getRoutes()->getByName($name)->gatherMiddleware())->toContain('throttle:keyring');
+})->with([
+    'register.store', 'password.email', 'password.update', 'user-password.update',
+    'keyring.authenticators.confirm', 'keyring.email.store', 'keyring.email.revert.store',
 ]);
 
 it('registers custom factors with extend, under the key they report', function () {
