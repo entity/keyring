@@ -28,6 +28,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "bun run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p tsconfig.stubs.json",
     "test": "bun test"
   },
@@ -39,6 +40,9 @@
     "vue": "^3.5.0"
   },
   "peerDependenciesMeta": {
+    "@inertiajs/core": {
+      "optional": true
+    },
     "@inertiajs/react": {
       "optional": true
     },

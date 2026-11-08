@@ -20,7 +20,7 @@ export default function SecurityKey({ challenge }: { challenge: Challenge }) {
       <p className="text-sm">
         {props.factor === 'passkey' ? 'Use your passkey to continue.' : `Insert and tap your security key (${props.authenticator.name}).`}
       </p>
-      {form.errors.credential && <p className="text-sm text-red-600">{form.errors.credential}</p>}
+      {form.errors.credential && <p role="alert" className="text-sm text-red-600">{form.errors.credential}</p>}
       <button type="button" disabled={form.processing} onClick={challenge.verifyKey} className="w-full rounded-md bg-black px-3 py-2 text-white disabled:opacity-50">Try again</button>
     </div>
   )

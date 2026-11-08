@@ -1,9 +1,9 @@
 import { useForm } from '@inertiajs/react'
 import { useEffect, useRef, useState, type ComponentType } from 'react'
-import { challengeFields, errorMessage, isAbort, keyCredential, passkeyCredential, sendCode, signInWith, switchTo } from './challenge'
+import { challengeFields, errorMessage, keyPrompt, passkeyLogin, sendCode, switchTo, type PasskeyLoginOptions, type PasskeyLoginState } from './challenge'
 import { routes } from './routes'
 import type { AuthenticatorSummary, ChallengeProps } from './types'
-import { supportsAutofill, supportsWebAuthn } from './webauthn'
+import { supportsWebAuthn } from './webauthn'
 
 export * from './index'
 export * from './challenge'
@@ -21,6 +21,7 @@ export type FactorComponent = ComponentType<{ challenge: Challenge }>
  */
 export function useChallenge(props: ChallengeProps, factors: Record<string, FactorComponent>) {
   const form = useForm<Record<string, any>>(challengeFields())
+  const [promptForKey] = useState(keyPrompt)
 
   function submit(data: Record<string, unknown> = {}) {
     form.transform(fields => ({ ...fields, ...data, authenticator: props.authenticator.id }))
@@ -32,7 +33,11 @@ export function useChallenge(props: ChallengeProps, factors: Record<string, Fact
     form.clearErrors()
 
     try {
-      submit({ credential: await keyCredential(props) })
+      const credential = await promptForKey(props)
+
+      if (credential) {
+        submit({ credential })
+      }
     } catch (error) {
       form.setError('credential', errorMessage(error))
     }
@@ -54,60 +59,24 @@ export function useChallenge(props: ChallengeProps, factors: Record<string, Fact
  * Sign in with a passkey, without a username. With `autofill`, passkeys are
  * offered in the email field's autofill (give it autoComplete="username webauthn").
  */
-export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember = () => false }: { autofill?: boolean, factor?: string, remember?: () => boolean } = {}) {
+export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember = () => false }: PasskeyLoginOptions = {}) {
   const [supported, setSupported] = useState(false)
-  const [processing, setProcessing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const current = useRef<AbortController | null>(null)
+  const [state, setState] = useState<PasskeyLoginState>({ processing: false, error: null })
+  const login = useRef<ReturnType<typeof passkeyLogin> | null>(null)
   const rememberRef = useRef(remember)
 
   useEffect(() => {
     rememberRef.current = remember
   })
 
-  async function signIn(conditional: boolean) {
-    current.current?.abort()
-    const controller = (current.current = new AbortController())
-    setError(null)
-    setProcessing(!conditional)
-
-    try {
-      const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
-
-      signInWith(factor, credential, rememberRef.current(), { onError: setError, onFinish: () => setProcessing(false) })
-    } catch (caught) {
-      // A newer request took over; it owns the state now.
-      if (current.current !== controller) {
-        return
-      }
-
-      setProcessing(false)
-
-      // Autofill gives up quietly (no passkeys, or the user typed instead), so
-      // only an explicit "Sign in with a passkey" shows an error.
-      if (!conditional && !isAbort(caught)) {
-        setError(errorMessage(caught))
-      }
-    }
-  }
-
   useEffect(() => {
-    let cancelled = false
     setSupported(supportsWebAuthn())
 
-    if (autofill) {
-      supportsAutofill().then(available => {
-        if (available && !cancelled) {
-          signIn(true)
-        }
-      })
-    }
+    const current = (login.current = passkeyLogin({ factor, autofill, remember: () => rememberRef.current() }, setState))
+    current.start()
 
-    return () => {
-      cancelled = true
-      current.current?.abort()
-    }
+    return () => current.stop()
   }, [autofill, factor])
 
-  return { supported, processing, error, signIn: () => signIn(false) }
+  return { supported, ...state, signIn: () => login.current?.signIn() }
 }

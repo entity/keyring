@@ -2,7 +2,7 @@ import { router } from '@inertiajs/core'
 import { json } from './http'
 import { routes } from './routes'
 import type { AuthenticatorSummary, ChallengeProps } from './types'
-import { getCredential } from './webauthn'
+import { getCredential, supportsAutofill } from './webauthn'
 
 /**
  * The framework-free half of the challenge page and passkey sign in. The
@@ -23,8 +23,32 @@ export function sendCode(props: ChallengeProps): void {
 }
 
 /** Run the browser prompt for the challenge's passkey or security key. */
-export function keyCredential(props: ChallengeProps): Promise<Record<string, any>> {
-  return getCredential(props.challenge.options)
+export function keyCredential(props: ChallengeProps, signal?: AbortSignal): Promise<Record<string, any>> {
+  return getCredential(props.challenge.options, { signal })
+}
+
+/**
+ * Make a key prompt for a challenge page. Browsers allow one prompt at a
+ * time, so a newer call aborts the one still open and takes over. Resolves to
+ * the credential, or null when the prompt was cancelled or replaced.
+ */
+export function keyPrompt(): (props: ChallengeProps) => Promise<Record<string, any> | null> {
+  let current: AbortController | null = null
+
+  return async (props) => {
+    current?.abort()
+    const controller = (current = new AbortController())
+
+    try {
+      return await keyCredential(props, controller.signal)
+    } catch (error) {
+      if (current !== controller || isAbort(error)) {
+        return null
+      }
+
+      throw error
+    }
+  }
 }
 
 /** Fetch usernameless options and run the browser prompt (or autofill). */
@@ -40,11 +64,99 @@ export function signInWith(factor: string, credential: Record<string, any>, reme
   })
 }
 
-/** The user closed the prompt, or a newer request replaced this one. */
+/**
+ * The user closed the prompt (browsers report that, and a timeout, as
+ * NotAllowedError), or a newer request replaced this one.
+ */
 export function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
+  return error instanceof DOMException && (error.name === 'AbortError' || error.name === 'NotAllowedError')
 }
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+export interface PasskeyLoginState {
+  processing: boolean
+  error: string | null
+}
+
+export interface PasskeyLoginOptions {
+  factor?: string
+  autofill?: boolean
+  remember?: () => boolean
+}
+
+/**
+ * A usernameless passkey sign in, without the framework: the Vue and React
+ * hooks only keep its state. The newest request owns the state. Autofill
+ * gives up quietly, and is offered again after an explicit attempt that
+ * didn't sign in. Call start() once mounted and stop() when unmounting.
+ */
+export function passkeyLogin(
+  { factor = 'passkey', autofill = false, remember = () => false }: PasskeyLoginOptions,
+  onChange: (state: PasskeyLoginState) => void,
+) {
+  const state: PasskeyLoginState = { processing: false, error: null }
+  let current: AbortController | null = null
+  let canAutofill = false
+  let stopped = false
+
+  function set(changes: Partial<PasskeyLoginState>): void {
+    if (!stopped) {
+      onChange({ ...Object.assign(state, changes) })
+    }
+  }
+
+  function offerAutofill(): void {
+    if (canAutofill && !stopped) {
+      run(true)
+    }
+  }
+
+  async function run(conditional: boolean): Promise<void> {
+    current?.abort()
+    const controller = (current = new AbortController())
+
+    if (!conditional) {
+      set({ processing: true, error: null })
+    }
+
+    try {
+      const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
+
+      signInWith(factor, credential, remember(), {
+        onError: (message) => {
+          set({ error: message })
+          offerAutofill()
+        },
+        onFinish: () => set({ processing: false }),
+      })
+    } catch (caught) {
+      if (current !== controller) {
+        return
+      }
+
+      set({ processing: false })
+
+      // Only an explicit "Sign in with a passkey" shows an error, and
+      // afterwards the email field offers passkeys again.
+      if (!conditional) {
+        set({ error: isAbort(caught) ? null : errorMessage(caught) })
+        offerAutofill()
+      }
+    }
+  }
+
+  return {
+    async start(): Promise<void> {
+      canAutofill = autofill && await supportsAutofill()
+      offerAutofill()
+    },
+    signIn: () => run(false),
+    stop(): void {
+      stopped = true
+      current?.abort()
+    },
+  }
 }

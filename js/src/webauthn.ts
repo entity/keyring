@@ -22,6 +22,8 @@ export async function supportsAutofill(): Promise<boolean> {
  * Run navigator.credentials.create() with options from enrollment.
  */
 export async function createCredential(options: Json): Promise<Json> {
+  ensureSupported()
+
   const publicKey = 'parseCreationOptionsFromJSON' in PublicKeyCredential
     ? PublicKeyCredential.parseCreationOptionsFromJSON(options as PublicKeyCredentialCreationOptionsJSON)
     : {
@@ -40,6 +42,8 @@ export async function createCredential(options: Json): Promise<Json> {
  * of a modal (the input needs autocomplete="username webauthn").
  */
 export async function getCredential(options: Json, { autofill = false, signal }: { autofill?: boolean, signal?: AbortSignal } = {}): Promise<Json> {
+  ensureSupported()
+
   const publicKey = 'parseRequestOptionsFromJSON' in PublicKeyCredential
     ? PublicKeyCredential.parseRequestOptionsFromJSON(options as PublicKeyCredentialRequestOptionsJSON)
     : {
@@ -49,6 +53,12 @@ export async function getCredential(options: Json, { autofill = false, signal }:
       } as PublicKeyCredentialRequestOptions
 
   return toJson(await navigator.credentials.get({ publicKey, mediation: autofill ? 'conditional' : undefined, signal }))
+}
+
+function ensureSupported(): void {
+  if (!supportsWebAuthn()) {
+    throw new Error('This browser does not support passkeys or security keys.')
+  }
 }
 
 function toJson(credential: Credential | null): Json {
