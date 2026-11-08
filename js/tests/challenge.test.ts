@@ -130,4 +130,24 @@ describe('passkeyLogin', () => {
     expect(prompts).toHaveLength(1)
     expect(states.every(state => state.error === null)).toBe(true)
   })
+
+  test('ignores a refused autofill sign in once an explicit one has taken over', async () => {
+    const states: Array<{ processing: boolean, error: string | null }> = []
+    const login = passkeyLogin({ autofill: true }, state => states.push(state))
+    await login.start()
+    await tick()
+
+    // Autofill picks a passkey; while it's being checked, the user clicks the button.
+    prompts[0].resolve({ id: 'autofill' })
+    await tick()
+    login.signIn()
+    await tick()
+
+    posted[0].callbacks.onError({ credential: 'Refused.' })
+    posted[0].callbacks.onFinish()
+
+    expect(prompts.map(prompt => prompt.autofill)).toEqual([true, false])
+    expect(prompts[1].signal?.aborted).toBe(false)
+    expect(states.at(-1)).toEqual({ processing: true, error: null })
+  })
 })

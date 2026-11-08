@@ -198,7 +198,7 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 | `factor` | The factor key, `passkey` by default. |
 | `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. The same in Vue and React, for example `remember: () => form.data.remember` in React. |
 
-It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`. Closing the prompt isn't an error. After an explicit sign in that didn't work, the email field offers passkeys again.
+It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`. `processing` is also true while a passkey picked from autofill is being checked. Closing the prompt isn't an error. After an explicit sign in that didn't work, the email field offers passkeys again.
 
 ## Challenge Helpers Without Vue or React
 
@@ -214,7 +214,7 @@ The Vue and React bindings are thin layers over these helpers, exported from `@e
 | `passkeyCredential(factor, { autofill?, signal? })` | Fetches the usernameless options and runs the prompt (or autofill). |
 | `signInWith(factor, credential, remember, { onError, onFinish })` | Posts a credential from `passkeyCredential()` to sign in. `onError` gets the first error message. |
 | `passkeyLogin(options, onChange)` | The state behind `usePasskeyLogin()`: call `start()` once mounted, `signIn()` for the button and `stop()` when unmounting. `onChange` gets `{ processing, error }`. |
-| `isAbort(error)` | Whether the error means the user closed the prompt (or it timed out), or a newer request replaced it. |
+| `isAbort(error)` | Whether the error means the user closed the prompt (or it timed out), or a newer request replaced it. Browsers report those as `NotAllowedError`, which they also throw when WebAuthn isn't allowed at all, such as in a cross-origin iframe without the `publickey-credentials-get` permission. If a prompt never appears, check that first. |
 | `errorMessage(error)` | A readable message for any thrown value. |
 
 ```ts
