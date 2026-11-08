@@ -13,6 +13,7 @@ class VerificationCode extends Notification
     public function __construct(
         #[\SensitiveParameter] public readonly string $code,
         public readonly int $ttl,
+        public readonly bool $enrolling = false,
     ) {}
 
     /**
@@ -30,6 +31,8 @@ class VerificationCode extends Notification
             ->line(__('Your verification code is:'))
             ->line('**'.trim(chunk_split($this->code, 4, ' ')).'**')
             ->line(__('It expires in :minutes minutes.', ['minutes' => intdiv($this->ttl, 60)]))
-            ->line(__('If you didn\'t try to sign in, someone may know your password. Please change it.'));
+            ->line($this->enrolling
+                ? __('If you didn\'t ask to add this email as a sign-in method, someone may be signed in to your account. Please change your password.')
+                : __('If you didn\'t try to sign in, someone may know your password. Please change it.'));
     }
 }

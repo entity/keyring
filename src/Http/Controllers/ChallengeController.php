@@ -96,10 +96,10 @@ class ChallengeController
         $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
         abort_unless($factor instanceof SendsCodes, 404);
 
-        $authenticator = $this->authenticatorFor($request, $attempt, $factor->key());
+        $authenticator = $this->authenticatorFor($request, $attempt, $factor->key()) ?? abort(404);
         $key = 'keyring-send:'.$attempt->id;
 
-        if ($authenticator === null || $limiter->tooManyAttempts($key, 3)) {
+        if ($limiter->tooManyAttempts($key, 3)) {
             throw ValidationException::withMessages([
                 'code' => __('auth.throttle', ['seconds' => $limiter->availableIn($key), 'minutes' => ceil($limiter->availableIn($key) / 60)]),
             ]);

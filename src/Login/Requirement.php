@@ -74,10 +74,6 @@ final readonly class Requirement
     }
 
     /**
-     * Only apply this requirement when the user has enrolled enough factors to
-     * meet it. Otherwise one factor is enough. This is Fortify's behaviour.
-     */
-    /**
      * Users who have a phishing-resistant factor (a passkey or security key)
      * must use one. "Try another way" won't offer weaker fallbacks (OWASP).
      */
@@ -87,6 +83,10 @@ final readonly class Requirement
         return clone ($this, ['noDowngrade' => true]);
     }
 
+    /**
+     * Only apply this requirement when the user has enrolled enough factors to
+     * meet it. Otherwise one factor is enough. This is Fortify's behaviour.
+     */
     #[\NoDiscard]
     public function ifEnrolled(): static
     {

@@ -25,7 +25,7 @@ class ResetPassword extends Notification
             ->subject(__('Reset your password'))
             ->line(__('Someone asked to reset the password for your account.'))
             ->action(__('Reset password'), Url::route('password.reset', ['token' => $this->token, 'email' => $email]))
-            ->line(__('This link expires in :count minutes.', ['count' => config('auth.passwords.'.config('auth.defaults.passwords').'.expire', 60)]))
+            ->line(__('This link expires in :count minutes.', ['count' => config('auth.passwords.'.(config('keyring.passwords.broker') ?? config('auth.defaults.passwords')).'.expire', 60)]))
             ->line(__('If you didn\'t ask for this, you can ignore this email. Your password won\'t change.'));
     }
 }
