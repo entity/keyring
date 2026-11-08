@@ -1,0 +1,81 @@
+<?php
+
+namespace Keyring\Http\Controllers;
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Keyring\Changes\EmailChanges;
+use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\KeyringManager;
+use Keyring\Models\PendingChange;
+
+class EmailChangeController
+{
+    use ChoosesFormat;
+
+    public function __construct(
+        protected EmailChanges $changes,
+        protected KeyringManager $keyring,
+    ) {}
+
+    /**
+     * Ask to change the email. Always answers the same way, whether or not
+     * the address belongs to someone else.
+     */
+    public function store(Request $request): mixed
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'string', 'email', 'max:255'],
+        ]);
+
+        $this->changes->request($request->user(), $validated['email']);
+
+        return $this->respond($request, 'email-change-requested');
+    }
+
+    public function show(Request $request): JsonResponse
+    {
+        $change = $this->changes->pending($request->user());
+
+        return new JsonResponse(['pending' => $change === null ? null : [
+            'email' => $change->value,
+            'confirmed' => $change->confirmed_at !== null,
+            'needsCurrentConfirmation' => $change->needsCurrentConfirmation(),
+            'expiresAt' => $change->expires_at->toIso8601String(),
+        ]]);
+    }
+
+    public function destroy(Request $request): mixed
+    {
+        $this->changes->cancel($request->user());
+
+        return $this->respond($request, 'email-change-cancelled');
+    }
+
+    /**
+     * A confirmation link from either address. Works signed out, since it may
+     * open in another browser.
+     */
+    public function confirm(string $change, string $token): mixed
+    {
+        $change = PendingChange::query()->findOrFail($change);
+        $applied = $this->changes->confirm($change, $token);
+
+        return redirect($this->keyring->guard()->check() ? config('keyring.home') : route('login'))
+            ->with('status', $applied ? 'email-changed' : ($change->isPending() ? 'email-change-confirmed' : 'email-change-invalid'));
+    }
+
+    public function revert(string $change, string $token): mixed
+    {
+        $change = PendingChange::query()->findOrFail($change);
+        $reverted = $this->changes->revert($change, $token);
+
+        return redirect()->route($reverted ? 'password.request' : 'login')
+            ->with('status', $reverted ? 'email-change-reverted' : 'email-change-invalid');
+    }
+
+    protected function respond(Request $request, string $status): mixed
+    {
+        return $this->wantsJson($request) ? new JsonResponse(['status' => $status]) : back()->with('status', $status);
+    }
+}

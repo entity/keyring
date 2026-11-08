@@ -123,6 +123,44 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Protected Attributes
+    |--------------------------------------------------------------------------
+    |
+    | These user attributes can only change through Keyring's flows (email
+    | change with confirmation, password change, password reset). Anything
+    | else throws, unless wrapped in Keyring::withoutProtection().
+    |
+    */
+
+    'protected' => ['email', 'password'],
+
+    'email_changes' => [
+        'expire' => '24h',
+        'revertable_for' => '7d',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Passwords
+    |--------------------------------------------------------------------------
+    |
+    | OWASP: at least 8 characters with MFA, 15 without, allow at least 64,
+    | any characters, no composition rules, and block breached passwords.
+    | Bcrypt silently ignores anything past 72 bytes, so with bcrypt longer
+    | passwords are rejected rather than truncated.
+    |
+    */
+
+    'passwords' => [
+        'min_with_mfa' => 8,
+        'min_without_mfa' => 15,
+        'max' => 128,
+        'uncompromised' => true,
+        'broker' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pending Logins
     |--------------------------------------------------------------------------
     |

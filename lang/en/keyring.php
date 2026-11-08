@@ -8,5 +8,6 @@ return [
     'enrollment_expired' => 'Setting this up took too long. Please start again.',
     'signed_out' => 'You\'ve been signed out. Please sign in again.',
     'device_reported' => 'We\'ve signed that device out. We recommend changing your password now.',
+    'reset_link_sent' => 'If that address has an account, we\'ve emailed a link to reset the password.',
     'unavailable' => 'Your account needs a sign-in method that isn\'t set up. Please contact support.',
 ];

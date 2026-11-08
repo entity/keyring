@@ -25,6 +25,7 @@ abstract class TestCase extends Orchestra
     {
         $app['config']->set('database.default', 'testing');
         $app['config']->set('auth.providers.users.model', User::class);
+        $app['config']->set('keyring.passwords.uncompromised', false);
     }
 
     protected function defineDatabaseMigrations(): void
