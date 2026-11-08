@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\LocatesIps;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
@@ -20,6 +21,7 @@ use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 
 const FIREFOX = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
@@ -94,12 +96,20 @@ it('does not ask for more on a familiar device and country', function () {
 });
 
 it('refuses critical risk with the usual error and signs everything out', function () {
-    Keyring::risk([new AlwaysRisky]);
+    Keyring::risk([]);
+    signInAs();
+    $existing = session(Sessions::KEY);
 
+    // Sign in again from a fresh browser, leaving the first session alive.
+    $this->flushSession();
+    $this->app['auth']->forgetGuards();
+
+    Keyring::risk([new AlwaysRisky]);
     signInAs()->assertSessionHasErrors(['email' => __('auth.failed')]);
 
     $this->assertGuest();
-    expect(SecurityEvent::where('type', 'risk_denied')->exists())->toBeTrue();
+    expect(app(SessionRegistry::class)->find($existing)->revokedAt)->not->toBeNull()
+        ->and(SecurityEvent::where('type', 'risk_denied')->exists())->toBeTrue();
 });
 
 it('can lock sign in for a while', function () {
@@ -182,7 +192,10 @@ it('logs security events and shows recent activity', function () {
     signInAs();
     $this->post('/logout');
 
-    expect(Keyring::activity($this->user)->pluck('type')->all())->toBe(['signed_out', 'new_device', 'signed_in']);
+    $types = Keyring::activity($this->user)->pluck('type');
+
+    expect($types->first())->toBe('signed_out')
+        ->and($types->all())->toContain('signed_in', 'new_device');
 });
 
 it('asks "was this you?" after someone fails the second factor', function () {

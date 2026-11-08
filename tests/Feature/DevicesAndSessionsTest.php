@@ -122,7 +122,18 @@ it('signs out everywhere else', function (string $driver) {
     login();
     $current = session(Sessions::KEY);
 
-    $other = new RegisteredSession('other', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, time(), time(), time() + 3600);
+    $other = new RegisteredSession(
+        id: 'other',
+        userId: (string) $this->user->id,
+        guard: 'web',
+        deviceId: null,
+        assurance: Assurance::AAL1,
+        ip: null,
+        userAgent: null,
+        authenticatedAt: now()->getTimestamp(),
+        lastActivityAt: now()->getTimestamp(),
+        expiresAt: now()->addHour()->getTimestamp(),
+    );
     $registry->save($other);
     expect($registry->forUser($this->user))->toHaveCount(2);
 

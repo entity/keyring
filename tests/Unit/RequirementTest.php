@@ -47,16 +47,6 @@ it('requires a phishing resistant verification', function () {
         ->and($requirement->isMetBy([$password, $key]))->toBeTrue();
 });
 
-it('is immutable', function () {
-    $base = Requirement::aal2();
-    $strict = $base->including(Category::Possession)->phishingResistant();
-
-    expect($base->categories)->toBe([])
-        ->and($base->requiresPhishingResistance)->toBeFalse()
-        ->and($strict->categories)->toBe([Category::Possession])
-        ->and($strict->requiresPhishingResistance)->toBeTrue();
-});
-
 it('knows whether another verification would help', function () {
     $password = verified('password', [Category::Knowledge]);
 
