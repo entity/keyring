@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Factor as FactorContract;
+use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -82,6 +83,26 @@ abstract class Factor implements FactorContract
             phishingResistant: $phishingResistant ?? $this->phishingResistant($authenticator),
             at: now()->getTimestamp(),
         );
+    }
+
+    /**
+     * A new, unsaved authenticator of the configured model.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    protected function makeAuthenticator(array $attributes): Authenticator
+    {
+        $model = Keyring::authenticatorModel();
+
+        return new $model(['factor' => $this->key(), ...$attributes]);
+    }
+
+    /**
+     * Whether a user may have more than one of these.
+     */
+    public function multiple(): bool
+    {
+        return true;
     }
 
     /**

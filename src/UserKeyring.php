@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\Factor;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
@@ -94,6 +95,25 @@ class UserKeyring
                 $authenticator->factor()->phishingResistant($authenticator),
             ))
             ->values();
+    }
+
+    /**
+     * The keyring as it would be without the given authenticator.
+     */
+    public function without(Authenticator $authenticator): self
+    {
+        $keyring = new self($this->user);
+        $keyring->authenticators = $this->all()->reject(fn (Authenticator $other) => $other->id === $authenticator->id)->values();
+
+        return $keyring;
+    }
+
+    /**
+     * Whether any authenticator can start a login on its own.
+     */
+    public function canSignIn(): bool
+    {
+        return $this->all()->contains(fn (Authenticator $authenticator) => $authenticator->factor() instanceof PrimaryFactor);
     }
 
     public function refresh(): static

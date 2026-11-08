@@ -120,11 +120,22 @@ class KeyringManager
         return $this;
     }
 
-    public function requirementFor(Authenticatable&Model $user, Attempt $attempt): Requirement
+    /**
+     * What the policy asks of this user, before considering what they've enrolled.
+     */
+    public function policy(Authenticatable&Model $user, Attempt $attempt): Requirement
     {
-        $requirement = $this->policy instanceof Closure
+        return $this->policy instanceof Closure
             ? ($this->policy)($user, $attempt)
             : $this->policy;
+    }
+
+    /**
+     * What this user must prove to complete the attempt.
+     */
+    public function requirementFor(Authenticatable&Model $user, Attempt $attempt): Requirement
+    {
+        $requirement = $this->policy($user, $attempt);
 
         if ($requirement->onlyIfEnrolled && ! $attempt->keyring()->canMeet($requirement)) {
             return Requirement::aal1();

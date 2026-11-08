@@ -2,8 +2,12 @@
 
 namespace Keyring\Factors;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Keyring\Contracts\Enrollable;
+use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Category;
 use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Login\Attempt;
@@ -14,7 +18,7 @@ use Keyring\Models\Authenticator;
  * Single-use codes the user saved when setting up their first second factor.
  * Stored as keyed hashes, never in plain text.
  */
-class RecoveryCodes extends Factor
+class RecoveryCodes extends Factor implements Enrollable
 {
     public function __construct(
         protected int $count = 8,
@@ -61,6 +65,39 @@ class RecoveryCodes extends Factor
     public function present(Authenticator $authenticator): array
     {
         return [...parent::present($authenticator), 'remaining' => count($this->hashes($authenticator))];
+    }
+
+    public function multiple(): bool
+    {
+        return false;
+    }
+
+    public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment
+    {
+        ['codes' => $codes, 'secret' => $secret] = $this->generate();
+
+        return Enrollment::make($this->key(), ['codes' => $codes], ['secret' => $secret]);
+    }
+
+    public function enrollmentRules(): array
+    {
+        return [];
+    }
+
+    /**
+     * Confirming means "I've saved these". New codes replace the old ones.
+     */
+    public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
+    {
+        return $this->make($enrollment->state('secret'));
+    }
+
+    /**
+     * A recovery codes authenticator for the given secret.
+     */
+    public function make(string $secret): Authenticator
+    {
+        return $this->makeAuthenticator(['name' => __('Recovery codes'), 'secret' => $secret]);
     }
 
     /**

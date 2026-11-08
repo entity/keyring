@@ -2,8 +2,17 @@
 
 namespace Keyring\Factors;
 
+use BaconQrCode\Renderer\Image\SvgImageBackEnd;
+use BaconQrCode\Renderer\ImageRenderer;
+use BaconQrCode\Renderer\RendererStyle\RendererStyle;
+use BaconQrCode\Writer;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Keyring\Contracts\Enrollable;
+use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Category;
+use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -15,7 +24,7 @@ use PragmaRX\Google2FA\Google2FA;
  * The last accepted time step is stored on the authenticator, so a code can't
  * be replayed within its window.
  */
-class Totp extends Factor
+class Totp extends Factor implements Enrollable
 {
     public function __construct(
         protected Google2FA $engine,
@@ -64,6 +73,51 @@ class Totp extends Factor
         $authenticator->withMeta('last_timestep', (int) $timestep)->save();
 
         return $this->verified($authenticator);
+    }
+
+    public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment
+    {
+        $secret = $this->engine->generateSecretKey(32);
+        $url = $this->engine->getQRCodeUrl(config('app.name'), (string) $user->getAttribute(Keyring::username()), $secret);
+
+        return Enrollment::make($this->key(), [
+            'secret' => $secret,
+            'url' => $url,
+            'qr' => $this->qr($url),
+        ], [
+            'secret' => $secret,
+            'name' => $request->string('name')->trim()->limit(64, '')->toString() ?: __('Authenticator app'),
+        ]);
+    }
+
+    public function enrollmentRules(): array
+    {
+        return $this->rules();
+    }
+
+    public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
+    {
+        $code = $this->normalizeCode((string) $request->input('code'));
+        $timestep = ctype_digit($code)
+            ? $this->engine->verifyKeyNewer($enrollment->state('secret'), $code, 0, $this->window)
+            : false;
+
+        if ($timestep === false) {
+            return null;
+        }
+
+        return $this->makeAuthenticator([
+            'name' => $enrollment->state('name'),
+            'secret' => $enrollment->state('secret'),
+            'meta' => ['last_timestep' => (int) $timestep],
+        ]);
+    }
+
+    protected function qr(string $url): string
+    {
+        $svg = new Writer(new ImageRenderer(new RendererStyle(192, 0), new SvgImageBackEnd))->writeString($url);
+
+        return trim(substr($svg, strpos($svg, "\n") + 1));
     }
 
     public function engine(): Google2FA

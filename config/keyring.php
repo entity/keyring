@@ -47,6 +47,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Managing Authenticators
+    |--------------------------------------------------------------------------
+    |
+    | Middleware for adding, changing and removing authenticators. Changing
+    | how someone signs in needs a recent verification (OWASP).
+    |
+    */
+
+    'manage_middleware' => ['auth', 'keyring.fresh:15m'],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pending Logins
     |--------------------------------------------------------------------------
     |

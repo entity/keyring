@@ -6,6 +6,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Contracts\Responses;
+use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
@@ -32,6 +33,7 @@ class KeyringServiceProvider extends ServiceProvider
         $this->app->singleton(KeyringManager::class);
 
         $this->app->scoped(AttemptStore::class, fn (Application $app) => new AttemptStore($app['session.store']));
+        $this->app->scoped(EnrollmentStore::class, fn (Application $app) => new EnrollmentStore($app['session.store']));
         $this->app->scoped(SessionAssurance::class, fn (Application $app) => new SessionAssurance($app['session.store']));
     }
 
