@@ -38,6 +38,8 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
    php artisan keyring:import fortify
    ```
 
+   It exits non-zero if any factor couldn't be imported. Sort those out before you go on. See [Importing Two Factor Data](#importing-two-factor-data).
+
 4. Remove `laravel/fortify`, its service provider (`App\Providers\FortifyServiceProvider` in `bootstrap/providers.php`), `config/fortify.php` and any Fortify actions you no longer need. Keyring registers routes with the same names as Fortify's (`login`, `logout`, `register`, `password.request` and so on), so both can't be installed at once without clashing.
 
 5. Move your settings into `config/keyring.php` and `app/Providers/KeyringServiceProvider.php`, using the tables below.
@@ -62,13 +64,16 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
 
 Things to know:
 
-- It reads your guard's user model, and needs `APP_KEY` to be the key Fortify encrypted the secrets with. Rows it can't decrypt are skipped and counted.
-- Only users with `two_factor_confirmed_at` set are imported. If you never turned on Fortify's `confirm` option, that column is empty for everyone, so pass `--unconfirmed` to import every user with a secret.
+- It reads your guard's user model, and decrypts with Fortify's encrypter: the one you gave `Fortify::encryptUsing()`, otherwise Eloquent's, otherwise `APP_KEY`. That has to be what Fortify encrypted the secrets with.
+- A user has two factor when Fortify would challenge them. With Fortify's `confirm` option on, that takes `two_factor_confirmed_at`. With it off, the default for `Features::twoFactorAuthentication()` without options, a secret is enough. The command reads this from `config/fortify.php`. If it can't tell (the file is gone, or two factor isn't in its `features`), rows with no `two_factor_confirmed_at` fail until you pass `--fortify-confirm=on` or `--fortify-confirm=off`.
+- Every row is reported as imported, already imported, skipped or failed. Skipped and failed rows are listed by user id with the reason.
+- Skipped rows are secrets Fortify wasn't enforcing: `confirm` on and never confirmed. Pass `--unconfirmed` to import them anyway.
+- The command exits non-zero when anything failed: a secret or recovery codes it can't decrypt or read, or a passkey with no user or an unreadable credential. Those users' factors are not imported. A user whose two factor data failed gets an authenticator app that can't be verified, so they're still challenged instead of signing in with just a password. Usually the cause is the wrong key: fix it and run the command again, and the real one replaces it. If the data is gone, delete that authenticator (`Authenticator::where('meta->import_failed_from', 'fortify')`) and the user enrolls again.
 - An imported authenticator app only becomes the default when the user doesn't already have one.
-- It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Already imported authenticator apps and passkeys are skipped.
+- It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Already imported authenticator apps and passkeys are left alone and counted as already imported.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
 - Recovery codes become case-insensitive, and spaces and dashes in them are ignored.
-- `--dry-run` shows the counts without writing anything.
+- `--dry-run` reports the same outcome and exit code without writing anything.
 
 ## How Fortify Concepts Map
 
