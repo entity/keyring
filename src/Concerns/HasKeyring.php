@@ -4,7 +4,7 @@ namespace Keyring\Concerns;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Keyring\Changes\EmailChanges;
+use Keyring\Changes\ReservedAddresses;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
@@ -25,8 +25,11 @@ trait HasKeyring
      */
     public static function bootHasKeyring(): void
     {
-        static::updating(fn (self $user) => Keyring::guardProtectedAttributes($user));
-        static::saving(fn (self $user) => app(EmailChanges::class)->guardReserved($user));
+        static::creating(fn (self $user) => app(ReservedAddresses::class)->guard($user));
+        static::updating(function (self $user) {
+            Keyring::guardProtectedAttributes($user);
+            app(ReservedAddresses::class)->guard($user);
+        });
 
         // Clean up once the user is really gone (not when soft deleted), so a
         // passkey can be registered again on a new account.

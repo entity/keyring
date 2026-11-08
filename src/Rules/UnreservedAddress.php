@@ -4,7 +4,7 @@ namespace Keyring\Rules;
 
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
-use Keyring\Changes\EmailChanges;
+use Keyring\Changes\ReservedAddresses;
 
 /**
  * Refuses an address that's reserved for its previous owner while their
@@ -15,7 +15,7 @@ class UnreservedAddress implements ValidationRule
 {
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        if (is_string($value) && app(EmailChanges::class)->reserved($value)) {
+        if (is_string($value) && app(ReservedAddresses::class)->has($value)) {
             $fail('validation.unique')->translate();
         }
     }
