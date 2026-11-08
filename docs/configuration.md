@@ -16,6 +16,7 @@
 - [Security Log](#security-log)
 - [Security Emails](#security-emails)
 - [Pending Logins, Timebox and Rate Limits](#pending-logins-timebox-and-rate-limits)
+- [Messages and Translations](#messages-and-translations)
 - [The Keyring Facade](#the-keyring-facade)
 
 ## Introduction
@@ -57,7 +58,6 @@ Set any of these to `false` to drop their routes. Sign in, challenges, step-up, 
 
 ```php
 'home' => '/dashboard',
-
 ```
 
 `home` is where users go after signing in or confirming, when there's no intended URL. It's also used after email verification (with `?verified=1` added) and after confirming an email change while signed in.
@@ -106,10 +106,10 @@ See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout`
 ## Managing Authenticators
 
 ```php
-'manage_middleware' => ['auth', 'keyring.fresh:15m'],
+'manage_middleware' => ['keyring.fresh:15m'],
 ```
 
-The middleware for adding, renaming and removing authenticators, revoking devices, changing the password and starting an email change. By default these need a verification in the last 15 minutes. See [Step-Up](step-up.md#fresh-verification).
+Extra middleware for adding, renaming and removing authenticators, revoking devices, changing the password and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default these routes need a verification in the last 15 minutes. See [Step-Up](step-up.md#fresh-verification).
 
 ## Devices
 
@@ -197,10 +197,11 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 'events' => [
     'enabled' => true,
     'keep_for' => '180d',
+    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
 ],
 ```
 
-See [Security Log & Emails](security-log-and-emails.md). Turning the log off also turns off "was this you?" alerts and the `RepeatedFactorFailures` risk signal, since both read from it.
+`keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in. See [Security Log & Emails](security-log-and-emails.md). Turning the log off also turns off "was this you?" alerts and the `RepeatedFactorFailures` risk signal, since both read from it.
 
 ## Security Emails
 
@@ -213,7 +214,7 @@ The security emails to send. `Keyring::notify()` in your provider overrides this
 ## Pending Logins, Timebox and Rate Limits
 
 ```php
-'pending_login_ttl' => 600,
+'pending_login_ttl' => '10m',
 
 'timebox' => 250_000,
 
@@ -223,11 +224,37 @@ The security emails to send. `Keyring::notify()` in your provider overrides this
 ],
 ```
 
-`pending_login_ttl` is how many seconds a half-finished login or confirmation stays valid. It's also the `expiresAt` shown on the challenge page.
+`pending_login_ttl` is how long a half-finished login or confirmation stays valid, as a [duration](#durations). It's also the `expiresAt` shown on the challenge page.
 
 `timebox` is the minimum time, in microseconds, that a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
 
 `limits` are the default attempts per minute for each factor, per account and per IP address. See [Rate Limiting](security.md#rate-limiting).
+
+Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
+
+```php
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+
+RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
+```
+
+## Messages and Translations
+
+Keyring's text lives in three translation files under the `keyring::` namespace:
+
+| File | Holds |
+|---|---|
+| `lang/en/keyring.php` | Validation and error messages, such as `keyring::keyring.invalid`. |
+| `lang/en/status.php` | The message for each status slug, such as `keyring::status.password-updated`. See [Status Responses](sign-in-flow.md#status-responses). |
+| `lang/en/notifications.php` | The copy for every email Keyring sends. See [Customising the Copy](security-log-and-emails.md#customising-the-copy). |
+
+Publish them to change the wording or add languages:
+
+```bash
+php artisan vendor:publish --tag=keyring-lang
+```
 
 ## The Keyring Facade
 
@@ -236,16 +263,20 @@ The security emails to send. `Keyring::notify()` in your provider overrides this
 | Method | Does |
 |---|---|
 | `Keyring::factors([...])` | Sets the factors users can use. See [Factors](factors.md). |
-| `Keyring::extend($key, $resolver)` | Adds one more factor from a closure. |
+| `Keyring::extend($key, $resolver)` | Adds one more factor from a closure. Its `key()` must match `$key`. |
 | `Keyring::require($requirement)` | Sets the policy. See [Policies](policies.md). |
 | `Keyring::pipeline($callback)` | Changes the verification steps. See [The Pipeline](sign-in-flow.md#the-verification-pipeline). |
 | `Keyring::respondWith($contract, $implementation)` | Swaps a response. See [Responses](sign-in-flow.md#responses). |
 | `Keyring::page($name, $component)` | Changes the component a page renders. See [Pages](sign-in-flow.md#pages). |
-| `Keyring::risk([...])->respond(...)` | Configures risk signals and actions. See [Risk](risk.md). |
-| `Keyring::notify([...])` | Turns security emails on. See [Security Emails](security-log-and-emails.md#security-emails). |
+| `Keyring::risk([...])->respond(...)` | Configures risk signals and actions. `Keyring::risk()->push(...)` adds signals to the defaults. See [Risk](risk.md). |
+| `Keyring::notify([...])` | Turns security emails on. Unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
+| `Keyring::passwordRulesUsing($callback)` | Adjusts the password rule. See [Password Rules](protected-changes.md#password-rules). |
 | `Keyring::createUsersUsing($action)` | Sets the registration action. |
+| `Keyring::routes()` | Registers Keyring's routes yourself, when `routes` is `false`. See [Routes](#routes). |
 | `Keyring::useAuthenticatorModel($model)` | Uses your own subclass of `Keyring\Models\Authenticator`. |
+| `Keyring::useDeviceModel($model)` | Uses your own subclass of `Keyring\Models\Device`. See [Your Own Device Model](devices-and-sessions.md#your-own-device-model). |
 | `Keyring::withoutProtection($callback, reason: ...)` | Changes protected attributes outside Keyring's flows. See [Protected Changes](protected-changes.md#bypassing-protection). |
 | `Keyring::activity($user, $limit = 25)` | Recent security log entries. |
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |
+| `Keyring::user()` | The user signed in to Keyring's guard. Throws an `AuthenticationException` when there isn't one. |
 | `Keyring::fake()` | Passes or fails factors in tests. See [Testing](testing.md). |

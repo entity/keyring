@@ -7,6 +7,7 @@
     - [React](#react)
     - [Factor Components](#factor-components)
 - [Signing In With a Passkey](#signing-in-with-a-passkey)
+- [Challenge Helpers Without Vue or React](#challenge-helpers-without-vue-or-react)
 - [Managing Authenticators](#managing-authenticators)
 - [Handling Step-Up in JavaScript](#handling-step-up-in-javascript)
 - [JSON Requests](#json-requests)
@@ -31,6 +32,7 @@ It has three entry points:
 | Import | Contains |
 |---|---|
 | `@entity/keyring` | WebAuthn helpers, enrollment helpers, `json()`, routes and types. No framework code. |
+| `@entity/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
 | `@entity/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@entity/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
 
@@ -100,7 +102,8 @@ const challenge = reactive(useChallenge(props, factors))
 | | |
 |---|---|
 | `form` | An Inertia form with `code`, `password` and `trust`. |
-| `component` | The component for `props.factor` (a computed ref). |
+| `props` | The page props you passed in. |
+| `component` | The component for `props.factor` (a computed ref), or `undefined` when the map has none. |
 | `submit(data?)` | Posts the form, plus `data` and the authenticator ID, to the verify route. Clears `code` and `password` afterwards. |
 | `switchTo(option)` | Visits the challenge page for one of `props.alternatives`. |
 | `send()` | Asks the server to send a code, for factors that send one. |
@@ -108,6 +111,8 @@ const challenge = reactive(useChallenge(props, factors))
 | `alternatives` | `props.alternatives`, as a computed ref. |
 
 The Vue factor components receive `challenge` and `page` (the page props).
+
+The published page falls back to a built-in component when a factor has none in the map: `SecurityKey` when the challenge has WebAuthn `options`, otherwise `Code`.
 
 ### React
 
@@ -141,11 +146,11 @@ export default function ChallengePage(props: ChallengeProps) {
 }
 ```
 
-The React hook returns the same as Vue's, except `Component` (capitalised) instead of `component`, plain values instead of refs, and the page props as `props`. React factor components receive only `challenge` (typed `Challenge`), and read the page from `challenge.props`.
+The React hook returns the same as Vue's, except `Component` (capitalised) instead of `component`, and plain values instead of refs. React factor components receive only `challenge` (typed `Challenge`), and read the page from `challenge.props`.
 
 ### Factor Components
 
-A factor component shows the right input and calls the challenge's methods. A minimal code factor in Vue:
+A factor component shows the right input and calls the challenge's methods. Factors that send codes include `sent` in their challenge props, so a component can tell whether to show a "send code" button first. A minimal code factor in Vue:
 
 ```vue
 <script setup lang="ts">
@@ -155,7 +160,7 @@ const { challenge, page } = defineProps<{ challenge: any, page: ChallengeProps }
 </script>
 
 <template>
-  <button v-if="page.factor === 'email-code' && !page.challenge.sent" @click="challenge.send()">Send code</button>
+  <button v-if="'sent' in page.challenge && !page.challenge.sent" @click="challenge.send()">Send code</button>
 
   <form v-else @submit.prevent="challenge.submit()">
     <input v-model="challenge.form.code" autocomplete="one-time-code" inputmode="numeric">
@@ -165,7 +170,7 @@ const { challenge, page } = defineProps<{ challenge: any, page: ChallengeProps }
 </template>
 ```
 
-The published `SecurityKey` component calls `challenge.verifyKey()` once as soon as it mounts, with a "try again" button in case the user dismisses the browser prompt.
+The published `SecurityKey` component calls `challenge.verifyKey()` once as soon as it mounts (once even under React's StrictMode), with a "try again" button in case the user dismisses the browser prompt.
 
 ## Signing In With a Passkey
 
@@ -192,9 +197,35 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 |---|---|
 | `autofill` | Also offer passkeys in the email field's autofill, when the browser supports it. The field needs `autocomplete="username webauthn"`. |
 | `factor` | The factor key, `passkey` by default. |
-| `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. |
+| `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. The same in Vue and React, for example `remember: () => form.data.remember` in React. |
 
-It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts.
+It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`.
+
+## Challenge Helpers Without Vue or React
+
+The Vue and React bindings are thin layers over these helpers, exported from `@entity/keyring/inertia` (and re-exported by the Vue and React entries). Use them to build the challenge page or passkey sign in with another framework. They post with Inertia's router (`@inertiajs/core`).
+
+| Function | Does |
+|---|---|
+| `challengeFields()` | The fields a challenge form starts with: `code`, `password` and `trust`. |
+| `switchTo(props, option)` | Visits the challenge page for one of `props.alternatives`. |
+| `sendCode(props)` | Asks the server to send a code for the current authenticator. |
+| `keyCredential(props)` | Runs the browser prompt with `props.challenge.options` and resolves to the credential to post as `credential`. |
+| `passkeyCredential(factor, { autofill?, signal? })` | Fetches the usernameless options and runs the prompt (or autofill). |
+| `signInWith(factor, credential, remember, { onError, onFinish })` | Posts a credential from `passkeyCredential()` to sign in. `onError` gets the first error message. |
+| `isAbort(error)` | Whether the error means the user closed the prompt, or a newer request replaced it. |
+| `errorMessage(error)` | A readable message for any thrown value. |
+
+```ts
+import { errorMessage, isAbort, passkeyCredential, signInWith } from '@entity/keyring/inertia'
+
+try {
+  const credential = await passkeyCredential('passkey')
+  signInWith('passkey', credential, false, { onError: showError, onFinish: () => {} })
+} catch (error) {
+  if (!isAbort(error)) showError(errorMessage(error))
+}
+```
 
 ## Managing Authenticators
 
@@ -249,7 +280,7 @@ try {
 }
 ```
 
-After a JSON `423`, Keyring doesn't know which page to send the user back to, so once they confirm they go to the intended URL from earlier in the session, or `home`. To bring users back to your security settings page, protect that page's `GET` route with `keyring.fresh` as well. Then step-up happens when the page loads, Keyring remembers the page, and the JSON calls on it pass while the verification is fresh:
+After a JSON `423`, Keyring remembers the page that made the call (from the `Referer` header), so once they confirm they come back to it. Without a `Referer`, Laravel uses the last page it saw in the session. You can also protect the page's own `GET` route with `keyring.fresh`. Then step-up happens when the page loads, and the JSON calls on it pass while the verification is fresh:
 
 ```php
 Route::get('/settings/security', SecuritySettingsController::class)
@@ -302,25 +333,37 @@ configureRoutes({
 })
 ```
 
-The keys are `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share, so changing it moves all three. The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
+The keys are `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
+
+```ts
+configureRoutes({
+  challengeBase: purpose => purpose === 'login' ? '/account/login/challenge' : '/account/confirm',
+})
+``` The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
 
 ## Flash Messages and Alerts
 
-Keyring's non-JSON responses flash a `status` slug to the session (JSON responses include it as `status`, with a readable `message`), such as `code-sent`, `password-updated`, `device-revoked` or `email-change-requested`. Share it through your Inertia middleware alongside the ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts):
+Keyring's non-JSON responses flash a `status` slug to the session (JSON responses include it as `status`, with a readable `message`), such as `code-sent`, `password-updated`, `device-revoked` or `email-change-requested`. Extra data, such as new recovery codes, is flashed as `keyring.result`. See [Status Responses](sign-in-flow.md#status-responses).
+
+Share them through your Inertia middleware alongside the ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts). Translate the slug with `keyring::status.*` to get the message:
 
 ```php
+use Illuminate\Support\Facades\Lang;
+
 public function share(Request $request): array
 {
     return [
         ...parent::share($request),
         'status' => fn () => $request->session()->get('status'),
+        'statusMessage' => fn () => Lang::has($key = 'keyring::status.'.$request->session()->get('status')) ? __($key) : null,
+        'keyringResult' => fn () => $request->session()->get('keyring.result'),
         'keyringAlerts' => fn () => $request->session()->get('keyring.alerts', []),
     ];
 }
 ```
 
-The published `login`, `forgot-password` and `verify-email` pages already receive `status` as a prop.
+The published `login`, `forgot-password` and `verify-email` pages already receive the translated message as their `status` prop.
 
 ## Without Inertia
 
-Without Inertia, Keyring renders Blade views named `auth.login`, `auth.challenge` and so on, with the props as view data. Write them yourself, or point pages anywhere with [`Keyring::page()`](sign-in-flow.md#pages). The browser package's WebAuthn and enrollment helpers work without Inertia; only the `vue` and `react` entry points need it.
+Without Inertia, Keyring renders Blade views named `auth.login`, `auth.challenge` and so on, with the props as view data. Write them yourself, or point pages anywhere with [`Keyring::page()`](sign-in-flow.md#pages). The browser package's WebAuthn and enrollment helpers work without Inertia. The challenge helpers and the `vue` and `react` entry points need it.

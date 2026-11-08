@@ -16,6 +16,7 @@
     - [Customising the Steps](#customising-the-steps)
     - [Writing a Step](#writing-a-step)
 - [Responses](#responses)
+    - [Status Responses](#status-responses)
 - [Pages](#pages)
 - [Events](#events)
 
@@ -27,7 +28,7 @@ Signing in is a short state machine:
 2. Keyring asks the [policy](policies.md) what they need. If that's met, they're signed in.
 3. Otherwise Keyring saves a pending **attempt** in the session and sends them to the challenge page, which asks for the next factor. They repeat until the requirement is met.
 
-The pending attempt is encrypted JSON in the session. It lasts `pending_login_ttl` seconds (10 minutes by default). After that, the user is sent back to the login page with `keyring::keyring.expired`.
+The pending attempt is encrypted JSON in the session. It lasts `pending_login_ttl` (10 minutes by default). After that, the user is sent back to the login page with `keyring::keyring.expired`.
 
 [Step-up](step-up.md) uses the same challenge page and the same pipeline, with the purpose `confirm` instead of `login`.
 
@@ -43,10 +44,14 @@ The pending attempt is encrypted JSON in the session. It lasts `pending_login_tt
 | `POST` | `/login/challenge/{factor}` | `keyring.login.verify` | Verify the next factor. |
 | `POST` | `/login/challenge/{factor}/send` | `keyring.login.send` | Send a code (email codes). |
 | `GET` | `/register` | `register` | The registration page. |
-| `POST` | `/register` | `register.store` | Create an account and sign in. Limited to 6 a minute. |
+| `POST` | `/register` | `register.store` | Create an account and sign in. Uses the `keyring` rate limiter. |
 | `POST` | `/logout` | `logout` | Sign out. |
 
-The login and registration routes are for guests only. The registration routes exist only when the `registration` feature is on.
+The login and registration routes are for guests only, and `/logout` needs `auth:{guard}`. The registration routes exist only when the `registration` feature is on. The `keyring` rate limiter allows 6 a minute by default; see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits).
+
+The routes that spend session state (`POST /login`, `POST /login/{factor}` and the challenge's verify and send routes) take Laravel's session lock with `->block()`, so parallel requests in one session wait their turn instead of spending the same state twice. Your cache store must support locks.
+
+A factor key that isn't registered gives a `404` on every route that takes one.
 
 ## Signing In With a Password
 
@@ -71,7 +76,7 @@ The same options work for autofill ("conditional UI"), where the browser offers 
 
 A passkey sign in still goes through the policy, so a policy like `Requirement::factors(3)` would still ask for more.
 
-Only factors that implement `PrimaryFactor` and say so with `startsLogin()` can start a login, and only `DiscoverableFactor`s serve options; other factor keys return a 404. Security keys share the passkey driver, so their routes answer, but a security key never identifies anyone on its own and the login fails.
+Only factors that implement `PrimaryFactor` and return `true` from `startsLogin()` can start a login, and only `DiscoverableFactor`s serve options; other factor keys return a 404. Security keys share the passkey driver but their `startsLogin()` is `false`, so `/login/security-key` and its options route return a 404 too.
 
 ## The Challenge Page
 
@@ -150,7 +155,7 @@ Factors that send codes only send when asked:
 POST /login/challenge/email-code/send
 ```
 
-Viewing or prefetching the page never sends anything. Each pending attempt can send three codes per 10 minutes. A new code replaces the previous one. The response is `{"status": "code-sent"}` for JSON clients, or a redirect back with the `status` flash set to `code-sent`.
+Viewing or prefetching the page never sends anything. Each pending attempt can send three codes per 10 minutes; a fourth gets a `429` with Laravel's `auth.throttle` message on `code`. A new code replaces the previous one, and a code only verifies the authenticator it was sent to. The response is a [status response](#status-responses) with `code-sent`.
 
 ## Finishing the Login
 
@@ -169,6 +174,8 @@ When the requirement is met, Keyring:
 
 `POST /register` passes the whole request to your `CreatesNewUsers` action (published to `app/Actions/Keyring/CreateNewUser.php` and registered with `Keyring::createUsersUsing()`). The action validates and returns the new user. Keyring then dispatches Laravel's `Registered` event and signs the user in, counting the password they just chose as proved. It doesn't consult the policy, since the user has no other factors yet.
 
+The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
+
 The published action validates `name`, `email` and `password` (with `PasswordRules::for()`, see [Password Rules](protected-changes.md#password-rules)). Change it to fit your app.
 
 ## Signing Out
@@ -176,6 +183,14 @@ The published action validates `name`, `email` and `password` (with `PasswordRul
 `POST /logout` revokes the registered session, signs the user out, forgets what they proved, and invalidates the session. JSON clients get `204 No Content`; others are redirected to `/`.
 
 The response also sends `Clear-Site-Data: "cache", "storage"`. It leaves cookies alone so the device cookie survives, and the next sign in isn't treated as a new device.
+
+To sign the current user out the same way from your own code, call `Keyring\Login\SignIn::out()`. It returns the user who was signed out, or `null`, and doesn't dispatch `LoggedOut`:
+
+```php
+use Keyring\Login\SignIn;
+
+app(SignIn::class)->out($request);
+```
 
 ## The Verification Pipeline
 
@@ -217,19 +232,15 @@ A step is a class with a `handle()` method that receives a `Keyring\Pipeline\Con
 namespace App\Keyring;
 
 use Closure;
-use Keyring\Contracts\LocatesIps;
+use Keyring\Devices\Location;
 use Keyring\Enums\Purpose;
 use Keyring\Pipeline\Context;
 
 class BlockSanctionedCountries
 {
-    public function __construct(
-        protected LocatesIps $locator,
-    ) {}
-
     public function handle(Context $context, Closure $next): Context
     {
-        $country = $this->locator->locate($context->request)['country'] ?? null;
+        $country = Location::of($context->request)['country'] ?? null;
 
         if ($context->purpose === Purpose::Login && in_array($country, config('app.blocked_countries'), true)) {
             return $context->fail();
@@ -253,6 +264,8 @@ The context holds:
 | `$context->identifying` | Whether this request also identifies the user (the first factor of a login). |
 | `$context->outcome` | The `Keyring\Pipeline\Outcome`, set by `CompleteAttempt` or by a failure. |
 
+`Location::of($request)` asks the configured [locator](devices-and-sessions.md#locations) once per request and remembers the answer, so steps, signals and device tracking share one lookup.
+
 Return `$context->fail()` to refuse with the same generic error as a wrong password, or `$context->lockout($seconds)` to answer as rate limited. A failure counts towards the rate limits like a wrong password.
 
 Where you put a step matters. Before `VerifyFactor`, the first factor of a login has no attempt or authenticator yet (`$context->attempt` is `null`). After `VerifyFactor`, steps only run when the proof was right, and the attempt is always set.
@@ -268,6 +281,8 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login, otherwise `keyring::keyring.invalid` on the factor's field. |
 | `LockoutResponse` | Too many attempts. | A `429` validation error with Laravel's `auth.throttle` message. |
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
+| `RegisterResponse` | A new user registered and was signed in. | The same as `AuthenticatedResponse`. |
+| `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
 
 "JSON" here means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits.
 
@@ -280,7 +295,7 @@ use Keyring\Contracts\Responses\AuthenticatedResponse;
 Keyring::respondWith(AuthenticatedResponse::class, WelcomeBack::class);
 ```
 
-Your class must implement the contract. After a verification, responses are built with the pipeline's context, so you can accept it in the constructor. Registration also uses `AuthenticatedResponse` but has no context, so make the parameter optional:
+Your class must implement the contract. After a verification, responses are built with the pipeline's context, so you can accept it in the constructor:
 
 ```php
 use Keyring\Contracts\Responses\AuthenticatedResponse;
@@ -300,9 +315,43 @@ class WelcomeBack implements AuthenticatedResponse
 }
 ```
 
-`LogoutResponse` is never given a context.
+`LogoutResponse` and `RegisterResponse` are never given a context.
 
 `respondWith()` also accepts a closure, which is bound in the container like any other binding.
+
+### Status Responses
+
+Every action that isn't a sign in or confirmation answers through `StatusResponse`. It's built with three arguments:
+
+| Argument | |
+|---|---|
+| `status` | A slug such as `password-updated` or `device-revoked`. |
+| `data` | Extra data, such as the new authenticator. Often empty. |
+| `redirect` | Where to go instead of back, or `null`. |
+
+JSON clients get the slug, its translated message, the redirect (when there is one) and the data, side by side:
+
+```json
+{
+  "status": "authenticator-updated",
+  "message": "Sign-in method updated.",
+  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Work phone" }
+}
+```
+
+Other requests are redirected (back, or to `redirect`) with the slug flashed as `status`, and any data flashed as `keyring.result`, for example `session('keyring.result.recoveryCodes')`.
+
+The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
+
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enrollment-started`, `password-reset`, `password-updated`, `reset-link-sent`, `sessions-revoked`, `signed-out` and `verification-link-sent`.
+
+Swap it like the others. Your class receives the same named arguments:
+
+```php
+use Keyring\Contracts\Responses\StatusResponse;
+
+Keyring::respondWith(StatusResponse::class, MyStatusResponse::class);
+```
 
 ## Pages
 
@@ -310,13 +359,13 @@ Keyring renders these pages:
 
 | Name | Props |
 |---|---|
-| `login` | `canResetPassword`, `canRegister`, `status` |
+| `login` | `canResetPassword`, `canRegister`, `status` (a translated message) |
 | `challenge` | See [Page Props](#page-props). Used for logins. |
 | `confirm` | The same props, with `purpose: "confirm"`. Used for step-up. |
 | `register` | none |
-| `forgot-password` | `status` |
+| `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
-| `verify-email` | `status` |
+| `verify-email` | `status` (a translated message) |
 | `email-change` | `action` (`confirm` or `revert`) and `url` (where its button posts). See [Protected Changes](protected-changes.md#the-emailed-links). |
 | `device-report` | `device` (a description) and `url` (where its button posts). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 
@@ -353,4 +402,10 @@ All in `Keyring\Events`:
 | `Confirmed` | A step-up completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |
 
-Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyring signs users in and out through the guard.
+Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyring signs users in and out through the guard. Like Fortify, Keyring also dispatches Laravel's other auth events next to its own, so listeners and packages built for them keep working:
+
+| Laravel event | Dispatched with |
+|---|---|
+| `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
+| `Illuminate\Auth\Events\Lockout` | `Lockout`. |
+| `Illuminate\Auth\Events\PasswordReset` | Keyring's `PasswordReset`. |

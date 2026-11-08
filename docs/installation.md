@@ -26,7 +26,7 @@ php artisan keyring:install --inertia=vue
 php artisan migrate
 ```
 
-`--inertia` accepts `vue` or `react`. Leave it off if you're building your own pages. Pass `--force` to overwrite files that already exist; without it, existing files are skipped.
+`--inertia` accepts `vue` or `react`. Leave it off if you're building your own pages. Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps.
 
 If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fortify.md) before migrating.
 
@@ -98,7 +98,7 @@ See [Frontend](frontend.md) for what the package provides.
 
 ## Routes Keyring Registers
 
-Keyring registers its routes under the `web` middleware group by default. Some use the same names as Laravel's conventions and Fortify (`login`, `logout`, `register`, `password.request`, `password.reset`, `verification.notice` and so on), so remove any routes of your own with those names. The full list is in [The Sign In Flow](sign-in-flow.md#routes), [Step-Up](step-up.md), [Managing Authenticators](authenticators.md#routes), [Devices & Sessions](devices-and-sessions.md#routes) and [Protected Changes](protected-changes.md#routes).
+Keyring registers its routes under the `web` middleware group by default, and every signed-in route checks Keyring's guard (`auth:{guard}`). Some use the same names as Laravel's conventions and Fortify (`login`, `logout`, `register`, `password.request`, `password.reset`, `verification.notice` and so on), so remove any routes of your own with those names. The full list is in [The Sign In Flow](sign-in-flow.md#routes), [Step-Up](step-up.md), [Managing Authenticators](authenticators.md#routes), [Devices & Sessions](devices-and-sessions.md#routes) and [Protected Changes](protected-changes.md#routes).
 
 To change the prefix, domain or middleware, or to turn routes off, see [Configuration](configuration.md#routes).
 
@@ -106,13 +106,13 @@ To change the prefix, domain or middleware, or to turn routes off, see [Configur
 
 - Set `APP_URL` to the address users actually visit. Keyring builds emailed links from it, and passkeys and security keys only work on that origin unless you configure others. See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
 - Open `app/Providers/KeyringServiceProvider.php` and choose your [factors](factors.md) and [policy](policies.md).
-- Schedule pruning of the security log:
+- Schedule `keyring:prune`, which clears out old devices, finished email changes, old security log entries and ended sessions:
 
   ```php
   // routes/console.php
   use Illuminate\Support\Facades\Schedule;
 
-  Schedule::command('model:prune', ['--model' => [\Keyring\Models\SecurityEvent::class]])->daily();
+  Schedule::command('keyring:prune')->daily();
   ```
 
-  `model:prune` only looks in `app/Models` unless you name models with `--model`, so Keyring's log isn't pruned without it.
+  See [Pruning](devices-and-sessions.md#pruning).

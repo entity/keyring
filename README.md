@@ -89,7 +89,11 @@ npm install @entity/keyring
 composer test      # tests
 composer lint      # code style
 composer analyse   # static analysis
+composer refactor  # apply Rector's rules
+composer check     # everything CI runs: Rector (dry run), Pint, PHPStan and Pest
 ```
+
+Run `composer check` before opening a pull request.
 
 ## License
 

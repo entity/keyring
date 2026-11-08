@@ -24,23 +24,23 @@ Whoever controls the email address and password controls the account. Keyring on
 
 | Method | URI | Name | Middleware |
 |---|---|---|---|
-| `POST` | `/user/email` | `keyring.email.store` | `manage_middleware`, 6 a minute |
+| `POST` | `/user/email` | `keyring.email.store` | `auth`, `manage_middleware`, limited |
 | `GET` | `/user/email` | `keyring.email.show` | `auth` |
 | `DELETE` | `/user/email` | `keyring.email.destroy` | `auth` |
-| `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | 12 a minute |
-| `POST` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm.store` | 12 a minute |
-| `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | 12 a minute |
-| `POST` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert.store` | 12 a minute |
-| `PUT` | `/user/password` | `user-password.update` | `manage_middleware` |
+| `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | limited |
+| `POST` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm.store` | limited |
+| `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited |
+| `POST` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert.store` | limited |
+| `PUT` | `/user/password` | `user-password.update` | `auth`, `manage_middleware` |
 | `GET` | `/forgot-password` | `password.request` | guest |
-| `POST` | `/forgot-password` | `password.email` | guest, 6 a minute |
+| `POST` | `/forgot-password` | `password.email` | guest, limited |
 | `GET` | `/reset-password/{token}` | `password.reset` | guest |
-| `POST` | `/reset-password` | `password.update` | guest, 6 a minute |
+| `POST` | `/reset-password` | `password.update` | guest, limited |
 | `GET` | `/email/verify` | `verification.notice` | `auth` |
-| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, 6 a minute |
-| `POST` | `/email/verification-notification` | `verification.send` | `auth`, 6 a minute |
+| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, limited |
+| `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
-The password reset routes exist only with the `password_reset` feature, and the verification routes only with `email_verification`.
+`auth` here is `auth:{guard}`, Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute by default. The password reset routes exist only with the `password_reset` feature, and the verification routes only with `email_verification`.
 
 ## Protected Attributes
 
@@ -77,7 +77,7 @@ Every use dispatches `Keyring\Events\ProtectionBypassed` with the reason, and lo
 
 ### Requesting a Change
 
-`POST /user/email` with `email` asks to change the address. It needs a [fresh verification](step-up.md#fresh-verification). The response is always `{"status": "email-change-requested"}` (or a redirect back with that `status`), whatever happens next, so it never reveals whether the new address already has an account.
+`POST /user/email` with `email` asks to change the address. It needs a [fresh verification](step-up.md#fresh-verification). The response is always the `email-change-requested` [status response](sign-in-flow.md#status-responses), whatever happens next, so it never reveals whether the new address already has an account.
 
 Keyring then:
 
@@ -87,6 +87,8 @@ Keyring then:
 4. emails the **current** address a notice with a link to revert, and a link to confirm too when it's needed (see below).
 
 If the new address belongs to another account, nothing is stored. The new address gets an email saying someone tried to use it, and the response is the same. Asking for the current address does nothing.
+
+All of these emails are sent after the response (with Laravel's `defer()`), so how long the request takes doesn't give away which case it was.
 
 ### Confirming
 
@@ -111,10 +113,10 @@ The current address can revert the change while it's pending, and for `email_cha
 
 - puts the old address back,
 - cancels any later email changes, so links from them can't move the address away again,
-- deletes every authenticator added since the change was requested,
+- deletes every authenticator added since the change was requested, one at a time, dispatching `AuthenticatorRemoved` for each,
 - signs out every session, and changes the "remember me" token.
 
-The user is then redirected to the forgot password page with `status` set to `email-change-reverted`, since whoever made the change may also know the password. Reverting doesn't change the password itself.
+The user is then redirected to the forgot password page (or the login page, when password resets are off) with `status` set to `email-change-reverted`, since whoever made the change may also know the password. Reverting doesn't change the password itself.
 
 ### Checking and Cancelling
 
@@ -133,7 +135,7 @@ The user is then redirected to the forgot password page with `status` set to `em
 
 `confirmed` is whether the new address has confirmed. `DELETE /user/email` cancels it and responds with `email-change-cancelled`.
 
-A password reset cancels any pending change, and so does a password change that signs out other sessions (the default).
+A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it.
 
 ## Changing the Password
 
@@ -147,7 +149,7 @@ A password reset cancels any pending change, and so does a password change that 
 
 A user without a password (for example, one who only uses passkeys) can set one here with just the fresh verification.
 
-Keyring regenerates the session ID. With `sign_out_others` on, it also revokes every other session, changes the "remember me" token, and cancels any pending email change. The response is `{"status": "password-updated"}`, or a redirect back with that `status`.
+Keyring regenerates the session ID and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Password Rules
 
@@ -155,28 +157,40 @@ Keyring regenerates the session ID. With `sign_out_others` on, it also revokes e
 
 - at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession,
 - at most `max` characters (128),
-- no composition rules (no "one uppercase, one symbol"),
+- no composition rules by default (no "one uppercase, one symbol"),
 - breached passwords rejected, when `uncompromised` is on,
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.
 
 Use the same rules in your own forms. `PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what the published registration action does.
 
+To add to the rule, pass a callback to `Keyring::passwordRulesUsing()` in your provider. It receives the `Illuminate\Validation\Rules\Password` rule Keyring built (with its length already set for the user) and the user, or `null` at registration, and returns the rule:
+
+```php
+use App\Models\User;
+use Illuminate\Validation\Rules\Password;
+
+Keyring::passwordRulesUsing(fn (Password $rule, ?User $user) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule);
+```
+
+The callback applies everywhere Keyring checks a new password: registration, password changes and resets.
+
 ## Resetting the Password
 
-`POST /forgot-password` with `email` sends a reset link when the address has an account. The answer is the same either way: `keyring::keyring.reset_link_sent`.
+`POST /forgot-password` with `email` sends a reset link when the address has an account. The answer is the same either way: the `reset-link-sent` [status response](sign-in-flow.md#status-responses). The email is sent after the response, so timing doesn't give it away either.
 
-The link is built from `APP_URL`, never the `Host` header. The reset page is sent with `Referrer-Policy: no-referrer`, so the token doesn't leak to other sites through the referrer.
+The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent through your user model's `sendPasswordResetNotification()`, so you change it the usual Laravel way. Keyring sets its link with `ResetPassword::createUrlUsing()`, built from `APP_URL`, never the `Host` header. If you've already set `createUrlUsing()` yourself, Keyring leaves it alone. The reset page is sent with `Referrer-Policy: no-referrer`, so the token doesn't leak to other sites through the referrer.
 
 `POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`, and the password rules only run once the token is accepted, so the form doesn't reveal which addresses have accounts or MFA. On success, Keyring:
 
-- saves the new password and changes the "remember me" token,
-- revokes every session,
+- saves the new password,
+- revokes every session and changes the "remember me" token,
 - cancels any pending email change,
-- dispatches `Keyring\Events\PasswordReset`,
-- redirects to the login page with the status. It never signs the user in, so the policy still applies at their next login.
+- lifts any [risk lock](risk.md#actions) on the account,
+- dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`,
+- redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.
 
-Resets use Laravel's password broker (`passwords.broker`, or your default), so its token expiry and throttling apply. Password reset keeps working while an account is locked by a [risk action](risk.md#actions).
+Resets use Laravel's password broker (`passwords.broker`, or your default), so its token expiry and throttling apply. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
 
 ## Email Verification
 
@@ -199,4 +213,4 @@ In `Keyring\Events`:
 
 `change` is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden from serialisation, and the addresses are encrypted at rest.
 
-`Keyring\Events\PasswordReset` isn't Laravel's `Illuminate\Auth\Events\PasswordReset`, which Keyring doesn't dispatch.
+Keyring also dispatches Laravel's `Illuminate\Auth\Events\PasswordReset` alongside its own `PasswordReset`, so listeners for either work.

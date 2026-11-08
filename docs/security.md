@@ -44,20 +44,20 @@ How they count:
 - A success clears the account's count. On the per-IP count, a success only takes back its own attempt. People signing in from one office address don't use up its limit, and an attacker can't reset the limit by signing in to an account of their own between guesses.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
 
-Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware: registration, password reset requests, resets, email change requests, enrollment confirmations, verification emails and the "this wasn't me" link are limited to 6 a minute, and the emailed email-change links to 12. Each pending attempt can send three codes per 10 minutes.
+Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
 
 ### Single-Use Codes
 
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
-- Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses, and are replaced by any newer code.
+- Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses, and are replaced by any newer code. A sent code only verifies the authenticator it was sent to.
 - WebAuthn challenges are random 32 byte values, kept on the server and dropped after one verification, so a response can't be replayed.
 
 ### Second Factors and Step-Up
 
 - Policies count distinct categories, so two factors of the same kind are never treated as multi-factor.
 - A passkey or security key only counts as inherence when it actually verified the user that time.
-- With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in.
+- With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in. Recovery codes stay on offer as the way back in, unless you pass `except: []`.
 - Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification. Users with a possession factor must use one, so a stolen session plus a phished password isn't enough.
 - The fresh window is fixed from the moment of verification and doesn't slide with activity.
 - Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset.
@@ -65,6 +65,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ### Sessions and Devices
 
+- Every signed-in Keyring route checks Keyring's guard (`auth:{guard}`), and the step-up middleware reads the user from it, so another guard's user can't stand in.
 - Every signed-in session is in Keyring's registry and is checked on every request, so revoking one takes effect on its next request with any session driver.
 - Sessions have idle and absolute timeouts, which can be stricter at higher assurance levels.
 - A session whose registry record has gone missing is signed out rather than started over.
@@ -76,12 +77,13 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 - `email` and `password` can only change through Keyring's flows. Bypassing that needs `Keyring::withoutProtection()`, which is announced and logged.
 - An email change needs a fresh verification, confirmation from the new address, and confirmation from the current address unless the session proved a second factor that existed before it signed in.
-- An email change never reveals whether the new address has an account.
+- An email change never reveals whether the new address has an account, in its answer or its timing: its emails, like the reset email, are sent after the response.
 - An email change only applies if the address is still the one it was requested from.
 - Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing.
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
 - Reverting an email change signs out every session, closes later changes and removes sign-in methods added since.
-- Password resets give the same answer for every address, sign out every session and cancel pending email changes.
+- Password resets give the same answer for every address, sign out every session, cancel pending email changes and lift risk locks.
+- Password changes cancel pending email changes, so someone who knew the old password can't finish one.
 - New passwords follow OWASP's length rules, are checked against breach lists, and are refused rather than silently cut short by bcrypt.
 
 ### Links and Headers
@@ -96,6 +98,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - Recovery codes and email codes are stored as keyed hashes.
 - Email change tokens are stored as SHA-256 hashes, and the addresses in a pending change are encrypted.
 - Device tokens are stored as SHA-256 hashes.
+- WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
 - WebAuthn user handles are an HMAC of the user ID, never the ID or email.
 - The security log never holds passwords, codes, tokens or session IDs.
 

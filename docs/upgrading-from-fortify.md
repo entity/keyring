@@ -82,7 +82,7 @@ Things to know:
 | `fortify.prefix`, `fortify.domain`, `fortify.middleware` | `keyring.prefix`, `keyring.domain`, `keyring.middleware` |
 | `fortify.passwords` | `keyring.passwords.broker` |
 | `fortify.views` | Always on. Use `Keyring::page()` to change a page. |
-| `fortify.limiters` | `keyring.limits`, or a factor's `limits()`. See [Rate Limiting](#rate-limiting). |
+| `fortify.limiters` | `keyring.limits`, a factor's `limits()`, and the `keyring` rate limiter for form routes. See [Rate Limiting](#rate-limiting). |
 | `Features::registration()` | `keyring.features.registration` |
 | `Features::resetPasswords()` | `keyring.features.password_reset` |
 | `Features::emailVerification()` | `keyring.features.email_verification` |
@@ -138,12 +138,13 @@ Fortify's response contracts map to Keyring's in `Keyring\Contracts\Responses`, 
 
 | Fortify | Keyring |
 |---|---|
-| `LoginResponse`, `TwoFactorLoginResponse`, `RegisterResponse` | `AuthenticatedResponse` |
+| `LoginResponse`, `TwoFactorLoginResponse` | `AuthenticatedResponse` |
+| `RegisterResponse` | `RegisterResponse` |
 | `FailedTwoFactorLoginResponse` | `FailedResponse` |
 | `LockoutResponse` | `LockoutResponse` |
 | `LogoutResponse` | `LogoutResponse` |
 
-Keyring adds `ChallengeResponse`, for when another factor is needed. Other actions (password reset, verification, profile) return fixed responses with a `status`.
+Keyring adds `ChallengeResponse`, for when another factor is needed. Fortify's `PasswordResetResponse`, `SuccessfulPasswordResetLinkRequestResponse`, `PasswordUpdateResponse` and the like map to one `StatusResponse`, which every other action returns with a status slug such as `reset-link-sent` or `password-updated`. See [Status Responses](sign-in-flow.md#status-responses).
 
 ### Events
 
@@ -157,11 +158,13 @@ Keyring adds `ChallengeResponse`, for when another factor is needed. Other actio
 | `ValidTwoFactorAuthenticationCodeProvided` | `FactorVerified` |
 | `TwoFactorAuthenticationFailed` | `FactorFailed` |
 
-All Keyring events are in `Keyring\Events`. Laravel's `Login`, `Logout`, `Registered` and `Verified` events still fire. Keyring dispatches its own `Lockout` and `PasswordReset` events, not Laravel's `Illuminate\Auth\Events\Lockout` and `Illuminate\Auth\Events\PasswordReset`, so move listeners for those.
+All Keyring events are in `Keyring\Events`. Laravel's `Login`, `Logout`, `Registered` and `Verified` events still fire, and like Fortify, Keyring also dispatches Laravel's `Failed`, `Lockout` and `PasswordReset`, so existing listeners for those keep working.
 
 ### Rate Limiting
 
 Fortify uses two named rate limiters, `login` and `two-factor`. Keyring limits every factor per account and per IP inside the pipeline, with `keyring.limits` as the defaults, and locks out repeated failures for longer each time. See [Rate Limiting](security.md#rate-limiting). Remove your `RateLimiter::for('login', ...)` and `RateLimiter::for('two-factor', ...)` definitions.
+
+Keyring's other form routes (registration, password resets, email changes, enrollment) use one named limiter, `keyring`, 6 requests a minute by default. Define `RateLimiter::for('keyring', ...)` to change it.
 
 ## Things That Behave Differently
 

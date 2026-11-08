@@ -102,6 +102,8 @@ The same options work for autofill, where the browser lists passkeys in the emai
 
 These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket every user shares.
 
+Security keys can't do this. `/login/security-key` and `/login/security-key/options` return a `404`.
+
 ## Customising a Profile
 
 Register the same profile under a second key, for example to treat hardware keys from one program separately:
@@ -116,13 +118,25 @@ Require user verification for security keys:
 WebAuthn::securityKeys()->requireUserVerification(),
 ```
 
-Both return new instances. A factor key other than `passkey` or `security-key` also needs a line in the frontend's factor map, and the browser package's `confirmEnrollment()` only runs the ceremony for those two keys, so create the credential yourself:
+Both return new instances. A factor key other than `passkey` or `security-key` needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment()` decides whether to run the WebAuthn ceremony from the options the server sends, so it works for any key:
 
 ```ts
-import { beginEnrollment, confirmEnrollment, createCredential } from '@entity/keyring'
+import { enroll } from '@entity/keyring'
 
-const { enrollment } = await beginEnrollment('backup-key')
-await confirmEnrollment('backup-key', enrollment, { credential: await createCredential(enrollment.options) })
+await enroll('backup-key', { name: 'Spare key' })
+```
+
+To change more than the profile, extend the class. `passkeys()` and `securityKeys()` return `static` and the constructor is `final`, so they build your subclass:
+
+```php
+use Keyring\Factors\WebAuthn;
+
+class AuditedWebAuthn extends WebAuthn
+{
+    // ...
+}
+
+Keyring::factors([AuditedWebAuthn::passkeys(), AuditedWebAuthn::securityKeys()]);
 ```
 
 ## Stored Data
@@ -131,7 +145,7 @@ Each key is a row in `keyring_authenticators` with:
 
 | Column | Holds |
 |---|---|
-| `credential_id` | The credential ID, base64url without padding. Unique across all users. |
+| `credential_id` | The credential ID, base64url without padding, up to 512 characters. Unique across all users. A key that sends a longer ID is refused at registration. |
 | `public_key` | The full credential record as JSON, including the public key and counter. |
 | `sign_count` | The last counter seen. |
 | `aaguid` | The model identifier the key reported. |

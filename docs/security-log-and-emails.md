@@ -9,6 +9,8 @@
     - [Email Types](#email-types)
     - [Customising the Copy](#customising-the-copy)
     - [Emails Keyring Always Sends](#emails-keyring-always-sends)
+    - [Using Your Own Notification Classes](#using-your-own-notification-classes)
+- [Laravel's Auth Events](#laravels-auth-events)
 
 ## The Security Log
 
@@ -20,6 +22,7 @@ The log never holds passwords, codes, tokens or session IDs.
 'events' => [
     'enabled' => true,
     'keep_for' => '180d',
+    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
 ],
 ```
 
@@ -69,14 +72,15 @@ return Inertia::render('settings/security', [
 
 ### Pruning
 
-`SecurityEvent` is mass prunable: entries older than `events.keep_for` (180 days) are deleted by Laravel's `model:prune` command. That command only finds models in `app/Models` by default, so name Keyring's model:
+`SecurityEvent` is mass prunable: entries older than `events.keep_for` (180 days) are deleted by `keyring:prune`, along with Keyring's other old records. Schedule it daily:
 
 ```php
 use Illuminate\Support\Facades\Schedule;
-use Keyring\Models\SecurityEvent;
 
-Schedule::command('model:prune', ['--model' => [SecurityEvent::class]])->daily();
+Schedule::command('keyring:prune')->daily();
 ```
+
+See [Pruning](devices-and-sessions.md#pruning).
 
 ## "Was This You?" Alerts
 
@@ -88,7 +92,9 @@ After a successful sign in, Keyring flashes `keyring.alerts` to the session: a l
 ]
 ```
 
-The types that become alerts are `second_factor_failed`, `device_reported`, `email_change_reverted` and `clone_suspected`. A `second_factor_failed` alert is the classic sign that someone else knows the password.
+The types that become alerts are listed in `events.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted` and `clone_suspected`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
+
+To read them yourself, call `Keyring\Activity\SecurityLog::pullAlerts($user)`. It returns the unseen alert entries, newest first, and marks them seen, so each comes back once.
 
 Share them through your Inertia middleware to show a banner:
 
@@ -117,7 +123,7 @@ Or pick the ones you want:
 Keyring::notify(['new_device', 'second_factor_failed']);
 ```
 
-You can also list types in the `notifications` config option. `Keyring::notify()` takes precedence over it.
+An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `notifications` config option. `Keyring::notify()` takes precedence over it.
 
 Every email is a `Keyring\Notifications\SecurityNotice`, sent by mail and queued. Each one includes when it happened, the device and the IP address of the request that caused it.
 
@@ -138,7 +144,7 @@ To send your own instead, listen for the matching [events](sign-in-flow.md#event
 
 ### Customising the Copy
 
-The wording lives in `lang/en/notifications.php`, keyed by type, with `subject`, `intro` and, for `new_device`, `action`. Publish it to change it:
+All the wording for Keyring's emails lives in `lang/en/notifications.php`. Security notices are keyed by type, with `subject`, `intro` and, for `new_device`, `action`; `details` holds the labels for the when, device and IP address lines, and `footer` the closing line. The emails below that Keyring always sends have their own keys (`verification_code`, `confirm_email_change`, `email_change_notice` and `email_address_in_use`). Publish the file to change it:
 
 ```bash
 php artisan vendor:publish --tag=keyring-lang
@@ -150,12 +156,28 @@ Some emails are part of a flow rather than a notice, so `Keyring::notify()` does
 
 | Notification | Sent to |
 |---|---|
-| `VerificationCode` | The user, with an [email code](factors.md#email-codes). |
-| `ResetPassword` | The user, with a reset link. |
+| `VerificationCode` | The user, with an [email code](factors.md#email-codes). The last line differs when the code confirms a new email code sign-in method. |
 | `ConfirmEmailChange` | The new address, during an email change. |
 | `EmailChangeNotice` | The current address, during an email change. |
 | `EmailAddressInUse` | An address someone tried to change their email to, when it already has an account. |
 
-Laravel's own `VerifyEmail` notification is used for email verification, with a link Keyring builds from `APP_URL`.
+These live in `Keyring\Notifications`. `VerificationCode` sends straight away; the three email change emails are sent after the response, so timing doesn't reveal whether an address has an account.
 
-All of these live in `Keyring\Notifications` and send immediately. Their text goes through Laravel's JSON translations, so you can translate the English strings in `lang/{locale}.json`.
+Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. Their copy comes from Laravel's translations, and you change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response.
+
+### Using Your Own Notification Classes
+
+Keyring resolves every notification above, and `SecurityNotice`, through the container, with named constructor arguments. To change one beyond its copy, extend it and bind your class in a service provider's `register()` method:
+
+```php
+use App\Notifications\BrandedVerificationCode;
+use Keyring\Notifications\VerificationCode;
+
+$this->app->bind(VerificationCode::class, BrandedVerificationCode::class);
+```
+
+Keep the parent's constructor parameters, since Keyring passes them by name.
+
+## Laravel's Auth Events
+
+Keyring dispatches Laravel's `Illuminate\Auth\Events\Failed`, `Lockout` and `PasswordReset` next to its own events, as Fortify does, so existing listeners keep working. See [Events](sign-in-flow.md#events).

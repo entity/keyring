@@ -23,11 +23,11 @@ One set of routes adds, renames and removes authenticators for every factor. The
 | Method | URI | Name | Does |
 |---|---|---|---|
 | `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begin: returns a QR code, WebAuthn options, recovery codes... |
-| `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finish: prove it works. Limited to 6 a minute. |
+| `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finish: prove it works. Uses the `keyring` rate limiter and the session lock. |
 | `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Rename, or make it the default. |
 | `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. |
 
-These routes use the `manage_middleware` config option, `['auth', 'keyring.fresh:15m']` by default. Users must have verified a factor in the last 15 minutes, and users with a second factor must have used it. See [Fresh Verification](step-up.md#fresh-verification).
+These routes need `auth:{guard}`, plus the `manage_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified a factor in the last 15 minutes, and users with a second factor must have used it. See [Fresh Verification](step-up.md#fresh-verification).
 
 `{factor}` must be a registered factor that implements `Enrollable`; otherwise the route returns a 404. Users can only see and change their own authenticators; anyone else's ID returns a 404.
 
@@ -64,7 +64,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
 }
 ```
 
-Names default to "Authenticator app", "Email", "Passkey" or "Security key", and are cut to 64 characters.
+Authenticator apps and email codes take an optional `name` when beginning or confirming (the one sent when confirming wins); passkeys and security keys take it when confirming. Names default to "Authenticator app", "Email", "Passkey" or "Security key", and are cut to 64 characters.
 
 ### Confirming
 
@@ -72,11 +72,11 @@ Names default to "Authenticator app", "Email", "Passkey" or "Security key", and 
 
 | Factor | Fields |
 |---|---|
-| `totp`, `email-code` | `code` |
+| `totp`, `email-code` | `code`, `name` (optional) |
 | `recovery` | none: confirming means "I've saved these" |
-| `passkey`, `security-key` | `credential` (the browser's response), `name` (optional, up to 64 characters) |
+| `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 
-A wrong code fails with `keyring::keyring.invalid` on `code`, and an expired or missing enrollment with `keyring::keyring.enrollment_expired`. Email enrollment codes keep their guess count between tries, like email codes at sign in.
+A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
 
 On success, the response contains the new authenticator, presented the same way as on the challenge page:
 
@@ -90,7 +90,7 @@ On success, the response contains the new authenticator, presented the same way 
 
 `recoveryCodes` is only there when Keyring generated recovery codes along with this authenticator (see below).
 
-The user's first saved authenticator becomes their default. A passkey or security key that's already registered, to anyone, can't be registered again.
+The user's first saved authenticator becomes their default (never recovery codes). A passkey or security key that's already registered, to anyone, can't be registered again. Confirming a factor that allows only one per user (`email-code`, `recovery`) replaces the one they had.
 
 ## Recovery Codes
 
@@ -107,9 +107,9 @@ Each code works once. The challenge page shows how many are left (`remaining`), 
 | Field | |
 |---|---|
 | `name` | Optional, up to 64 characters. |
-| `default` | Optional boolean. `true` makes this the default and clears the flag on the user's others. |
+| `default` | Optional boolean. `true` makes this the default and clears the flag on the user's others. Not allowed for recovery codes. |
 
-The default authenticator is offered first when a second factor is needed.
+The default authenticator is offered first when a second factor is needed. Recovery codes are a fallback, so they can't be made the default.
 
 ## Removing Authenticators
 
@@ -121,7 +121,7 @@ The password can't be removed this way. It isn't stored in `keyring_authenticato
 
 ## Responses
 
-Requests that expect JSON (and aren't Inertia visits) get JSON with a `status`:
+Every route answers with a [status response](sign-in-flow.md#status-responses). Requests that expect JSON (and aren't Inertia visits) get JSON with `status`, `message` and the extra data:
 
 | Action | `status` | Also |
 |---|---|---|

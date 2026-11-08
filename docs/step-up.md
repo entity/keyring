@@ -15,7 +15,7 @@ Step-up asks a signed-in user to prove something again before continuing. Keyrin
 - `keyring:{level}` requires the session to have reached an [assurance level](policies.md#assurance-levels).
 - `keyring.fresh:{window}` requires a verification within a time window.
 
-Both work as route middleware or with Laravel's `#[Middleware]` attribute, which takes one middleware per attribute. Always put them after `auth`:
+Both work as route middleware or with Laravel's `#[Middleware]` attribute, which takes one middleware per attribute. Always put them after `auth`. They read the user from Keyring's guard (`Keyring::user()`), not the default one, and a request with no one signed in to that guard gets Laravel's usual `AuthenticationException`:
 
 ```php
 use Illuminate\Routing\Attributes\Controllers\Middleware;
@@ -39,13 +39,22 @@ Route::delete('/account', [AccountController::class, 'destroy'])
 
 ## Raising Assurance
 
-`keyring:aal2` lets the request through when the session has reached AAL2 or higher. `keyring:aal1` and `keyring:aal3` work the same way, and `keyring` on its own means `keyring:aal2`.
+`keyring:aal2` lets the request through when the session has reached AAL2 or higher. `keyring:aal1` and `keyring:aal3` work the same way, and `keyring` on its own means `keyring:aal2`. An unknown level name throws an `InvalidArgumentException`.
 
 It counts everything proved so far this session, so it only asks for what's missing. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL3 and goes straight through.
 
 The level stays reached for the rest of the session, unless a [risk response](risk.md#checkpoints) clears it.
 
 Users who don't have the authenticators to reach the level get a `403` with `keyring::keyring.needs_factor`, since confirming couldn't help them. Send these users to set up a factor first, for example by checking `$request->user()->keyring->canMeet(Requirement::aal2())` before linking to the route.
+
+To check the session's level in your own code, ask `Keyring\Sessions\SessionAssurance`:
+
+```php
+use Keyring\Enums\Assurance;
+use Keyring\Sessions\SessionAssurance;
+
+app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
+```
 
 ## Fresh Verification
 
@@ -56,7 +65,7 @@ Users who don't have the authenticators to reach the level get a `403` with `key
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is fresh for step-up too.
 
-Keyring uses `keyring.fresh:15m` on its own sensitive routes, through the `manage_middleware` config option: managing authenticators and devices, changing the password, and starting an email change.
+Keyring uses `keyring.fresh:15m` on its own sensitive routes, through the `manage_middleware` config option (applied on top of `auth:{guard}`): managing authenticators and devices, changing the password, and starting an email change.
 
 ## The Confirm Flow
 
@@ -68,7 +77,7 @@ When a request needs step-up, Keyring starts a confirm attempt with the requirem
 | `POST` | `/confirm/{factor}` | `keyring.confirm.verify` |
 | `POST` | `/confirm/{factor}/send` | `keyring.confirm.send` |
 
-These routes need a signed-in user. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress starts one that any one factor satisfies.
+These routes need a user signed in to Keyring's guard (`auth:{guard}`), and the verify and send routes take the session lock like the login challenge's. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress starts one that any one factor satisfies.
 
 When the user has verified enough, Keyring:
 
@@ -80,7 +89,7 @@ When the user has verified enough, Keyring:
 
 For a `GET` request, the intended URL is the page that needed step-up. For other methods, Laravel uses the previous URL instead, so the user comes back to the page with the form rather than to a URL they can't `GET`.
 
-The confirm attempt expires after `pending_login_ttl` seconds like a login attempt.
+The confirm attempt expires after `pending_login_ttl`, like a login attempt.
 
 ## JSON Requests
 

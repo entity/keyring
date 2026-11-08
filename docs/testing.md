@@ -33,9 +33,7 @@ abstract class TestCase extends BaseTestCase
 }
 ```
 
-`InteractsWithKeyring` also swaps in an instant timebox, so failed factor checks don't wait the usual 250ms.
-
-Keyring doesn't swap the timebox for you, so without the binding every failed verification in your tests waits for the full `timebox`.
+`InteractsWithKeyring` also swaps in an instant timebox for every test that uses it, so failed factor checks don't wait the usual 250ms. Tests without the trait wait the full `timebox` on every failed verification.
 
 ## Acting at an Assurance Level
 

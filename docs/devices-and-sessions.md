@@ -7,12 +7,15 @@
     - [New Device Sign Ins](#new-device-sign-ins)
     - [The "This Wasn't Me" Link](#the-this-wasnt-me-link)
     - [Locations](#locations)
+    - [Device Names](#device-names)
+    - [Your Own Device Model](#your-own-device-model)
 - [Listing and Revoking Devices](#listing-and-revoking-devices)
 - [The Session Registry](#the-session-registry)
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
     - [The Session Middleware](#the-session-middleware)
 - [Timeouts](#timeouts)
+- [Pruning](#pruning)
 - [Events](#events)
 
 ## Introduction
@@ -26,17 +29,19 @@ Keyring tracks two things:
 
 | Method | URI | Name | Middleware | Does |
 |---|---|---|---|---|
-| `GET` | `/user/devices` | `keyring.devices.index` | `auth` | Lists the user's devices as JSON. |
-| `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `manage_middleware` | Signs one device out. |
-| `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `manage_middleware` | Signs out every other session. |
-| `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, 6 a minute | The "this wasn't me" link: a page with a button. |
-| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, 6 a minute | Signs the device out. |
+| `GET` | `/user/devices` | `keyring.devices.index` | `auth:{guard}` | Lists the user's devices as JSON. |
+| `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `manage_middleware` | Signs one device out. |
+| `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `manage_middleware` | Signs out every other session. |
+| `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
+| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, `keyring` limiter | Signs the device out. |
 
 ## Devices
 
 On every sign in, Keyring looks for its device cookie (`keyring_device` by default). If it's missing or unknown, Keyring creates a device with a new random token and sets the cookie. The cookie is httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts 400 days. Only a SHA-256 hash of the token is stored.
 
-Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The name is only for people; Keyring never makes security decisions from the user agent string.
+Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The user agent is never a factor. It's only a weak risk signal: `SessionFingerprintChanged` notices when a session's browser or platform changes.
+
+A browser shared by several accounts has one cookie and a device for each account that signed in on it.
 
 ### Trusted Devices
 
@@ -101,7 +106,48 @@ class IpLocator implements LocatesIps
 
 The array may contain `country`, `region`, `city`, `latitude` and `longitude`. Impossible travel needs the coordinates.
 
-`Keyring\Devices\HeaderLocator` reads the `CF-IPCountry`, `CF-Region`, `CF-IPCity`, `CF-IPLatitude` and `CF-IPLongitude` headers that some proxies and CDNs add. Only use it when requests can't reach your app without passing through that proxy, since anyone can send those headers.
+Keyring asks the locator at most once per request, however many signals and steps need the location. Read it the same way in your own code with `Keyring\Devices\Location::of($request)`.
+
+`Keyring\Devices\HeaderLocator` reads the location headers a proxy or CDN adds. By default it reads Cloudflare's: `CF-IPCountry`, `CF-Region`, `CF-IPCity`, `CF-IPLatitude` and `CF-IPLongitude`. For another proxy, set `devices.locator` to `HeaderLocator::class` and bind it with your own map of location fields to header names:
+
+```php
+use Keyring\Devices\HeaderLocator;
+
+$this->app->bind(HeaderLocator::class, fn () => new HeaderLocator([
+    'country' => 'X-Country-Code',
+    'city' => 'X-City',
+]));
+```
+
+Only use it when requests can't reach your app without passing through that proxy, since anyone can send those headers.
+
+### Device Names
+
+Keyring's own user agent parsing only knows the common browsers and platforms. To use a real parser, pass a closure that receives the user agent string and returns a name, or `null`, in a service provider's `boot()` method:
+
+```php
+use Keyring\Devices\UserAgent;
+
+UserAgent::describeUsing(fn (string $userAgent) => app(UserAgentParser::class)->parse($userAgent)->summary());
+```
+
+`UserAgent::from($request)` returns the request's user agent trimmed to 500 characters, as Keyring stores it.
+
+### Your Own Device Model
+
+To add relationships or methods to devices, extend `Keyring\Models\Device` and tell Keyring about it:
+
+```php
+use App\Models\Device;
+
+Keyring::useDeviceModel(Device::class);
+```
+
+`$user->devices()`, the risk signals, `keyring:prune` and the device routes all use it. The model has two query scopes, `ownedBy($user)` and `active()` (not revoked):
+
+```php
+Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
+```
 
 ## Listing and Revoking Devices
 
@@ -125,9 +171,15 @@ The array may contain `country`, `region`, `city`, `latitude` and `longitude`. I
 }
 ```
 
-`DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. Revoking the current device redirects to the login page. Otherwise the response is `{"status": "device-revoked"}`, or a redirect back with that `status`.
+`DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` signs out every session except the current one and changes the "remember me" token. It responds with `sessions-revoked`.
+`DELETE /user/devices` signs out every session except the current one and changes the "remember me" token. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which also cycles the remember token and returns how many sessions it revoked:
+
+```php
+use Keyring\Sessions\Sessions;
+
+app(Sessions::class)->revokeAll($user, except: app(Sessions::class)->current($request)?->id);
+```
 
 Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends.
 
@@ -164,7 +216,18 @@ $this->app->afterResolving(SessionRegistryManager::class, function (SessionRegis
 });
 ```
 
-Then set `sessions.driver` to `custom`. The contract's methods are `save()`, `find()`, `forUser()`, `touch()`, `revoke()`, `revokeAll()` and `revokeDevice()`. `save()` must never clear a revocation made in the meantime.
+Then set `sessions.driver` to `custom`. The contract's methods:
+
+| Method | Does |
+|---|---|
+| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime. |
+| `find($id)` | The session, or `null`. |
+| `forUser($user)` | The user's sessions that haven't expired or been revoked, most recent first. |
+| `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
+| `revoke($id)` | Revokes one session. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. |
+| `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
+| `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A store that expires records itself can return `0`. |
 
 ### The Session Middleware
 
@@ -179,7 +242,7 @@ On each signed-in request it:
 
 A session whose record has gone missing is signed out rather than registered again, so clearing records can't restart a session's window.
 
-A signed-out JSON request gets a `401` with `keyring::keyring.signed_out`. Other requests are redirected to the login page with that message as `status`.
+A signed-out request is sent to the login page with the `signed-out` status, and comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`.
 
 ## Timeouts
 
@@ -198,6 +261,26 @@ A signed-out JSON request gets a `401` with `keyring::keyring.signed_out`. Other
 - **`levels`** override either for sessions at an assurance level: `none`, `aal1`, `aal2` or `aal3`.
 
 A session takes the level it reached at sign in. If [step-up](step-up.md) raises it, the session takes the new level's idle timeout, and its absolute timeout can get shorter (never longer), still counted from sign in.
+
+## Pruning
+
+`php artisan keyring:prune` deletes what Keyring no longer needs:
+
+- devices revoked more than 30 days ago,
+- email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago, since they hold both addresses,
+- security log entries older than `events.keep_for`,
+- registered sessions that have expired or been revoked, through the registry's `prune()`. The cache driver's records expire on their own.
+
+Schedule it daily:
+
+```php
+// routes/console.php
+use Illuminate\Support\Facades\Schedule;
+
+Schedule::command('keyring:prune')->daily();
+```
+
+It runs Laravel's `model:prune` for Keyring's models, including your own [device model](#your-own-device-model). Laravel's plain `model:prune` only looks in `app/Models`, so it won't find them on its own.
 
 ## Events
 

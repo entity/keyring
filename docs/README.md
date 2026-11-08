@@ -19,7 +19,7 @@ Keyring is an authentication backend for Laravel. It handles sign in, registrati
 ## Account Security
 
 - [Managing Authenticators](authenticators.md): adding, renaming and removing sign-in methods, and recovery codes.
-- [Devices & Sessions](devices-and-sessions.md): device recognition, the session registry and timeouts.
+- [Devices & Sessions](devices-and-sessions.md): device recognition, the session registry, timeouts and pruning.
 - [Protected Changes](protected-changes.md): changing the email address and password.
 - [Risk](risk.md): risk signals and what to do about them.
 - [Security Log & Emails](security-log-and-emails.md): the activity log, "was this you?" alerts and security emails.
