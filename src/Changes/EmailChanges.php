@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Keyring\Enums\Category;
+use Keyring\Enums\EmailConfirmation;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EmailChanged;
 use Keyring\Events\EmailChangeRequested;
 use Keyring\Events\EmailChangeReverted;
-use Keyring\Exceptions\ReservedAddressException;
 use Keyring\KeyringManager;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -25,6 +25,7 @@ use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Keyring\Support\RowLock;
 
 use function Illuminate\Support\defer;
 
@@ -48,6 +49,7 @@ class EmailChanges
         protected KeyringManager $keyring,
         protected Sessions $sessions,
         protected SessionAssurance $assurance,
+        protected ReservedAddresses $reserved,
     ) {}
 
     public function request(Authenticatable&Model $user, string $email): ?PendingChange
@@ -78,10 +80,10 @@ class EmailChanges
                 'attribute' => $this->attribute(),
                 'value' => $email,
                 'previous_value' => $current,
-                'confirm_token' => hash('sha256', $tokens['confirm']),
-                'current_token' => $needsCurrent ? hash('sha256', $tokens['current']) : null,
-                'revert_token' => hash('sha256', $tokens['revert']),
-                'expires_at' => now()->addSeconds(Duration::seconds(config('keyring.email_changes.expire', '24h'))),
+                'confirm_token' => PendingChange::hashToken($tokens['confirm']),
+                'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
+                'revert_token' => PendingChange::hashToken($tokens['revert']),
+                'expires_at' => Duration::fromNow(config('keyring.email_changes.expire', '24h')),
             ]);
             $change->authenticatable()->associate($user);
             $change->save();
@@ -105,64 +107,50 @@ class EmailChanges
     }
 
     /**
-     * Handle a confirmation from either address. Returns whether the change
-     * has now been applied.
+     * Handle a confirmation from either address.
      */
-    public function confirm(PendingChange $change, string $token): bool
+    public function confirm(PendingChange $change, string $token): EmailConfirmation
     {
-        $hash = hash('sha256', $token);
-
-        $applied = DB::transaction(function () use ($change, $hash) {
-            $change = $this->lock($change);
-
+        $result = RowLock::hold($change, function (?PendingChange $change) use ($token) {
             if ($change === null || ! $change->isPending()) {
-                return false;
+                return EmailConfirmation::Invalid;
             }
 
-            if (hash_equals($change->confirm_token, $hash)) {
+            if ($change->matches('confirm_token', $token)) {
                 $change->confirmed_at ??= now();
-            } elseif ($change->current_token !== null && hash_equals($change->current_token, $hash)) {
+            } elseif ($change->matches('current_token', $token)) {
                 $change->current_confirmed_at ??= now();
+            } else {
+                return EmailConfirmation::Invalid;
             }
 
             $change->save();
 
-            return $change->isReady() && $this->apply($change);
+            return match (true) {
+                ! $change->isReady() => EmailConfirmation::NeedsOtherAddress,
+                $this->apply($change) => EmailConfirmation::Applied,
+                default => EmailConfirmation::Invalid,
+            };
         });
 
         $change = $change->fresh();
 
-        if ($applied && ($user = $change?->user())) {
+        if ($result === EmailConfirmation::Applied && ($user = $change?->user())) {
             EmailChanged::dispatch($user, $change);
         }
 
-        return $applied;
-    }
-
-    /**
-     * Whether the token is one of this change's confirmation tokens.
-     */
-    public function recognises(PendingChange $change, string $token): bool
-    {
-        $hash = hash('sha256', $token);
-
-        return hash_equals($change->confirm_token, $hash)
-            || ($change->current_token !== null && hash_equals($change->current_token, $hash));
+        return $result;
     }
 
     /**
      * "This wasn't me": put the address back, close every later change, remove
      * sign-in methods added since the change was requested, and sign out
-     * everywhere.
+     * everywhere. Returns whether the link was good.
      */
     public function revert(PendingChange $change, string $token): bool
     {
-        $hash = hash('sha256', $token);
-
-        $reverted = DB::transaction(function () use ($change, $hash) {
-            $change = $this->lock($change);
-
-            if ($change === null || ! $change->canRevert() || ! hash_equals($change->revert_token, $hash)) {
+        $reverted = RowLock::hold($change, function (?PendingChange $change) use ($token) {
+            if ($change === null || ! $change->canRevert() || ! $change->matches('revert_token', $token)) {
                 return false;
             }
 
@@ -175,30 +163,19 @@ class EmailChanges
             $change->forceFill(['reverted_at' => now()])->save();
 
             if ($user !== null) {
-                // Later changes were made by whoever had the account; their
-                // links must not be able to move the address away again.
                 $this->closeLaterChanges($user, $change);
-
-                // One by one, so each removal is logged and announced.
-                $this->keyring->authenticatorModel()::query()
-                    ->ownedBy($user)
-                    ->where('created_at', '>=', $change->created_at)
-                    ->get()
-                    ->each(function (Authenticator $authenticator) use ($user) {
-                        $authenticator->delete();
-                        AuthenticatorRemoved::dispatch($user, $authenticator);
-                    });
+                $this->removeAuthenticatorsAddedSince($user, $change->created_at);
             }
 
             return true;
         });
 
-        $user = $change->fresh()?->user();
+        $change = $change->fresh();
 
-        if ($reverted && $user !== null) {
+        if ($reverted && ($user = $change?->user())) {
             $this->sessions->revokeAll($user);
 
-            EmailChangeReverted::dispatch($user, $change->fresh());
+            EmailChangeReverted::dispatch($user, $change);
         }
 
         return $reverted;
@@ -210,21 +187,12 @@ class EmailChanges
      */
     public function cancel(Authenticatable&Model $user): void
     {
-        PendingChange::query()
-            ->ownedBy($user)
-            ->where('attribute', $this->attribute())
-            ->pending()
-            ->update(['cancelled_at' => now()]);
+        $this->changesOf($user)->pending()->update(['cancelled_at' => now()]);
     }
 
     public function pending(Authenticatable&Model $user): ?PendingChange
     {
-        return PendingChange::query()
-            ->ownedBy($user)
-            ->where('attribute', $this->attribute())
-            ->pending()
-            ->latest()
-            ->first();
+        return $this->changesOf($user)->pending()->latest()->first();
     }
 
     /**
@@ -233,9 +201,7 @@ class EmailChanges
      */
     public function lastChangedAt(Authenticatable&Model $user): ?Carbon
     {
-        $times = PendingChange::query()
-            ->ownedBy($user)
-            ->where('attribute', $this->attribute())
+        $times = $this->changesOf($user)
             ->whereNotNull('applied_at')
             ->get(['applied_at', 'reverted_at'])
             ->flatMap(fn (PendingChange $change) => [$change->applied_at, $change->reverted_at])
@@ -276,78 +242,71 @@ class EmailChanges
     protected function apply(PendingChange $change): bool
     {
         $user = $change->user();
-        $user = $user?->newQuery()->lockForUpdate()->find($user->getKey());
 
-        if (
-            $user === null
-            || Str::lower((string) $user->getAttribute($change->attribute)) !== Str::lower((string) $change->previous_value)
-            || $this->taken($user, $change->value)
-        ) {
-            $change->forceFill(['cancelled_at' => now()])->save();
+        return $user !== null && RowLock::hold($user, function (?Model $user) use ($change) {
+            if (
+                $user === null
+                || Str::lower((string) $user->getAttribute($change->attribute)) !== Str::lower((string) $change->previous_value)
+                || $this->taken($user, $change->value)
+            ) {
+                $change->forceFill(['cancelled_at' => now()])->save();
 
-            return false;
-        }
+                return false;
+            }
 
-        $this->keyring->changing(fn () => $user->forceFill([
-            $change->attribute => $change->value,
-            ...(array_key_exists('email_verified_at', $user->getAttributes()) ? ['email_verified_at' => now()] : []),
-        ])->save());
+            $this->keyring->changing(fn () => $user->forceFill([
+                $change->attribute => $change->value,
+                ...(array_key_exists('email_verified_at', $user->getAttributes()) ? ['email_verified_at' => now()] : []),
+            ])->save());
 
-        $change->forceFill([
-            'applied_at' => now(),
-            'revertable_until' => now()->addSeconds(Duration::seconds(config('keyring.email_changes.revertable_for', '7d'))),
-        ])->save();
+            $change->forceFill([
+                'applied_at' => now(),
+                'revertable_until' => Duration::fromNow(config('keyring.email_changes.revertable_for', '7d')),
+            ])->save();
 
-        return true;
+            return true;
+        });
     }
 
+    /**
+     * Later changes were made by whoever had the account; their links must
+     * not be able to move the address away again.
+     */
     protected function closeLaterChanges(Authenticatable&Model $user, PendingChange $change): void
     {
-        PendingChange::query()
-            ->ownedBy($user)
-            ->where('attribute', $change->attribute)
+        $this->changesOf($user)
             ->where($change->getKeyName(), '>', $change->getKey()) // ULIDs sort by creation
             ->whereNull('reverted_at')
             ->update(['cancelled_at' => now(), 'revertable_until' => now()]);
     }
 
-    protected function lock(PendingChange $change): ?PendingChange
-    {
-        return PendingChange::query()->lockForUpdate()->find($change->getKey());
-    }
-
     /**
-     * Whether an address is held for someone else: while an email change can
-     * still be reverted, the address it replaced stays with its owner.
+     * One by one, so each removal is logged and announced.
      */
-    public function reserved(string $email, ?Model $for = null): bool
+    protected function removeAuthenticatorsAddedSince(Authenticatable&Model $user, Carbon $since): void
     {
-        return PendingChange::query()
-            ->where('attribute', $this->attribute())
-            ->reserving($email)
-            ->when($for?->exists, fn (Builder $query) => $query->whereNot(fn (Builder $query) => $query->ownedBy($for)))
-            ->exists();
-    }
-
-    /**
-     * Refuse to give a user an address reserved for someone else, however
-     * it's saved.
-     *
-     * @internal
-     */
-    public function guardReserved(Model $user): void
-    {
-        $email = $user->getAttribute($this->attribute());
-
-        if ($user->isDirty($this->attribute()) && is_string($email) && $this->reserved($email, $user)) {
-            throw ReservedAddressException::for($user, $this->attribute());
-        }
+        $this->keyring->authenticatorModel()::query()
+            ->ownedBy($user)
+            ->where('created_at', '>=', $since)
+            ->get()
+            ->each(function (Authenticator $authenticator) use ($user) {
+                $authenticator->delete();
+                AuthenticatorRemoved::dispatch($user, $authenticator);
+            });
     }
 
     protected function taken(Authenticatable&Model $user, string $email): bool
     {
         return $user->newQuery()->where($this->attribute(), $email)->whereKeyNot($user->getKey())->exists()
-            || $this->reserved($email, $user);
+            || $this->reserved->has($email, except: $user);
+    }
+
+    /**
+     * @return Builder<PendingChange>
+     */
+    protected function changesOf(Authenticatable&Model $user): Builder
+    {
+        return PendingChange::query()->ownedBy($user)->where('attribute', $this->attribute());
     }
 
     protected function attribute(): string

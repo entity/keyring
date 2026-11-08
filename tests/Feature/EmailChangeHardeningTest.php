@@ -4,9 +4,12 @@ use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Validator;
 use Keyring\Changes\EmailChanges;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\EmailConfirmation;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Exceptions\ReservedAddressException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
@@ -14,6 +17,7 @@ use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Rules\UnreservedAddress;
 use Keyring\Tests\Fixtures\CreateNewUser;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
@@ -51,7 +55,7 @@ function requestChange(User $user, string $to, Assurance $as = Assurance::AAL1):
 /**
  * Confirm from both addresses (no second factor was proved, so both must).
  */
-function confirmBoth(PendingChange $change, array $tokens): bool
+function confirmBoth(PendingChange $change, array $tokens): EmailConfirmation
 {
     app(EmailChanges::class)->confirm($change, $tokens['current']);
 
@@ -100,7 +104,7 @@ it('cancels changes still pending when an earlier one is reverted', function () 
 
     app(EmailChanges::class)->revert($first->fresh(), $firstTokens['revert']);
 
-    expect(confirmBoth($second->fresh(), $secondTokens))->toBeFalse()
+    expect(confirmBoth($second->fresh(), $secondTokens))->toBe(EmailConfirmation::Invalid)
         ->and($this->user->fresh()->email)->toBe('taylor@example.com');
 });
 
@@ -110,7 +114,7 @@ it('does not apply a change once the address has moved on', function () {
 
     Keyring::withoutProtection(fn () => $this->user->fresh()->update(['email' => 'support-set@example.com']));
 
-    expect(confirmBoth($change, $tokens))->toBeFalse()
+    expect(confirmBoth($change, $tokens))->toBe(EmailConfirmation::Invalid)
         ->and($this->user->fresh()->email)->toBe('support-set@example.com');
 });
 
@@ -120,8 +124,8 @@ it('cannot be confirmed twice from stale copies', function () {
     app(EmailChanges::class)->confirm($change, $tokens['current']);
     $stale = PendingChange::find($change->id);
 
-    expect(app(EmailChanges::class)->confirm($change->fresh(), $tokens['confirm']))->toBeTrue()
-        ->and(app(EmailChanges::class)->confirm($stale, $tokens['confirm']))->toBeFalse()
+    expect(app(EmailChanges::class)->confirm($change->fresh(), $tokens['confirm']))->toBe(EmailConfirmation::Applied)
+        ->and(app(EmailChanges::class)->confirm($stale, $tokens['confirm']))->toBe(EmailConfirmation::Invalid)
         ->and(PendingChange::find($change->id)->previous_value)->toBe('taylor@example.com');
 
     app(EmailChanges::class)->revert(PendingChange::find($change->id), $tokens['revert']);
@@ -158,7 +162,7 @@ it('cancels pending email changes when the password is reset', function () {
         'password_confirmation' => 'correct horse battery staple',
     ])->assertRedirect(route('login'));
 
-    expect(confirmBoth($change->fresh(), $tokens))->toBeFalse()
+    expect(confirmBoth($change->fresh(), $tokens))->toBe(EmailConfirmation::Invalid)
         ->and($this->user->fresh()->email)->toBe('taylor@example.com');
 });
 
@@ -243,6 +247,24 @@ describe('the address a change replaced', function () {
     });
 
     it('cannot be given to another user however they are saved', function () {
+        expect(fn () => taylor())->toThrow(ReservedAddressException::class);
+
+        $other = taylor(['email' => 'other@example.com']);
+
+        // Protected attributes are checked first, and lifting that protection
+        // doesn't lift the reservation.
+        expect(fn () => $other->update(['email' => 'taylor@example.com']))->toThrow(ProtectedAttributeException::class)
+            ->and(fn () => Keyring::withoutProtection(fn () => $other->update(['email' => 'taylor@example.com'])))->toThrow(ReservedAddressException::class);
+    });
+
+    it('is refused by the validation rule, whatever its case', function () {
+        expect(Validator::make(['email' => 'TAYLOR@example.com'], ['email' => new UnreservedAddress])->fails())->toBeTrue()
+            ->and(Validator::make(['email' => 'someone@example.com'], ['email' => new UnreservedAddress])->fails())->toBeFalse();
+    });
+
+    it('stays reserved after APP_KEY is rotated', function () {
+        config(['app.previous_keys' => [config('app.key')], 'app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+
         expect(fn () => taylor())->toThrow(ReservedAddressException::class);
     });
 

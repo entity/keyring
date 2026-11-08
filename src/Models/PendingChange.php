@@ -49,9 +49,36 @@ class PendingChange extends Model
     {
         static::saving(function (self $change) {
             if ($change->isDirty('previous_value')) {
-                $change->previous_value_hash = $change->previous_value === null ? null : KeyedHash::make(Str::lower($change->previous_value));
+                $change->previous_value_hash = $change->previous_value === null ? null : static::lookupHash($change->previous_value);
             }
         });
+    }
+
+    /**
+     * Tokens are emailed in plain text and stored as SHA-256 hashes.
+     */
+    public static function hashToken(string $token): string
+    {
+        return hash('sha256', $token);
+    }
+
+    /**
+     * Whether the token is the one stored in the given token column.
+     *
+     * @param  'confirm_token'|'current_token'|'revert_token'  $column
+     */
+    public function matches(string $column, string $token): bool
+    {
+        return $this->{$column} !== null && hash_equals($this->{$column}, static::hashToken($token));
+    }
+
+    /**
+     * How a previous value is found while it's reserved: lowercased, and
+     * keyed with APP_KEY since the value itself is encrypted.
+     */
+    public static function lookupHash(string $value): string
+    {
+        return KeyedHash::make(Str::lower($value));
     }
 
     protected function casts(): array
@@ -118,8 +145,8 @@ class PendingChange extends Model
 
     /**
      * Applied changes that can still be reverted, which keep the address they
-     * replaced for their owner: if someone else could take it meanwhile, the
-     * owner couldn't get it back.
+     * replaced for their owner (see ReservedAddresses). The SQL twin of
+     * canRevert() for applied changes: keep the two in step.
      *
      * @param  Builder<static>  $query
      */
