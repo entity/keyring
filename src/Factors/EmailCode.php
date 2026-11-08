@@ -25,6 +25,14 @@ class EmailCode extends CodeFactor
         return [...parent::present($authenticator), 'hint' => $this->mask((string) $authenticator->user()->getAttribute('email'))];
     }
 
+    /**
+     * Every copy would go to the same address, so one is enough.
+     */
+    public function multiple(): bool
+    {
+        return false;
+    }
+
     protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, string $code): void
     {
         // An authenticator that isn't saved yet means this code confirms enrollment.

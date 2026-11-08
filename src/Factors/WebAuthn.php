@@ -207,10 +207,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     public function enrollmentRules(): array
     {
-        return [
-            'credential' => ['required'],
-            'name' => ['nullable', 'string', 'max:64'],
-        ];
+        return ['credential' => ['required'], 'name' => ['nullable', 'string', 'max:64']];
     }
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
@@ -228,7 +225,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         }
 
         return $this->makeAuthenticator([
-            'name' => $request->string('name')->trim()->toString() ?: $this->defaultName(),
+            'name' => $this->nameFrom($request, $this->defaultName()),
             'credential_id' => $id,
             'public_key' => $this->ceremonies()->toJson($record),
             'sign_count' => $record->counter,

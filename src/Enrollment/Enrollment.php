@@ -14,9 +14,9 @@ final readonly class Enrollment
      */
     public function __construct(
         public string $factor,
-        public array $props = [],
-        public array $state = [],
-        public int $expiresAt = 0,
+        public array $props,
+        public array $state,
+        public int $expiresAt,
     ) {}
 
     public static function make(string $factor, array $props = [], array $state = []): self
@@ -40,18 +40,22 @@ final readonly class Enrollment
         return $this->expiresAt < now()->getTimestamp();
     }
 
+    /**
+     * What's kept in the session until the enrollment is confirmed. Props
+     * were for the browser and can be large (a QR code), so they're left out.
+     *
+     * @return array{factor: string, state: array<string, mixed>, expires_at: int}
+     */
     public function toArray(): array
     {
-        return [
-            'factor' => $this->factor,
-            'props' => $this->props,
-            'state' => $this->state,
-            'expires_at' => $this->expiresAt,
-        ];
+        return ['factor' => $this->factor, 'state' => $this->state, 'expires_at' => $this->expiresAt];
     }
 
+    /**
+     * @param  array{factor: string, state: array<string, mixed>, expires_at: int}  $data
+     */
     public static function fromArray(array $data): self
     {
-        return new self($data['factor'], $data['props'], $data['state'], $data['expires_at']);
+        return new self($data['factor'], [], $data['state'], $data['expires_at']);
     }
 }

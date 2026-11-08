@@ -16,6 +16,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Pipeline\SharedLimit;
 
 /**
  * Sensible defaults for factors. Most factors only need key(), categories()
@@ -49,10 +50,9 @@ abstract class Factor implements FactorContract
     }
 
     /**
-     * Keys containing "|ip|" are shared by every account on that address, so
-     * a success never clears them. Requests that don't name an account (like
-     * a usernameless passkey) only get the per-IP limit, so they can't fill
-     * one bucket that every user shares.
+     * The per-IP limit is a SharedLimit, so a success never clears it.
+     * Requests that don't name an account (like a usernameless passkey) only
+     * get the per-IP limit, so they can't fill one bucket every user shares.
      *
      * A browser the account has signed in from before gets a bucket of its
      * own (OWASP "device cookies"), so someone guessing elsewhere can't lock
@@ -68,7 +68,7 @@ abstract class Factor implements FactorContract
 
         return array_values(array_filter([
             $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($bucket),
-            Limit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
+            SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
         ]));
     }
 
@@ -149,6 +149,25 @@ abstract class Factor implements FactorContract
         $model = Keyring::authenticatorModel();
 
         return new $model(['factor' => $this->key(), ...$attributes]);
+    }
+
+    /**
+     * Rules for confirming an enrollment: the factor's own, plus an optional
+     * name, which every factor accepts at either step.
+     *
+     * @return array<string, mixed>
+     */
+    public function enrollmentRules(): array
+    {
+        return [...$this->rules(), 'name' => ['nullable', 'string', 'max:64']];
+    }
+
+    /**
+     * The name the user gave a new authenticator, or the default.
+     */
+    protected function nameFrom(Request $request, string $default): string
+    {
+        return $request->string('name')->trim()->limit(64, '')->value() ?: $default;
     }
 
     /**

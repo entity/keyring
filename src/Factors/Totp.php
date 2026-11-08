@@ -90,13 +90,8 @@ class Totp extends Factor implements Enrollable
             'qr' => $this->qr($url),
         ], [
             'secret' => $secret,
-            'name' => $request->string('name')->trim()->limit(64, '')->toString() ?: __('Authenticator app'),
+            'name' => $this->nameFrom($request, __('Authenticator app')),
         ]);
-    }
-
-    public function enrollmentRules(): array
-    {
-        return $this->rules();
     }
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
@@ -111,7 +106,7 @@ class Totp extends Factor implements Enrollable
         }
 
         return $this->makeAuthenticator([
-            'name' => $enrollment->state('name'),
+            'name' => $this->nameFrom($request, $enrollment->state('name')),
             'secret' => $enrollment->state('secret'),
             'meta' => ['last_timestep' => (int) $timestep],
         ]);

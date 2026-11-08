@@ -19,7 +19,7 @@ use Keyring\Models\Authenticator;
  * OWASP rules once: random codes, short expiry, single use, limited guesses,
  * resend replaces the old code, stored hashed, never logged.
  *
- * A new factor only needs key(), deliver() and (optionally) a name.
+ * A new factor only needs key(), deliver() and defaultName().
  */
 abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 {
@@ -61,7 +61,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     {
         $code = $this->generate();
 
-        $attempt->put($this->key(), 'code', $this->issue($code));
+        $attempt->put($this->key(), 'code', $this->issue($code, $authenticator));
 
         $this->deliver($attempt->user(), $authenticator, $code);
     }
@@ -80,6 +80,12 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $issued = $attempt->state($this->key(), 'code');
+
+        // A code only proves the authenticator it was sent to.
+        if (($issued['authenticator'] ?? null) !== $authenticator->getKey()) {
+            $issued = null;
+        }
+
         [$valid, $issued] = $this->check($issued, (string) $request->input('code'));
 
         $issued === null
@@ -102,13 +108,9 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         ], [
             'code' => $this->issue($code),
             'name' => $authenticator->name,
+            'secret' => $authenticator->secret,
             'meta' => $authenticator->meta,
         ]);
-    }
-
-    public function enrollmentRules(): array
-    {
-        return $this->rules();
     }
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
@@ -123,20 +125,19 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         }
 
         return $this->makeAuthenticator([
-            'name' => $enrollment->state('name'),
+            'name' => $this->nameFrom($request, $enrollment->state('name')),
+            'secret' => $enrollment->state('secret'),
             'meta' => $enrollment->state('meta'),
         ]);
     }
 
     /**
      * The authenticator a new enrollment will create. Override to collect a
-     * phone number or similar from the request.
+     * phone number or similar: put it in `secret` (encrypted) or `meta`.
      */
     protected function newAuthenticator(Authenticatable&Model $user, Request $request): Authenticator
     {
-        $authenticator = $this->makeAuthenticator([
-            'name' => $request->string('name')->trim()->limit(64, '')->toString() ?: $this->defaultName($user),
-        ]);
+        $authenticator = $this->makeAuthenticator(['name' => $this->nameFrom($request, $this->defaultName($user))]);
 
         return $authenticator->setRelation('authenticatable', $user);
     }
@@ -147,20 +148,21 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     }
 
     /**
-     * @return array{hash: string, expires_at: int, guesses: int}
+     * @return array{hash: string, expires_at: int, guesses: int, authenticator: ?string}
      */
-    protected function issue(string $code): array
+    protected function issue(string $code, ?Authenticator $authenticator = null): array
     {
         return [
             'hash' => $this->hash($code),
             'expires_at' => now()->addSeconds($this->ttl)->getTimestamp(),
             'guesses' => 0,
+            'authenticator' => $authenticator?->getKey(),
         ];
     }
 
     /**
-     * @param  array{hash: string, expires_at: int, guesses: int}|null  $issued
-     * @return array{0: bool, 1: array{hash: string, expires_at: int, guesses: int}|null}
+     * @param  array{hash: string, expires_at: int, guesses: int, authenticator?: ?string}|null  $issued
+     * @return array{0: bool, 1: array{hash: string, expires_at: int, guesses: int, authenticator?: ?string}|null}
      */
     protected function check(?array $issued, string $code): array
     {
