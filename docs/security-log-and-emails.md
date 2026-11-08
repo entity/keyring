@@ -112,7 +112,7 @@ public function share(Request $request): array
 
 ## Security Emails
 
-Keyring can email users about security events. These emails are off by default, since your app may want to send its own. Turn them all on in `KeyringServiceProvider`:
+Keyring can tell users about security events. By default it sends the notices NIST SP 800-63B requires (`authenticator_added` and `recovery_code_used`) and the other account changes (`authenticator_removed` and `password_changed`). Set the `notifications` config option to `[]` to send your own instead, or turn them all on in `KeyringServiceProvider`:
 
 ```php
 Keyring::notify();
