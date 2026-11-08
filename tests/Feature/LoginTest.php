@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Events\Authenticated;
@@ -260,9 +261,9 @@ it('finds users the app\'s way, and answers the same when it finds no one', func
 });
 
 it('normalises usernames the app\'s way', function () {
-    Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
-    taylor(['email' => 'Taylor@Example.com']);
+    // Staff sign in with just their name; it's completed to their address.
+    Keyring::normalizeUsernamesUsing(fn (string $username) => Str::lower(trim($username)).(str_contains($username, '@') ? '' : '@example.com'));
+    taylor();
 
-    $this->post('/login', ['email' => ' taylor@example.com ', 'password' => 'password'])->assertSessionHasErrors('email');
-    $this->post('/login', ['email' => ' Taylor@Example.com ', 'password' => 'password'])->assertRedirect('/dashboard');
+    $this->post('/login', ['email' => ' Taylor ', 'password' => 'password'])->assertRedirect('/dashboard');
 });

@@ -84,6 +84,8 @@ Keyring::findUsersUsing(fn (Request $request) => User::query()
 Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
 ```
 
+Whether a lookup cares about case also depends on your database: MySQL's default collations ignore it, while PostgreSQL and SQLite don't.
+
 `findUsersUsing()` only finds the user: Keyring still checks the password, and answers a `null` the same way as a wrong password, in the same time. The username field's validation still applies; change it with a [pipeline step](#writing-a-step) if you need to.
 
 ## Signing In With a Passkey
