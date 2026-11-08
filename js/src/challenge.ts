@@ -65,8 +65,11 @@ export function signInWith(factor: string, credential: Record<string, any>, reme
 }
 
 /**
- * The user closed the prompt (browsers report that, and a timeout, as
- * NotAllowedError), or a newer request replaced this one.
+ * The user closed the prompt, or a newer request replaced this one. Browsers
+ * report a closed prompt and a timeout as NotAllowedError, which is also what
+ * they throw when WebAuthn isn't allowed at all (a cross-origin iframe without
+ * the publickey-credentials permission, or no user gesture in Safari), so
+ * check those first if a prompt never appears.
  */
 export function isAbort(error: unknown): boolean {
   return error instanceof DOMException && (error.name === 'AbortError' || error.name === 'NotAllowedError')
@@ -117,6 +120,7 @@ export function passkeyLogin(
   async function run(conditional: boolean): Promise<void> {
     current?.abort()
     const controller = (current = new AbortController())
+    const isCurrent = () => current === controller
 
     if (!conditional) {
       set({ processing: true, error: null })
@@ -125,15 +129,32 @@ export function passkeyLogin(
     try {
       const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
 
+      // A passkey was picked (from autofill too), so it's being checked now.
+      set({ processing: true, error: null })
+
+      let refused = false
+
       signInWith(factor, credential, remember(), {
         onError: (message) => {
-          set({ error: message })
-          offerAutofill()
+          refused = true
+
+          if (isCurrent()) {
+            set({ error: message })
+          }
         },
-        onFinish: () => set({ processing: false }),
+        // Inertia calls this after onError too.
+        onFinish: () => {
+          if (isCurrent()) {
+            set({ processing: false })
+
+            if (refused) {
+              offerAutofill()
+            }
+          }
+        },
       })
     } catch (caught) {
-      if (current !== controller) {
+      if (!isCurrent()) {
         return
       }
 
@@ -150,6 +171,7 @@ export function passkeyLogin(
 
   return {
     async start(): Promise<void> {
+      set({ processing: false, error: null })
       canAutofill = autofill && await supportsAutofill()
       offerAutofill()
     },
