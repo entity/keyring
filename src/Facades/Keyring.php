@@ -26,6 +26,7 @@ use Keyring\KeyringManager;
  * @method static \Keyring\Testing\KeyringFake fake()
  * @method static \Keyring\KeyringManager createUsersUsing(string $action)
  * @method static \Illuminate\Support\Collection activity(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user, int $limit = 25)
+ * @method static string|null statusMessage(mixed $status)
  * @method static \Keyring\KeyringManager respondWith(string $contract, \Closure|string $implementation)
  * @method static \Illuminate\Contracts\Auth\StatefulGuard guard()
  * @method static \Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model user()

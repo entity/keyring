@@ -3,8 +3,8 @@
 namespace Keyring\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Lang;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Facades\Keyring;
 
 trait RespondsWithStatus
 {
@@ -19,12 +19,13 @@ trait RespondsWithStatus
     }
 
     /**
-     * The flashed status as a message for a page to show.
+     * The flashed status as a message for a page to show. Statuses that
+     * aren't Keyring's (like the password broker's) are already messages.
      */
     protected function statusMessage(Request $request): ?string
     {
         $status = $request->session()->get('status');
 
-        return is_string($status) && Lang::has($key = 'keyring::status.'.$status) ? __($key) : $status;
+        return Keyring::statusMessage($status) ?? $status;
     }
 }
