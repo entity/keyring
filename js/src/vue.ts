@@ -74,7 +74,9 @@ export function usePasskeyLogin({ autofill = false, factor = 'passkey', remember
     } catch (caught) {
       processing.value = false
 
-      if (!(caught instanceof DOMException && caught.name === 'AbortError')) {
+      // Autofill gives up quietly (no passkeys, or the user typed instead), so
+      // only an explicit "Sign in with a passkey" shows an error.
+      if (!conditional && !(caught instanceof DOMException && caught.name === 'AbortError')) {
         error.value = caught instanceof Error ? caught.message : String(caught)
       }
     }
