@@ -117,3 +117,30 @@ it('answers json step-up with a 423', function () {
 
     $this->getJson('/account')->assertStatus(423)->assertJsonPath('redirect', route('keyring.confirm.challenge'));
 });
+
+it('refuses an aal2 route when the user has nothing that could reach it', function () {
+    signIn();
+
+    // A plain confirm wouldn't raise their level, so it would only loop.
+    $this->get('/billing')->assertForbidden();
+    $this->getJson('/billing')->assertForbidden();
+});
+
+it('brings json callers back to the page they were on after confirming', function () {
+    signIn();
+    $this->travel(16)->minutes();
+
+    $this->from('/settings')->getJson('/account')->assertStatus(423);
+
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+        ->assertRedirect('/settings');
+});
+
+it('lets the password through step-up when the only other factor is a used-up set of recovery codes', function () {
+    Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();
+    signIn();
+    $this->travel(16)->minutes();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'password');
+});

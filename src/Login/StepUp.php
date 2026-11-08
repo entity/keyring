@@ -5,6 +5,7 @@ namespace Keyring\Login;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Enums\Purpose;
+use Keyring\KeyringManager;
 use Keyring\Session\SessionAssurance;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -16,6 +17,7 @@ class StepUp
     public function __construct(
         protected AttemptStore $attempts,
         protected SessionAssurance $assurance,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -24,11 +26,18 @@ class StepUp
      */
     public function require(Request $request, Requirement $requirement, bool $building): Response
     {
+        // Without the sign-in methods to meet it, confirming can't help, and
+        // would only send the user round in a loop.
+        abort_unless($this->keyring->for($request->user())->canMeet($requirement), 403, __('keyring::keyring.needs_factor'));
+
         $this->begin($request, $requirement, $building);
 
         $url = route('keyring.confirm.challenge');
 
         if ($request->expectsJson() && ! $request->hasHeader('X-Inertia')) {
+            // Come back to the page that made the call once confirmed.
+            redirect()->setIntendedUrl(url()->previous());
+
             return new JsonResponse(['message' => __('keyring::keyring.confirm'), 'redirect' => $url], 423);
         }
 

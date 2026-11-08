@@ -29,9 +29,13 @@ class RecoveryCodes extends Factor implements Enrollable
         return 'recovery';
     }
 
+    /**
+     * A used-up set proves nothing, so it doesn't count as a factor (or
+     * users would be asked for codes they no longer have).
+     */
     public function categories(Authenticator $authenticator): array
     {
-        return [Category::Possession];
+        return $this->hashes($authenticator) === [] ? [] : [Category::Possession];
     }
 
     /**
