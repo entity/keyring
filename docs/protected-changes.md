@@ -157,9 +157,11 @@ A password reset or a password change cancels any pending change, since whoever 
 | `current_password` | Required when the user has a password. |
 | `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
 
+Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`.
+
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
-Keyring runs your action as one of its own flows, so it may change the protected `password` attribute. Afterwards, whatever the action did, Keyring regenerates the session ID and cancels any pending email change. `sign_out_others` (a boolean, `true` by default) decides whether it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Password Rules
 
@@ -191,7 +193,7 @@ protected function passwordRules((Authenticatable&Model)|null $user = null): arr
 
 The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent through your user model's `sendPasswordResetNotification()`, so you change it the usual Laravel way. Keyring sets its link with `ResetPassword::createUrlUsing()`, built from `APP_URL`, never the `Host` header. If you've already set `createUrlUsing()` yourself, Keyring leaves it alone. The reset page is sent with `Referrer-Policy: no-referrer`, so the token doesn't leak to other sites through the referrer.
 
-`POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`. Only once the token is accepted does Keyring pass the request to your `ResetsUserPasswords` action (published to `app/Actions/Keyring/ResetUserPassword.php`), which checks the password rules and saves the password, so the form doesn't reveal which addresses have accounts or MFA. Then Keyring:
+`POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`. Only once the token is accepted does Keyring pass the request to your `ResetsUserPasswords` action (published to `app/Actions/Keyring/ResetUserPassword.php`), which checks the password rules and saves the password, so the form doesn't reveal which addresses have accounts or MFA. As with changes, the action may only change the password, and must save one or throw. Then Keyring:
 
 - revokes every session and changes the "remember me" token,
 - cancels any pending email change,

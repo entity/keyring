@@ -23,6 +23,7 @@ use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Exceptions\MissingAction;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
@@ -40,6 +41,18 @@ use Keyring\WebAuthn\Ceremonies;
 
 class KeyringServiceProvider extends ServiceProvider
 {
+    /**
+     * The app's actions, and how to register each.
+     *
+     * @var array<class-string, string>
+     */
+    protected const array ACTIONS = [
+        Contracts\CreatesNewUsers::class => 'createUsersUsing',
+        Contracts\ResetsUserPasswords::class => 'resetUserPasswordsUsing',
+        Contracts\UpdatesUserPasswords::class => 'updateUserPasswordsUsing',
+        Contracts\ValidatesEmailChanges::class => 'validateEmailChangesUsing',
+    ];
+
     /**
      * @var array<class-string, class-string>
      */
@@ -66,6 +79,11 @@ class KeyringServiceProvider extends ServiceProvider
         $this->app->bind(RiskLocks::class, fn (Application $app) => new RiskLocks($app['cache']->store(config('keyring.risk.store'))));
         $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
         $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
+
+        // The app registers its own actions; say how when it hasn't.
+        foreach (self::ACTIONS as $contract => $method) {
+            $this->app->bindIf($contract, fn () => throw MissingAction::for($contract, $method));
+        }
 
         // Per request, since they wrap the current session.
         $this->app->scoped(AttemptStore::class);

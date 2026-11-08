@@ -1,6 +1,6 @@
 # Keyring Documentation
 
-Keyring is an authentication backend for Laravel. It handles sign in, registration, password resets, email verification, second factors, passkeys, step-up, devices, sessions and account changes. Like Fortify, it ships no UI of its own beyond optional Inertia pages you publish and own.
+Keyring is an authentication backend for Laravel. It handles sign in, registration, password resets, email verification, second factors, passkeys, step-up, devices, sessions and account changes. Like Fortify, it ships no UI of its own: your app owns the pages and the account actions, and Keyring supplies everything around them.
 
 ## Getting Started
 
