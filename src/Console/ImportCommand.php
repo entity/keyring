@@ -171,13 +171,13 @@ class ImportCommand extends Command
 
     protected function hasDefault(Model $user): bool
     {
-        return Keyring::authenticatorModel()::query()->whereMorphedTo('authenticatable', $user)->where('is_default', true)->exists();
+        return Keyring::authenticatorModel()::query()->ownedBy($user)->where('is_default', true)->exists();
     }
 
     protected function imported(Model $user, string $factor, string $source): bool
     {
         return Keyring::authenticatorModel()::query()
-            ->whereMorphedTo('authenticatable', $user)
+            ->ownedBy($user)
             ->where('factor', $factor)
             ->where('meta->imported_from', $source)
             ->exists();

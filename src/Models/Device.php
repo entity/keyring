@@ -51,15 +51,6 @@ class Device extends Model
      * @param  Builder<static>  $query
      */
     #[Scope]
-    protected function ownedBy(Builder $query, Model $user): void
-    {
-        $query->whereMorphedTo('authenticatable', $user);
-    }
-
-    /**
-     * @param  Builder<static>  $query
-     */
-    #[Scope]
     protected function active(Builder $query): void
     {
         $query->whereNull('revoked_at');

@@ -83,8 +83,8 @@ class SecurityLog
     /**
      * @return Builder<SecurityEvent>
      */
-    protected function query(Authenticatable&Model $user)
+    protected function query(Authenticatable&Model $user): Builder
     {
-        return SecurityEvent::query()->whereMorphedTo('authenticatable', $user);
+        return SecurityEvent::query()->ownedBy($user);
     }
 }

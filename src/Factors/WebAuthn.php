@@ -34,7 +34,7 @@ use Webauthn\PublicKeyCredentialDescriptor;
  */
 class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, PrimaryFactor
 {
-    protected const LOGIN_OPTIONS = 'keyring.webauthn.login';
+    protected const string LOGIN_OPTIONS = 'keyring.webauthn.login';
 
     final public function __construct(
         protected Profile $profile,
@@ -191,7 +191,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment
     {
         $exclude = Keyring::authenticatorModel()::query()
-            ->whereMorphedTo('authenticatable', $user)
+            ->ownedBy($user)
             ->whereNotNull('credential_id')
             ->get()
             ->map(fn (Authenticator $each) => $this->descriptor($each))

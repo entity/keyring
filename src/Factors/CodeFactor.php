@@ -13,6 +13,7 @@ use Keyring\Enums\Category;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\KeyedHash;
 
 /**
  * Base for factors that send a one-time code (email, SMS, ...). Handles the
@@ -181,6 +182,6 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     protected function hash(string $code): string
     {
-        return hash_hmac('sha256', $this->key().'|'.$code, config('app.key'));
+        return KeyedHash::make($this->key().'|'.$code);
     }
 }
