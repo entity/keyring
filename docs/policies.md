@@ -30,11 +30,12 @@ A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possess
 |---|---|
 | `Requirement::aal1()` | Any one category. |
 | `Requirement::aal2()` | Two categories. |
-| `Requirement::aal3()` | Two categories, including possession, and at least one phishing-resistant verification. |
+| `Requirement::aal3()` | Two categories, including possession, and a phishing-resistant key that can't leave its device. |
 | `Requirement::factors(3)` | That many categories (at least 1). |
 | `Requirement::for(Assurance::AAL2)` | The requirement for an assurance level. |
 | `->including(Category::Possession)` | That category must be among those verified. |
 | `->phishingResistant()` | At least one verification must be phishing resistant (a passkey or security key). |
+| `->deviceBound()` | At least one verification must be a phishing-resistant key that can't leave its device: a security key, or a passkey that doesn't sync. |
 | `->ifEnrolled()` | Apply this as far as the user's authenticators can meet it. See [Only When Enrolled](#only-when-enrolled). |
 | `->noDowngrade()` | Users with a passkey or security key must use one. See [No Downgrade](#no-downgrade). |
 
@@ -51,12 +52,14 @@ Keyring works out an assurance level from what a user has proved in their sessio
 | Proved | Level |
 |---|---|
 | A password | AAL1 |
-| A password and a TOTP, email or recovery code | AAL2 |
+| A password and a TOTP or recovery code | AAL2 |
+| A password and an email code, with [`EmailCode::asSecondFactor()`](factors.md#email-codes) | AAL2 (below NIST's bar) |
+| A passkey that syncs (iCloud Keychain, Google Password Manager...) | AAL2 |
 | A password and a security key, without user verification | AAL3 |
-| A passkey (always user verified) | AAL3 |
+| A passkey that stays on its device (always user verified) | AAL3 |
 | A security key that verified the user (PIN or biometric) | AAL3 |
 
-AAL3 means two categories, one of them a phishing-resistant possession factor. A user-verified passkey proves possession and inherence in one step, so it reaches AAL3 on its own.
+AAL3 means two categories, one of them a phishing-resistant key that can't leave its device, as NIST SP 800-63B requires. A user-verified passkey proves possession and inherence in one step, so it reaches AAL2 on its own, and AAL3 when it doesn't sync. Whether a key may sync is the backup-eligible flag it reports on every sign in; a key that hasn't reported it counts as synced.
 
 The [step-up middleware](step-up.md#raising-assurance) asks for these levels by name: `keyring:aal2`.
 
