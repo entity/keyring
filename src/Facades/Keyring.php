@@ -33,6 +33,7 @@ use Keyring\KeyringManager;
  * @method static \Illuminate\Contracts\Auth\UserProvider provider(string|null $guard = null)
  * @method static \Keyring\UserKeyring for(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static string username()
+ * @method static string normalizeUsername(string $username)
  * @method static array protectedAttributes()
  * @method static mixed withoutProtection(\Closure $callback, string|null $reason = null)
  * @method static \Keyring\KeyringManager useAuthenticatorModel(string $model)

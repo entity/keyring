@@ -63,7 +63,7 @@ abstract class Factor implements FactorContract
     {
         $account = $attempt !== null
             ? (string) $attempt->userId
-            : $this->normalizeAccount((string) $request->input(config('keyring.username')));
+            : $this->normalizeAccount((string) $request->input(Keyring::username()));
 
         $bucket = $this->key().'|account|'.$account.$this->knownDevice($request, $attempt, $account);
 
@@ -83,15 +83,18 @@ abstract class Factor implements FactorContract
 
             return $user !== null && $account === ($attempt !== null
                 ? (string) $user->getAuthIdentifier()
-                : $this->normalizeAccount((string) $user->getAttribute(config('keyring.username'))));
+                : $this->normalizeAccount((string) $user->getAttribute(Keyring::username())));
         });
 
         return $device === null ? '' : '|device|'.$device->id;
     }
 
+    /**
+     * Transliterated too, so spelling variants of one address share a limit.
+     */
     protected function normalizeAccount(string $account): string
     {
-        return Str::transliterate(Str::lower(trim($account)));
+        return Str::transliterate(Keyring::normalizeUsername($account));
     }
 
     public function errorKey(): string

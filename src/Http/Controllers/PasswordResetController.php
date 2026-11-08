@@ -45,7 +45,7 @@ class PasswordResetController
         // After the response, so how long it takes doesn't give away whether
         // the address has an account.
         defer(fn () => $this->broker()->sendResetLink([
-            $this->keyring->username() => $request->string($this->keyring->username())->lower()->value(),
+            $this->keyring->username() => $this->keyring->normalizeUsername((string) $request->input($this->keyring->username())),
         ]));
 
         return $this->status('reset-link-sent');
@@ -75,7 +75,7 @@ class PasswordResetController
         ]);
 
         $status = $this->broker()->reset([
-            $this->keyring->username() => $request->string($this->keyring->username())->lower()->value(),
+            $this->keyring->username() => $this->keyring->normalizeUsername((string) $request->input($this->keyring->username())),
             'token' => $request->input('token'),
             'password' => $request->input('password'),
         ], function (Authenticatable&Model $user, string $password) use ($request) {

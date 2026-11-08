@@ -84,7 +84,7 @@ The published `CreateNewUser` action passes the plain password to `User::create(
 
 Implementing `MustVerifyEmail` is recommended. Users who implement it must verify their address before they can add a sign-in method. See [Managing Authenticators](authenticators.md#email-verification).
 
-Keyring looks users up by the `email` attribute by default (see `username` in [Configuration](configuration.md#guard-and-users)). Lookups lowercase the input, so store addresses lowercased. The published `CreateNewUser` action does this.
+Keyring looks users up by the `email` attribute by default (see `username` in [Configuration](configuration.md#guard-and-users)). Lookups trim and lowercase the input, so store addresses the same way. `Keyring::normalizeUsername()` does exactly that, and the published `CreateNewUser` action uses it.
 
 ## Frontend
 

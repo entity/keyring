@@ -65,7 +65,7 @@ class Password extends Factor implements PrimaryFactor
     public function identify(Request $request): ?Authenticator
     {
         $user = $this->provider()->retrieveByCredentials([
-            Keyring::username() => Str::lower($request->string(Keyring::username())),
+            Keyring::username() => Keyring::normalizeUsername((string) $request->input(Keyring::username())),
         ]);
 
         if (! $user instanceof Model || blank($user->getAuthPassword())) {
