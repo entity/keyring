@@ -2,10 +2,10 @@
 
 namespace Keyring\Tests\Fixtures;
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+
 /**
  * A kind of user kept in the users table, as with single table inheritance.
  */
-class AdminUser extends User
-{
-    protected $table = 'users';
-}
+#[Table(name: 'users')]
+class AdminUser extends User {}
