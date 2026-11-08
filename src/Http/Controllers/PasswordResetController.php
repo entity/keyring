@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Keyring\Changes\EmailChanges;
 use Keyring\Devices\DeviceManager;
 use Keyring\Events\PasswordReset;
 use Keyring\Http\Responses\ChoosesFormat;
@@ -92,6 +93,7 @@ class PasswordResetController
             ])->save());
 
             $this->sessions->registry()->revokeAll($user);
+            app(EmailChanges::class)->cancel($user);
 
             PasswordReset::dispatch($user);
         });

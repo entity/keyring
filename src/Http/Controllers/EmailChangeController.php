@@ -53,8 +53,24 @@ class EmailChangeController
     }
 
     /**
-     * A confirmation link from either address. Works signed out, since it may
-     * open in another browser.
+     * The page an emailed link opens. It changes nothing: mail scanners fetch
+     * links on their own, so the change only happens when the person presses
+     * the button, which POSTs back to the same URL.
+     */
+    public function page(Request $request, string $change, string $token): mixed
+    {
+        PendingChange::query()->findOrFail($change);
+        $action = $request->routeIs('keyring.email.revert') ? 'revert' : 'confirm';
+
+        return $this->keyring->render('email-change', [
+            'action' => $action,
+            'url' => route("keyring.email.{$action}.store", ['change' => $change, 'token' => $token]),
+        ]);
+    }
+
+    /**
+     * Confirm from either address. Works signed out, since the link may open
+     * in another browser.
      */
     public function confirm(string $change, string $token): mixed
     {

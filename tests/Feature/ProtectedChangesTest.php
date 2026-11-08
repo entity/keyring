@@ -4,6 +4,7 @@ use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Events\EmailChanged;
@@ -21,6 +22,7 @@ use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Notifications\ResetPassword;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
+use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
     Notification::fake();
@@ -43,6 +45,30 @@ function sentTo(string $address, string $notification): object
     });
 
     return $sent;
+}
+
+/**
+ * Sign in for real with a password and a TOTP enrolled before this session,
+ * the only kind of second factor that waives current-address confirmation.
+ */
+function signInWithTotp(User $user): void
+{
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+
+    test()->post('/login', ['email' => $user->email, 'password' => 'password']);
+    test()->post(route('keyring.login.verify', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($totp->secret)]);
+}
+
+/**
+ * Open an emailed change link the way a person would: the GET shows a page,
+ * and pressing its button POSTs back to the same URL.
+ */
+function follow(string $url): TestResponse
+{
+    test()->inertia()->get($url)->assertOk();
+    test()->flushHeaders();
+
+    return test()->post($url);
 }
 
 function linkIn(object $notification, string $text): string
@@ -85,10 +111,10 @@ describe('changing email', function () {
         $this->getJson(route('keyring.email.show'))->assertJsonPath('pending.email', 'new@example.com')
             ->assertJsonPath('pending.needsCurrentConfirmation', true);
 
-        $this->get(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        follow(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
         expect($this->user->fresh()->email)->toBe('taylor@example.com');
 
-        $this->get(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Confirm the change'));
+        follow(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Confirm the change'));
         expect($this->user->fresh()->email)->toBe('new@example.com')
             ->and($this->user->fresh()->email_verified_at)->not->toBeNull();
 
@@ -96,15 +122,14 @@ describe('changing email', function () {
     });
 
     it('only needs the new address to confirm when there is a second factor', function () {
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
-        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+        signInWithTotp($this->user);
 
         $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
 
         $notice = sentTo('taylor@example.com', EmailChangeNotice::class);
         expect($notice->confirmToken)->toBeNull();
 
-        $this->get(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        follow(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
         expect($this->user->fresh()->email)->toBe('new@example.com');
     });
 
@@ -123,16 +148,15 @@ describe('changing email', function () {
 
     it('lets the old address revert the change and signs everyone out', function () {
         Event::fake([EmailChangeReverted::class]);
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
-        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+        signInWithTotp($this->user);
 
         $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com']);
-        $this->get(linkIn(sentTo('attacker@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        follow(linkIn(sentTo('attacker@example.com', ConfirmEmailChange::class), 'Confirm email address'));
         expect($this->user->fresh()->email)->toBe('attacker@example.com');
 
         $this->travel(3)->days();
 
-        $this->get(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Wasn\'t you'))
+        follow(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Wasn\'t you'))
             ->assertRedirect(route('password.request'));
 
         expect($this->user->fresh()->email)->toBe('taylor@example.com')
@@ -141,15 +165,14 @@ describe('changing email', function () {
     });
 
     it('stops allowing reverts after the window', function () {
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
-        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+        signInWithTotp($this->user);
 
         $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com']);
-        $this->get(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
+        follow(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
 
         $this->travel(8)->days();
 
-        $this->get(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Wasn\'t you'));
+        follow(linkIn(sentTo('taylor@example.com', EmailChangeNotice::class), 'Wasn\'t you'));
         expect($this->user->fresh()->email)->toBe('new@example.com');
     });
 

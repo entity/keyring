@@ -235,9 +235,12 @@ Keyring::withoutProtection(fn () => $user->update([...]), reason: 'support ticke
 
 - **Email change** (`POST /user/email`):
   - It needs a fresh verification.
-  - The new address must confirm. The current address gets a notice with a revert link, and must confirm too when the account has no second factor.
+  - The new address must confirm. The current address gets a notice with a revert link, and must confirm too unless this session proved a second factor that existed before it signed in.
+  - Emailed links open a page with a button; only the button (a POST) changes anything, so mail scanners that open links can't confirm or revert.
+  - A change only applies if the address is still the one it was requested from.
   - It never reveals whether the new address belongs to someone else.
-  - The revert link signs out every session.
+  - The revert link signs out every session, closes any later changes, and removes sign-in methods added since the change was requested.
+  - Password resets and password changes cancel any change still pending.
 - **Password change** (`PUT /user/password`): it needs the current password, applies the OWASP rules and signs out other sessions:
   - at least 8 characters with MFA, 15 without
   - up to 128 characters, rejecting anything bcrypt would truncate

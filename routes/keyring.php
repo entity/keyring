@@ -82,8 +82,12 @@ Route::middleware('auth:'.$guard)->group(function () {
 });
 
 Route::middleware('throttle:12,1')->group(function () {
-    Route::get('/email-changes/{change}/confirm/{token}', [EmailChangeController::class, 'confirm'])->name('keyring.email.confirm');
-    Route::get('/email-changes/{change}/revert/{token}', [EmailChangeController::class, 'revert'])->name('keyring.email.revert');
+    // GET only shows a page with a button; the POST makes the change, so a
+    // mail scanner opening the link can't confirm or revert anything.
+    Route::get('/email-changes/{change}/confirm/{token}', [EmailChangeController::class, 'page'])->name('keyring.email.confirm');
+    Route::post('/email-changes/{change}/confirm/{token}', [EmailChangeController::class, 'confirm'])->name('keyring.email.confirm.store');
+    Route::get('/email-changes/{change}/revert/{token}', [EmailChangeController::class, 'page'])->name('keyring.email.revert');
+    Route::post('/email-changes/{change}/revert/{token}', [EmailChangeController::class, 'revert'])->name('keyring.email.revert.store');
 });
 
 Route::get('/user/devices', [DeviceController::class, 'index'])->middleware('auth:'.$guard)->name('keyring.devices.index');

@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Keyring\Changes\EmailChanges;
 use Keyring\Devices\DeviceManager;
 use Keyring\Events\PasswordChanged;
 use Keyring\Http\Responses\ChoosesFormat;
@@ -50,6 +51,7 @@ class PasswordController
         if ($validated['sign_out_others'] ?? true) {
             $this->sessions->registry()->revokeAll($user, except: $this->sessions->current($request)?->id);
             $this->devices->cycleRememberToken($user);
+            app(EmailChanges::class)->cancel($user);
         }
 
         PasswordChanged::dispatch($user);

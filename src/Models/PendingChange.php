@@ -31,6 +31,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $cancelled_at
  * @property Carbon $expires_at
  * @property Carbon|null $revertable_until
+ * @property Carbon|null $created_at
  */
 #[Table('keyring_pending_changes')]
 #[Unguarded]
