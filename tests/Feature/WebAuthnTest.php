@@ -67,6 +67,17 @@ it('signs in with a passkey alone, without a username', function (VirtualAuthent
     'Ed25519' => fn () => VirtualAuthenticator::eddsa(),
 ]);
 
+it('caps a passkey that syncs at aal2, as nist does', function () {
+    $key = new VirtualAuthenticator(synced: true);
+    enroll('passkey', $key);
+
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+        ->and($this->user->keyring->canMeet(Requirement::aal3()))->toBeFalse();
+});
+
 it('uses a security key as a second factor', function () {
     $key = new VirtualAuthenticator(userVerification: false);
     enroll('security-key', $key);

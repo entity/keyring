@@ -61,7 +61,7 @@ trait InteractsWithKeyring
                 new Verification('password', null, [Category::Knowledge], at: $at),
                 new Verification('totp', 'testing', [Category::Possession], at: $at),
             ],
-            Assurance::AAL3 => [new Verification('passkey', 'testing', [Category::Possession, Category::Inherence], phishingResistant: true, at: $at)],
+            Assurance::AAL3 => [new Verification('security-key', 'testing', [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
         };
 
         return $this->withSession([

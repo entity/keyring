@@ -41,7 +41,7 @@ Route::delete('/account', [AccountController::class, 'destroy'])
 
 `keyring:aal2` lets the request through when the session has reached AAL2 or higher. `keyring:aal1` and `keyring:aal3` work the same way, and `keyring` on its own means `keyring:aal2`. An unknown level name throws an `InvalidArgumentException`.
 
-It counts everything proved so far this session, so it only asks for what's missing. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL3 and goes straight through.
+It counts everything proved so far this session, so it only asks for what's missing. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL2, and at AAL3 if the passkey stays on its device.
 
 The level stays reached for the rest of the session, unless a [risk response](risk.md#checkpoints) clears it.
 

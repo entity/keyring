@@ -124,9 +124,10 @@ class Ceremonies
 
     /**
      * Check a login response against a stored credential. Returns the updated
-     * record and whether the user was verified, or null when it isn't valid.
+     * record, whether the user was verified and whether the key may sync, or
+     * null when it isn't valid.
      *
-     * @return array{record: CredentialRecord, userVerified: bool}|null
+     * @return array{record: CredentialRecord, userVerified: bool, backupEligible: bool}|null
      *
      * @throws CounterException when the counter went backwards (a cloned key)
      */
@@ -143,7 +144,11 @@ class Ceremonies
             $record = AuthenticatorAssertionResponseValidator::create($this->steps()->requestCeremony())
                 ->check($record, $credential->response, $options, $this->relyingPartyId(), $record->userHandle);
 
-            return ['record' => $record, 'userVerified' => $credential->response->authenticatorData->isUserVerified()];
+            return [
+                'record' => $record,
+                'userVerified' => $credential->response->authenticatorData->isUserVerified(),
+                'backupEligible' => $credential->response->authenticatorData->isBackupEligible(),
+            ];
         } catch (CounterException $e) {
             throw $e;
         } catch (Throwable $e) {

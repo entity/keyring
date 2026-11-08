@@ -84,12 +84,7 @@ class UserKeyring
 
         return $this->all()
             ->reject(fn (Authenticator $authenticator) => in_array($authenticator->id, $used, true))
-            ->filter(fn (Authenticator $authenticator) => $requirement->wouldProgress(
-                $verifications,
-                $authenticator->factor()->categories($authenticator),
-                $authenticator->factor()->phishingResistant($authenticator),
-                $authenticator->factor,
-            ))
+            ->filter(fn (Authenticator $authenticator) => $requirement->wouldProgress($verifications, Verification::of($authenticator)))
             ->values();
     }
 

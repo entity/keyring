@@ -47,7 +47,7 @@ $this->actingAs($user)->withAssurance(Assurance::AAL2)->get('/billing')->assertO
 $this->actingAs($user)->freshAt(now()->subHour())->deleteJson('/account')->assertStatus(423);
 ```
 
-- `withAssurance($level)` pretends the session proved enough to reach that level: a password for AAL1, a password and a TOTP code for AAL2, a passkey for AAL3. `Assurance::None` proves nothing.
+- `withAssurance($level)` pretends the session proved enough to reach that level: a password for AAL1, a password and a TOTP code for AAL2, a security key for AAL3. `Assurance::None` proves nothing.
 - `freshAt($time)` pretends those verifications happened at that time, for [`keyring.fresh`](step-up.md#fresh-verification). Without it, they happen now.
 
 You can chain both, in either order. The level defaults to AAL1, so `freshAt()` alone gives a password verification at that time.
