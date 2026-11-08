@@ -14,3 +14,10 @@ it('lets apps register the routes themselves, e.g. under a prefix', function () 
 
     $this->inertia()->get('/account/login')->assertOk()->assertJsonPath('component', 'auth/login');
 });
+
+it('takes the session lock on routes that spend session state', function (string $name) {
+    expect(Route::getRoutes()->getByName($name)->locksFor())->toBeGreaterThan(0);
+})->with([
+    'login.store', 'keyring.login.factor', 'keyring.login.verify', 'keyring.login.send',
+    'keyring.confirm.verify', 'keyring.confirm.send', 'keyring.authenticators.confirm',
+]);
