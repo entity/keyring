@@ -74,10 +74,11 @@ class EmailChanges
 
         $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($request);
 
-        $change = PendingChange::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
+        $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
             $this->cancel($user);
 
-            $change = new PendingChange([
+            $model = $this->keyring->pendingChangeModel();
+            $change = new $model([
                 'attribute' => $this->attribute(),
                 'value' => $email,
                 'previous_value' => $current,
@@ -307,7 +308,7 @@ class EmailChanges
      */
     protected function changesOf(Authenticatable&Model $user): Builder
     {
-        return PendingChange::query()->ownedBy($user)->where('attribute', $this->attribute());
+        return $this->keyring->pendingChangeModel()::query()->ownedBy($user)->where('attribute', $this->attribute());
     }
 
     protected function attribute(): string

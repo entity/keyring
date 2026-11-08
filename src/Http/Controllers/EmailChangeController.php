@@ -11,7 +11,6 @@ use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Models\PendingChange;
 
 class EmailChangeController
 {
@@ -61,7 +60,7 @@ class EmailChangeController
      */
     public function page(Request $request, string $change, string $token): mixed
     {
-        $change = PendingChange::query()->findOrFail($change);
+        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
         $action = $request->routeIs('keyring.email.revert') ? 'revert' : 'confirm';
 
         return $this->keyring->render('email-change', [
@@ -76,7 +75,7 @@ class EmailChangeController
      */
     public function confirm(string $change, string $token): StatusResponse
     {
-        $change = PendingChange::query()->findOrFail($change);
+        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
 
         $status = match ($this->changes->confirm($change, $token)) {
             EmailConfirmation::Applied => 'email-changed',
@@ -89,7 +88,7 @@ class EmailChangeController
 
     public function revert(string $change, string $token): StatusResponse
     {
-        $change = PendingChange::query()->findOrFail($change);
+        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
 
         // Send them to reset their password, when the app has that flow.
         return $this->changes->revert($change, $token)

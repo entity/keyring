@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\User;
@@ -76,3 +77,20 @@ it('can turn registration off', function () {
     expect(Route::has('register'))->toBeFalse()
         ->and(Route::has('login'))->toBeTrue();
 });
+
+it('can leave new users signed out, for everyone or per user', function (bool|Closure $when) {
+    Keyring::signInAfterRegistering($when);
+
+    $this->post('/register', [
+        'name' => 'Taylor',
+        'email' => 'taylor@example.com',
+        'password' => 'correct horse battery staple',
+        'password_confirmation' => 'correct horse battery staple',
+    ])->assertRedirect(route('login'))->assertSessionHas('status', 'registered');
+
+    $this->assertGuest();
+    expect(User::sole()->email)->toBe('taylor@example.com');
+})->with([
+    'never' => false,
+    'not this user' => fn () => fn (User $user) => $user->email === 'someone-else@example.com',
+]);

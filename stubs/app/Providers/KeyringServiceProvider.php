@@ -50,6 +50,11 @@ class KeyringServiceProvider extends ServiceProvider
         Keyring::updateUserPasswordsUsing(UpdateUserPassword::class);
         Keyring::validateEmailChangesUsing(ValidateEmailChange::class);
 
+        // Find users your own way (by email or username, skipping banned
+        // accounts...), or keep new users signed out until they're approved:
+        // Keyring::findUsersUsing(fn (Request $request) => User::firstWhere('email', $request->email));
+        // Keyring::signInAfterRegistering(false);
+
         // The limit on registration, password resets and changes, enrollment
         // and emailed links. Sign in attempts use the "limits" config instead.
         RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by(Keyring::guard()->id() ?: $request->ip()));

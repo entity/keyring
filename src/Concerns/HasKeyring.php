@@ -8,7 +8,6 @@ use Keyring\Changes\ReservedAddresses;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
-use Keyring\Models\PendingChange;
 use Keyring\Sessions\Sessions;
 use Keyring\UserKeyring;
 
@@ -42,7 +41,7 @@ trait HasKeyring
 
             $user->authenticators()->delete();
             $user->devices()->delete();
-            PendingChange::query()->ownedBy($user)->delete();
+            Keyring::pendingChangeModel()::query()->ownedBy($user)->delete();
         });
     }
 

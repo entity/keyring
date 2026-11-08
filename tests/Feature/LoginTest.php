@@ -240,3 +240,29 @@ it('keeps a half-finished sign in when checking the password rehashes it', funct
         ->assertRedirect('/dashboard');
     $this->assertAuthenticatedAs($user);
 });
+
+it('finds users the app\'s way, and answers the same when it finds no one', function () {
+    $user = taylor(['name' => 'taylor']);
+    Keyring::findUsersUsing(fn ($request) => User::query()
+        ->where('email', $request->input('email'))
+        ->orWhere('name', $request->input('email'))
+        ->first());
+
+    $this->post('/login', ['email' => 'taylor', 'password' => 'password'])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($user);
+    $this->post('/logout');
+
+    Keyring::findUsersUsing(fn () => null);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertSessionHasErrors(['email' => __('auth.failed')]);
+    $this->assertGuest();
+});
+
+it('normalises usernames the app\'s way', function () {
+    Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
+    taylor(['email' => 'Taylor@Example.com']);
+
+    $this->post('/login', ['email' => ' taylor@example.com ', 'password' => 'password'])->assertSessionHasErrors('email');
+    $this->post('/login', ['email' => ' Taylor@Example.com ', 'password' => 'password'])->assertRedirect('/dashboard');
+});

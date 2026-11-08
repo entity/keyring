@@ -37,12 +37,19 @@ use Keyring\KeyringManager;
  * @method static \Keyring\UserKeyring for(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static string username()
  * @method static string normalizeUsername(string $username)
+ * @method static \Keyring\KeyringManager normalizeUsernamesUsing(\Closure $callback)
+ * @method static \Keyring\KeyringManager findUsersUsing(\Closure $callback)
+ * @method static \Keyring\KeyringManager signInAfterRegistering(\Closure|bool $when)
  * @method static array protectedAttributes()
  * @method static mixed withoutProtection(\Closure $callback, string|null $reason = null)
  * @method static \Keyring\KeyringManager useAuthenticatorModel(string $model)
  * @method static class-string<\Keyring\Models\Authenticator> authenticatorModel()
  * @method static \Keyring\KeyringManager useDeviceModel(string $model)
  * @method static class-string<\Keyring\Models\Device> deviceModel()
+ * @method static \Keyring\KeyringManager usePendingChangeModel(string $model)
+ * @method static class-string<\Keyring\Models\PendingChange> pendingChangeModel()
+ * @method static \Keyring\KeyringManager useSecurityEventModel(string $model)
+ * @method static class-string<\Keyring\Models\SecurityEvent> securityEventModel()
  *
  * @see KeyringManager
  */

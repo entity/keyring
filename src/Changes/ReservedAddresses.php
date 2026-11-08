@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Exceptions\ReservedAddressException;
 use Keyring\KeyringManager;
-use Keyring\Models\PendingChange;
 
 /**
  * While an email change can still be reverted, the address it replaced stays
@@ -24,7 +23,7 @@ class ReservedAddresses
      */
     public function has(string $address, ?Model $except = null): bool
     {
-        return PendingChange::query()
+        return $this->keyring->pendingChangeModel()::query()
             ->where('attribute', $this->keyring->username())
             ->reserving($address)
             ->when($except?->exists, fn (Builder $query) => $query->whereNot(fn (Builder $query) => $query->ownedBy($except)))
