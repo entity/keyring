@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
+use Keyring\Events\SessionEnded;
 use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -52,7 +53,7 @@ class AuthenticateSession
             // expired, or the store was cleared). Treat it as signed out rather
             // than starting it over with a fresh window.
             if ($request->session()->has(Sessions::KEY)) {
-                return $this->signOut($request);
+                return $this->signOut($request, 'revoked');
             }
 
             // Signed in some other way (e.g. a "remember me" cookie): register it.
@@ -65,12 +66,16 @@ class AuthenticateSession
         $now = now()->getTimestamp();
         $idle = $this->sessions->idle();
 
-        if (
-            ! $session->isActive($now)
-            || $session->userId !== (string) $user->getAuthIdentifier()
-            || ($idle !== null && $now - $session->lastActivityAt > $idle)
-        ) {
-            return $this->signOut($request);
+        $ended = match (true) {
+            $session->revokedAt !== null => 'revoked',
+            ! $session->isActive($now) => 'expired',
+            $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
+            $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
+            default => null,
+        };
+
+        if ($ended !== null) {
+            return $this->signOut($request, $ended);
         }
 
         // Before anything checks the level, so inactivity lapses it first.
@@ -97,7 +102,7 @@ class AuthenticateSession
         $action = $this->risk->enforce($user, $risk, Checkpoint::Request);
 
         if ($action->reauthenticate || $action->deny || $action->revokeSessions) {
-            return $this->signOut($request);
+            return $this->signOut($request, 'risk');
         }
 
         // Ask again before anything sensitive, and remember what we've seen
@@ -116,16 +121,24 @@ class AuthenticateSession
         return null;
     }
 
-    protected function signOut(Request $request): Response
+    /**
+     * @param  'revoked'|'expired'|'idle'|'other_user'|'risk'  $reason
+     */
+    protected function signOut(Request $request, string $reason): Response
     {
-        $this->signIn->out($request);
+        if ($user = $this->signIn->out($request)) {
+            SessionEnded::dispatch($user, $reason);
+        }
 
         // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
         // login, remembering where they were going.
-        if ($this->wantsJson($request)) {
-            return new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401);
-        }
+        $response = $this->wantsJson($request)
+            ? new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401)
+            : redirect()->guest(route('login'))->with('status', 'signed-out');
 
-        return redirect()->guest(route('login'))->with('status', 'signed-out');
+        // As on sign out: nothing the session cached stays in the browser.
+        $response->headers->set('Clear-Site-Data', '"cache", "storage"');
+
+        return $response;
     }
 }

@@ -12,6 +12,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
@@ -196,7 +197,9 @@ it('enforces the idle timeout', function () {
     $this->get('/home')->assertOk();
 
     $this->travel(11)->minutes();
-    $this->get('/home')->assertRedirect('/login');
+    $this->get('/home')->assertRedirect('/login')->assertHeader('Clear-Site-Data', '"cache", "storage"');
+
+    expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'idle']);
 });
 
 it('registers sessions that started some other way', function () {
