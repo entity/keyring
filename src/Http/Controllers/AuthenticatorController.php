@@ -13,7 +13,6 @@ use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Models\Authenticator;
 
 /**
  * Adding, renaming, choosing the default and removing authenticators. One
@@ -69,7 +68,7 @@ class AuthenticatorController
 
     public function update(Request $request, string $authenticator): StatusResponse
     {
-        $authenticator = $this->find($request, $authenticator);
+        $authenticator = $this->changes->find($request->user(), $authenticator);
 
         $this->changes->update($authenticator, $request->validate([
             'name' => ['sometimes', 'string', 'max:64'],
@@ -101,13 +100,5 @@ class AuthenticatorController
         $factor = $this->keyring->factor($key);
 
         return $factor instanceof Enrollable ? $factor : abort(404);
-    }
-
-    protected function find(Request $request, string $id): Authenticator
-    {
-        return $this->keyring->authenticatorModel()::query()
-            ->ownedBy($request->user())
-            ->findOrFail($id)
-            ->setRelation('authenticatable', $request->user());
     }
 }

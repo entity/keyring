@@ -80,6 +80,11 @@ class Authenticator extends Model
         return $authenticator;
     }
 
+    /**
+     * Unlike Keyring's other records, an authenticator always has a user:
+     * they're deleted with the user. So this throws rather than returning
+     * null, and callers don't need to check.
+     */
     public function user(): Authenticatable&Model
     {
         $user = $this->authenticatable;

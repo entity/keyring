@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
@@ -52,7 +53,7 @@ class EmailChanges
         protected ReservedAddresses $reserved,
     ) {}
 
-    public function request(Authenticatable&Model $user, string $email): ?PendingChange
+    public function request(Authenticatable&Model $user, string $email, Request $request): ?PendingChange
     {
         $email = $this->keyring->normalizeUsername($email);
         $current = (string) $user->getAttribute($this->attribute());
@@ -71,7 +72,7 @@ class EmailChanges
 
         $tokens = ['confirm' => Str::random(48), 'current' => Str::random(48), 'revert' => Str::random(48)];
 
-        $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor();
+        $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($request);
 
         $change = PendingChange::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
             $this->cancel($user);
@@ -216,9 +217,9 @@ class EmailChanges
      * the session don't count, or a stolen session could add one, verify it,
      * and skip the check.
      */
-    protected function sessionProvedEstablishedSecondFactor(): bool
+    protected function sessionProvedEstablishedSecondFactor(Request $request): bool
     {
-        $signedInAt = $this->sessions->current(request())?->authenticatedAt;
+        $signedInAt = $this->sessions->current($request)?->authenticatedAt;
 
         if ($signedInAt === null) {
             return false;
