@@ -85,12 +85,13 @@ return [
     | Managing Authenticators
     |--------------------------------------------------------------------------
     |
-    | Middleware for adding, changing and removing authenticators. Changing
-    | how someone signs in needs a recent verification (OWASP).
+    | Extra middleware for adding, changing and removing authenticators (on
+    | top of being signed in to Keyring's guard). Changing how someone signs
+    | in needs a recent verification (OWASP).
     |
     */
 
-    'manage_middleware' => ['auth', 'keyring.fresh:15m'],
+    'manage_middleware' => ['keyring.fresh:15m'],
 
     /*
     |--------------------------------------------------------------------------

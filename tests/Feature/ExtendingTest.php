@@ -1,0 +1,44 @@
+<?php
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\Route;
+use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
+use Keyring\Tests\Fixtures\User;
+
+beforeEach(function () {
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+});
+
+it('uses keyring\'s guard for every route, not the app default', function () {
+    config(['auth.guards.admin' => ['driver' => 'session', 'provider' => 'users'], 'keyring.guard' => 'admin']);
+    Route::setRoutes(new RouteCollection);
+    Keyring::routes();
+
+    $this->actingAs($this->user, 'admin')->withAssurance(Assurance::AAL1)
+        ->postJson('/user/authenticators/totp')
+        ->assertOk();
+});
+
+it('lets apps swap the response for every action', function () {
+    app()->bind(StatusResponse::class, fn ($app, array $parameters) => new class($parameters['status']) implements StatusResponse
+    {
+        public function __construct(public string $status) {}
+
+        public function toResponse($request)
+        {
+            return new JsonResponse(['custom' => $this->status]);
+        }
+    });
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->deleteJson('/user/devices')
+        ->assertExactJson(['custom' => 'sessions-revoked']);
+});
+
+it('answers unknown factors with a 404', function () {
+    $this->postJson('/login/sms')->assertNotFound();
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->postJson('/user/authenticators/sms')->assertNotFound();
+});
