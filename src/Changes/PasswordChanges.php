@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
 use Keyring\KeyringManager;
+use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use LogicException;
@@ -56,6 +57,7 @@ class PasswordChanges
         $this->save($user, $save);
         $this->sessions->revokeAll($user);
         $this->locks->unlock($user);
+        ConsecutiveLimit::forget($user);
 
         PasswordReset::dispatch($user);
     }

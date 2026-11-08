@@ -259,14 +259,18 @@ return [
     | Rate Limits
     |--------------------------------------------------------------------------
     |
-    | Default attempts per minute, per account and per IP address. Factors may
-    | declare their own limits.
+    | Default attempts per minute, per account and per IP address, and the
+    | failures in a row an account's factor allows however slowly they come
+    | (NIST SP 800-63B caps them at 100; null for no cap). At that cap the
+    | factor is refused until a password reset. Factors may declare their own
+    | limits.
     |
     */
 
     'limits' => [
         'per_account' => 5,
         'per_ip' => 20,
+        'consecutive' => 100,
     ],
 
 ];
