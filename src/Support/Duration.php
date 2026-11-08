@@ -2,6 +2,7 @@
 
 namespace Keyring\Support;
 
+use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 
 final class Duration
@@ -26,5 +27,21 @@ final class Duration
             'd' => 86400,
             default => throw new InvalidArgumentException("Invalid duration [{$duration}]."),
         };
+    }
+
+    /**
+     * The moment the duration from now ends.
+     */
+    public static function fromNow(string|int $duration): Carbon
+    {
+        return now()->addSeconds(self::seconds($duration));
+    }
+
+    /**
+     * The moment the duration before now began.
+     */
+    public static function ago(string|int $duration): Carbon
+    {
+        return now()->subSeconds(self::seconds($duration));
     }
 }

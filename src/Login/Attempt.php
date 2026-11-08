@@ -83,7 +83,7 @@ final class Attempt
             purpose: $purpose,
             guard: config('keyring.guard'),
             userId: $user->getAuthIdentifier(),
-            expiresAt: now()->addSeconds(Duration::seconds(config('keyring.pending_login_ttl')))->getTimestamp(),
+            expiresAt: Duration::fromNow(config('keyring.pending_login_ttl'))->getTimestamp(),
             remember: $remember,
             verifications: $verifications,
             requirement: $requirement,
@@ -116,7 +116,7 @@ final class Attempt
      */
     public function device(): ?Device
     {
-        return $this->deviceId === null ? null : Device::find($this->deviceId);
+        return $this->deviceId === null ? null : Keyring::deviceModel()::find($this->deviceId);
     }
 
     public function isNewDevice(): bool
