@@ -153,7 +153,7 @@ abstract class Factor implements FactorContract
 
     /**
      * Rules for confirming an enrollment: the factor's own, plus an optional
-     * name, which every factor accepts at either step.
+     * name for the new authenticator.
      *
      * @return array<string, mixed>
      */

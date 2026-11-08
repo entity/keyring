@@ -6,6 +6,7 @@ import type { AuthenticatorSummary, ChallengeProps } from './types'
 import { supportsAutofill, supportsWebAuthn } from './webauthn'
 
 export * from './index'
+export * from './challenge'
 
 export type Challenge = ReturnType<typeof useChallenge>
 

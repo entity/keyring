@@ -3,6 +3,7 @@
 namespace Keyring\Http\Responses;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Lang;
 use Keyring\Contracts\Responses\StatusResponse as StatusResponseContract;
 
 class StatusResponse implements StatusResponseContract
@@ -25,7 +26,7 @@ class StatusResponse implements StatusResponseContract
         if ($this->wantsJson($request)) {
             return new JsonResponse(array_filter([
                 'status' => $this->status,
-                'message' => __('keyring::status.'.$this->status),
+                'message' => Lang::has($key = 'keyring::status.'.$this->status) ? __($key) : null,
                 'redirect' => $this->redirect,
                 ...$this->data,
             ], fn (mixed $value) => $value !== null));

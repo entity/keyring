@@ -66,13 +66,15 @@ class Device extends Model
     }
 
     /**
-     * Revoked devices, a month after they were signed out.
+     * Devices signed out a month ago, or not seen for a year.
      *
      * @return Builder<static>
      */
     public function prunable(): Builder
     {
-        return static::query()->where('revoked_at', '<', now()->subDays(30));
+        return static::query()
+            ->where('revoked_at', '<', now()->subDays(30))
+            ->orWhere('last_seen_at', '<', now()->subYear());
     }
 
     public function isTrusted(): bool

@@ -32,9 +32,12 @@ class DispatchLaravelEvents
     public function failed(FactorFailed $event): void
     {
         $username = config('keyring.username');
+        $user = $event->attempt?->user();
 
         // Only who it was for, never the password or code that was tried.
-        event(new Failed(config('keyring.guard'), $event->attempt?->user(), [$username => $event->request->input($username)]));
+        event(new Failed(config('keyring.guard'), $user, [
+            $username => $user?->getAttribute($username) ?? $event->request->input($username),
+        ]));
     }
 
     public function lockout(Lockout $event): void

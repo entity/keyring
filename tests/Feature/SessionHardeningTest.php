@@ -139,3 +139,17 @@ it('asks again for laravel password confirmation after a mid-session step-up', f
 
     $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect('/password-confirm');
 });
+
+it('answers a signed-out json request with a 401, and remembers where a page visit was going', function () {
+    config(['keyring.sessions.driver' => 'cache']);
+    signInWith();
+    app(SessionRegistry::class)->revoke(session(Sessions::KEY));
+
+    $this->getJson('/home')->assertUnauthorized()->assertJsonPath('status', 'signed-out');
+
+    signInWith();
+    app(SessionRegistry::class)->revoke(session(Sessions::KEY));
+
+    $this->get('/home')->assertRedirect('/login');
+    expect(session('url.intended'))->toEndWith('/home');
+});

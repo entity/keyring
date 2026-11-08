@@ -3,8 +3,8 @@
 namespace Keyring\Http\Middleware;
 
 use Closure;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
 use Keyring\KeyringManager;
@@ -113,6 +113,12 @@ class AuthenticateSession
     {
         $this->signIn->out($request);
 
-        return app(StatusResponse::class, ['status' => 'signed-out', 'redirect' => route('login')])->toResponse($request);
+        // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
+        // login, remembering where they were going.
+        if ($request->expectsJson() && ! $request->hasHeader('X-Inertia')) {
+            return new JsonResponse(['status' => 'signed-out', 'message' => __('keyring::status.signed-out')], 401);
+        }
+
+        return redirect()->guest(route('login'))->with('status', 'signed-out');
     }
 }
