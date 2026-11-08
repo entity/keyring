@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Tests\Fixtures\Staff;
 
 beforeEach(function () {
     Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
@@ -42,6 +43,29 @@ it('asks a password-only session for a second factor before an aal2 route', func
 
     expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
     $this->get('/billing')->assertOk();
+});
+
+it('drops a confirmation that started under another guard', function () {
+    $staff = staff();
+    $totp = Authenticator::factory()->totp()->for($staff, 'authenticatable')->create();
+    config([
+        'auth.providers.staff' => ['driver' => 'eloquent', 'model' => Staff::class],
+        'auth.guards.staff' => ['driver' => 'session', 'provider' => 'staff'],
+        'auth.defaults.guard' => 'staff',
+        'keyring.guard' => 'staff',
+    ]);
+
+    $this->actingAs($staff, 'staff')->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+    config(['auth.defaults.guard' => 'web', 'keyring.guard' => 'web']);
+
+    $this->actingAs($this->user, 'web')
+        ->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect(route('keyring.confirm.challenge'))
+        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    expect($totp->fresh()->last_used_at)->toBeNull();
 });
 
 it('needs a fresh verification after the window passes', function () {

@@ -5,6 +5,7 @@ namespace Keyring\Login;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Keyring\Activity\SecurityLog;
 use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Purpose;
@@ -34,6 +35,10 @@ class SignIn
     public function complete(Request $request, Attempt $attempt): void
     {
         $user = $attempt->user();
+
+        if (! $this->keyring->belongsToGuard($user)) {
+            throw ValidationException::withMessages([$this->keyring->username() => __('auth.failed')]);
+        }
 
         $this->keyring->guard()->login($user, $attempt->remember);
         $request->session()->regenerate(true);
