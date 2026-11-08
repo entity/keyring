@@ -346,7 +346,7 @@ it('prunes old devices, email changes, security events and ended sessions', func
 
 it('describes the setup in artisan about', function () {
     $this->artisan('about', ['--only' => 'keyring'])
-        ->expectsOutputToContain('password, totp, recovery')
+        ->expectsOutputToContain('password, passkey, totp, recovery')
         ->expectsOutputToContain('registration, password_reset, email_verification')
         ->assertSuccessful();
 });
