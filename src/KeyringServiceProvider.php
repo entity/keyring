@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Keyring\Activity\DispatchLaravelEvents;
 use Keyring\Activity\RecordSecurityEvents;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
@@ -45,6 +46,7 @@ class KeyringServiceProvider extends ServiceProvider
         Responses\FailedResponse::class => DefaultResponses\FailedResponse::class,
         Responses\LockoutResponse::class => DefaultResponses\LockoutResponse::class,
         Responses\LogoutResponse::class => DefaultResponses\LogoutResponse::class,
+        Responses\RegisterResponse::class => DefaultResponses\RegisterResponse::class,
         Responses\StatusResponse::class => DefaultResponses\StatusResponse::class,
     ];
 
@@ -104,6 +106,7 @@ class KeyringServiceProvider extends ServiceProvider
         }
 
         Event::subscribe(SendSecurityNotifications::class);
+        Event::subscribe(DispatchLaravelEvents::class);
     }
 
     /**
