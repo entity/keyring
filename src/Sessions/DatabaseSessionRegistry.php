@@ -33,9 +33,7 @@ class DatabaseSessionRegistry implements SessionRegistry
 
     public function forUser(Authenticatable $user): Collection
     {
-        return $this->query()
-            ->where('user_id', (string) $user->getAuthIdentifier())
-            ->whereNull('revoked_at')
+        return $this->activeFor($user)
             ->where('expires_at', '>', now()->getTimestamp())
             ->latest('last_activity_at')
             ->get()
@@ -54,19 +52,15 @@ class DatabaseSessionRegistry implements SessionRegistry
 
     public function revokeAll(Authenticatable $user, ?string $except = null): int
     {
-        return $this->query()
-            ->where('user_id', (string) $user->getAuthIdentifier())
-            ->whereNull('revoked_at')
+        return $this->activeFor($user)
             ->when($except, fn (Builder $query) => $query->where('id', '!=', $except))
             ->update(['revoked_at' => now()->getTimestamp()]);
     }
 
     public function revokeDevice(Authenticatable $user, string $deviceId): int
     {
-        return $this->query()
-            ->where('user_id', (string) $user->getAuthIdentifier())
+        return $this->activeFor($user)
             ->where('device_id', $deviceId)
-            ->whereNull('revoked_at')
             ->update(['revoked_at' => now()->getTimestamp()]);
     }
 
@@ -76,6 +70,14 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->where('expires_at', '<=', now()->getTimestamp())
             ->orWhereNotNull('revoked_at')
             ->delete();
+    }
+
+    /**
+     * The user's sessions that haven't been revoked.
+     */
+    protected function activeFor(Authenticatable $user): Builder
+    {
+        return $this->query()->where('user_id', (string) $user->getAuthIdentifier())->whereNull('revoked_at');
     }
 
     protected function query(): Builder

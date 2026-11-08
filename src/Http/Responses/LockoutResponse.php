@@ -2,9 +2,9 @@
 
 namespace Keyring\Http\Responses;
 
-use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Responses\LockoutResponse as LockoutResponseContract;
 use Keyring\Pipeline\Context;
+use Keyring\Support\Throttle;
 
 class LockoutResponse implements LockoutResponseContract
 {
@@ -14,11 +14,6 @@ class LockoutResponse implements LockoutResponseContract
 
     public function toResponse($request)
     {
-        throw ValidationException::withMessages([
-            $this->context->errorKey() => __('auth.throttle', [
-                'seconds' => $this->context->retryAfter,
-                'minutes' => ceil($this->context->retryAfter / 60),
-            ]),
-        ])->status(429);
+        Throttle::fail($this->context->errorKey(), $this->context->retryAfter);
     }
 }

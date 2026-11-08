@@ -5,6 +5,7 @@ namespace Keyring\Login;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Enums\Purpose;
+use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Sessions\SessionAssurance;
 use Symfony\Component\HttpFoundation\Response;
@@ -14,6 +15,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class StepUp
 {
+    use ChoosesFormat;
+
     public function __construct(
         protected AttemptStore $attempts,
         protected SessionAssurance $assurance,
@@ -34,7 +37,7 @@ class StepUp
 
         $url = route('keyring.confirm.challenge');
 
-        if ($request->expectsJson() && ! $request->hasHeader('X-Inertia')) {
+        if ($this->wantsJson($request)) {
             // Come back to the page that made the call once confirmed.
             redirect()->setIntendedUrl(url()->previous());
 
