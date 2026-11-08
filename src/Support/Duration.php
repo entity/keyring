@@ -24,6 +24,7 @@ final class Duration
             'm' => 60,
             'h' => 3600,
             'd' => 86400,
+            default => throw new InvalidArgumentException("Invalid duration [{$duration}]."),
         };
     }
 }
