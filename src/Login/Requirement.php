@@ -175,7 +175,7 @@ final readonly class Requirement
     }
 
     /**
-     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool}
+     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool, no_downgrade: bool}
      */
     public function toArray(): array
     {
@@ -189,7 +189,7 @@ final readonly class Requirement
     }
 
     /**
-     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool}  $data
+     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool, no_downgrade?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
