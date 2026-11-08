@@ -25,6 +25,10 @@ class CompleteAttempt
         $attempt = $context->attempt;
 
         if (! $attempt->complete) {
+            // A factor was just proved, so whoever planted or copied the old
+            // session ID mustn't share the progress.
+            $context->request->session()->regenerate(true);
+
             $this->attempts->save($attempt);
             $context->outcome = Outcome::Challenge;
 

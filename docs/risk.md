@@ -93,7 +93,7 @@ Build an action with one of the static constructors and chain extras:
 | `Action::stepUp()` | Ask for a second factor, if the user has one (the requirement becomes at least AAL2). | Forget what the session has proved, so step-up middleware asks again. |
 | `Action::reauthenticate()` | Nothing. | Sign the session out. |
 | `Action::deny()` | Refuse the sign in with the usual "these credentials don't match" error. | Sign the session out. |
-| `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token and stop trusting their devices (`Sessions::revokeAll()`). |
+| `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::revokeAll()`). |
 | `->lockFor('1h')` | Refuse sign ins for that long. | The same, from now. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 

@@ -25,7 +25,7 @@ The [conformance suite](testing.md#the-conformance-suite) tests several of these
 - A wrong password and an unknown account give the same error, on the same field, with the same status code.
 - Every failed factor check takes at least `timebox` microseconds (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist.
 - Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, or as soon as the user's password changes.
-- The session ID is regenerated when a user signs in and when they step up.
+- The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
 - Keyring's responses send `Cache-Control: no-store, private`, and signing out sends `Clear-Site-Data`.
@@ -74,7 +74,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - A revocation can't be undone by a request saving a stale copy of its session.
 - Laravel's session ID is never stored by Keyring or written to the security log.
 - Devices are recognised by a random, httpOnly cookie, stored as a hash. A device is never a factor, only an input to your policy and risk signals.
-- Signing out everywhere also stops trusting the other devices, so a device trusted by whoever had the account can't skip the second factor afterwards.
+- Signing out everywhere also stops trusting the other devices and cancels pending email changes, so whoever had the account can't skip the second factor on a device they trusted or finish a change they started.
 
 ### Account Changes
 
@@ -114,6 +114,8 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
 - **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and new passkeys get a different user handle. Recovery codes and reserved email addresses keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
 - **"Remember me" is all or nothing.** Laravel has one remember token per user, so revoking any device or signing out other sessions ends every remembered browser.
+- **Laravel's `cookie` session driver can't destroy an old session.** The session lives in the cookie, so a copied one keeps working after the ID changes, until the session is revoked or expires. Use a server-side session driver if that matters.
+- **A request overlapping a session ID change can undo or lose it.** Laravel saves the session when each request ends, so a request still running when the ID changes can save the old session again, and a copied cookie would then keep working. A request sent with the old ID just after the change finds no session, and that browser has to sign in again.
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
 - **Work in progress.** Keyring hasn't been tagged or used in production yet.
