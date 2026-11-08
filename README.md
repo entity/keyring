@@ -96,6 +96,12 @@ composer check     # everything CI runs: Rector (dry run), Pint, PHPStan and Pes
 
 Run `composer check` before opening a pull request.
 
+The race tests run operations in separate processes against a real database, so they need PostgreSQL or MySQL and run as their own suite (CI runs them on both):
+
+```bash
+DB_CONNECTION=pgsql DB_DATABASE=keyring_test vendor/bin/pest --testsuite=Concurrency
+```
+
 ## License
 
 MIT
