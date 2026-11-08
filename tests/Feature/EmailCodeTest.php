@@ -14,7 +14,7 @@ beforeEach(function () {
     Notification::fake();
     Keyring::factors([Password::class, Totp::class, EmailCode::class, RecoveryCodes::class]);
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 });
 
 function emailAuthenticator(User $user): Authenticator

@@ -25,7 +25,7 @@ use Keyring\Tests\Fixtures\User;
 beforeEach(function () {
     Notification::fake();
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 });
 
 function sentTo(string $address, string $notification): object
@@ -109,7 +109,7 @@ describe('changing email', function () {
     });
 
     it('does not reveal that an address is taken', function () {
-        User::create(['name' => 'Other', 'email' => 'taken@example.com', 'password' => 'password']);
+        User::create(['name' => 'Other', 'email' => 'taken@example.com', 'password' => 'password', 'email_verified_at' => now()]);
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
         $this->postJson(route('keyring.email.store'), ['email' => 'taken@example.com'])

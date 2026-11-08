@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Event;
+use Keyring\Enums\Assurance;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
@@ -11,8 +12,8 @@ use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
-    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
 });
 
 it('enrolls an authenticator app in two steps', function () {
@@ -82,7 +83,7 @@ it('renames and picks the default', function () {
 });
 
 it('cannot touch someone else\'s authenticators', function () {
-    $other = User::create(['name' => 'Other', 'email' => 'other@example.com', 'password' => 'password']);
+    $other = User::create(['name' => 'Other', 'email' => 'other@example.com', 'password' => 'password', 'email_verified_at' => now()]);
     $theirs = Authenticator::factory()->totp()->for($other, 'authenticatable')->create();
 
     $this->deleteJson(route('keyring.authenticators.destroy', $theirs->id))->assertNotFound();

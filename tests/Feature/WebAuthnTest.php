@@ -21,12 +21,12 @@ beforeEach(function () {
         RecoveryCodes::class,
     ]);
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 });
 
 function enroll(string $factor, VirtualAuthenticator $key, string $name = 'My key'): void
 {
-    test()->actingAs(test()->user)->withAssurance(Assurance::AAL1);
+    test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
 
     $options = test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
 
@@ -170,7 +170,7 @@ it('will not register the same key twice', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
     $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect($options['excludeCredentials'])->toHaveCount(1);

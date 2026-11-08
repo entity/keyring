@@ -13,7 +13,7 @@ use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     Keyring::factors([Password::class, Totp::class, WebAuthn::securityKeys(), RecoveryCodes::class]);
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 });
 
 it('passes factors without real proofs', function () {

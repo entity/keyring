@@ -30,6 +30,6 @@ class ConformanceTest extends TestCase
 
     protected function keyringUser(): User
     {
-        return User::create(['name' => 'Taylor', 'email' => 'taylor-'.uniqid().'@example.com', 'password' => 'password']);
+        return User::create(['name' => 'Taylor', 'email' => 'taylor-'.uniqid().'@example.com', 'password' => 'password', 'email_verified_at' => now()]);
     }
 }

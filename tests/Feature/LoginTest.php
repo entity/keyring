@@ -19,6 +19,7 @@ function user(array $attributes = []): User
         'name' => 'Taylor',
         'email' => 'taylor@example.com',
         'password' => 'password',
+        'email_verified_at' => now(),
         ...$attributes,
     ]);
 }

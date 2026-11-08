@@ -22,7 +22,7 @@ const FIREFOX = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 });
 
 function login(array $cookies = []): TestResponse

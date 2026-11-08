@@ -58,7 +58,7 @@ beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
     Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/sensitive', fn () => 'sensitive');
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 });
 
 function signInAs(string $agent = FIREFOX_WIN, string $password = 'password', array $cookies = []): TestResponse
