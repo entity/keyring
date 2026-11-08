@@ -45,12 +45,6 @@ describe('keyring:install', function () {
             ->and(file_get_contents($this->sandbox.'/bootstrap/providers.php'))->toContain('App\Providers\KeyringServiceProvider::class');
     });
 
-    it('rejects unknown frontend stacks before writing anything', function () {
-        $this->artisan('keyring:install', ['--inertia' => 'angular'])->assertFailed();
-
-        expect(file_exists($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBeFalse();
-    });
-
     it('can run again without duplicating migrations or overwriting customised files', function () {
         $this->artisan('keyring:install')->assertSuccessful();
         file_put_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php', '<?php // mine');

@@ -12,7 +12,7 @@
 
 - PHP 8.5 or later
 - Laravel 13 or later
-- Inertia v3, if you want the published pages. Without Inertia, Keyring renders Blade views instead (see [Pages](sign-in-flow.md#pages)).
+- Inertia v3 (optional). Without Inertia, Keyring renders Blade views instead (see [Pages](sign-in-flow.md#pages)).
 - The `sodium` PHP extension, if you want passkeys and security keys that sign with Ed25519. Without it, Keyring only offers ES256 and RS256 keys.
 
 ## Installing Keyring
@@ -22,11 +22,11 @@ Install the package with Composer, then run the install command:
 ```bash
 composer require entity/keyring
 
-php artisan keyring:install --inertia=vue
+php artisan keyring:install
 php artisan migrate
 ```
 
-`--inertia` accepts `vue` or `react`. Leave it off if you're building your own pages. Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps.
+Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps.
 
 If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fortify.md) before migrating.
 
@@ -40,8 +40,6 @@ If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fort
 | `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. |
 | `app/Providers/KeyringServiceProvider.php` | Where you register factors and the policy. It's added to `bootstrap/providers.php` for you. |
 | `app/Actions/Keyring/CreateNewUser.php` | Your registration logic. |
-| `resources/js/pages/auth/*` | Inertia pages, with `--inertia` only. |
-| `resources/js/keyring/*` | The per-factor components used by the challenge page, with `--inertia` only. |
 
 You can publish the same files on their own with the `keyring-config`, `keyring-migrations` and `keyring-lang` tags:
 

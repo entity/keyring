@@ -12,20 +12,11 @@ use Symfony\Component\Console\Attribute\AsCommand;
 #[AsCommand(name: 'keyring:install')]
 #[Description('Install Keyring: config, migrations, a service provider and your registration action')]
 #[Signature('keyring:install
-        {--inertia= : Also publish Inertia pages for "vue" or "react"}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
 {
     public function handle(Filesystem $files): int
     {
-        $stack = $this->option('inertia');
-
-        if ($stack !== null && ! in_array($stack, ['vue', 'react'], true)) {
-            $this->components->error('The --inertia option must be "vue" or "react".');
-
-            return self::FAILURE;
-        }
-
         $this->callSilently('vendor:publish', ['--tag' => 'keyring-config', '--force' => $this->option('force')]);
 
         // Publishing again would add the migrations twice, under new timestamps.
@@ -38,18 +29,11 @@ class InstallCommand extends Command
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
 
-        if ($stack !== null) {
-            foreach ($files->allFiles($this->stub("inertia/{$stack}")) as $file) {
-                $this->copy($files, $file->getPathname(), resource_path('js/'.$file->getRelativePathname()));
-            }
-
-            $this->components->info("Inertia {$stack} pages published to resources/js/pages/auth.");
-        }
-
         $this->components->info('Keyring installed.');
         $this->components->bulletList([
             'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
             'Run <comment>php artisan migrate</comment>',
+            'Build the <comment>auth/*</comment> pages Keyring renders, see the "Pages" docs',
             'Already using Fortify? Run <comment>php artisan keyring:import fortify</comment>',
         ]);
 

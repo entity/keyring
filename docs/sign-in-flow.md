@@ -385,7 +385,7 @@ Keyring::page('login', fn (array $props) => response()->view('marketing.login', 
 
 A closure can return anything a route can (a response, a view or a string).
 
-`challenge` and `confirm` are separate pages. The published `confirm` page renders the `challenge` page, so overriding `challenge` with `Keyring::page()` doesn't change step-up; override `confirm` too.
+`challenge` and `confirm` are separate pages, so overriding `challenge` with `Keyring::page()` doesn't change step-up; override `confirm` too. A `confirm` page can simply render your `challenge` page with its props.
 
 ## Events
 

@@ -12,7 +12,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 - **Protected account changes:** `email` and `password` can only change through Keyring's flows (OWASP). Email changes are confirmed from both addresses and can be reverted.
 - **Risk signals:** new device, new country, impossible travel, a session cookie showing up in another browser, repeated failures. Each level maps to an action.
 - **A security log and opt-in security emails.**
-- **Headless:** Inertia pages by default, swappable responses, published actions. `keyring:install --inertia=vue|react` gives you working pages.
+- **Headless:** like Fortify, Keyring renders your pages with props and answers JSON, with swappable responses and published actions. A browser package handles WebAuthn and the challenge page for Vue and React.
 
 > Work in progress: not tagged or production-tested yet.
 
@@ -26,7 +26,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 
 ```bash
 composer require entity/keyring
-php artisan keyring:install --inertia=vue   # or react, or leave it off for headless
+php artisan keyring:install
 php artisan migrate
 ```
 
@@ -80,6 +80,7 @@ npm install @entity/keyring
 - [Risk](docs/risk.md)
 - [Security Log & Emails](docs/security-log-and-emails.md)
 - [Frontend](docs/frontend.md)
+- [Example app](https://github.com/entity/keyring-example): every page, in React with the Laravel starter kit
 - [Testing](docs/testing.md)
 - [Security](docs/security.md)
 

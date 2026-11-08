@@ -1,7 +1,7 @@
 # Frontend
 
 - [Introduction](#introduction)
-- [The Published Pages](#the-published-pages)
+- [Building the Pages](#building-the-pages)
 - [The Challenge Page](#the-challenge-page)
     - [Vue](#vue)
     - [React](#react)
@@ -18,10 +18,7 @@
 
 ## Introduction
 
-Keyring is headless. It renders [pages](sign-in-flow.md#pages) with props and answers JSON requests, and you decide how they look. Two things help:
-
-- `keyring:install --inertia=vue` or `--inertia=react` publishes working pages you own and can restyle.
-- `@entity/keyring` is a small browser package with WebAuthn helpers, enrollment helpers, and Vue and React bindings for Inertia v3.
+Keyring is headless, like Fortify. It renders [pages](sign-in-flow.md#pages) with props and answers JSON requests, and your app owns every page. `@entity/keyring` is a small browser package that does the fiddly parts: WebAuthn, enrollment, and Vue and React bindings for Inertia v3.
 
 ```bash
 npm install @entity/keyring
@@ -36,26 +33,20 @@ It has three entry points:
 | `@entity/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@entity/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
 
-## The Published Pages
+## Building the Pages
 
-With `--inertia`, Keyring publishes:
+Keyring renders the components `auth/login`, `auth/challenge` and so on. [Pages](sign-in-flow.md#pages) lists each one and its props. Most are plain forms posting to Keyring's routes. Two need more:
 
-```
-resources/js/pages/auth/
-    login, register, forgot-password, reset-password, verify-email,
-    challenge, confirm, email-change, device-report
-resources/js/keyring/
-    factors.ts
-    factors/Password, Code, SecurityKey
-```
+- **The challenge page** (and `confirm`, for step-up) shows whichever factor comes next. [`useChallenge()`](#the-challenge-page) does the work.
+- **The login page** can offer passkeys, with [`usePasskeyLogin()`](#signing-in-with-a-passkey).
 
-Inertia resolves them as `auth/login` and so on. Keyring doesn't publish settings pages for managing authenticators or devices; build those with the [helpers below](#managing-authenticators) and the JSON routes.
+Settings pages for authenticators, devices and the email address are yours too, built on the [helpers below](#managing-authenticators) and the JSON routes. The [example app](https://github.com/entity/keyring-example) has every page, in React with the Laravel starter kit's components, if you'd like a reference.
 
 ## The Challenge Page
 
-The `challenge` page (and `confirm`, which renders it) receives the [challenge props](sign-in-flow.md#page-props). `useChallenge()` turns them into what the page needs: the component for the current factor, a form, "try another way" and submitting.
+The `challenge` page (and `confirm`) receives the [challenge props](sign-in-flow.md#page-props). `useChallenge()` turns them into what the page needs: the component for the current factor, a form, "try another way" and submitting.
 
-The factor components come from `resources/js/keyring/factors.ts`, which maps factor keys to components:
+Give it a map of factor keys to components, for example in `resources/js/keyring/factors.ts`:
 
 ```ts
 import { defineAsyncComponent } from 'vue'
@@ -111,7 +102,7 @@ const challenge = useChallenge(props, factors)
 
 Factor components receive `challenge`, and read the page from `challenge.props`.
 
-The published page falls back to a built-in component when a factor has none in the map: `SecurityKey` when the challenge has WebAuthn `options`, otherwise `Code`.
+When a factor has no component in the map, `component` is `undefined`. A good fallback is your security key component when the challenge has WebAuthn `options`, otherwise your code component.
 
 ### React
 
@@ -169,7 +160,7 @@ const { challenge } = defineProps<{ challenge: Challenge }>()
 </template>
 ```
 
-The published `SecurityKey` component calls `challenge.verifyKey()` once as soon as it mounts (once even under React's StrictMode), with a "try again" button in case the user dismisses the browser prompt.
+A security key component usually calls `challenge.verifyKey()` as soon as it mounts, with a "try again" button in case the user dismisses the browser prompt. Under React's StrictMode, guard the call with a ref so the prompt opens once.
 
 ## Signing In With a Passkey
 
@@ -342,7 +333,7 @@ configureRoutes({
 })
 ```
 
-The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
+Update any paths your own pages link to directly, such as `/login` or `/register`.
 
 ## Flash Messages and Alerts
 
@@ -365,7 +356,7 @@ public function share(Request $request): array
 }
 ```
 
-The published `login`, `forgot-password` and `verify-email` pages already receive the translated message as their `status` prop.
+The `login`, `forgot-password` and `verify-email` pages already receive the translated message as their `status` prop.
 
 ## Without Inertia
 
