@@ -21,6 +21,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Features
+    |--------------------------------------------------------------------------
+    |
+    | Turn off flows your app handles itself. Sign in, challenges, step-up,
+    | authenticators, devices and protected changes are always on.
+    |
+    */
+
+    'features' => [
+        'registration' => true,
+        'password_reset' => true,
+        'email_verification' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Redirects
     |--------------------------------------------------------------------------
     */

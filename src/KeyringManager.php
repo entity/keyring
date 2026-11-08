@@ -12,6 +12,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Keyring\Activity\SecurityLog;
+use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\Signal;
 use Keyring\Events\ProtectionBypassed;
@@ -247,6 +248,18 @@ class KeyringManager
     public function notifies(string $type): bool
     {
         return in_array($type, $this->notifications ?? config('keyring.notifications', []), true);
+    }
+
+    /**
+     * Use your action to create users at registration.
+     *
+     * @param  class-string<CreatesNewUsers>  $action
+     */
+    public function createUsersUsing(string $action): static
+    {
+        $this->container->singleton(CreatesNewUsers::class, $action);
+
+        return $this;
     }
 
     /**

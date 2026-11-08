@@ -6,16 +6,26 @@ use Keyring\Http\Controllers\AuthenticatorController;
 use Keyring\Http\Controllers\ChallengeController;
 use Keyring\Http\Controllers\DeviceController;
 use Keyring\Http\Controllers\EmailChangeController;
+use Keyring\Http\Controllers\EmailVerificationController;
 use Keyring\Http\Controllers\PasswordController;
 use Keyring\Http\Controllers\PasswordResetController;
+use Keyring\Http\Controllers\RegisteredUserController;
+use Keyring\Support\Features;
 
 $guard = config('keyring.guard');
 
 Route::middleware('guest:'.$guard)->group(function () {
-    Route::get('/forgot-password', [PasswordResetController::class, 'create'])->name('password.request');
-    Route::post('/forgot-password', [PasswordResetController::class, 'store'])->middleware('throttle:6,1')->name('password.email');
-    Route::get('/reset-password/{token}', [PasswordResetController::class, 'edit'])->name('password.reset');
-    Route::post('/reset-password', [PasswordResetController::class, 'update'])->middleware('throttle:6,1')->name('password.update');
+    if (Features::enabled('registration')) {
+        Route::get('/register', [RegisteredUserController::class, 'create'])->name('register');
+        Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:6,1')->name('register.store');
+    }
+
+    if (Features::enabled('password_reset')) {
+        Route::get('/forgot-password', [PasswordResetController::class, 'create'])->name('password.request');
+        Route::post('/forgot-password', [PasswordResetController::class, 'store'])->middleware('throttle:6,1')->name('password.email');
+        Route::get('/reset-password/{token}', [PasswordResetController::class, 'edit'])->name('password.reset');
+        Route::post('/reset-password', [PasswordResetController::class, 'update'])->middleware('throttle:6,1')->name('password.update');
+    }
 
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
@@ -57,6 +67,14 @@ Route::middleware(config('keyring.manage_middleware'))->group(function () {
     Route::put('/user/password', [PasswordController::class, 'update'])->name('user-password.update');
     Route::post('/user/email', [EmailChangeController::class, 'store'])->middleware('throttle:6,1')->name('keyring.email.store');
 });
+
+if (Features::enabled('email_verification')) {
+    Route::middleware('auth:'.$guard)->group(function () {
+        Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
+        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
+        Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware('throttle:6,1')->name('verification.send');
+    });
+}
 
 Route::middleware('auth:'.$guard)->group(function () {
     Route::get('/user/email', [EmailChangeController::class, 'show'])->name('keyring.email.show');

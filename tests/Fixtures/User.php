@@ -2,6 +2,7 @@
 
 namespace Keyring\Tests\Fixtures;
 
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -10,7 +11,7 @@ use Keyring\Concerns\HasKeyring;
 
 #[Unguarded]
 #[Hidden('password', 'remember_token')]
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasKeyring, Notifiable;
 
