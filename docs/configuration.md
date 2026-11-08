@@ -206,10 +206,10 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 ## Security Emails
 
 ```php
-'notifications' => [],
+'notifications' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
 ```
 
-The security emails to send. `Keyring::notify()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
+The security notices to send: by default the ones NIST SP 800-63B requires and the other account changes. `[]` sends none. `Keyring::notify()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
 
 ## Pending Logins, Timebox and Rate Limits
 

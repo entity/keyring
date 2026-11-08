@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
 use Keyring\Enums\Assurance;
 use Keyring\Events\AuthenticatorAdded;
@@ -9,6 +10,7 @@ use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\SecurityNotice;
 use Keyring\Support\PasswordRules;
 use Keyring\Tests\Fixtures\User;
 
@@ -160,4 +162,13 @@ it('only allows the shorter password with a real second factor, not recovery cod
 
     expect($this->user->keyring->refresh()->hasSecondFactor())->toBeTrue();
     expect(Validator::make(['password' => 'short pass', 'password_confirmation' => 'short pass'], ['password' => PasswordRules::for($this->user->fresh())])->fails())->toBeFalse();
+});
+
+it('tells the user when a sign-in method is added, by default', function () {
+    Notification::fake();
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+    Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'authenticator_added');
 });
