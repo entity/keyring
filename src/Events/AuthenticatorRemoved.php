@@ -4,7 +4,6 @@ namespace Keyring\Events;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
-use Illuminate\Queue\SerializesModels;
 use Keyring\Models\Authenticator;
 
 /**
@@ -12,7 +11,9 @@ use Keyring\Models\Authenticator;
  */
 class AuthenticatorRemoved
 {
-    use Dispatchable, SerializesModels;
+    // Not SerializesModels: the authenticator is already deleted, so a
+    // queued listener couldn't fetch it again.
+    use Dispatchable;
 
     public function __construct(
         public readonly Authenticatable $user,
