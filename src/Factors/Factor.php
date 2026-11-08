@@ -17,6 +17,7 @@ use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Pipeline\SharedLimit;
+use Keyring\Support\RowLock;
 
 /**
  * Sensible defaults for factors. Most factors only need key(), categories()
@@ -125,9 +126,7 @@ abstract class Factor implements FactorContract
      */
     protected function consume(Authenticator $authenticator, Closure $use): bool
     {
-        return $authenticator->getConnection()->transaction(function () use ($authenticator, $use) {
-            $locked = $authenticator->newQuery()->lockForUpdate()->find($authenticator->getKey());
-
+        return RowLock::hold($authenticator, function (?Authenticator $locked) use ($authenticator, $use) {
             if ($locked === null || ! $use($locked)) {
                 return false;
             }

@@ -21,6 +21,7 @@ use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use Keyring\Support\RowLock;
 
 /**
  * Adding, renaming, choosing the default and removing authenticators. One
@@ -133,11 +134,9 @@ class AuthenticatorController
     {
         $user = $request->user();
 
-        $removed = DB::transaction(function () use ($request, $user, $authenticator) {
-            // One removal per user at a time, so two at once can't each count
-            // on the other's authenticator still being there.
-            $user->newQuery()->lockForUpdate()->find($user->getKey());
-
+        // One removal per user at a time, so two at once can't each count on
+        // the other's authenticator still being there.
+        $removed = RowLock::hold($user, function () use ($request, $user, $authenticator) {
             $authenticator = $this->find($request, $authenticator);
             $remaining = $this->keyring->for($user)->without($authenticator);
 
