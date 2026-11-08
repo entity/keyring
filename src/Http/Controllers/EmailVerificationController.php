@@ -5,6 +5,7 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Uri;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 
@@ -29,7 +30,7 @@ class EmailVerificationController
             $request->fulfill();
         }
 
-        return redirect()->intended(config('keyring.home').'?verified=1');
+        return redirect()->intended((string) Uri::of(config('keyring.home'))->withQuery(['verified' => 1]));
     }
 
     public function send(Request $request): mixed
