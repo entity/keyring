@@ -3,7 +3,7 @@
 namespace Keyring\Notifications;
 
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
@@ -11,8 +11,11 @@ use Illuminate\Notifications\Notification;
  * One notification for every security email ("new sign in", "password
  * changed", "someone failed your second factor"...). Copy lives in
  * lang/en/notifications.php, keyed by type.
+ *
+ * Queued once any open transaction commits, so a change that's rolled back
+ * is never announced, and the job never reads the user before the change.
  */
-class SecurityNotice extends Notification implements ShouldQueue
+class SecurityNotice extends Notification implements ShouldQueueAfterCommit
 {
     use Queueable;
 

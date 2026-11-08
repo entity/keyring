@@ -125,7 +125,7 @@ Keyring::notify(['new_device', 'second_factor_failed']);
 
 An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `notifications` config option. `Keyring::notify()` takes precedence over it.
 
-Every email is a `Keyring\Notifications\SecurityNotice`, sent by mail and queued. Each one includes when it happened, the device and the IP address of the request that caused it.
+Every email is a `Keyring\Notifications\SecurityNotice`, sent by mail and queued once any open database transaction commits. Each one includes when it happened, the device and the IP address of the request that caused it.
 
 ### Email Types
 
