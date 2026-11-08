@@ -224,6 +224,23 @@ it('sends security emails only when asked to', function () {
     Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'new_device' && $notice->actionUrl !== null);
 });
 
+it('sends security notices through any channel the app chooses', function () {
+    Keyring::notify(['new_device'])->securityNoticesUsing(DatabaseSecurityNotice::class);
+    $this->user->devices()->delete();
+
+    signInAs();
+
+    Notification::assertSentTo($this->user, DatabaseSecurityNotice::class, function (DatabaseSecurityNotice $notice, array $channels) {
+        $data = $notice->toArray($this->user);
+
+        return $channels === ['database']
+            && $data['type'] === 'new_device'
+            && $data['subject'] === 'New sign-in to your account'
+            && $data['action']['text'] === "This wasn't me"
+            && array_key_exists('IP address', $data['details']);
+    });
+});
+
 it('tells the user when someone gets their password but not the second factor', function () {
     Keyring::notify();
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
@@ -233,3 +250,11 @@ it('tells the user when someone gets their password but not the second factor', 
 
     Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'second_factor_failed');
 });
+
+class DatabaseSecurityNotice extends SecurityNotice
+{
+    public function via(object $notifiable): array
+    {
+        return ['database'];
+    }
+}

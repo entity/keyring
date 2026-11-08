@@ -8,7 +8,7 @@ use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
 /**
- * One notification for every security email ("new sign in", "password
+ * One notification for every security notice ("new sign in", "password
  * changed", "someone failed your second factor"...). Copy lives in
  * lang/en/notifications.php, keyed by type.
  *
@@ -30,6 +30,12 @@ class SecurityNotice extends Notification implements ShouldQueueAfterCommit
         public readonly ?string $actionUrl = null,
     ) {}
 
+    /**
+     * Email by default. Extend this class to send it elsewhere (Slack, SMS,
+     * the database...) and register yours with Keyring::securityNoticesUsing().
+     *
+     * @return list<string>
+     */
     public function via(object $notifiable): array
     {
         return ['mail'];
@@ -37,20 +43,52 @@ class SecurityNotice extends Notification implements ShouldQueueAfterCommit
 
     public function toMail(object $notifiable): MailMessage
     {
-        $key = 'keyring::notifications.'.$this->type;
+        $content = $this->content();
 
-        $message = new MailMessage()
-            ->subject(__($key.'.subject', $this->replace))
-            ->line(__($key.'.intro', $this->replace));
+        $message = new MailMessage()->subject($content['subject'])->line($content['intro']);
+
+        foreach ($content['details'] as $label => $value) {
+            $message->line($label.': '.$value);
+        }
+
+        if ($content['action'] !== null) {
+            $message->action($content['action']['text'], $content['action']['url']);
+        }
+
+        return $message->line($content['footer']);
+    }
+
+    /**
+     * For the database and broadcast channels.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(object $notifiable): array
+    {
+        return ['type' => $this->type, ...$this->content()];
+    }
+
+    /**
+     * What the notice says, translated, for any channel: build a Slack or SMS
+     * message from this rather than from the raw type.
+     *
+     * @return array{subject: string, intro: string, details: array<string, string>, action: array{text: string, url: string}|null, footer: string}
+     */
+    public function content(): array
+    {
+        $key = 'keyring::notifications.'.$this->type;
+        $details = [];
 
         foreach (array_filter($this->details, fn ($value) => $value !== null && $value !== '') as $label => $value) {
-            $message->line(__('keyring::notifications.details.'.$label).': '.$value);
+            $details[__('keyring::notifications.details.'.$label)] = (string) $value;
         }
 
-        if ($this->actionUrl !== null) {
-            $message->action(__($key.'.action'), $this->actionUrl);
-        }
-
-        return $message->line(__('keyring::notifications.footer'));
+        return [
+            'subject' => __($key.'.subject', $this->replace),
+            'intro' => __($key.'.intro', $this->replace),
+            'details' => $details,
+            'action' => $this->actionUrl === null ? null : ['text' => __($key.'.action'), 'url' => $this->actionUrl],
+            'footer' => __('keyring::notifications.footer'),
+        ];
     }
 }

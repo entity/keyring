@@ -24,6 +24,7 @@ use Keyring\KeyringManager;
  * @method static bool notifies(string $type)
  * @method static \Keyring\KeyringManager passwordRulesUsing(\Closure $callback)
  * @method static \Keyring\Testing\KeyringFake fake()
+ * @method static \Keyring\KeyringManager securityNoticesUsing(string $notification)
  * @method static \Keyring\KeyringManager createUsersUsing(string $action)
  * @method static \Illuminate\Support\Collection activity(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user, int $limit = 25)
  * @method static string|null statusMessage(mixed $status)

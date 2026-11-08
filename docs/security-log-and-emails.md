@@ -9,6 +9,7 @@
     - [Email Types](#email-types)
     - [Customising the Copy](#customising-the-copy)
     - [Emails Keyring Always Sends](#emails-keyring-always-sends)
+    - [Slack, SMS and Other Channels](#slack-sms-and-other-channels)
     - [Using Your Own Notification Classes](#using-your-own-notification-classes)
 - [Laravel's Auth Events](#laravels-auth-events)
 
@@ -125,7 +126,7 @@ Keyring::notify(['new_device', 'second_factor_failed']);
 
 An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `notifications` config option. `Keyring::notify()` takes precedence over it.
 
-Every email is a `Keyring\Notifications\SecurityNotice`, sent by mail and queued once any open database transaction commits. Each one includes when it happened, the device and the IP address of the request that caused it.
+Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless you [choose other channels](#slack-sms-and-other-channels), and queued once any open database transaction commits. Each one includes when it happened, the device and the IP address of the request that caused it.
 
 ### Email Types
 
@@ -150,9 +151,43 @@ All the wording for Keyring's emails lives in `lang/en/notifications.php`. Secur
 php artisan vendor:publish --tag=keyring-lang
 ```
 
+### Slack, SMS and Other Channels
+
+Security notices use Laravel's notification channels, so they can go anywhere Laravel can send. Extend `SecurityNotice`, choose the channels in `via()` (per user if you like), and add the matching method. `content()` gives you the translated subject, intro, detail lines and action to build from:
+
+```php
+namespace App\Notifications;
+
+use Illuminate\Notifications\Slack\SlackMessage;
+use Keyring\Notifications\SecurityNotice as KeyringSecurityNotice;
+
+class SecurityNotice extends KeyringSecurityNotice
+{
+    public function via(object $notifiable): array
+    {
+        return $notifiable->slack_webhook ? ['mail', 'slack'] : ['mail'];
+    }
+
+    public function toSlack(object $notifiable): SlackMessage
+    {
+        $content = $this->content();
+
+        return new SlackMessage()->text($content['subject'].': '.$content['intro']);
+    }
+}
+```
+
+Slack needs Laravel's `laravel/slack-notification-channel` package; see [Laravel's notification docs](https://laravel.com/docs/notifications#slack-notifications) for it and the other channels. Then register the class in your `KeyringServiceProvider`:
+
+```php
+Keyring::securityNoticesUsing(\App\Notifications\SecurityNotice::class);
+```
+
+`toArray()` is already there, so adding `database` or `broadcast` to `via()` works without more code. Keep the parent's constructor, since Keyring passes its arguments by name.
+
 ### Emails Keyring Always Sends
 
-Some emails are part of a flow rather than a notice, so `Keyring::notify()` doesn't control them:
+Some emails are part of a flow rather than a notice, so `Keyring::notify()` doesn't control them. They prove the person controls an inbox, so they're always email:
 
 | Notification | Sent to |
 |---|---|
