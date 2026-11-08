@@ -63,6 +63,13 @@ class VerifyFactor
         }
 
         $context->attempt->record($context->verification);
+
+        // A factor may verify a different authenticator than the one shown
+        // (e.g. the user tapped another of their security keys).
+        if ($context->verification->authenticator !== null && $context->verification->authenticator !== $context->authenticator->id) {
+            $context->authenticator = $context->attempt->keyring()->find($context->verification->authenticator) ?? $context->authenticator;
+        }
+
         $context->authenticator->markAsUsed();
 
         FactorVerified::dispatch($context->attempt, $context->authenticator, $context->verification);

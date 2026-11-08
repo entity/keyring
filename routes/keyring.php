@@ -16,6 +16,14 @@ Route::middleware('guest:'.$guard)->group(function () {
         Route::post('/{factor}', [ChallengeController::class, 'verify'])->name('verify');
         Route::post('/{factor}/send', [ChallengeController::class, 'send'])->name('send');
     });
+
+    // Sign in with another primary factor, like a passkey: /login/passkey
+    Route::get('/login/{factor}/options', [AuthenticatedSessionController::class, 'options'])
+        ->where('factor', '^(?!challenge$)[a-z0-9-]+$')
+        ->name('keyring.login.options');
+    Route::post('/login/{factor}', [AuthenticatedSessionController::class, 'store'])
+        ->where('factor', '^(?!challenge$)[a-z0-9-]+$')
+        ->name('keyring.login.factor');
 });
 
 Route::middleware('auth:'.$guard)->prefix('/confirm')->name('keyring.confirm.')->group(function () {

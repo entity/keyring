@@ -49,6 +49,19 @@ final class Context
         return $this;
     }
 
+    /**
+     * The form field to report problems on: the first identifying field (like
+     * the email) when starting a login, otherwise the factor's own field.
+     */
+    public function errorKey(): string
+    {
+        if ($this->identifying && $this->factor instanceof PrimaryFactor) {
+            return array_key_first($this->factor->identificationRules()) ?? $this->factor->errorKey();
+        }
+
+        return $this->factor->errorKey();
+    }
+
     public function failed(): bool
     {
         return in_array($this->outcome, [Outcome::Failed, Outcome::LockedOut], true);

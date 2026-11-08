@@ -47,6 +47,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | WebAuthn (Passkeys & Security Keys)
+    |--------------------------------------------------------------------------
+    |
+    | The relying party ID defaults to your APP_URL host, and the allowed
+    | origins to your APP_URL. Timeout is in milliseconds.
+    |
+    */
+
+    'webauthn' => [
+        'relying_party' => [
+            'id' => env('KEYRING_WEBAUTHN_RP_ID'),
+            'name' => env('KEYRING_WEBAUTHN_RP_NAME'),
+        ],
+        'origins' => [],
+        'timeout' => 60_000,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Managing Authenticators
     |--------------------------------------------------------------------------
     |

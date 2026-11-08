@@ -12,6 +12,7 @@ use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Login\AttemptStore;
 use Keyring\Session\SessionAssurance;
+use Keyring\WebAuthn\Ceremonies;
 
 class KeyringServiceProvider extends ServiceProvider
 {
@@ -31,6 +32,7 @@ class KeyringServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/keyring.php', 'keyring');
 
         $this->app->singleton(KeyringManager::class);
+        $this->app->singleton(Ceremonies::class);
 
         $this->app->scoped(AttemptStore::class, fn (Application $app) => new AttemptStore($app['session.store']));
         $this->app->scoped(EnrollmentStore::class, fn (Application $app) => new EnrollmentStore($app['session.store']));

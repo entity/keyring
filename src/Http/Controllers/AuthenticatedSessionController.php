@@ -2,8 +2,10 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Keyring\Contracts\DiscoverableFactor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Enums\Purpose;
@@ -28,6 +30,18 @@ class AuthenticatedSessionController
             'canResetPassword' => Route::has('password.request'),
             'status' => $request->session()->get('status'),
         ]);
+    }
+
+    /**
+     * Options for a usernameless sign in, e.g. GET /login/passkey/options.
+     */
+    public function options(Request $request, string $factor): JsonResponse
+    {
+        $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
+
+        abort_unless($factor instanceof DiscoverableFactor, 404);
+
+        return new JsonResponse($factor->loginOptions($request));
     }
 
     /**

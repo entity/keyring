@@ -4,7 +4,6 @@ namespace Keyring\Http\Responses;
 
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Responses\FailedResponse as FailedResponseContract;
-use Keyring\Facades\Keyring;
 use Keyring\Pipeline\Context;
 
 class FailedResponse implements FailedResponseContract
@@ -19,10 +18,8 @@ class FailedResponse implements FailedResponseContract
      */
     public function toResponse($request)
     {
-        $identifying = $this->context->identifying;
-
         throw ValidationException::withMessages([
-            $identifying ? Keyring::username() : $this->context->factor->errorKey() => $identifying
+            $this->context->errorKey() => $this->context->identifying
                 ? __('auth.failed')
                 : __('keyring::keyring.invalid'),
         ]);

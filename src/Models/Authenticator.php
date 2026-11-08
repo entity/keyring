@@ -27,6 +27,11 @@ use LogicException;
  * @property string $factor
  * @property string $name
  * @property string|null $secret
+ * @property string|null $credential_id
+ * @property string|null $public_key
+ * @property int $sign_count
+ * @property string|null $aaguid
+ * @property list<string>|null $transports
  * @property array<string, mixed>|null $meta
  * @property bool $is_default
  * @property Carbon|null $confirmed_at
