@@ -126,6 +126,17 @@ class EmailChanges
     }
 
     /**
+     * Whether the token is one of this change's confirmation tokens.
+     */
+    public function recognises(PendingChange $change, string $token): bool
+    {
+        $hash = hash('sha256', $token);
+
+        return hash_equals($change->confirm_token, $hash)
+            || ($change->current_token !== null && hash_equals($change->current_token, $hash));
+    }
+
+    /**
      * "This wasn't me": put the address back, close every later change, remove
      * sign-in methods added since the change was requested, and sign out
      * everywhere.

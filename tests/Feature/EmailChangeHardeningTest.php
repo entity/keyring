@@ -182,3 +182,10 @@ it('waives the current address confirmation for a second factor that predates th
 
     expect(PendingChange::query()->latest('id')->first()->current_token)->toBeNull();
 });
+
+it('says a link was invalid when the token is wrong', function () {
+    $change = requestChange($this->user, 'new@example.com');
+
+    $this->post(route('keyring.email.confirm.store', [$change->id, 'wrong-token']))
+        ->assertSessionHas('status', 'email-change-invalid');
+});

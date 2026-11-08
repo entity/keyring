@@ -4,6 +4,7 @@ namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Keyring\Changes\EmailChanges;
 use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
@@ -76,9 +77,15 @@ class EmailChangeController
     {
         $change = PendingChange::query()->findOrFail($change);
         $applied = $this->changes->confirm($change, $token);
+        $change = $change->fresh();
 
-        return redirect($this->keyring->guard()->check() ? config('keyring.home') : route('login'))
-            ->with('status', $applied ? 'email-changed' : ($change->isPending() ? 'email-change-confirmed' : 'email-change-invalid'));
+        $status = match (true) {
+            $applied => 'email-changed',
+            $change?->isPending() === true && $this->changes->recognises($change, $token) => 'email-change-confirmed',
+            default => 'email-change-invalid',
+        };
+
+        return redirect($this->keyring->guard()->check() ? config('keyring.home') : route('login'))->with('status', $status);
     }
 
     public function revert(string $change, string $token): mixed
@@ -86,7 +93,8 @@ class EmailChangeController
         $change = PendingChange::query()->findOrFail($change);
         $reverted = $this->changes->revert($change, $token);
 
-        return redirect()->route($reverted ? 'password.request' : 'login')
+        // Send them to reset their password, when the app has that flow.
+        return redirect()->route($reverted && Route::has('password.request') ? 'password.request' : 'login')
             ->with('status', $reverted ? 'email-change-reverted' : 'email-change-invalid');
     }
 
