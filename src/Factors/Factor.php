@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Factor as FactorContract;
+use Keyring\Devices\DeviceManager;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
@@ -51,17 +52,45 @@ abstract class Factor implements FactorContract
      * a success never clears them. Requests that don't name an account (like
      * a usernameless passkey) only get the per-IP limit, so they can't fill
      * one bucket that every user shares.
+     *
+     * A browser the account has signed in from before gets a bucket of its
+     * own (OWASP "device cookies"), so someone guessing elsewhere can't lock
+     * the owner out.
      */
     public function limits(Request $request, ?Attempt $attempt): array
     {
         $account = $attempt !== null
             ? (string) $attempt->userId
-            : Str::transliterate(Str::lower(trim((string) $request->input(config('keyring.username')))));
+            : $this->normalizeAccount((string) $request->input(config('keyring.username')));
+
+        $bucket = $this->key().'|account|'.$account.$this->knownDevice($request, $attempt, $account);
 
         return array_values(array_filter([
-            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($this->key().'|account|'.$account),
+            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($bucket),
             Limit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
         ]));
+    }
+
+    /**
+     * "|device|{id}" when the request's device cookie belongs to the account.
+     */
+    protected function knownDevice(Request $request, ?Attempt $attempt, string $account): string
+    {
+        $device = $account === '' ? null : app(DeviceManager::class)->recognise($request);
+        $user = $device?->user();
+
+        $owner = match (true) {
+            $user === null => null,
+            $attempt !== null => (string) $user->getAuthIdentifier(),
+            default => $this->normalizeAccount((string) $user->getAttribute(config('keyring.username'))),
+        };
+
+        return $device !== null && $owner === $account ? '|device|'.$device->id : '';
+    }
+
+    protected function normalizeAccount(string $account): string
+    {
+        return Str::transliterate(Str::lower(trim($account)));
     }
 
     public function errorKey(): string

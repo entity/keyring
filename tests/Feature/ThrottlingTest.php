@@ -130,3 +130,23 @@ it('does not count successful sign-ins against the ip limit', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])
         ->assertSessionHasErrors(['email' => __('auth.failed')]);
 });
+
+it('lets the owner sign in from a known device while someone else is locked out', function () {
+    config(['keyring.limits.per_account' => 3, 'keyring.limits.per_ip' => 100]);
+    account('taylor@example.com');
+
+    $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+    $this->post('/logout');
+
+    foreach (range(1, 4) as $guess) {
+        $this->withUnencryptedCookies([])->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+    }
+
+    $error = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->getSession()->get('errors')->first('email');
+    expect($error)->toContain('Too many');
+
+    $this->withCookie('keyring_device', $device)
+        ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect('/dashboard');
+});

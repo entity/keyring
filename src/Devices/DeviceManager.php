@@ -31,13 +31,19 @@ class DeviceManager
      */
     public function find(Request $request, Authenticatable&Model $user): ?Device
     {
+        $device = $this->recognise($request);
+
+        return $device?->authenticatable()->is($user) ? $device : null;
+    }
+
+    /**
+     * The device the request's cookie belongs to, whoever's it is.
+     */
+    public function recognise(Request $request): ?Device
+    {
         $token = $this->token($request);
 
-        if ($token === null) {
-            return null;
-        }
-
-        return $this->query($user)
+        return $token === null ? null : Device::query()
             ->where('token_hash', hash('sha256', $token))
             ->whereNull('revoked_at')
             ->first();
