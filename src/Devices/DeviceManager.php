@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
-use Keyring\Contracts\LocatesIps;
 use Keyring\Events\DeviceRevoked;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
@@ -24,7 +23,6 @@ use Keyring\Support\Duration;
 class DeviceManager
 {
     public function __construct(
-        protected LocatesIps $locator,
         protected Sessions $sessions,
     ) {}
 
@@ -80,7 +78,7 @@ class DeviceManager
             'name' => UserAgent::describe($request->userAgent()),
             'user_agent' => UserAgent::from($request),
             'ip' => $request->ip(),
-            'location' => $this->locator->locate($request) ?? $device->location,
+            'location' => Location::of($request) ?? $device->location,
             'last_seen_at' => now(),
         ]);
 
