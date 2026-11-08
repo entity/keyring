@@ -141,6 +141,19 @@ final readonly class Requirement
         return count($verified) < $this->factors;
     }
 
+    /**
+     * The stricter of two requirements.
+     */
+    #[\NoDiscard]
+    public function atLeast(self $other): static
+    {
+        return clone ($this, [
+            'factors' => max($this->factors, $other->factors),
+            'categories' => array_values(array_unique([...$this->categories, ...$other->categories], SORT_REGULAR)),
+            'requiresPhishingResistance' => $this->requiresPhishingResistance || $other->requiresPhishingResistance,
+        ]);
+    }
+
     public function assurance(): Assurance
     {
         return match (true) {

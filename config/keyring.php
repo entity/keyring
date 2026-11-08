@@ -161,6 +161,54 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Risk
+    |--------------------------------------------------------------------------
+    |
+    | Signal scores add up (0-100) into a level. Configure signals and what to
+    | do at each level with Keyring::risk([...])->respond(fn ...). By default:
+    | medium asks for another factor, high also notifies, critical refuses the
+    | sign in and signs out every session.
+    |
+    */
+
+    'risk' => [
+        'levels' => ['medium' => 30, 'high' => 60, 'critical' => 90],
+        'recent_change' => '7d',
+        'store' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security Log
+    |--------------------------------------------------------------------------
+    |
+    | Sign ins, failures, lockouts, changes and automatic actions are logged to
+    | keyring_events. Prune with `php artisan model:prune`.
+    |
+    */
+
+    'events' => [
+        'enabled' => true,
+        'keep_for' => '180d',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security Emails
+    |--------------------------------------------------------------------------
+    |
+    | Which security emails Keyring sends. Off by default: your app may want
+    | to send its own. Call Keyring::notify() to turn them all on, or list
+    | types: new_device, password_changed, authenticator_added,
+    | authenticator_removed, second_factor_failed, recovery_code_used,
+    | suspicious_activity, clone_suspected.
+    |
+    */
+
+    'notifications' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pending Logins
     |--------------------------------------------------------------------------
     |

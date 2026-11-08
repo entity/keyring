@@ -5,6 +5,7 @@ namespace Keyring\Pipeline\Steps;
 use Closure;
 use Keyring\Enums\Purpose;
 use Keyring\KeyringManager;
+use Keyring\Login\Requirement;
 use Keyring\Pipeline\Context;
 
 /**
@@ -22,7 +23,14 @@ class DetermineRequirement
         $attempt = $context->attempt;
 
         if ($context->purpose === Purpose::Login || $attempt->requirement === null) {
-            $attempt->requirement = $this->keyring->requirementFor($attempt->user(), $attempt);
+            $requirement = $this->keyring->requirementFor($attempt->user(), $attempt);
+
+            // Risk asked for more: add a second factor when the user has one.
+            if ($attempt->stepUp && $attempt->keyring()->canMeet(Requirement::aal2())) {
+                $requirement = $requirement->atLeast(Requirement::aal2());
+            }
+
+            $attempt->requirement = $requirement;
         }
 
         return $next($context);

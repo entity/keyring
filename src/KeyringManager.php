@@ -11,7 +11,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
+use Keyring\Activity\SecurityLog;
 use Keyring\Contracts\Factor;
+use Keyring\Contracts\Signal;
 use Keyring\Events\ProtectionBypassed;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Exceptions\UnknownFactor;
@@ -21,7 +23,9 @@ use Keyring\Factors\Totp;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Steps;
+use Keyring\Risk\RiskEngine;
 
 class KeyringManager
 {
@@ -45,6 +49,9 @@ class KeyringManager
 
     /** @var class-string<Authenticator> */
     protected string $authenticatorModel = Authenticator::class;
+
+    /** @var list<string>|null Security emails to send, null for the config value. */
+    protected ?array $notifications = null;
 
     /** How many Keyring flows are currently allowed to change protected attributes. */
     protected int $changing = 0;
@@ -201,6 +208,51 @@ class KeyringManager
         }
 
         return $steps->all();
+    }
+
+    /**
+     * Configure risk signals:
+     *
+     *     Keyring::risk([NewDevice::class, ImpossibleTravel::class])->respond(fn (Risk $risk) => ...);
+     *
+     * @param  list<class-string<Signal>|Signal>|null  $signals
+     */
+    public function risk(?array $signals = null): RiskEngine
+    {
+        $engine = $this->container->make(RiskEngine::class);
+
+        return $signals === null ? $engine : $engine->signals($signals);
+    }
+
+    /**
+     * Send security emails: new sign ins, password changes, failed second
+     * factors and so on. Pass types to pick, or nothing for all of them.
+     *
+     * @param  list<string>|null  $types
+     */
+    public function notify(?array $types = null): static
+    {
+        $this->notifications = $types ?? [
+            'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
+            'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
+        ];
+
+        return $this;
+    }
+
+    public function notifies(string $type): bool
+    {
+        return in_array($type, $this->notifications ?? config('keyring.notifications', []), true);
+    }
+
+    /**
+     * Recent security activity for a settings page.
+     *
+     * @return Collection<int, SecurityEvent>
+     */
+    public function activity(Authenticatable&Model $user, int $limit = 25): Collection
+    {
+        return $this->container->make(SecurityLog::class)->activity($user, $limit);
     }
 
     /**

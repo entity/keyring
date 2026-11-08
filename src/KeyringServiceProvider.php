@@ -4,8 +4,10 @@ namespace Keyring;
 
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Keyring\Activity\RecordSecurityEvents;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
@@ -16,6 +18,9 @@ use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Login\AttemptStore;
+use Keyring\Notifications\SendSecurityNotifications;
+use Keyring\Risk\RiskEngine;
+use Keyring\Risk\RiskLocks;
 use Keyring\Session\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\WebAuthn\Ceremonies;
@@ -40,6 +45,8 @@ class KeyringServiceProvider extends ServiceProvider
         $this->app->singleton(KeyringManager::class);
         $this->app->singleton(Ceremonies::class);
         $this->app->singleton(SessionRegistryManager::class);
+        $this->app->singleton(RiskEngine::class);
+        $this->app->bind(RiskLocks::class, fn (Application $app) => new RiskLocks($app['cache']->store(config('keyring.risk.store'))));
         $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
         $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
 
@@ -60,6 +67,12 @@ class KeyringServiceProvider extends ServiceProvider
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);
         }
+
+        if (config('keyring.events.enabled')) {
+            Event::subscribe(RecordSecurityEvents::class);
+        }
+
+        Event::subscribe(SendSecurityNotifications::class);
 
         if (config('keyring.routes')) {
             $this->registerRoutes();

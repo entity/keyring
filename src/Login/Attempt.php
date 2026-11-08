@@ -11,6 +11,7 @@ use Keyring\Exceptions\AttemptExpired;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Risk\Risk;
 use Keyring\UserKeyring;
 
 /**
@@ -41,6 +42,12 @@ final class Attempt
     public private(set) ?string $deviceId = null;
 
     public private(set) bool $deviceResolved = false;
+
+    /** What the risk signals found, once assessed. */
+    public ?Risk $risk = null;
+
+    /** Whether risk asked for an extra factor. */
+    public bool $stepUp = false;
 
     /**
      * @param  list<Verification>  $verifications
@@ -194,6 +201,8 @@ final class Attempt
             'state' => $this->state,
             'presented' => $this->presented,
             'device' => ['id' => $this->deviceId, 'resolved' => $this->deviceResolved, 'trust' => $this->trustDevice],
+            'risk' => $this->risk?->toArray(),
+            'step_up' => $this->stepUp,
         ];
     }
 
@@ -218,6 +227,8 @@ final class Attempt
         $attempt->deviceId = $data['device']['id'] ?? null;
         $attempt->deviceResolved = $data['device']['resolved'] ?? false;
         $attempt->trustDevice = $data['device']['trust'] ?? false;
+        $attempt->risk = isset($data['risk']) ? Risk::fromArray($data['risk']) : null;
+        $attempt->stepUp = $data['step_up'] ?? false;
 
         return $attempt;
     }

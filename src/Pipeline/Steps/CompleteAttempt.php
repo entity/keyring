@@ -3,6 +3,7 @@
 namespace Keyring\Pipeline\Steps;
 
 use Closure;
+use Keyring\Activity\SecurityLog;
 use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Purpose;
 use Keyring\Events\Authenticated;
@@ -27,6 +28,7 @@ class CompleteAttempt
         protected SessionAssurance $assurance,
         protected DeviceManager $devices,
         protected Sessions $sessions,
+        protected SecurityLog $log,
     ) {}
 
     public function handle(Context $context, Closure $next): Context
@@ -52,7 +54,15 @@ class CompleteAttempt
             [$device, $new] = $this->devices->signIn($context->request, $user, $attempt->trustDevice);
             $this->sessions->start($context->request, $user, $device, $this->assurance->level());
 
-            Authenticated::dispatch($user, $attempt);
+            Authenticated::dispatch($user, $attempt, $device);
+
+            // "Was this you?" for anything suspicious since they last signed in.
+            $context->request->session()->flash('keyring.alerts', $this->log->alerts($user)->map(fn ($event) => [
+                'type' => $event->type,
+                'factor' => $event->factor,
+                'at' => $event->created_at->toIso8601String(),
+                'ip' => $event->ip,
+            ])->all());
 
             if ($new) {
                 NewDeviceSignedIn::dispatch($user, $device);

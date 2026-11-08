@@ -5,9 +5,15 @@ namespace Keyring\Http\Middleware;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Keyring\Devices\DeviceManager;
+use Keyring\Events\RiskAssessed;
 use Keyring\KeyringManager;
+use Keyring\Risk\Assessment;
+use Keyring\Risk\Checkpoint;
+use Keyring\Risk\RiskEngine;
 use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -23,6 +29,7 @@ class AuthenticateSession
         protected Sessions $sessions,
         protected SessionAssurance $assurance,
         protected DeviceManager $devices,
+        protected RiskEngine $risk,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -55,11 +62,56 @@ class AuthenticateSession
             return $this->signOut($request);
         }
 
+        if ($this->risk->hasRequestSignals() && ($response = $this->assessRisk($request, $user, $session)) !== null) {
+            return $response;
+        }
+
         if ($now - $session->lastActivityAt >= 60) {
             $this->sessions->registry()->touch($session->id, $now);
         }
 
         return $next($request);
+    }
+
+    /**
+     * Cheap mid-session checks, like the session cookie turning up in a
+     * different browser. Returns a response when the session must end.
+     */
+    protected function assessRisk(Request $request, mixed $user, RegisteredSession $session): ?Response
+    {
+        $risk = $this->risk->assess(new Assessment(Checkpoint::Request, $request, $user, session: $session));
+
+        if (! $risk->isElevated()) {
+            return null;
+        }
+
+        $action = $this->risk->decide($risk, Checkpoint::Request);
+
+        if ($action->doesSomething()) {
+            RiskAssessed::dispatch($user, $risk, $action, Checkpoint::Request->value);
+        }
+
+        if ($action->revokeSessions) {
+            $this->sessions->registry()->revokeAll($user);
+            $this->devices->cycleRememberToken($user);
+        }
+
+        if ($action->reauthenticate || $action->deny || $action->revokeSessions) {
+            return $this->signOut($request);
+        }
+
+        // Ask again before anything sensitive, and remember what we've seen
+        // so the same change isn't acted on twice.
+        if ($action->stepUp) {
+            $this->assurance->flush();
+        }
+
+        $this->sessions->registry()->save($session->with([
+            'ip' => $request->ip(),
+            'userAgent' => Str::limit((string) $request->userAgent(), 500, ''),
+        ]));
+
+        return null;
     }
 
     protected function signOut(Request $request): Response

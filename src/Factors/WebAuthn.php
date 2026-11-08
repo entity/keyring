@@ -10,6 +10,7 @@ use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Category;
+use Keyring\Events\CloneSuspected;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
@@ -18,6 +19,7 @@ use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
 use Webauthn\AuthenticatorSelectionCriteria;
 use Webauthn\CredentialRecord;
+use Webauthn\Exception\CounterException;
 use Webauthn\PublicKeyCredentialDescriptor;
 
 /**
@@ -156,11 +158,17 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             return null;
         }
 
-        $result = $this->ceremonies()->assert(
-            $credential,
-            $options,
-            $this->ceremonies()->fromJson($actual->public_key, CredentialRecord::class),
-        );
+        try {
+            $result = $this->ceremonies()->assert(
+                $credential,
+                $options,
+                $this->ceremonies()->fromJson($actual->public_key, CredentialRecord::class),
+            );
+        } catch (CounterException) {
+            CloneSuspected::dispatch($actual);
+
+            $result = null;
+        }
 
         $attempt->forget($this->key());
 

@@ -3,6 +3,7 @@
 namespace Keyring\Pipeline;
 
 use InvalidArgumentException;
+use Keyring\Pipeline\Steps\AssessRisk;
 use Keyring\Pipeline\Steps\CompleteAttempt;
 use Keyring\Pipeline\Steps\DetermineRequirement;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
@@ -28,6 +29,7 @@ final class Steps
             EnsureNotThrottled::class,
             VerifyFactor::class,
             ResolveDevice::class,
+            AssessRisk::class,
             DetermineRequirement::class,
             CompleteAttempt::class,
         ]);

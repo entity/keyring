@@ -22,6 +22,7 @@ use Webauthn\AuthenticatorSelectionCriteria;
 use Webauthn\CeremonyStep\CeremonyStepManagerFactory;
 use Webauthn\CredentialRecord;
 use Webauthn\Denormalizer\WebauthnSerializerFactory;
+use Webauthn\Exception\CounterException;
 use Webauthn\Exception\WebauthnException;
 use Webauthn\PublicKeyCredential;
 use Webauthn\PublicKeyCredentialCreationOptions;
@@ -120,6 +121,8 @@ class Ceremonies
      * record and whether the user was verified, or null when it isn't valid.
      *
      * @return array{record: CredentialRecord, userVerified: bool}|null
+     *
+     * @throws CounterException when the counter went backwards (a cloned key)
      */
     public function assert(string $credential, string $options, CredentialRecord $record): ?array
     {
@@ -135,6 +138,8 @@ class Ceremonies
                 ->check($record, $credential->response, $options, $this->relyingPartyId(), $record->userHandle);
 
             return ['record' => $record, 'userVerified' => $credential->response->authenticatorData->isUserVerified()];
+        } catch (CounterException $e) {
+            throw $e;
         } catch (Throwable $e) {
             report_if(! $this->isRejection($e), $e);
 
