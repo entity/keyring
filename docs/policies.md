@@ -35,7 +35,7 @@ A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possess
 | `Requirement::for(Assurance::AAL2)` | The requirement for an assurance level. |
 | `->including(Category::Possession)` | That category must be among those verified. |
 | `->phishingResistant()` | At least one verification must be phishing resistant (a passkey or security key). |
-| `->ifEnrolled()` | Only apply this when the user has set up enough to meet it. See [Only When Enrolled](#only-when-enrolled). |
+| `->ifEnrolled()` | Apply this as far as the user's authenticators can meet it. See [Only When Enrolled](#only-when-enrolled). |
 | `->noDowngrade()` | Users with a passkey or security key must use one. See [No Downgrade](#no-downgrade). |
 
 Requirements are immutable. Each modifier returns a new instance, and PHP warns if you discard it:
@@ -62,9 +62,11 @@ The [step-up middleware](step-up.md#raising-assurance) asks for these levels by 
 
 ## Only When Enrolled
 
-`ifEnrolled()` applies the requirement only when the user's authenticators could meet it. Otherwise, one factor is enough.
+`ifEnrolled()` applies the requirement as far as the user's authenticators can meet it. When they can't meet all of it, they must prove the strongest version they can, and never just one factor while they have a second.
 
 With `Requirement::aal2()->ifEnrolled()`, a user with only a password signs in with the password. Once they add an authenticator app, they need both.
+
+With `Requirement::aal2()->phishingResistant()->ifEnrolled()`, a user with a password and an authenticator app has no key to meet it, so they still need both. Recovery codes don't count as that second factor: a user with nothing else beyond a password signs in with the password rather than spending a code every time.
 
 Without `ifEnrolled()`, users who can't meet the requirement can't sign in at all. They see an error (`keyring::keyring.unavailable`) on the login page asking them to contact support. Use this only when every account is set up with the factors it needs before it signs in.
 
