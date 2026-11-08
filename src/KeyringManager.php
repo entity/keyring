@@ -27,6 +27,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
+use Keyring\Testing\KeyringFake;
 
 class KeyringManager
 {
@@ -248,6 +249,18 @@ class KeyringManager
     public function notifies(string $type): bool
     {
         return in_array($type, $this->notifications ?? config('keyring.notifications', []), true);
+    }
+
+    /**
+     * Pass or fail factor checks in tests without real codes or signatures.
+     */
+    public function fake(): KeyringFake
+    {
+        if (! $this->container->bound(KeyringFake::class)) {
+            $this->container->instance(KeyringFake::class, new KeyringFake);
+        }
+
+        return $this->container->make(KeyringFake::class);
     }
 
     /**

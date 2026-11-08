@@ -46,6 +46,38 @@ class AuthenticatorFactory extends Factory
         ]);
     }
 
+    /**
+     * A passkey that only works with Keyring::fake(), or with a
+     * VirtualAuthenticator enrolled through the real flow.
+     */
+    public function passkey(): static
+    {
+        return $this->webauthn('passkey', 'Passkey', userVerified: true);
+    }
+
+    public function securityKey(bool $userVerified = false): static
+    {
+        return $this->webauthn('security-key', 'Security key', $userVerified);
+    }
+
+    public function emailCode(): static
+    {
+        return $this->state(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]);
+    }
+
+    protected function webauthn(string $factor, string $name, bool $userVerified): static
+    {
+        return $this->state(fn () => [
+            'factor' => $factor,
+            'name' => $name,
+            'secret' => null,
+            'credential_id' => rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
+            'public_key' => '{}',
+            'transports' => ['usb'],
+            'meta' => ['user_verified' => $userVerified],
+        ]);
+    }
+
     public function default(): static
     {
         return $this->state(['is_default' => true]);

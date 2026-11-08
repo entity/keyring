@@ -10,7 +10,9 @@ use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\Verification;
 use Keyring\Pipeline\Context;
+use Keyring\Testing\KeyringFake;
 
 /**
  * Identifies the user (for primary factors) and checks the proof, inside a
@@ -25,7 +27,9 @@ class VerifyFactor
 
     public function handle(Context $context, Closure $next): Context
     {
-        $context->request->validate($this->rules($context));
+        if (! $this->faked($context)) {
+            $context->request->validate($this->rules($context));
+        }
 
         $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context) {
             if ($context->identifying && $context->factor instanceof PrimaryFactor) {
@@ -44,7 +48,7 @@ class VerifyFactor
                 return;
             }
 
-            $context->verification = $context->factor->verify($context->attempt, $context->authenticator, $context->request);
+            $context->verification = $this->check($context);
 
             if ($context->verification !== null) {
                 $timebox->returnEarly();
@@ -75,6 +79,31 @@ class VerifyFactor
         FactorVerified::dispatch($context->attempt, $context->authenticator, $context->verification);
 
         return $next($context);
+    }
+
+    protected function faked(Context $context): bool
+    {
+        return $this->container->bound(KeyringFake::class)
+            && $this->container->make(KeyringFake::class)->decision($context->factor->key()) !== null;
+    }
+
+    protected function check(Context $context): ?Verification
+    {
+        $decision = $this->container->bound(KeyringFake::class)
+            ? $this->container->make(KeyringFake::class)->decision($context->factor->key())
+            : null;
+
+        if ($decision === null) {
+            return $context->factor->verify($context->attempt, $context->authenticator, $context->request);
+        }
+
+        return $decision ? new Verification(
+            factor: $context->factor->key(),
+            authenticator: $context->authenticator->isVirtual() ? null : $context->authenticator->id,
+            categories: $context->factor->categories($context->authenticator),
+            phishingResistant: $context->factor->phishingResistant($context->authenticator),
+            at: now()->getTimestamp(),
+        ) : null;
     }
 
     /**
