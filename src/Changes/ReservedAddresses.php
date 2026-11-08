@@ -1,0 +1,46 @@
+<?php
+
+namespace Keyring\Changes;
+
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Keyring\Exceptions\ReservedAddressException;
+use Keyring\KeyringManager;
+use Keyring\Models\PendingChange;
+
+/**
+ * While an email change can still be reverted, the address it replaced stays
+ * with its owner. If someone else could take it meanwhile, the owner's
+ * "this wasn't me" link would have nowhere to put it back.
+ */
+class ReservedAddresses
+{
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
+
+    /**
+     * Whether the address is held for someone other than the given user.
+     */
+    public function has(string $address, ?Model $except = null): bool
+    {
+        return PendingChange::query()
+            ->where('attribute', $this->keyring->username())
+            ->reserving($address)
+            ->when($except?->exists, fn (Builder $query) => $query->whereNot(fn (Builder $query) => $query->ownedBy($except)))
+            ->exists();
+    }
+
+    /**
+     * Refuse to save a user with an address held for someone else.
+     */
+    public function guard(Model $user): void
+    {
+        $attribute = $this->keyring->username();
+        $address = $user->getAttribute($attribute);
+
+        if ($user->isDirty($attribute) && is_string($address) && $this->has($address, except: $user)) {
+            throw ReservedAddressException::for($user, $attribute);
+        }
+    }
+}
