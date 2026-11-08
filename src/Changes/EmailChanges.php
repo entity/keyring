@@ -54,7 +54,7 @@ class EmailChanges
 
     public function request(Authenticatable&Model $user, string $email): ?PendingChange
     {
-        $email = Str::lower(trim($email));
+        $email = $this->keyring->normalizeUsername($email);
         $current = (string) $user->getAttribute($this->attribute());
 
         if ($email === Str::lower($current)) {

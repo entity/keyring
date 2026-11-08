@@ -173,6 +173,6 @@ class ChallengeController
     protected function expired(Purpose $purpose, ?string $message = null): RedirectResponse
     {
         return to_route($purpose === Purpose::Login ? 'login' : 'keyring.confirm.challenge')
-            ->withErrors([config('keyring.username') => $message ?? __('keyring::keyring.expired')]);
+            ->withErrors([$this->keyring->username() => $message ?? __('keyring::keyring.expired')]);
     }
 }

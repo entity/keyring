@@ -2,9 +2,9 @@
 
 namespace Keyring\Tests\Fixtures;
 
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Keyring\Contracts\CreatesNewUsers;
+use Keyring\Facades\Keyring;
 use Keyring\Rules\UnreservedAddress;
 use Keyring\Support\PasswordRules;
 
@@ -12,7 +12,7 @@ class CreateNewUser implements CreatesNewUsers
 {
     public function create(array $input): User
     {
-        $input['email'] = Str::lower(trim((string) ($input['email'] ?? '')));
+        $input['email'] = Keyring::normalizeUsername((string) ($input['email'] ?? ''));
 
         validator($input, [
             'name' => ['required', 'string', 'max:255'],

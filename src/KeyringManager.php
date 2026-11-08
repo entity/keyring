@@ -13,6 +13,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Inertia\Inertia;
 use InvalidArgumentException;
@@ -408,6 +409,15 @@ class KeyringManager
     public function username(): string
     {
         return config('keyring.username');
+    }
+
+    /**
+     * A typed username as Keyring stores and looks it up: trimmed and
+     * lowercased.
+     */
+    public function normalizeUsername(string $username): string
+    {
+        return Str::lower(trim($username));
     }
 
     /**
