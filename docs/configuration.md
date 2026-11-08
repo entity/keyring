@@ -58,12 +58,11 @@ Set any of these to `false` to drop their routes. Sign in, challenges, step-up, 
 ```php
 'home' => '/dashboard',
 
-'login_redirect' => '/login',
 ```
 
 `home` is where users go after signing in or confirming, when there's no intended URL. It's also used after email verification (with `?verified=1` added) and after confirming an email change while signed in.
 
-`login_redirect` isn't read by Keyring yet. Signed-out users are sent to the route named `login`.
+Signed-out users are sent to the route named `login`.
 
 ## Routes
 
@@ -79,7 +78,13 @@ Set any of these to `false` to drop their routes. Sign in, challenges, step-up, 
 
 Keyring registers its routes inside a group with this prefix, domain and middleware. It always adds a middleware that sends `Cache-Control: no-store, private` on every Keyring response.
 
-If you set `routes` to `false`, Keyring registers nothing, and you need to define the routes yourself. Keyring has no helper for this. Copy `vendor/entity/keyring/routes/keyring.php` into your app as a starting point, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
+If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring::routes()` where you want them, for example inside your own group:
+
+```php
+Route::prefix('account')->middleware('throttle:60,1')->group(fn () => Keyring::routes());
+```
+
+`Keyring::routes()` adds the `middleware` option and the no-cache middleware, but not `prefix` or `domain`; your group decides those. To change the routes themselves, copy `vendor/entity/keyring/routes/keyring.php` into your app instead, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
 
 The browser package uses Keyring's default paths. If you change the prefix, tell it with [`configureRoutes()`](frontend.md#changing-routes). The published pages also contain a few hard-coded paths such as `/login` and `/register`.
 

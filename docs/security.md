@@ -77,7 +77,8 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - An email change needs a fresh verification, confirmation from the new address, and confirmation from the current address unless the session proved a second factor that existed before it signed in.
 - An email change never reveals whether the new address has an account.
 - An email change only applies if the address is still the one it was requested from.
-- Emailed confirm and revert links only act on a button press (a POST), so mail scanners that open links can't confirm or revert anything.
+- Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing.
+- A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
 - Reverting an email change signs out every session, closes later changes and removes sign-in methods added since.
 - Password resets give the same answer for every address, sign out every session and cancel pending email changes.
 - New passwords follow OWASP's length rules, are checked against breach lists, and are refused rather than silently cut short by bcrypt.
@@ -108,7 +109,5 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - **Changing `APP_KEY` breaks hashed and encrypted data.** Recovery codes stop working, pending email codes become invalid, and the WebAuthn user handle for new keys changes. Laravel's previous keys only help with encrypted values such as TOTP secrets.
 - **"Remember me" is all or nothing.** Laravel has one remember token per user, so revoking any device or signing out other sessions ends every remembered browser.
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
-- **The "this wasn't me" link acts on open.** Unlike the email change links, it has no confirmation button, so a mail scanner that opens it signs the device out.
-- **After a JSON step-up, users return to `home`.** Keyring doesn't remember the page for `423` responses. See [JSON Requests](step-up.md#json-requests).
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
 - **Work in progress.** Keyring hasn't been tagged or used in production yet.

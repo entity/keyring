@@ -113,6 +113,8 @@ A user has at most one set. Generating a new set replaces the old one. Users get
 
 The hashes are keyed with `APP_KEY`. Changing `APP_KEY` makes existing recovery codes stop working.
 
+Once every code is used, the set no longer counts as a factor, so policies and step-up stop asking for it.
+
 ### Passkeys and Security Keys
 
 One WebAuthn driver with two profiles. Passkeys are discoverable and always verify the user, so they can sign in on their own. Security keys are a second factor. See [Passkeys & Security Keys](passkeys.md).
@@ -271,7 +273,7 @@ Implement these as well when they apply:
 
 | Contract | Means | Methods |
 |---|---|---|
-| `Keyring\Contracts\PrimaryFactor` | It can start a login by identifying the user (`POST /login/{key}`). | `identify($request)` returns the authenticator the request is for, or `null`. It must take the same time whether or not a user is found. `identificationRules()` validates the identifying fields. |
+| `Keyring\Contracts\PrimaryFactor` | It can start a login by identifying the user (`POST /login/{key}`). | `startsLogin()` says whether it can, as configured (WebAuthn returns `false` for security keys). `identify($request)` returns the authenticator the request is for, or `null`. It must take the same time whether or not a user is found. `identificationRules()` validates the identifying fields. |
 | `Keyring\Contracts\DiscoverableFactor` | A primary factor that needs no username, like a passkey. | `loginOptions($request)` returns what the browser needs, served at `GET /login/{key}/options`. |
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment()`, `enrollmentRules()`, `confirmEnrollment()` and `multiple()`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |

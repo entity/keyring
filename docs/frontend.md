@@ -41,7 +41,7 @@ With `--inertia`, Keyring publishes:
 ```
 resources/js/pages/auth/
     login, register, forgot-password, reset-password, verify-email,
-    challenge, confirm, email-change
+    challenge, confirm, email-change, device-report
 resources/js/keyring/
     factors.ts
     factors/Password, Code, SecurityKey

@@ -168,7 +168,7 @@ Use the same rules in your own forms. `PasswordRules::for()` with no user applie
 
 The link is built from `APP_URL`, never the `Host` header. The reset page is sent with `Referrer-Policy: no-referrer`, so the token doesn't leak to other sites through the referrer.
 
-`POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. On success, Keyring:
+`POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`, and the password rules only run once the token is accepted, so the form doesn't reveal which addresses have accounts or MFA. On success, Keyring:
 
 - saves the new password and changes the "remember me" token,
 - revokes every session,

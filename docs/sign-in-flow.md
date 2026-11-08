@@ -71,7 +71,7 @@ The same options work for autofill ("conditional UI"), where the browser offers 
 
 A passkey sign in still goes through the policy, so a policy like `Requirement::factors(3)` would still ask for more.
 
-Only factors that implement `PrimaryFactor` can start a login, and only `DiscoverableFactor`s serve options; other factor keys return a 404. Security keys share the passkey driver, so their routes answer, but a security key never identifies anyone on its own and the login fails.
+Only factors that implement `PrimaryFactor` and say so with `startsLogin()` can start a login, and only `DiscoverableFactor`s serve options; other factor keys return a 404. Security keys share the passkey driver, so their routes answer, but a security key never identifies anyone on its own and the login fails.
 
 ## The Challenge Page
 
@@ -318,6 +318,7 @@ Keyring renders these pages:
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` |
 | `email-change` | `action` (`confirm` or `revert`) and `url` (where its button posts). See [Protected Changes](protected-changes.md#the-emailed-links). |
+| `device-report` | `device` (a description) and `url` (where its button posts). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 
 With Inertia installed, each renders the component `auth/{name}`, such as `auth/login`. Without Inertia, Keyring renders the Blade view `auth.{name}`, such as `resources/views/auth/login.blade.php`, with the props as view data. Keyring doesn't ship Blade views, so you write them.
 
@@ -333,7 +334,7 @@ Or pass a closure that receives the props and returns a response:
 Keyring::page('login', fn (array $props) => response()->view('marketing.login', $props));
 ```
 
-Return a response object rather than a bare view: Keyring adds a `Referrer-Policy` header to the `reset-password` page, which needs one. For the same reason, apps without Inertia should register `reset-password` this way, because the Blade fallback returns a bare view and the reset page fails with it.
+A closure can return anything a route can (a response, a view or a string).
 
 `challenge` and `confirm` are separate pages. The published `confirm` page renders the `challenge` page, so overriding `challenge` with `Keyring::page()` doesn't change step-up; override `confirm` too.
 

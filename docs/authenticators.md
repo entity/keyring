@@ -130,7 +130,7 @@ Requests that expect JSON (and aren't Inertia visits) get JSON with a `status`:
 | Update | `authenticator-updated` | `authenticator` |
 | Remove | `authenticator-removed` | |
 
-Other requests are redirected back with the `status` flashed, and the extra data flashed under `keyring`. The [browser package](frontend.md#managing-authenticators) uses the JSON form.
+Other requests are redirected back with the `status` flashed, and the extra data flashed under `keyring.result` (for example `session('keyring.result.enrollment')`). The [browser package](frontend.md#managing-authenticators) uses the JSON form.
 
 ## From JavaScript
 

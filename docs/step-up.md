@@ -45,7 +45,7 @@ It counts everything proved so far this session, so it only asks for what's miss
 
 The level stays reached for the rest of the session, unless a [risk response](risk.md#checkpoints) clears it.
 
-Users who don't have the authenticators to reach the level can't get through. The confirm page shows `keyring::keyring.unavailable` and offers a plain confirmation instead, which doesn't raise their level, so they're asked again. Send these users to set up a factor first, for example by checking `$request->user()->keyring->canMeet(Requirement::aal2())` before linking to the route.
+Users who don't have the authenticators to reach the level get a `403` with `keyring::keyring.needs_factor`, since confirming couldn't help them. Send these users to set up a factor first, for example by checking `$request->user()->keyring->canMeet(Requirement::aal2())` before linking to the route.
 
 ## Fresh Verification
 
@@ -93,7 +93,7 @@ Requests that expect JSON (and aren't Inertia visits) get a `423 Locked` respons
 }
 ```
 
-Send the user to `redirect`, then let them try again. In this case Keyring doesn't remember where the user came from, so after confirming they land on the intended URL from earlier in the session, or `home`. If you want users to come back to a settings page, protect that page's `GET` route with the same middleware, so step-up happens when the page loads. See [Handling Step-Up in JavaScript](frontend.md#handling-step-up-in-javascript).
+Send the user to `redirect`, then let them try again. Keyring remembers the page that made the call (the `Referer`), so after confirming they come back to it. Protecting the page's own `GET` route with the same middleware also works, and asks up front when the page loads. See [Handling Step-Up in JavaScript](frontend.md#handling-step-up-in-javascript).
 
 ## Laravel's Password Confirmation
 
