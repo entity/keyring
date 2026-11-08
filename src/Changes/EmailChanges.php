@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -185,11 +186,16 @@ class EmailChanges
 
     /**
      * Cancel every change still waiting for confirmation, e.g. after the
-     * account was recovered with a password reset.
+     * account was recovered with a password reset. Someone reacting to a
+     * takeover may also follow the emailed "this wasn't me" link afterwards,
+     * so $keepRevertLink leaves it working until the change would have expired.
      */
-    public function cancel(Authenticatable&Model $user): void
+    public function cancel(Authenticatable&Model $user, bool $keepRevertLink = false): void
     {
-        $this->changesOf($user)->pending()->update(['cancelled_at' => now()]);
+        $this->changesOf($user)->pending()->update([
+            'cancelled_at' => now(),
+            ...($keepRevertLink ? ['revertable_until' => new Expression('expires_at')] : []),
+        ]);
     }
 
     public function pending(Authenticatable&Model $user): ?PendingChange

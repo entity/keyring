@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
@@ -106,8 +107,9 @@ class Sessions
     /**
      * Sign the user out everywhere but the given session, and close the other
      * ways back in without a full sign in: Laravel keeps one remember token
-     * per user, so cycling it stops every "remember me" cookie, and no other
-     * device stays trusted.
+     * per user, so cycling it stops every "remember me" cookie, no other
+     * device stays trusted, and an email change waiting for confirmation is
+     * cancelled, though its "this wasn't me" link keeps working.
      */
     public function revokeAll(Authenticatable $user, ?string $except = null): int
     {
@@ -116,6 +118,7 @@ class Sessions
 
         $this->cycleRememberToken($user);
         $this->distrustDevices($user, except: $keptDevice);
+        $this->cancelEmailChanges($user);
 
         return $count;
     }
@@ -139,6 +142,14 @@ class Sessions
                 ->whereNotNull('trusted_until')
                 ->when($except, fn (Builder $query) => $query->whereKeyNot($except))
                 ->update(['trusted_until' => null]);
+        }
+    }
+
+    protected function cancelEmailChanges(Authenticatable $user): void
+    {
+        if ($user instanceof Model) {
+            // Resolved here because EmailChanges needs this class.
+            app(EmailChanges::class)->cancel($user, keepRevertLink: true);
         }
     }
 

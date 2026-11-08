@@ -193,6 +193,35 @@ it('waives the current address confirmation for a second factor that predates th
     expect(PendingChange::query()->latest('id')->first()->current_token)->toBeNull();
 });
 
+it('keeps the revert link working after signing out everywhere else cancels the change', function () {
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com'])->assertOk();
+    $change = PendingChange::sole();
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+
+    $this->deleteJson(route('keyring.devices.destroy-others'))->assertOk();
+    $planted = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    expect($change->fresh()->isPending())->toBeFalse()
+        ->and(confirmBoth($change->fresh(), $tokens))->toBe(EmailConfirmation::Invalid);
+
+    $this->post(route('keyring.email.revert.store', [$change->id, $tokens['revert']]))
+        ->assertSessionHas('status', 'email-change-reverted');
+
+    expect($change->fresh()->reverted_at)->not->toBeNull()
+        ->and(Authenticator::find($planted->id))->toBeNull()
+        ->and($this->user->fresh()->email)->toBe('taylor@example.com');
+});
+
+it('does not revert a change its owner cancelled', function () {
+    $change = requestChange($this->user, 'new@example.com');
+    $tokens = tokensFor('new@example.com', 'taylor@example.com');
+
+    $this->deleteJson(route('keyring.email.destroy'))->assertOk();
+
+    expect(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeFalse();
+});
+
 it('says a link was invalid when the token is wrong', function () {
     $change = requestChange($this->user, 'new@example.com');
 

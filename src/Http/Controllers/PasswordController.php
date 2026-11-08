@@ -30,7 +30,7 @@ class PasswordController
             signOutOthers: $request->boolean('sign_out_others', true),
         );
 
-        $request->session()->regenerate();
+        $request->session()->regenerate(true);
 
         return $this->status('password-updated');
     }

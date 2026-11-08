@@ -128,9 +128,13 @@ class PendingChange extends Model
         return $this->confirmed_at !== null && ! $this->needsCurrentConfirmation();
     }
 
+    /**
+     * A cancelled change only stays revertable when cancelling set
+     * revertable_until, as signing out everywhere does.
+     */
     public function canRevert(): bool
     {
-        return $this->reverted_at === null && $this->cancelled_at === null
+        return $this->reverted_at === null
             && ($this->isPending() || $this->revertable_until?->isFuture() === true);
     }
 

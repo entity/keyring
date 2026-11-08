@@ -1,17 +1,21 @@
 <?php
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Models\PendingChange;
 use Keyring\Risk\Action;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 
 const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
@@ -51,6 +55,104 @@ function signInWith(string $agent = FIREFOX): void
 }
 
 dataset('drivers', ['database', 'cache']);
+
+/**
+ * The array driver keeps one store per test, so replaying an old session ID
+ * only means something on a driver that reads it back.
+ */
+function useFileSessions(): void
+{
+    $directory = sys_get_temp_dir().'/keyring-sessions-'.uniqid();
+    mkdir($directory);
+    config(['session.driver' => 'file', 'session.files' => $directory]);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+}
+
+/**
+ * Forget what this process holds, then ask for a signed-in page with the
+ * given session ID, like another browser would.
+ */
+function requestWithSessionId(string $id): TestResponse
+{
+    session()->flush();
+    app('auth')->forgetGuards();
+
+    return test()->withCredentials()->withCookie(config('session.cookie'), $id)->getJson(route('keyring.devices.index'));
+}
+
+dataset('session rotations', [
+    'a password change' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1']],
+    'a password change that keeps other sessions' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1', 'sign_out_others' => false]],
+    'a step-up' => ['postJson', '/confirm/password', ['password' => 'password']],
+    'signing out everywhere else' => ['deleteJson', '/user/devices', []],
+]);
+
+it('stops the old session id working after :dataset, and keeps the user signed in', function (string $method, string $uri, array $data) {
+    useFileSessions();
+    signInWith();
+    $this->inertia()->get(route('keyring.confirm.challenge')); // the step-up needs one in progress
+    $this->withoutHeader('X-Inertia');
+
+    $old = session()->getId();
+    $token = session()->token();
+    $registered = session(Sessions::KEY);
+    $verified = array_keys(session(SessionAssurance::KEY));
+    session()->flash('status', 'kept');
+
+    $this->withCredentials()->withCookie(config('session.cookie'), $old)->{$method}($uri, $data)->assertOk();
+
+    $new = session()->getId();
+    expect($new)->not->toBe($old)
+        ->and(session()->token())->not->toBe($token)
+        ->and(session('status'))->toBe('kept');
+
+    requestWithSessionId($old)->assertUnauthorized();
+
+    requestWithSessionId($new)->assertOk();
+    expect(session(Sessions::KEY))->toBe($registered)
+        ->and(array_keys(session(SessionAssurance::KEY)))->toBe($verified)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+})->with('session rotations');
+
+it('replaces a planted session id when the password step leaves a pending login', function () {
+    useFileSessions();
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->get('/login');
+    $planted = session()->getId();
+
+    $this->withCredentials()->withCookie(config('session.cookie'), $planted)
+        ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    expect(session()->getId())->not->toBe($planted)
+        ->and(session()->has('keyring.attempt.login'))->toBeTrue()
+        ->and(session()->getHandler()->read($planted))->toBe('');
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+});
+
+it('cancels a pending email change when signing out everywhere else, and from revokeAll', function () {
+    Notification::fake();
+    signInWith();
+
+    $this->postJson('/user/email', ['email' => 'someone-else@example.com'])->assertOk();
+    $change = PendingChange::sole();
+
+    $this->deleteJson(route('keyring.devices.destroy-others'))->assertOk();
+
+    expect($change->fresh()->isPending())->toBeFalse();
+    $this->get('/home')->assertOk();
+
+    $this->postJson('/user/email', ['email' => 'someone-else@example.com'])->assertOk();
+    $change = PendingChange::query()->whereNull('cancelled_at')->sole();
+
+    app(Sessions::class)->revokeAll($this->user);
+
+    expect($change->fresh()->isPending())->toBeFalse();
+});
 
 it('does not let anonymous wrong passwords raise the owner\'s risk', function () {
     Keyring::risk([RepeatedFactorFailures::class])->respond(fn ($risk) => $risk->has('repeated_failures') ? Action::deny() : Action::allow());
