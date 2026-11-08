@@ -13,7 +13,7 @@ use Keyring\Tests\Fixtures\SmsCode;
 
 beforeEach(function () {
     SmsCode::$sent = [];
-    Keyring::factors([Password::class, Totp::class, EmailCode::class, SmsCode::class]);
+    Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor(), SmsCode::class]);
 
     $this->user = taylor();
 });

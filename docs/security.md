@@ -57,6 +57,8 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 ### Second Factors and Step-Up
 
 - Policies count distinct categories, so two factors of the same kind are never treated as multi-factor.
+- Assurance levels follow NIST SP 800-63B: a passkey that syncs reaches AAL2, and AAL3 needs a phishing-resistant key that can't leave its device, read from the flag the key reports on every sign in.
+- Email codes are opt-in (`EmailCode::asSecondFactor()`), since NIST rules out email for authentication codes and the inbox can also reset the password.
 - A passkey or security key only counts as inherence when it actually verified the user that time.
 - With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in. Recovery codes stay on offer as the way back in, unless you pass `except: []`.
 - With `ifEnrolled()`, a policy the user can't fully meet still asks for the strongest version they can give, so a user with a second factor never signs in with one factor.

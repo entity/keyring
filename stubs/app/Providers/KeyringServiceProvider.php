@@ -28,8 +28,9 @@ class KeyringServiceProvider extends ServiceProvider
             WebAuthn::passkeys(),
             WebAuthn::securityKeys(),
             Totp::class,
-            EmailCode::class,
             RecoveryCodes::class,
+            // Email codes fall short of NIST AAL2 (the inbox can also reset the
+            // password). To accept them anyway: EmailCode::asSecondFactor(),
         ]);
 
         // What they must prove. Two factors once they've set one up, and a

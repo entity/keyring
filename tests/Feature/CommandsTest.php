@@ -357,5 +357,5 @@ it('publishes a provider that boots and registers the actions', function () {
     expect(app(UpdatesUserPasswords::class))->toBeInstanceOf(UpdateUserPassword::class)
         ->and(app(ResetsUserPasswords::class))->toBeInstanceOf(ResetUserPassword::class)
         ->and(app(ValidatesEmailChanges::class))->toBeInstanceOf(ValidateEmailChange::class)
-        ->and(Keyring::registered()->keys()->all())->toContain('passkey', 'security-key', 'email-code');
+        ->and(Keyring::registered()->keys()->all())->toContain('passkey', 'security-key')->not->toContain('email-code');
 });

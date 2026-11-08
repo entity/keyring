@@ -12,7 +12,7 @@ use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     Notification::fake();
-    Keyring::factors([Password::class, Totp::class, EmailCode::class, RecoveryCodes::class]);
+    Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor(), RecoveryCodes::class]);
 
     $this->user = taylor();
 });
@@ -154,4 +154,10 @@ it('burns the enrollment code after too many wrong guesses', function () {
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => sentCode($this->user)])->assertUnprocessable();
 
     expect($this->user->keyring->refresh()->of('email-code'))->toBeEmpty();
+});
+
+it('only takes email codes as a second factor when the app accepts the risk', function () {
+    Keyring::factors([Password::class, EmailCode::class]);
+
+    expect(fn () => Keyring::registered())->toThrow(InvalidArgumentException::class, 'EmailCode::asSecondFactor()');
 });
