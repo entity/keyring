@@ -13,6 +13,7 @@ use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\KeyedHash;
 
 /**
  * Single-use codes the user saved when setting up their first second factor.
@@ -24,7 +25,7 @@ class RecoveryCodes extends Factor implements Enrollable
         protected int $count = 8,
     ) {}
 
-    public const KEY = 'recovery';
+    public const string KEY = 'recovery';
 
     public function key(): string
     {
@@ -147,22 +148,26 @@ class RecoveryCodes extends Factor implements Enrollable
         return json_decode($authenticator->secret ?? '[]', true) ?: [];
     }
 
-    protected function hash(string $code, ?string $key = null): string
+    protected function hash(string $code): string
     {
-        return hash_hmac('sha256', Str::lower($this->normalizeCode($code)), $key ?? config('app.key'));
+        return KeyedHash::make($this->normalizeCode($code));
     }
 
     /**
-     * The code hashed with the current key and every previous one, so rotating
-     * APP_KEY (with APP_PREVIOUS_KEYS) doesn't throw away saved codes.
+     * The code hashed with every key it might have been stored under.
      *
      * @return list<string>
      */
     protected function candidates(string $code): array
     {
-        return array_map(
-            fn (string $key) => $this->hash($code, $key),
-            [config('app.key'), ...config('app.previous_keys', [])],
-        );
+        return KeyedHash::candidates($this->normalizeCode($code));
+    }
+
+    /**
+     * Codes are case-insensitive.
+     */
+    protected function normalizeCode(string $code): string
+    {
+        return Str::lower(parent::normalizeCode($code));
     }
 }

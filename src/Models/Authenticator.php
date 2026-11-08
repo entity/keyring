@@ -4,6 +4,7 @@ namespace Keyring\Models;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
@@ -120,7 +121,8 @@ class Authenticator extends Model
     /**
      * @param  Builder<static>  $query
      */
-    protected function scopeConfirmed(Builder $query): void
+    #[Scope]
+    protected function confirmed(Builder $query): void
     {
         $query->whereNotNull('confirmed_at');
     }

@@ -10,6 +10,7 @@ use Cose\Algorithm\Signature\RSA\RS256;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Facades\Keyring;
+use Keyring\Support\KeyedHash;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
 use Symfony\Component\Serializer\Normalizer\AbstractObjectNormalizer;
@@ -169,7 +170,7 @@ class Ceremonies
      */
     public function userHandle(Authenticatable $user): string
     {
-        return hash_hmac('sha256', 'keyring|'.$user->getAuthIdentifier(), config('app.key'));
+        return KeyedHash::make('keyring|'.$user->getAuthIdentifier());
     }
 
     public function relyingPartyId(): string

@@ -3,6 +3,8 @@
 namespace Keyring\Models\Concerns;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
@@ -28,5 +30,14 @@ trait BelongsToUser
         $user = $this->authenticatable;
 
         return $user instanceof Authenticatable ? $user : null;
+    }
+
+    /**
+     * @param  Builder<static>  $query
+     */
+    #[Scope]
+    protected function ownedBy(Builder $query, Model $user): void
+    {
+        $query->whereMorphedTo('authenticatable', $user);
     }
 }

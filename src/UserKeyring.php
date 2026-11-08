@@ -131,7 +131,7 @@ class UserKeyring
     protected function load(): Collection
     {
         $stored = Keyring::authenticatorModel()::query()
-            ->whereMorphedTo('authenticatable', $this->user)
+            ->ownedBy($this->user)
             ->confirmed()
             ->get()
             ->each(fn (Authenticator $authenticator) => $authenticator->setRelation('authenticatable', $this->user));
