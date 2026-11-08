@@ -111,7 +111,7 @@ Eight single-use codes in the form `xxxxx-xxxxx`, shown once. They're stored as 
 
 A user has at most one set. Generating a new set replaces the old one. Users get a set automatically with their first extra factor. See [Recovery Codes](authenticators.md#recovery-codes).
 
-The hashes are keyed with `APP_KEY`. Changing `APP_KEY` makes existing recovery codes stop working.
+The hashes are keyed with `APP_KEY`. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
 
 Once every code is used, the set no longer counts as a factor, so policies and step-up stop asking for it.
 

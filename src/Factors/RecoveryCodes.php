@@ -48,11 +48,11 @@ class RecoveryCodes extends Factor implements Enrollable
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $hash = $this->hash((string) $request->input('code'));
+        $candidates = $this->candidates((string) $request->input('code'));
 
-        $used = $this->consume($authenticator, function (Authenticator $locked) use ($hash) {
+        $used = $this->consume($authenticator, function (Authenticator $locked) use ($candidates) {
             $hashes = $this->hashes($locked);
-            $match = array_find_key($hashes, fn (string $stored) => hash_equals($stored, $hash));
+            $match = array_find_key($hashes, fn (string $stored) => array_any($candidates, fn (string $hash) => hash_equals($stored, $hash)));
 
             if ($match === null) {
                 return false;
@@ -145,8 +145,22 @@ class RecoveryCodes extends Factor implements Enrollable
         return json_decode($authenticator->secret ?? '[]', true) ?: [];
     }
 
-    protected function hash(string $code): string
+    protected function hash(string $code, ?string $key = null): string
     {
-        return hash_hmac('sha256', Str::lower($this->normalizeCode($code)), config('app.key'));
+        return hash_hmac('sha256', Str::lower($this->normalizeCode($code)), $key ?? config('app.key'));
+    }
+
+    /**
+     * The code hashed with the current key and every previous one, so rotating
+     * APP_KEY (with APP_PREVIOUS_KEYS) doesn't throw away saved codes.
+     *
+     * @return list<string>
+     */
+    protected function candidates(string $code): array
+    {
+        return array_map(
+            fn (string $key) => $this->hash($code, $key),
+            [config('app.key'), ...config('app.previous_keys', [])],
+        );
     }
 }

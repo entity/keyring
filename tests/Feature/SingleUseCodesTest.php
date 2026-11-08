@@ -43,3 +43,10 @@ it('keeps other recovery codes usable when two different codes are used at once'
         ->and(Keyring::factor('recovery')->verify($this->attempt, $second, Request::create('/', 'POST', ['code' => 'BBBBB-22222'])))->not->toBeNull()
         ->and(Keyring::factor('recovery')->present(Authenticator::find($id))['remaining'])->toBe(1);
 });
+
+it('keeps recovery codes working after APP_KEY is rotated', function () {
+    $id = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create()->id;
+    config(['app.previous_keys' => [config('app.key')], 'app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+
+    expect(Keyring::factor('recovery')->verify($this->attempt, Authenticator::find($id), Request::create('/', 'POST', ['code' => 'aaaaa-11111'])))->not->toBeNull();
+});
