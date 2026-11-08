@@ -18,23 +18,30 @@ class InstallCommand extends Command
 {
     public function handle(Filesystem $files): int
     {
-        $this->callSilently('vendor:publish', ['--tag' => 'keyring-config', '--force' => $this->option('force')]);
-        $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations', '--force' => $this->option('force')]);
+        $stack = $this->option('inertia');
 
-        $this->copy($files, 'KeyringServiceProvider.php', app_path('Providers/KeyringServiceProvider.php'));
-        $this->copy($files, 'CreateNewUser.php', app_path('Actions/Keyring/CreateNewUser.php'));
+        if ($stack !== null && ! in_array($stack, ['vue', 'react'], true)) {
+            $this->components->error('The --inertia option must be "vue" or "react".');
+
+            return self::FAILURE;
+        }
+
+        $this->callSilently('vendor:publish', ['--tag' => 'keyring-config', '--force' => $this->option('force')]);
+
+        // Publishing again would add the migrations twice, under new timestamps.
+        if ($files->glob(database_path('migrations/*_create_keyring_authenticators_table.php')) === []) {
+            $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations']);
+        }
+
+        $this->copy($files, $this->stub('KeyringServiceProvider.php'), app_path('Providers/KeyringServiceProvider.php'));
+        $this->copy($files, $this->stub('CreateNewUser.php'), app_path('Actions/Keyring/CreateNewUser.php'));
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
 
-        if ($stack = $this->option('inertia')) {
-            if (! in_array($stack, ['vue', 'react'], true)) {
-                $this->components->error('The --inertia option must be "vue" or "react".');
-
-                return self::FAILURE;
+        if ($stack !== null) {
+            foreach ($files->allFiles($this->stub("inertia/{$stack}")) as $file) {
+                $this->copy($files, $file->getPathname(), resource_path('js/'.$file->getRelativePathname()));
             }
-
-            $files->copyDirectory(__DIR__."/../../stubs/inertia/{$stack}/pages", resource_path('js/pages'));
-            $files->copyDirectory(__DIR__."/../../stubs/inertia/{$stack}/keyring", resource_path('js/keyring'));
 
             $this->components->info("Inertia {$stack} pages published to resources/js/pages/auth.");
         }
@@ -49,15 +56,23 @@ class InstallCommand extends Command
         return self::SUCCESS;
     }
 
-    protected function copy(Filesystem $files, string $stub, string $target): void
+    /**
+     * Copy a stub into the app, leaving anything already there unless --force.
+     */
+    protected function copy(Filesystem $files, string $from, string $to): void
     {
-        if ($files->exists($target) && ! $this->option('force')) {
-            $this->components->warn("Skipped {$target}, it already exists.");
+        if ($files->exists($to) && ! $this->option('force')) {
+            $this->components->warn("Skipped {$to}, it already exists.");
 
             return;
         }
 
-        $files->ensureDirectoryExists(dirname($target));
-        $files->copy(__DIR__.'/../../stubs/'.$stub, $target);
+        $files->ensureDirectoryExists(dirname($to));
+        $files->copy($from, $to);
+    }
+
+    protected function stub(string $path): string
+    {
+        return __DIR__.'/../../stubs/'.$path;
     }
 }

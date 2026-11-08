@@ -2,6 +2,7 @@
 
 namespace Keyring\Console;
 
+use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -11,7 +12,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\RecoveryCodes;
-use Keyring\Models\Authenticator;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
@@ -35,7 +35,15 @@ class ImportCommand extends Command
             return self::FAILURE;
         }
 
-        $model = config('auth.providers.'.config('auth.guards.'.config('keyring.guard').'.provider').'.model');
+        $provider = Keyring::provider();
+
+        if (! $provider instanceof EloquentUserProvider) {
+            $this->components->error('Importing needs an Eloquent user provider.');
+
+            return self::FAILURE;
+        }
+
+        $model = $provider->getModel();
         $counts = ['totp' => 0, 'recovery' => 0, 'passkey' => 0, 'skipped' => 0];
 
         if (Schema::hasColumn((new $model)->getTable(), 'two_factor_secret')) {
@@ -81,7 +89,7 @@ class ImportCommand extends Command
 
         try {
             $secret = decrypt($user->getAttribute('two_factor_secret'));
-            $codes = json_decode(decrypt($user->getAttribute('two_factor_recovery_codes') ?? encrypt('[]')), true) ?: [];
+            $codes = ($encrypted = $user->getAttribute('two_factor_recovery_codes')) === null ? [] : (json_decode(decrypt($encrypted), true) ?: []);
         } catch (DecryptException) {
             $counts['skipped']++;
 
@@ -95,6 +103,15 @@ class ImportCommand extends Command
             return;
         }
 
+        // Together or not at all: a half import would be skipped next time.
+        DB::transaction(fn () => $this->createTwoFactor($user, $secret, $codes));
+    }
+
+    /**
+     * @param  list<string>  $codes
+     */
+    protected function createTwoFactor(Model $user, string $secret, array $codes): void
+    {
         $this->create($user, [
             'factor' => 'totp',
             'name' => __('Authenticator app'),
@@ -162,8 +179,8 @@ class ImportCommand extends Command
         return Keyring::authenticatorModel()::query()
             ->whereMorphedTo('authenticatable', $user)
             ->where('factor', $factor)
-            ->get()
-            ->contains(fn (Authenticator $authenticator) => $authenticator->meta('imported_from') === $source);
+            ->where('meta->imported_from', $source)
+            ->exists();
     }
 
     /**
