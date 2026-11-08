@@ -28,7 +28,7 @@ function taylor(array $attributes = []): User
  */
 function staff(): Staff
 {
-    return Staff::create(['name' => 'Staff', 'email' => 'staff@example.com', 'password' => 'password']);
+    return Staff::create(['id' => User::query()->max('id') ?? 1, 'name' => 'Staff', 'email' => 'staff@example.com', 'password' => 'password']);
 }
 
 /**
