@@ -21,10 +21,8 @@ use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
 
-const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
-const FIREFOX_WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
+const FIREFOX = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
 
 class FakeLocator implements LocatesIps
 {
@@ -59,10 +57,10 @@ beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
     Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/sensitive', fn () => 'sensitive');
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
-function signInAs(string $agent = FIREFOX_WIN, string $password = 'password', array $cookies = []): TestResponse
+function signInAs(string $agent = FIREFOX, string $password = 'password', array $cookies = []): TestResponse
 {
     return test()->withHeader('User-Agent', $agent)->withCookies($cookies)
         ->post('/login', ['email' => 'taylor@example.com', 'password' => $password]);
@@ -148,7 +146,7 @@ it('asks again before sensitive pages when the session moves browser', function 
     Keyring::risk([SessionFingerprintChanged::class]);
     signInAs();
 
-    $this->withHeader('User-Agent', FIREFOX_WIN)->get('/sensitive')->assertOk();
+    $this->withHeader('User-Agent', FIREFOX)->get('/sensitive')->assertOk();
 
     $this->withHeader('User-Agent', CHROME)->get('/home')->assertOk();
     $this->withHeader('User-Agent', CHROME)->get('/sensitive')->assertRedirect(route('keyring.confirm.challenge'));
@@ -194,7 +192,7 @@ it('asks "was this you?" after someone fails the second factor', function () {
     $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
 
     signInAs();
-    $this->post(route('keyring.login.verify', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($totp->secret)])
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
         ->assertSessionHas('keyring.alerts', fn ($alerts) => $alerts[0]['type'] === 'second_factor_failed');
 
     signInAs();

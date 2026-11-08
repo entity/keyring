@@ -10,7 +10,6 @@ use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Testing\VirtualAuthenticator;
-use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     Keyring::factors([
@@ -21,7 +20,7 @@ beforeEach(function () {
         RecoveryCodes::class,
     ]);
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 function enroll(string $factor, VirtualAuthenticator $key, string $name = 'My key'): void

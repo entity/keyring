@@ -6,11 +6,9 @@ use Keyring\Factors\Password;
 use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
-use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 it('refuses removals that would leave the account below its policy once recovery codes go too', function () {
@@ -41,7 +39,7 @@ it('needs a second factor, not just the password, to manage authenticators when 
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertSessionHasErrors();
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
 
-    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($totp->secret)]);
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)]);
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
 });
 

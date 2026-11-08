@@ -12,10 +12,9 @@ use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Notifications\ConfirmEmailChange;
-use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 it('uses keyring\'s guard for every route, not the app default', function () {

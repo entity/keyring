@@ -14,7 +14,7 @@ beforeEach(function () {
 });
 
 it('builds the "this wasn\'t me" link from APP_URL, not the Host header', function () {
-    $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $user = taylor();
 
     $this->withServerVariables(['HTTP_HOST' => 'evil.test'])
         ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);

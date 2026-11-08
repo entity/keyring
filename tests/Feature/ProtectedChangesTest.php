@@ -22,12 +22,11 @@ use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
     Notification::fake();
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 function sentTo(string $address, string $notification): object
@@ -56,7 +55,7 @@ function signInWithTotp(User $user): void
     $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subDay()]);
 
     test()->post('/login', ['email' => $user->email, 'password' => 'password']);
-    test()->post(route('keyring.login.verify', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($totp->secret)]);
+    test()->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
 }
 
 /**

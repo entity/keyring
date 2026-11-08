@@ -11,27 +11,10 @@ use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
-
-function user(array $attributes = []): User
-{
-    return User::create([
-        'name' => 'Taylor',
-        'email' => 'taylor@example.com',
-        'password' => 'password',
-        'email_verified_at' => now(),
-        ...$attributes,
-    ]);
-}
 
 function totpFor(User $user, bool $default = false): Authenticator
 {
     return Authenticator::factory()->totp()->for($user, 'authenticatable')->state(['is_default' => $default])->create();
-}
-
-function currentCode(Authenticator $authenticator): string
-{
-    return app(Google2FA::class)->getCurrentOtp($authenticator->secret);
 }
 
 it('renders the login page through inertia', function () {
@@ -44,7 +27,7 @@ it('renders the login page through inertia', function () {
 
 it('signs in with just a password when nothing else is enrolled', function () {
     Event::fake([Authenticated::class]);
-    $user = user();
+    $user = taylor();
 
     $this->post('/login', ['email' => 'Taylor@Example.com', 'password' => 'password'])
         ->assertRedirect('/dashboard');
@@ -56,7 +39,7 @@ it('signs in with just a password when nothing else is enrolled', function () {
 
 it('gives the same error for a wrong password and an unknown account', function () {
     Event::fake([FactorFailed::class]);
-    user();
+    taylor();
 
     $wrong = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])
         ->assertSessionHasErrors('email')->getSession()->get('errors')->first('email');
@@ -70,7 +53,7 @@ it('gives the same error for a wrong password and an unknown account', function 
 });
 
 it('asks for a second factor when one is enrolled', function () {
-    $user = user();
+    $user = taylor();
     $totp = totpFor($user);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
@@ -84,7 +67,7 @@ it('asks for a second factor when one is enrolled', function () {
         ->assertJsonPath('props.factor', 'totp')
         ->assertJsonPath('props.authenticator.id', $totp->id);
 
-    $this->post(route('keyring.login.verify', 'totp'), ['code' => currentCode($totp)])
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
         ->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($user);
@@ -92,7 +75,7 @@ it('asks for a second factor when one is enrolled', function () {
 });
 
 it('rejects a wrong code and keeps the user signed out', function () {
-    $user = user();
+    $user = taylor();
     totpFor($user);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
@@ -104,9 +87,9 @@ it('rejects a wrong code and keeps the user signed out', function () {
 });
 
 it('does not accept the same totp code twice', function () {
-    $user = user();
+    $user = taylor();
     $totp = totpFor($user);
-    $code = currentCode($totp);
+    $code = totpCode($totp->secret);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => $code])->assertRedirect('/dashboard');
@@ -120,7 +103,7 @@ it('does not accept the same totp code twice', function () {
 });
 
 it('offers other ways to sign in', function () {
-    $user = user();
+    $user = taylor();
     $first = totpFor($user, default: true);
     $second = totpFor($user);
     Authenticator::factory()->recoveryCodes()->for($user, 'authenticatable')->create();
@@ -140,7 +123,7 @@ it('offers other ways to sign in', function () {
 
 it('signs in with a recovery code once', function () {
     Event::fake([RecoveryCodeUsed::class]);
-    $user = user();
+    $user = taylor();
     totpFor($user);
     Authenticator::factory()->recoveryCodes()->for($user, 'authenticatable')->create();
 
@@ -158,7 +141,7 @@ it('signs in with a recovery code once', function () {
 
 it('locks out after too many failures', function () {
     config(['keyring.limits.per_account' => 2]);
-    user();
+    taylor();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
@@ -175,13 +158,13 @@ it('uses the policy to decide what is needed', function () {
         ? Requirement::aal2()->including(Category::Possession)
         : Requirement::aal1());
 
-    $admin = user(['email' => 'admin@example.com']);
+    $admin = taylor(['email' => 'admin@example.com']);
     totpFor($admin);
 
     $this->post('/login', ['email' => 'admin@example.com', 'password' => 'password'])
         ->assertRedirect(route('keyring.login.challenge'));
 
-    $user = user(['email' => 'user@example.com']);
+    $user = taylor(['email' => 'user@example.com']);
     totpFor($user);
 
     $this->post('/login', ['email' => 'user@example.com', 'password' => 'password'])
@@ -190,7 +173,7 @@ it('uses the policy to decide what is needed', function () {
 
 it('turns users away when the policy needs factors they do not have', function () {
     Keyring::require(Requirement::aal2());
-    user();
+    taylor();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
         ->assertRedirect(route('keyring.login.challenge'));
@@ -201,7 +184,7 @@ it('turns users away when the policy needs factors they do not have', function (
 });
 
 it('sends people back to login when the attempt has expired', function () {
-    $user = user();
+    $user = taylor();
     totpFor($user);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
@@ -211,7 +194,7 @@ it('sends people back to login when the attempt has expired', function () {
 });
 
 it('answers json clients with json', function () {
-    $user = user();
+    $user = taylor();
     totpFor($user);
 
     $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
@@ -220,7 +203,7 @@ it('answers json clients with json', function () {
 });
 
 it('signs out', function () {
-    $user = user();
+    $user = taylor();
 
     $this->actingAs($user)->post('/logout')->assertRedirect('/');
 

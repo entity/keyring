@@ -10,13 +10,12 @@ use Keyring\Factors\Totp;
 use Keyring\Models\Authenticator;
 use Keyring\Notifications\VerificationCode;
 use Keyring\Tests\Fixtures\SmsCode;
-use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     SmsCode::$sent = [];
     Keyring::factors([Password::class, Totp::class, EmailCode::class, SmsCode::class]);
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 it('keeps what a custom code factor collects at enrollment', function () {

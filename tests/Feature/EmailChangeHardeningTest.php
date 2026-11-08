@@ -17,7 +17,7 @@ use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
     Notification::fake();
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 /**
@@ -163,7 +163,7 @@ it('asks the current address to confirm when the second factor was only just add
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
     $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
-    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($secret)])->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     // Now that a second factor exists, the session has to use it to stay fresh.
     $this->travel(16)->minutes();
@@ -180,7 +180,7 @@ it('waives the current address confirmation for a second factor that predates th
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
-    $this->post(route('keyring.login.verify', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($totp->secret)]);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
 
     $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
 

@@ -70,7 +70,7 @@ describe('keyring:import fortify', function () {
             $table->timestamp('two_factor_confirmed_at')->nullable();
         });
 
-        $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        $this->user = taylor();
     });
 
     it('imports fortify two factor and recovery codes, once', function () {

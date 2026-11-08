@@ -9,11 +9,10 @@ use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
-use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     Keyring::factors([Password::class, Totp::class, WebAuthn::securityKeys(), RecoveryCodes::class]);
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 it('passes factors without real proofs', function () {

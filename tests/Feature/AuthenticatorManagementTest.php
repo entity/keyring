@@ -9,10 +9,9 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
 });
 
@@ -32,7 +31,7 @@ it('enrolls an authenticator app in two steps', function () {
         ->assertJsonValidationErrors('code');
 
     $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), [
-        'code' => app(Google2FA::class)->getCurrentOtp($secret),
+        'code' => totpCode($secret),
     ])->assertOk()->assertJsonPath('authenticator.name', '1Password');
 
     expect($response->json('recoveryCodes'))->toHaveCount(8);
@@ -52,7 +51,7 @@ it('only hands out recovery codes automatically the first time', function () {
 
     $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
 
-    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => app(Google2FA::class)->getCurrentOtp($secret)])
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
         ->assertOk()
         ->assertJsonMissingPath('recoveryCodes')
         ->assertJsonPath('authenticator.name', 'Authenticator app');

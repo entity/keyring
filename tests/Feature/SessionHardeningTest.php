@@ -13,10 +13,8 @@ use Keyring\Risk\Finding;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\Sessions;
-use Keyring\Tests\Fixtures\User;
 
-const FIREFOX_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
-const CHROME_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
+const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
 
 class RevokesDuringAssessment implements Signal
 {
@@ -44,10 +42,10 @@ beforeEach(function () {
     RevokesDuringAssessment::$fired = false;
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
-function signInWith(string $agent = FIREFOX_AGENT): void
+function signInWith(string $agent = FIREFOX): void
 {
     test()->withHeader('User-Agent', $agent)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 }
@@ -110,10 +108,10 @@ it('does not undo a revocation that lands while a request is being assessed', fu
     Keyring::risk([new RevokesDuringAssessment]);
     signInWith();
 
-    $this->withHeader('User-Agent', CHROME_AGENT)->get('/home');
+    $this->withHeader('User-Agent', CHROME)->get('/home');
 
     expect(app(SessionRegistry::class)->find(session(Sessions::KEY))?->revokedAt)->not->toBeNull();
-    $this->withHeader('User-Agent', CHROME_AGENT)->get('/home')->assertRedirect('/login');
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertRedirect('/login');
 })->with('drivers');
 
 it('applies lockFor from the request checkpoint too', function () {
@@ -121,7 +119,7 @@ it('applies lockFor from the request checkpoint too', function () {
         ->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->revokeAllSessions()->lockFor('1h') : Action::allow());
 
     signInWith();
-    $this->withHeader('User-Agent', CHROME_AGENT)->get('/home')->assertRedirect('/login');
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertRedirect('/login');
 
     signInWith();
     $this->assertGuest();
@@ -133,11 +131,11 @@ it('asks again for laravel password confirmation after a mid-session step-up', f
     Route::middleware(['web', 'auth', 'password.confirm'])->get('/billing', fn () => 'billing');
 
     signInWith();
-    $this->withHeader('User-Agent', FIREFOX_AGENT)->get(route('keyring.confirm.challenge'));
-    $this->withHeader('User-Agent', FIREFOX_AGENT)->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
-    $this->withHeader('User-Agent', FIREFOX_AGENT)->get('/billing')->assertOk();
+    $this->withHeader('User-Agent', FIREFOX)->get(route('keyring.confirm.challenge'));
+    $this->withHeader('User-Agent', FIREFOX)->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+    $this->withHeader('User-Agent', FIREFOX)->get('/billing')->assertOk();
 
-    $this->withHeader('User-Agent', CHROME_AGENT)->get('/home')->assertOk();
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertOk();
 
-    $this->withHeader('User-Agent', CHROME_AGENT)->get('/billing')->assertRedirect('/password-confirm');
+    $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect('/password-confirm');
 });

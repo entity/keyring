@@ -15,14 +15,11 @@ use Keyring\Models\Device;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
-
-const FIREFOX = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
 
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
 
-    $this->user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $this->user = taylor();
 });
 
 function login(array $cookies = []): TestResponse
@@ -94,7 +91,7 @@ it('lets the policy skip the second factor on a trusted device', function () {
     $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.canTrustDevice', true);
 
     $response = $this->post(route('keyring.login.verify', 'totp'), [
-        'code' => app(Google2FA::class)->getCurrentOtp($totp->secret),
+        'code' => totpCode($totp->secret),
         'trust' => true,
     ])->assertRedirect('/dashboard');
 
