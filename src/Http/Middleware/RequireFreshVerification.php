@@ -5,7 +5,9 @@ namespace Keyring\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
 use Keyring\KeyringManager;
+use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
 use Keyring\Sessions\SessionAssurance;
@@ -13,10 +15,12 @@ use Keyring\Support\Duration;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Requires a verification within a window, e.g. keyring.fresh:15m. Users
- * with only a password confirm with it; users with a second factor must use
- * one. The window is fixed from the moment of verification and doesn't slide
- * with activity.
+ * Requires the user to have verified within a window, e.g. keyring.fresh:15m,
+ * as much as signing in would ask of them, as far as they can: both factors
+ * for a user with two (NIST SP 800-63B: binding a new authenticator takes
+ * authenticating at the account's level, or the new one's if that's lower).
+ * Users with a possession factor always use one. The window is fixed from the
+ * moment of verification and doesn't slide with activity.
  */
 class RequireFreshVerification
 {
@@ -39,14 +43,17 @@ class RequireFreshVerification
     }
 
     /**
-     * Users who have something beyond a password must use it: otherwise a
-     * stolen session plus a phished password could add new factors without
-     * ever touching the existing ones.
+     * What signing in would ask of this user, and a possession factor
+     * whenever they have one: otherwise a stolen session plus one phished
+     * factor could add new ones without ever touching the rest.
      */
     protected function requirement(): Requirement
     {
-        return $this->keyring->for($this->keyring->user())->has(Category::Possession)
-            ? Requirement::aal1()->including(Category::Possession)
-            : Requirement::aal1();
+        $user = $this->keyring->user();
+        $requirement = $this->keyring->requirementFor($user, Attempt::start(Purpose::Login, $user), reachable: true);
+
+        return $this->keyring->for($user)->has(Category::Possession)
+            ? $requirement->atLeast(Requirement::aal1()->including(Category::Possession))
+            : $requirement;
     }
 }

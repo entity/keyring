@@ -24,22 +24,20 @@ it('refuses removals that would leave the account below its policy once recovery
     expect($this->user->keyring->refresh()->all()->pluck('factor')->sort()->values()->all())->toBe(['password', 'recovery', 'totp']);
 });
 
-it('needs a second factor, not just the password, to manage authenticators when the user has one', function () {
+it('needs every factor signing in would, not just one, to manage authenticators', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->freshAt(now()->subHour());
 
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
-
-    $this->inertia()->get(route('keyring.confirm.challenge'))
-        ->assertJsonPath('props.factor', 'totp')
-        ->assertJsonPath('props.alternatives', []);
+    $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'totp');
     $this->flushHeaders();
 
-    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertSessionHasErrors();
+    // One factor isn't enough for a user with two.
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)]);
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
 
-    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
 });
 
