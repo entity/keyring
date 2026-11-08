@@ -28,7 +28,6 @@ Register factors in the `boot()` method of your `KeyringServiceProvider`:
 
 ```php
 use Keyring\Facades\Keyring;
-use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
@@ -39,7 +38,6 @@ Keyring::factors([
     WebAuthn::passkeys(),
     WebAuthn::securityKeys(),
     Totp::class,
-    EmailCode::class,
     RecoveryCodes::class,
 ]);
 ```
@@ -72,7 +70,7 @@ Removing a factor from the list doesn't delete anyone's authenticators. Keyring 
 |---|---|---|---|---|---|
 | `password` | `Password` | knowledge | yes | no | 40 |
 | `totp` | `Totp` | possession | no | yes | 60 |
-| `email-code` | `EmailCode` | possession | no | yes, one | 30 |
+| `email-code` | `EmailCode::asSecondFactor()` | possession | no | yes, one | 30 |
 | `recovery` | `RecoveryCodes` | possession | no | yes, one set | 0 |
 | `passkey` | `WebAuthn::passkeys()` | possession, plus inherence when the user was verified | yes | yes | 100 |
 | `security-key` | `WebAuthn::securityKeys()` | possession, plus inherence when the user was verified | no | yes | 90 |
@@ -95,7 +93,13 @@ A user can have several authenticator apps.
 
 ### Email Codes
 
-An eight digit code sent to the user's current email address. A code:
+An eight digit code sent to the user's current email address. It's opt-in, because NIST SP 800-63B rules out email for authentication codes: whoever controls the inbox can also reset the password, so for a user whose only second factor it is, the inbox is the whole account. Registering plain `EmailCode::class` throws an exception that says so. To accept that risk:
+
+```php
+Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor()]);
+```
+
+A code:
 
 - is only sent when the user asks (see [Sending Codes](sign-in-flow.md#sending-codes)), never just by opening the challenge page,
 - expires after 10 minutes,
