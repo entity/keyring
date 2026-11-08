@@ -8,6 +8,7 @@ use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Crypt;
 use Keyring\Enums\Purpose;
+use Keyring\Exceptions\AttemptExpired;
 
 /**
  * Keeps attempts in the session, one per purpose.
@@ -31,6 +32,12 @@ class AttemptStore
         return tap(Attempt::start($purpose, $user, $remember, $requirement, $verifications), $this->save(...));
     }
 
+    /**
+     * The attempt in progress, unless it expired, its user is gone, or their
+     * password changed since it was saved: a reset or change elsewhere ends
+     * every half-finished sign in, including one that already got past the
+     * old password.
+     */
     public function current(Purpose $purpose): ?Attempt
     {
         $payload = $this->session->get($this->key($purpose));
@@ -40,14 +47,14 @@ class AttemptStore
         }
 
         try {
-            $attempt = Attempt::fromArray(json_decode(Crypt::decryptString($payload), true, flags: JSON_THROW_ON_ERROR));
-        } catch (DecryptException|\JsonException|\TypeError|\ValueError) {
-            $this->forget($purpose);
-
-            return null;
+            $data = json_decode(Crypt::decryptString($payload), true, flags: JSON_THROW_ON_ERROR);
+            $attempt = Attempt::fromArray($data);
+            $valid = ! $attempt->expired && hash_equals($data['password'] ?? '', $this->passwordHash($attempt->user()));
+        } catch (AttemptExpired|DecryptException|\JsonException|\TypeError|\ValueError) {
+            $valid = false;
         }
 
-        if ($attempt->expired) {
+        if (! $valid) {
             $this->forget($purpose);
 
             return null;
@@ -60,13 +67,26 @@ class AttemptStore
     {
         $this->session->put(
             $this->key($attempt->purpose),
-            Crypt::encryptString(json_encode($attempt->toArray(), JSON_THROW_ON_ERROR)),
+            Crypt::encryptString(json_encode([
+                ...$attempt->toArray(),
+                'password' => $this->passwordHash($attempt->user()),
+            ], JSON_THROW_ON_ERROR)),
         );
     }
 
     public function forget(Purpose $purpose): void
     {
         $this->session->forget($this->key($purpose));
+    }
+
+    /**
+     * Stands in for the user's password hash. It's taken on every save, so
+     * the rehash that can follow a successful password check doesn't count
+     * as a change.
+     */
+    protected function passwordHash(Authenticatable $user): string
+    {
+        return hash('sha256', (string) $user->getAuthPassword());
     }
 
     protected function key(Purpose $purpose): string
