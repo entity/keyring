@@ -111,6 +111,12 @@ See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout`
 
 Extra middleware for adding, renaming and removing authenticators, revoking devices, changing the password and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default these routes need a verification in the last 15 minutes. See [Step-Up](step-up.md#fresh-verification).
 
+```php
+'enrollment_url' => null,
+```
+
+Where the `keyring.enrolled` middleware sends users who still need a second factor. Null answers `403`. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
+
 ## Devices
 
 ```php

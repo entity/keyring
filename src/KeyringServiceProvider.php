@@ -27,6 +27,7 @@ use Keyring\Exceptions\MissingAction;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
+use Keyring\Http\Middleware\RequireEnrollment;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Login\AttemptStore;
@@ -119,6 +120,7 @@ class KeyringServiceProvider extends ServiceProvider
         $router->aliasMiddleware('keyring', RequireAssurance::class);
         $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);
         $router->aliasMiddleware('keyring.session', AuthenticateSession::class);
+        $router->aliasMiddleware('keyring.enrolled', RequireEnrollment::class);
 
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);
