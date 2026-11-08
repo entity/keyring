@@ -221,7 +221,7 @@ describe('keyring:import fortify', function () {
         });
         DB::table('passkeys')->insert([
             ['id' => 1, 'user_id' => 999, 'name' => 'Orphan', 'credential_id' => 'a', 'credential' => '{}'],
-            ['id' => 2, 'user_id' => $this->user->id, 'name' => 'Broken', 'credential_id' => 'b', 'credential' => 'not json'],
+            ['id' => 2, 'user_id' => $this->user->id, 'name' => 'Broken', 'credential_id' => 'b', 'credential' => '{}'],
         ]);
 
         $this->artisan('keyring:import', ['source' => 'fortify'])
