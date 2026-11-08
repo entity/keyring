@@ -149,11 +149,18 @@ class KeyringManager
     }
 
     /**
-     * What this user must prove to complete the attempt.
+     * What this user must prove to complete the attempt. With $reachable, a
+     * policy they can't fully meet is limited to what they can, as if it said
+     * ifEnrolled(): for checks like re-verifying before adding the very key a
+     * policy asks for.
      */
-    public function requirementFor(Authenticatable&Model $user, Attempt $attempt): Requirement
+    public function requirementFor(Authenticatable&Model $user, Attempt $attempt, bool $reachable = false): Requirement
     {
         $requirement = $this->policy($user, $attempt);
+
+        if ($reachable) {
+            $requirement = $requirement->ifEnrolled();
+        }
 
         if ($requirement->noDowngrade && ! $requirement->requiresPhishingResistance
             && $attempt->keyring()->canMeet(Requirement::aal1()->phishingResistant())) {

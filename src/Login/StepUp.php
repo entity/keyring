@@ -48,10 +48,20 @@ class StepUp
     }
 
     /**
+     * Start a confirm attempt, or carry on with the one in progress when it's
+     * for the same requirement, so a page that asks again halfway through
+     * doesn't lose what the user already proved.
+     *
      * @param  list<Verification>  $proved
      */
     public function begin(Request $request, Requirement $requirement, array $proved = []): Attempt
     {
+        $current = $this->attempts->current(Purpose::Confirm);
+
+        if ($current?->requirement?->toArray() === $requirement->toArray()) {
+            return $current;
+        }
+
         return $this->attempts->start(
             Purpose::Confirm,
             $this->keyring->user(),
