@@ -40,7 +40,7 @@ class Sessions
             userAgent: UserAgent::from($request),
             authenticatedAt: $now,
             lastActivityAt: $now,
-            expiresAt: $now + $this->absolute($assurance),
+            expiresAt: $now + $this->absolute(),
         );
 
         $this->registry->save($session);
@@ -57,17 +57,15 @@ class Sessions
     }
 
     /**
-     * Record a step-up. Higher levels may have a shorter absolute timeout.
+     * Record the level a step-up reached, for the sessions list. The session
+     * keeps its own limits; levels lapse on their own (SessionAssurance).
      */
     public function elevate(Request $request, Assurance $assurance): void
     {
         $session = $this->current($request);
 
         if ($session !== null && $assurance->value > $session->assurance->value) {
-            $this->registry->update($session->id, [
-                'assurance' => $assurance,
-                'expiresAt' => min($session->expiresAt, $session->authenticatedAt + $this->absolute($assurance)),
-            ]);
+            $this->registry->update($session->id, ['assurance' => $assurance]);
         }
     }
 
@@ -81,27 +79,34 @@ class Sessions
     }
 
     /**
-     * Seconds of inactivity allowed at this level, or null for no limit
-     * (Laravel's own session lifetime still applies).
+     * Seconds of inactivity allowed before the session ends, or with a level,
+     * before that level lapses. Null for no limit (Laravel's own session
+     * lifetime still applies).
      */
-    public function idle(Assurance $assurance): ?int
+    public function idle(?Assurance $level = null): ?int
     {
-        $idle = $this->timeout($assurance, 'idle');
+        $idle = $this->timeout($level, 'idle');
 
         return $idle === null ? null : Duration::seconds($idle);
     }
 
-    public function absolute(Assurance $assurance): int
+    /**
+     * Seconds after sign in that the session ends, or with a level, that a
+     * verification keeps counting toward it.
+     */
+    public function absolute(?Assurance $level = null): int
     {
-        return Duration::seconds($this->timeout($assurance, 'absolute') ?? '30d');
+        return Duration::seconds($this->timeout($level, 'absolute') ?? '30d');
     }
 
     /**
-     * The level's own timeout (sessions.levels.aal3.idle), else the default.
+     * The level's own limit (sessions.levels.aal2.idle), else the session's.
      */
-    protected function timeout(Assurance $assurance, string $kind): int|string|null
+    protected function timeout(?Assurance $level, string $kind): int|string|null
     {
-        return config('keyring.sessions.levels.'.strtolower($assurance->name).'.'.$kind, config('keyring.sessions.'.$kind));
+        $default = config('keyring.sessions.'.$kind);
+
+        return $level === null ? $default : config('keyring.sessions.levels.'.strtolower($level->name).'.'.$kind, $default);
     }
 
     /**

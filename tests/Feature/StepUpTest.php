@@ -135,3 +135,66 @@ it('lets the password through step-up when the only other factor is a used-up se
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'password');
 });
+
+describe('levels lapsing, as nist sp 800-63b asks', function () {
+    beforeEach(function () {
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        signIn();
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+        $this->get('/billing')->assertOk();
+    });
+
+    it('lapses aal2 after an hour idle, without signing out', function () {
+        $this->travel(61)->minutes();
+
+        $this->get('/home')->assertOk();
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+    });
+
+    it('asks for every factor again once inactivity lapsed the level', function () {
+        $this->travel(61)->minutes();
+        $this->get('/billing');
+        $this->inertia()->get(route('keyring.confirm.challenge'));
+
+        // TOTP checks the real clock, so use the next code: sign in spent this one.
+        // The password from sign in no longer counts, so one factor isn't enough.
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])
+            ->assertRedirect(route('keyring.confirm.challenge'));
+        $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'password');
+    });
+
+    it('lapses aal2 after 24 hours however active the session is', function () {
+        foreach (range(1, 30) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('restores the level and resets its clocks when the user verifies again', function () {
+        $this->travel(61)->minutes();
+        $this->get('/billing');
+        $this->inertia()->get(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)]);
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/billing');
+
+        $this->get('/billing')->assertOk();
+        $this->travel(59)->minutes();
+        $this->get('/billing')->assertOk();
+    });
+
+    it('lapses aal3 to aal2 after 15 minutes idle', function () {
+        $this->withAssurance(Assurance::AAL3);
+        $this->get('/home');
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+
+        $this->travel(16)->minutes();
+        $this->get('/home');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+    });
+});

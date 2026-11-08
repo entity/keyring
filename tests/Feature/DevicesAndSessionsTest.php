@@ -179,8 +179,17 @@ it('enforces the absolute timeout', function () {
     $this->get('/home')->assertRedirect('/login');
 });
 
-it('enforces the idle timeout per level', function () {
-    config(['keyring.sessions.levels' => ['aal1' => ['idle' => '10m']]]);
+it('keeps "remember me" no longer than a session lasts', function () {
+    $response = test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+
+    $cookie = collect($response->headers->getCookies())->first(fn ($cookie) => str_starts_with($cookie->getName(), 'remember_web_'));
+
+    expect($cookie->getExpiresTime())->toBeLessThanOrEqual(now()->addDays(30)->getTimestamp() + 60)
+        ->toBeGreaterThan(now()->addDays(29)->getTimestamp());
+});
+
+it('enforces the idle timeout', function () {
+    config(['keyring.sessions.idle' => '10m']);
     login();
 
     $this->travel(5)->minutes();
