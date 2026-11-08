@@ -1,0 +1,54 @@
+<?php
+
+namespace Keyring\Login;
+
+use Keyring\Enums\Category;
+
+/**
+ * A record that a factor was verified, and what it proved.
+ *
+ * Categories are worked out at verification time rather than enrollment, so a
+ * WebAuthn credential only counts as inherence when the authenticator actually
+ * verified the user on this occasion.
+ */
+final readonly class Verification
+{
+    /**
+     * @param  list<Category>  $categories
+     */
+    public function __construct(
+        public string $factor,
+        public ?string $authenticator,
+        public array $categories,
+        public bool $phishingResistant = false,
+        public int $at = 0,
+    ) {}
+
+    /**
+     * @return array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant: bool, at: int}
+     */
+    public function toArray(): array
+    {
+        return [
+            'factor' => $this->factor,
+            'authenticator' => $this->authenticator,
+            'categories' => array_map(fn (Category $category) => $category->value, $this->categories),
+            'phishing_resistant' => $this->phishingResistant,
+            'at' => $this->at,
+        ];
+    }
+
+    /**
+     * @param  array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant?: bool, at?: int}  $data
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            factor: $data['factor'],
+            authenticator: $data['authenticator'],
+            categories: array_map(Category::from(...), $data['categories']),
+            phishingResistant: $data['phishing_resistant'] ?? false,
+            at: $data['at'] ?? 0,
+        );
+    }
+}
