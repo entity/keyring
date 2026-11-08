@@ -1,0 +1,128 @@
+# Policies
+
+- [Introduction](#introduction)
+- [Requirements](#requirements)
+- [Assurance Levels](#assurance-levels)
+- [Only When Enrolled](#only-when-enrolled)
+- [No Downgrade](#no-downgrade)
+- [Deciding Per User and Attempt](#deciding-per-user-and-attempt)
+- [How the Policy Is Applied](#how-the-policy-is-applied)
+- [Checking Requirements in Code](#checking-requirements-in-code)
+
+## Introduction
+
+The **policy** decides what a user must prove to sign in. You set it once, in your `KeyringServiceProvider`:
+
+```php
+use Keyring\Facades\Keyring;
+use Keyring\Login\Requirement;
+
+Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
+```
+
+The published provider uses exactly this. If you never call `Keyring::require()`, the policy is `Requirement::aal2()->ifEnrolled()`, which is how Fortify behaves: a second factor once the user has set one up.
+
+## Requirements
+
+A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possession, inherence), not verifications. A password plus a PIN is still one factor, and so is a TOTP code plus an email code.
+
+| | Means |
+|---|---|
+| `Requirement::aal1()` | Any one category. |
+| `Requirement::aal2()` | Two categories. |
+| `Requirement::aal3()` | Two categories, including possession, and at least one phishing-resistant verification. |
+| `Requirement::factors(3)` | That many categories (at least 1). |
+| `Requirement::for(Assurance::AAL2)` | The requirement for an assurance level. |
+| `->including(Category::Possession)` | That category must be among those verified. |
+| `->phishingResistant()` | At least one verification must be phishing resistant (a passkey or security key). |
+| `->ifEnrolled()` | Only apply this when the user has set up enough to meet it. See [Only When Enrolled](#only-when-enrolled). |
+| `->noDowngrade()` | Users with a passkey or security key must use one. See [No Downgrade](#no-downgrade). |
+
+Requirements are immutable. Each modifier returns a new instance, and PHP warns if you discard it:
+
+```php
+$requirement = Requirement::aal2()->including(Category::Possession)->phishingResistant();
+```
+
+## Assurance Levels
+
+Keyring works out an assurance level from what a user has proved in their session, loosely following NIST SP 800-63B. The levels are `Keyring\Enums\Assurance`: `None`, `AAL1`, `AAL2` and `AAL3`.
+
+| Proved | Level |
+|---|---|
+| A password | AAL1 |
+| A password and a TOTP, email or recovery code | AAL2 |
+| A password and a security key, without user verification | AAL3 |
+| A passkey (always user verified) | AAL3 |
+| A security key that verified the user (PIN or biometric) | AAL3 |
+
+AAL3 means two categories, one of them a phishing-resistant possession factor. A user-verified passkey proves possession and inherence in one step, so it reaches AAL3 on its own.
+
+The [step-up middleware](step-up.md#raising-assurance) asks for these levels by name: `keyring:aal2`.
+
+## Only When Enrolled
+
+`ifEnrolled()` applies the requirement only when the user's authenticators could meet it. Otherwise, one factor is enough.
+
+With `Requirement::aal2()->ifEnrolled()`, a user with only a password signs in with the password. Once they add an authenticator app, they need both.
+
+Without `ifEnrolled()`, users who can't meet the requirement can't sign in at all. They see an error (`keyring::keyring.unavailable`) on the login page asking them to contact support. Use this only when every account is set up with the factors it needs before it signs in.
+
+## No Downgrade
+
+`noDowngrade()` stops users with a phishing-resistant authenticator from being talked into a weaker one. When a user has any passkey or security key, the requirement gains `phishingResistant()`, and "try another way" only offers their other passkeys and security keys.
+
+This has a cost. A user with a security key, an authenticator app and recovery codes won't be offered the app or the codes at sign in, so losing their only key locks them out until support helps. Encourage users to register two keys, or leave `noDowngrade()` off.
+
+## Deciding Per User and Attempt
+
+Pass a closure to decide for each user and attempt. It receives the user and the `Keyring\Login\Attempt`, and returns a `Requirement`:
+
+```php
+use App\Models\User;
+use Keyring\Login\Attempt;
+use Keyring\Login\Requirement;
+
+Keyring::require(fn (User $user, Attempt $attempt) => match (true) {
+    $user->is_admin => Requirement::aal2()->phishingResistant(),
+    $attempt->device()?->isTrusted() === true => Requirement::aal1(),
+    $attempt->risk?->isElevated() === true => Requirement::aal2(),
+    default => Requirement::aal2()->ifEnrolled(),
+});
+```
+
+`ifEnrolled()` and `noDowngrade()` work the same way when a closure returns them.
+
+What the attempt tells you:
+
+| | |
+|---|---|
+| `$attempt->user()` | The user signing in. |
+| `$attempt->device()` | Their known `Keyring\Models\Device` for this browser, or `null` for a new one. A device is trusted when the user ticked "don't ask again on this device" (see [Trusted Devices](devices-and-sessions.md#trusted-devices)). |
+| `$attempt->isNewDevice()` | Whether this browser hasn't been seen before. |
+| `$attempt->risk` | The `Keyring\Risk\Risk` from the [risk signals](risk.md), or `null`. |
+| `$attempt->verifications` | What has been proved so far. |
+| `$attempt->remember` | Whether "remember me" was ticked. |
+| `$attempt->keyring()` | The user's authenticators. |
+
+The closure must cope with `null` devices and risk. Keyring also calls it with a fresh attempt (no device, no risk) when a user removes an authenticator, to check what's left still meets the policy.
+
+## How the Policy Is Applied
+
+- The policy is asked again after every factor the user verifies during a login. A risk assessment can raise it partway through.
+- When the [risk response](risk.md#responding-to-risk) asks for a step-up and the user has enough authenticators, the requirement becomes at least `aal2()`.
+- The policy only applies to logins. [Step-up](step-up.md) sets its own requirement.
+- [Registration](sign-in-flow.md#registration) signs the new user in with their password without asking the policy, since they can't have other factors yet.
+- Users can't remove an authenticator if what's left can't sign in, or can't meet the policy (unless it uses `ifEnrolled()`). See [Removing Authenticators](authenticators.md#removing-authenticators).
+
+## Checking Requirements in Code
+
+```php
+use Keyring\Enums\Category;
+use Keyring\Login\Requirement;
+
+$user->keyring->canMeet(Requirement::aal2());   // could their authenticators meet it?
+$user->keyring->has(Category::Possession);       // do they have a possession factor?
+```
+
+`Keyring::policy($user, $attempt)` returns what the policy says, and `Keyring::requirementFor($user, $attempt)` returns what it comes to once `ifEnrolled()` and `noDowngrade()` are applied.

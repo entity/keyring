@@ -1,0 +1,186 @@
+# Managing Authenticators
+
+- [Introduction](#introduction)
+- [Routes](#routes)
+- [Email Verification](#email-verification)
+- [Adding an Authenticator](#adding-an-authenticator)
+    - [Beginning](#beginning)
+    - [Confirming](#confirming)
+- [Recovery Codes](#recovery-codes)
+- [Renaming and Choosing the Default](#renaming-and-choosing-the-default)
+- [Removing Authenticators](#removing-authenticators)
+- [Responses](#responses)
+- [From JavaScript](#from-javascript)
+- [From PHP](#from-php)
+- [Events](#events)
+
+## Introduction
+
+One set of routes adds, renames and removes authenticators for every factor. There are no per-factor routes to register: when you add a factor, its enrollment works through the same endpoints.
+
+## Routes
+
+| Method | URI | Name | Does |
+|---|---|---|---|
+| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begin: returns a QR code, WebAuthn options, recovery codes... |
+| `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finish: prove it works. Limited to 6 a minute. |
+| `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Rename, or make it the default. |
+| `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. |
+
+These routes use the `manage_middleware` config option, `['auth', 'keyring.fresh:15m']` by default. Users must have verified a factor in the last 15 minutes, and users with a second factor must have used it. See [Fresh Verification](step-up.md#fresh-verification).
+
+`{factor}` must be a registered factor that implements `Enrollable`; otherwise the route returns a 404. Users can only see and change their own authenticators; anyone else's ID returns a 404.
+
+## Email Verification
+
+When your user model implements `MustVerifyEmail`, users must verify their email address before beginning or confirming an enrollment. Until then, both routes return a `403` with `keyring::keyring.verify_email_first`.
+
+Until the address is verified, the account may belong to whoever typed that address first. Factors they added would survive the real owner's password reset.
+
+## Adding an Authenticator
+
+Adding is always two steps. Nothing is saved until the second one succeeds.
+
+### Beginning
+
+`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes. Starting again replaces it. The response's `enrollment` holds what to show the user:
+
+| Factor | Request fields | `enrollment` |
+|---|---|---|
+| `totp` | `name` (optional) | `secret`, `url` (`otpauth://`), `qr` (an SVG string) |
+| `email-code` | `name` (optional) | `length`, `sent: true`. A code is sent to the current address. |
+| `recovery` | none | `codes`: the new plain codes, shown once |
+| `passkey`, `security-key` | none | `options`: WebAuthn creation options for the browser |
+
+```json
+{
+  "status": "enrollment-started",
+  "factor": "totp",
+  "enrollment": {
+    "secret": "JBSWY3DPEHPK3PXP...",
+    "url": "otpauth://totp/Example:taylor%40example.com?secret=...",
+    "qr": "<svg ...>...</svg>"
+  }
+}
+```
+
+Names default to "Authenticator app", "Email", "Passkey" or "Security key", and are cut to 64 characters.
+
+### Confirming
+
+`POST /user/authenticators/{factor}/confirm` proves the enrollment works:
+
+| Factor | Fields |
+|---|---|
+| `totp`, `email-code` | `code` |
+| `recovery` | none: confirming means "I've saved these" |
+| `passkey`, `security-key` | `credential` (the browser's response), `name` (optional, up to 64 characters) |
+
+A wrong code fails with `keyring::keyring.invalid` on `code`, and an expired or missing enrollment with `keyring::keyring.enrollment_expired`. Email enrollment codes keep their guess count between tries, like email codes at sign in.
+
+On success, the response contains the new authenticator, presented the same way as on the challenge page:
+
+```json
+{
+  "status": "authenticator-added",
+  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
+  "recoveryCodes": ["k3j9d-p2x8q", "..."]
+}
+```
+
+`recoveryCodes` is only there when Keyring generated recovery codes along with this authenticator (see below).
+
+The user's first saved authenticator becomes their default. A passkey or security key that's already registered, to anyone, can't be registered again.
+
+## Recovery Codes
+
+The first time a user adds an extra factor and has no recovery codes, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered.
+
+To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set.
+
+Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count, so you can suggest new codes when they run low. Users with no codes left keep the (empty) set until they make a new one or it's removed along with their last factor.
+
+## Renaming and Choosing the Default
+
+`PATCH /user/authenticators/{id}` accepts:
+
+| Field | |
+|---|---|
+| `name` | Optional, up to 64 characters. |
+| `default` | Optional boolean. `true` makes this the default and clears the flag on the user's others. |
+
+The default authenticator is offered first when a second factor is needed.
+
+## Removing Authenticators
+
+`DELETE /user/authenticators/{id}` removes an authenticator, unless what's left would leave the user unable to sign in, or unable to meet the policy (for policies without `ifEnrolled()`). That fails with `keyring::keyring.last_factor` on `authenticator`.
+
+Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes go with it. The policy is checked against what will actually be left.
+
+The password can't be removed this way. It isn't stored in `keyring_authenticators`.
+
+## Responses
+
+Requests that expect JSON (and aren't Inertia visits) get JSON with a `status`:
+
+| Action | `status` | Also |
+|---|---|---|
+| Begin | `enrollment-started` | `factor`, `enrollment` |
+| Confirm | `authenticator-added` | `authenticator`, `recoveryCodes` |
+| Update | `authenticator-updated` | `authenticator` |
+| Remove | `authenticator-removed` | |
+
+Other requests are redirected back with the `status` flashed, and the extra data flashed under `keyring`. The [browser package](frontend.md#managing-authenticators) uses the JSON form.
+
+## From JavaScript
+
+```ts
+import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@entity/keyring'
+
+// Passkeys, security keys and recovery codes need no input in between.
+const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })
+
+// Authenticator apps: show the QR code, then ask for a code.
+const { enrollment } = await beginEnrollment('totp')
+// ...render enrollment.qr...
+await confirmEnrollment('totp', enrollment, { code })
+
+await renameAuthenticator(id, 'Work phone')
+await makeDefault(id)
+await removeAuthenticator(id)
+```
+
+`confirmEnrollment()` runs the browser's WebAuthn ceremony for `passkey` and `security-key`. These helpers throw a `KeyringRequestError` on failure, including the `423` from step-up. See [Frontend](frontend.md#managing-authenticators).
+
+## From PHP
+
+`$user->keyring` (or `Keyring::for($user)`) is a `Keyring\UserKeyring`:
+
+```php
+use Keyring\Enums\Category;
+
+$user->keyring->all();                       // every confirmed authenticator, default first, then by priority
+$user->keyring->default();                   // the default, or the first stored one
+$user->keyring->of('security-key');          // one factor's authenticators
+$user->keyring->find($id);
+$user->keyring->has(Category::Possession);
+$user->keyring->canMeet($requirement);
+$user->keyring->canSignIn();                 // can anything start a login?
+```
+
+The result is cached on the model. Call `$user->keyring->refresh()` after changing authenticators in the same request.
+
+`$user->authenticators()` is a normal Eloquent relationship if you need to query rows directly. Secrets, public keys and credential IDs are hidden when the model is serialised, and `secret` is encrypted at rest.
+
+## Events
+
+In `Keyring\Events`:
+
+| Event | Properties |
+|---|---|
+| `AuthenticatorAdded` | `user`, `authenticator` |
+| `AuthenticatorRemoved` | `user`, `authenticator` |
+| `RecoveryCodesGenerated` | `user`, `authenticator` |
+| `RecoveryCodeUsed` | `authenticator`, `remaining` |
+
+Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.
