@@ -4,7 +4,9 @@ use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use App\Providers\KeyringServiceProvider;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Encryption\Encrypter;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -78,6 +80,10 @@ describe('keyring:import fortify', function () {
         $this->user = taylor();
     });
 
+    afterEach(function () {
+        Model::encryptUsing(null);
+    });
+
     it('imports fortify two factor and recovery codes, once', function () {
         $secret = app(Google2FA::class)->generateSecretKey();
 
@@ -91,7 +97,7 @@ describe('keyring:import fortify', function () {
         expect(Authenticator::count())->toBe(0);
 
         $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
-        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+        $this->artisan('keyring:import', ['source' => 'fortify'])->expectsOutputToContain('Already imported')->assertSuccessful();
 
         $keyring = $this->user->keyring->refresh();
         expect($keyring->of('totp'))->toHaveCount(1)
@@ -104,10 +110,13 @@ describe('keyring:import fortify', function () {
     });
 
     it('imports unconfirmed secrets only when asked, without adding a second default', function () {
+        config(['fortify.features' => ['two-factor-authentication'], 'fortify-options.two-factor-authentication' => ['confirm' => true]]);
         DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey())]);
         $existing = Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->default()->create(['factor' => 'passkey']);
 
-        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Skipped user {$this->user->id}: its secret was never confirmed")
+            ->assertSuccessful();
         expect($this->user->keyring->refresh()->of('totp'))->toBeEmpty();
 
         $this->artisan('keyring:import', ['source' => 'fortify', '--unconfirmed' => true])->assertSuccessful();
@@ -115,6 +124,110 @@ describe('keyring:import fortify', function () {
         $keyring = $this->user->keyring->refresh();
         expect($keyring->of('totp'))->toHaveCount(1)
             ->and($keyring->default()->id)->toBe($existing->id);
+    });
+
+    it('imports a secret with no confirmation when fortify enforces it without one, and challenges the user', function () {
+        config(['fortify.features' => ['two-factor-authentication']]);
+        DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey())]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect(route('keyring.login.challenge'));
+        $this->assertGuest();
+    });
+
+    it('asks which rule applies when fortify\'s config can\'t say', function () {
+        DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey())]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Failed user {$this->user->id}: its secret was never confirmed and Fortify's confirm option can't be read.")
+            ->assertFailed();
+        $this->artisan('keyring:import', ['source' => 'fortify', '--fortify-confirm' => 'maybe'])->assertFailed();
+        $this->artisan('keyring:import', ['source' => 'fortify', '--fortify-confirm' => 'on'])->assertSuccessful();
+        expect($this->user->keyring->refresh()->of('totp'))->toBeEmpty();
+
+        $this->artisan('keyring:import', ['source' => 'fortify', '--fortify-confirm' => 'off'])->assertSuccessful();
+        expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+    });
+
+    it('fails closed on a secret it can\'t decrypt, and imports it once it can', function () {
+        $secret = app(Google2FA::class)->generateSecretKey();
+        DB::table('users')->update([
+            'two_factor_secret' => new Encrypter(random_bytes(32), 'aes-256-cbc')->encrypt($secret),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify', '--dry-run' => true])
+            ->expectsOutputToContain("Failed user {$this->user->id}: its two factor secret or recovery codes can't be decrypted")
+            ->assertFailed();
+        expect(Authenticator::count())->toBe(0);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Failed user {$this->user->id}")
+            ->assertFailed();
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertFailed();
+
+        expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect(route('keyring.login.challenge'));
+        $this->assertGuest();
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($secret)]);
+        $this->assertGuest();
+
+        DB::table('users')->update(['two_factor_secret' => encrypt($secret)]);
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $keyring = $this->user->keyring->refresh();
+        expect($keyring->of('totp'))->toHaveCount(1)
+            ->and($keyring->of('totp')->first()->secret)->toBe($secret);
+    });
+
+    it('fails a row whose recovery codes are in an unexpected format', function () {
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
+            'two_factor_recovery_codes' => encrypt('not json'),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Failed user {$this->user->id}: its two factor secret or recovery codes are in an unexpected format")
+            ->assertFailed();
+    });
+
+    it('decrypts with the encrypter eloquent is using', function () {
+        $encrypter = new Encrypter(random_bytes(32), 'aes-256-cbc');
+        Model::encryptUsing($encrypter);
+        $secret = app(Google2FA::class)->generateSecretKey();
+        DB::table('users')->update(['two_factor_secret' => $encrypter->encrypt($secret), 'two_factor_confirmed_at' => now()]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        expect($this->user->keyring->refresh()->of('totp')->first()->secret)->toBe($secret);
+    });
+
+    it('reports passkeys it can\'t import', function () {
+        Schema::create('passkeys', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id');
+            $table->string('name');
+            $table->string('credential_id');
+            $table->json('credential');
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamps();
+        });
+        DB::table('passkeys')->insert([
+            ['id' => 1, 'user_id' => 999, 'name' => 'Orphan', 'credential_id' => 'a', 'credential' => '{}'],
+            ['id' => 2, 'user_id' => $this->user->id, 'name' => 'Broken', 'credential_id' => 'b', 'credential' => 'not json'],
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Failed passkey 1 of user 999: that user doesn't exist")
+            ->expectsOutputToContain("Failed passkey 2 of user {$this->user->id}: its credential is in an unexpected format")
+            ->assertFailed();
+        expect(Authenticator::count())->toBe(0);
     });
 
     it('imports laravel passkeys so they keep working', function () {
