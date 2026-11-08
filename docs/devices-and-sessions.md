@@ -235,6 +235,16 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 
 `Keyring\Http\Middleware\AuthenticateSession` does the checking. Keyring adds it to the `web` middleware group for you. Set `sessions.middleware` to `false` to add it yourself, under the alias `keyring.session`.
 
+It only checks routes it runs on. If signed-in sessions reach other groups, add `keyring.session` there too, or revoked and timed-out sessions keep working on those routes until Laravel's own session lifetime runs out. The usual case is Sanctum's stateful `api` routes for a single-page app:
+
+```php
+// bootstrap/app.php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->statefulApi();
+    $middleware->appendToGroup('api', 'keyring.session');
+})
+```
+
 On each signed-in request it:
 
 - signs the user out if their registry record was revoked, has expired, belongs to someone else, or has been idle too long,
