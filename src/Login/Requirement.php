@@ -22,6 +22,7 @@ final readonly class Requirement
         public int $factors = 1,
         public array $categories = [],
         public bool $requiresPhishingResistance = false,
+        public bool $requiresDeviceBound = false,
         public bool $onlyIfEnrolled = false,
         public bool $noDowngrade = false,
         public array $downgradeExceptions = [],
@@ -38,9 +39,13 @@ final readonly class Requirement
         return new self(factors: 2);
     }
 
+    /**
+     * NIST AAL3: two factors, one of them a phishing-resistant key that can't
+     * leave its device. A synced passkey reaches AAL2, not AAL3.
+     */
     public static function aal3(): self
     {
-        return new self(factors: 2, categories: [Category::Possession], requiresPhishingResistance: true);
+        return self::aal2()->including(Category::Possession)->deviceBound();
     }
 
     public static function factors(int $count): self
@@ -75,6 +80,16 @@ final readonly class Requirement
     public function phishingResistant(): static
     {
         return clone ($this, ['requiresPhishingResistance' => true]);
+    }
+
+    /**
+     * Require a phishing-resistant key that can't leave its device: a
+     * security key or a passkey that doesn't sync.
+     */
+    #[\NoDiscard]
+    public function deviceBound(): static
+    {
+        return clone ($this, ['requiresPhishingResistance' => true, 'requiresDeviceBound' => true]);
     }
 
     /**
@@ -126,12 +141,13 @@ final readonly class Requirement
      * @param  list<Category>  $categories  the categories the user can prove
      */
     #[\NoDiscard]
-    public function limitedTo(array $categories, bool $phishingResistant): static
+    public function limitedTo(array $categories, bool $phishingResistant, bool $deviceBound = false): static
     {
         return clone ($this, [
             'factors' => max(1, min(max($this->factors, 2), count($categories))),
             'categories' => array_values(array_filter($this->categories, fn (Category $category) => in_array($category, $categories, true))),
             'requiresPhishingResistance' => $this->requiresPhishingResistance && $phishingResistant,
+            'requiresDeviceBound' => $this->requiresDeviceBound && $deviceBound,
         ]);
     }
 
@@ -144,23 +160,27 @@ final readonly class Requirement
 
         return count($verified) >= $this->factors
             && array_all($this->categories, fn (Category $category) => in_array($category, $verified, true))
-            && (! $this->requiresPhishingResistance || $this->hasPhishingResistant($verifications));
+            && (! $this->requiresPhishingResistance || $this->hasPhishingResistant($verifications))
+            && (! $this->requiresDeviceBound || $this->hasDeviceBoundKey($verifications));
     }
 
     /**
-     * Whether a further verification with these properties would bring the
-     * given verifications closer to meeting the requirement.
+     * Whether a further verification like this one would bring the given
+     * verifications closer to meeting the requirement.
      *
      * @param  list<Verification>  $verifications
-     * @param  list<Category>  $categories
      */
-    public function wouldProgress(array $verifications, array $categories, bool $phishingResistant, ?string $factor = null): bool
+    public function wouldProgress(array $verifications, Verification $next): bool
     {
         $verified = $this->categoriesIn($verifications);
-        $new = array_filter($categories, fn (Category $category) => ! in_array($category, $verified, true));
+        $new = array_filter($next->categories, fn (Category $category) => ! in_array($category, $verified, true));
+
+        if ($this->requiresDeviceBound && ! $this->hasDeviceBoundKey($verifications)) {
+            return $this->hasDeviceBoundKey([$next]);
+        }
 
         if ($this->requiresPhishingResistance && ! $this->hasPhishingResistant($verifications)) {
-            return $phishingResistant || in_array($factor, $this->phishingResistanceExceptions, true);
+            return $this->hasPhishingResistant([$next]);
         }
 
         if ($new === []) {
@@ -190,6 +210,7 @@ final readonly class Requirement
             'factors' => max($this->factors, $other->factors),
             'categories' => array_values(array_unique([...$this->categories, ...$other->categories], SORT_REGULAR)),
             'requiresPhishingResistance' => $this->requiresPhishingResistance || $other->requiresPhishingResistance,
+            'requiresDeviceBound' => $this->requiresDeviceBound || $other->requiresDeviceBound,
             'noDowngrade' => $this->noDowngrade || $other->noDowngrade,
             'downgradeExceptions' => match (true) {
                 $this->noDowngrade && $other->noDowngrade => array_values(array_intersect($this->downgradeExceptions, $other->downgradeExceptions)),
@@ -205,7 +226,7 @@ final readonly class Requirement
     }
 
     /**
-     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>}
+     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>}
      */
     public function toArray(): array
     {
@@ -213,6 +234,7 @@ final readonly class Requirement
             'factors' => $this->factors,
             'categories' => array_map(fn (Category $category) => $category->value, $this->categories),
             'phishing_resistant' => $this->requiresPhishingResistance,
+            'device_bound' => $this->requiresDeviceBound,
             'if_enrolled' => $this->onlyIfEnrolled,
             'no_downgrade' => $this->noDowngrade,
             'downgrade_exceptions' => $this->downgradeExceptions,
@@ -221,7 +243,7 @@ final readonly class Requirement
     }
 
     /**
-     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>}  $data
+     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -229,6 +251,7 @@ final readonly class Requirement
             factors: $data['factors'],
             categories: array_map(Category::from(...), $data['categories']),
             requiresPhishingResistance: $data['phishing_resistant'],
+            requiresDeviceBound: $data['device_bound'] ?? false,
             onlyIfEnrolled: $data['if_enrolled'],
             noDowngrade: $data['no_downgrade'] ?? false,
             downgradeExceptions: $data['downgrade_exceptions'] ?? [],
@@ -251,6 +274,14 @@ final readonly class Requirement
         }
 
         return array_values($categories);
+    }
+
+    /**
+     * @param  list<Verification>  $verifications
+     */
+    private function hasDeviceBoundKey(array $verifications): bool
+    {
+        return array_any($verifications, fn (Verification $verification) => $verification->phishingResistant && $verification->deviceBound);
     }
 
     /**

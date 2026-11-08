@@ -23,15 +23,17 @@ final readonly class Verification
         public array $categories,
         public bool $phishingResistant = false,
         public int $at = 0,
+        public bool $deviceBound = false,
     ) {}
 
     /**
-     * A verification of the authenticator now. Categories and phishing
-     * resistance come from its factor unless the factor saw otherwise.
+     * A verification of the authenticator now. Categories, phishing
+     * resistance and device binding come from its factor unless the factor
+     * saw otherwise.
      *
      * @param  list<Category>|null  $categories
      */
-    public static function of(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null): self
+    public static function of(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null, ?bool $deviceBound = null): self
     {
         $factor = $authenticator->factor();
 
@@ -41,11 +43,12 @@ final readonly class Verification
             categories: $categories ?? $factor->categories($authenticator),
             phishingResistant: $phishingResistant ?? $factor->phishingResistant($authenticator),
             at: now()->getTimestamp(),
+            deviceBound: $deviceBound ?? $factor->deviceBound($authenticator),
         );
     }
 
     /**
-     * @return array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant: bool, at: int}
+     * @return array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant: bool, at: int, device_bound: bool}
      */
     public function toArray(): array
     {
@@ -55,11 +58,12 @@ final readonly class Verification
             'categories' => array_map(fn (Category $category) => $category->value, $this->categories),
             'phishing_resistant' => $this->phishingResistant,
             'at' => $this->at,
+            'device_bound' => $this->deviceBound,
         ];
     }
 
     /**
-     * @param  array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant?: bool, at?: int}  $data
+     * @param  array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant?: bool, at?: int, device_bound?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -69,6 +73,7 @@ final readonly class Verification
             categories: array_map(Category::from(...), $data['categories']),
             phishingResistant: $data['phishing_resistant'] ?? false,
             at: $data['at'] ?? 0,
+            deviceBound: $data['device_bound'] ?? false,
         );
     }
 }

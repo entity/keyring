@@ -30,6 +30,11 @@ abstract class Factor implements FactorContract
         return false;
     }
 
+    public function deviceBound(Authenticator $authenticator): bool
+    {
+        return false;
+    }
+
     public function priority(): int
     {
         return 50;
@@ -114,9 +119,9 @@ abstract class Factor implements FactorContract
     /**
      * Record a successful verification of the given authenticator.
      */
-    protected function verified(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null): Verification
+    protected function verified(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null, ?bool $deviceBound = null): Verification
     {
-        return Verification::of($authenticator, $categories, $phishingResistant);
+        return Verification::of($authenticator, $categories, $phishingResistant, $deviceBound);
     }
 
     /**

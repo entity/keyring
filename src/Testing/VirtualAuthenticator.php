@@ -35,6 +35,8 @@ class VirtualAuthenticator
         public bool $userVerification = true,
         public string $aaguid = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
         public string $algorithm = 'ES256',
+        // A passkey that syncs between devices (backup eligible and backed up).
+        public bool $synced = false,
     ) {
         $this->credentialId = random_bytes(32);
         $this->key = $algorithm === 'EdDSA'
@@ -131,7 +133,7 @@ class VirtualAuthenticator
 
     protected function authenticatorData(string $rpId, bool $attested): string
     {
-        $flags = 0x01 | ($this->userVerification ? 0x04 : 0) | ($attested ? 0x40 : 0);
+        $flags = 0x01 | ($this->userVerification ? 0x04 : 0) | ($this->synced ? 0x08 | 0x10 : 0) | ($attested ? 0x40 : 0);
 
         $data = hash('sha256', $rpId, true).chr($flags).pack('N', ++$this->counter);
 
