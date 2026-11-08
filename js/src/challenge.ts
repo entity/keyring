@@ -129,6 +129,12 @@ export function passkeyLogin(
     try {
       const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
 
+      // The browser can still hand over a passkey just as a newer request
+      // takes over; that one owns the state now.
+      if (!isCurrent()) {
+        return
+      }
+
       // A passkey was picked (from autofill too), so it's being checked now.
       set({ processing: true, error: null })
 

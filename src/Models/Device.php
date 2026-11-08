@@ -2,6 +2,7 @@
 
 namespace Keyring\Models;
 
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\Table;
@@ -10,7 +11,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
 use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Support\Url;
 
@@ -24,10 +24,10 @@ use Keyring\Support\Url;
  * @property string|null $user_agent
  * @property string|null $ip
  * @property array<string, mixed>|null $location
- * @property Carbon|null $first_seen_at
- * @property Carbon|null $last_seen_at
- * @property Carbon|null $trusted_until
- * @property Carbon|null $revoked_at
+ * @property CarbonInterface|null $first_seen_at
+ * @property CarbonInterface|null $last_seen_at
+ * @property CarbonInterface|null $trusted_until
+ * @property CarbonInterface|null $revoked_at
  */
 #[Table('keyring_devices')]
 #[Unguarded]

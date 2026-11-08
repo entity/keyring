@@ -2,13 +2,13 @@
 
 namespace Keyring\Models;
 
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
 use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Support\Duration;
 
@@ -23,8 +23,8 @@ use Keyring\Support\Duration;
  * @property string|null $ip
  * @property string|null $user_agent
  * @property array<string, mixed>|null $meta
- * @property Carbon|null $seen_at
- * @property Carbon $created_at
+ * @property CarbonInterface|null $seen_at
+ * @property CarbonInterface $created_at
  */
 #[Table('keyring_events')]
 #[Unguarded]
