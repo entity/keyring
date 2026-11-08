@@ -5,7 +5,7 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
 use Keyring\Contracts\CreatesNewUsers;
-use Keyring\Contracts\Responses\AuthenticatedResponse;
+use Keyring\Contracts\Responses\RegisterResponse;
 use Keyring\Enums\Category;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -33,6 +33,6 @@ class RegisteredUserController
             ? [new Verification('password', null, [Category::Knowledge], at: now()->getTimestamp())]
             : []);
 
-        return app(AuthenticatedResponse::class)->toResponse($request);
+        return app(RegisterResponse::class)->toResponse($request);
     }
 }

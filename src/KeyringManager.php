@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 use Inertia\Inertia;
 use InvalidArgumentException;
 use Keyring\Activity\SecurityLog;
@@ -60,6 +61,9 @@ class KeyringManager
 
     /** @var class-string<Device> */
     protected string $deviceModel = Device::class;
+
+    /** @var (Closure(PasswordRule, (Authenticatable&Model)|null): PasswordRule)|null */
+    protected ?Closure $passwordRules = null;
 
     /** @var list<string>|null Security emails to send, null for the config value. */
     protected ?array $notifications = null;
@@ -290,6 +294,27 @@ class KeyringManager
     public function notifies(string $type): bool
     {
         return in_array($type, $this->notifications ?? config('keyring.notifications', []), true);
+    }
+
+    /**
+     * Adjust the password rule Keyring builds (its length depends on whether
+     * the user has MFA), e.g. fn (Password $rule, ?User $user) => $rule->mixedCase().
+     *
+     * @param  Closure(PasswordRule, (Authenticatable&Model)|null): PasswordRule  $callback
+     */
+    public function passwordRulesUsing(Closure $callback): static
+    {
+        $this->passwordRules = $callback;
+
+        return $this;
+    }
+
+    /**
+     * @internal
+     */
+    public function adjustPasswordRule(PasswordRule $rule, (Authenticatable&Model)|null $user): PasswordRule
+    {
+        return $this->passwordRules === null ? $rule : ($this->passwordRules)($rule, $user);
     }
 
     /**

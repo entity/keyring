@@ -31,6 +31,9 @@ final class PasswordRules
             $rule->uncompromised();
         }
 
+        // The app's adjustments, from Keyring::passwordRulesUsing().
+        $rule = Keyring::adjustPasswordRule($rule, $user);
+
         return ['required', 'string', 'confirmed', $rule, self::bcryptLimit()];
     }
 
@@ -42,7 +45,7 @@ final class PasswordRules
     {
         return function (string $attribute, mixed $value, Closure $fail) {
             if (Hash::getDefaultDriver() === 'bcrypt' && is_string($value) && strlen($value) > 72) {
-                $fail(__('The :attribute must not be longer than 72 bytes.'));
+                $fail(__('keyring::keyring.password_too_long'));
             }
         };
     }
