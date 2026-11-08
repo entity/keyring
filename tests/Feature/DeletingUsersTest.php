@@ -1,6 +1,5 @@
 <?php
 
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
@@ -8,7 +7,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\Sessions;
-use Keyring\Tests\Fixtures\User;
+use Keyring\Tests\Fixtures\SoftDeletingUser;
 
 it('removes sign-in methods, devices, pending changes and sessions with the user', function () {
     $user = taylor();
@@ -40,8 +39,3 @@ it('keeps everything while the user is only soft deleted', function () {
     $user->forceDelete();
     expect(Authenticator::count())->toBe(0);
 });
-
-class SoftDeletingUser extends User
-{
-    use SoftDeletes;
-}
