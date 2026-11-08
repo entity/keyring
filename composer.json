@@ -1,0 +1,56 @@
+{
+    "name": "entity/keyring",
+    "description": "Factor-driven authentication for Laravel: many authenticators per user, devices, sessions, step-up and risk.",
+    "keywords": ["laravel", "auth", "mfa", "2fa", "webauthn", "passkeys", "totp"],
+    "license": "MIT",
+    "type": "library",
+    "require": {
+        "php": "^8.5",
+        "bacon/bacon-qr-code": "^3.0",
+        "illuminate/auth": "^13.0",
+        "illuminate/contracts": "^13.0",
+        "illuminate/database": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/routing": "^13.0",
+        "illuminate/session": "^13.0",
+        "illuminate/support": "^13.0",
+        "pragmarx/google2fa": "^9.0",
+        "web-auth/webauthn-lib": "^5.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "Keyring\\": "src/",
+            "Keyring\\Database\\Factories\\": "database/factories/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Keyring\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": ["Keyring\\KeyringServiceProvider"],
+            "aliases": {"Keyring": "Keyring\\Facades\\Keyring"}
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "lint": "pint",
+        "analyse": "phpstan analyse"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {"pestphp/pest-plugin": true}
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "require-dev": {
+        "inertiajs/inertia-laravel": "^3.7",
+        "larastan/larastan": "^3.14",
+        "laravel/pint": "^1.32",
+        "orchestra/testbench": "^11.3",
+        "pestphp/pest": "^5.3",
+        "pestphp/pest-plugin-laravel": "^5.0"
+    }
+}
