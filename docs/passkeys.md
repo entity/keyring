@@ -97,7 +97,7 @@ Passkeys sign in on their own:
 
 1. The browser fetches `GET /login/passkey/options`. The options have an empty `allowCredentials` and require user verification. Keyring keeps the challenge in the session.
 2. The user picks a passkey, and the browser posts the response to `POST /login/passkey`.
-3. Keyring finds the passkey by its credential ID, checks the signature, and continues with the [policy](policies.md) as for any login.
+3. Keyring finds the passkey by its credential ID, among those of the model behind its guard, checks the signature, and continues with the [policy](policies.md) as for any login.
 
 The same options work for autofill, where the browser lists passkeys in the email field (give the field `autocomplete="username webauthn"`). The browser package's `usePasskeyLogin({ autofill: true })` starts that for you. See [Frontend](frontend.md#signing-in-with-a-passkey).
 

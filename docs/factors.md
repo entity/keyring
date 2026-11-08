@@ -284,7 +284,7 @@ Implement these as well when they apply:
 
 | Contract | Means | Methods |
 |---|---|---|
-| `Keyring\Contracts\PrimaryFactor` | It can start a login by identifying the user (`POST /login/{key}`). | `startsLogin()` says whether it can, as configured (WebAuthn returns `false` for security keys). `identify($request)` returns the authenticator the request is for, or `null`. It must take the same time whether or not a user is found. `identificationRules()` validates the identifying fields. |
+| `Keyring\Contracts\PrimaryFactor` | It can start a login by identifying the user (`POST /login/{key}`). | `startsLogin()` says whether it can, as configured (WebAuthn returns `false` for security keys). `identify($request)` returns the authenticator the request is for, or `null`. An authenticator whose user Keyring's guard wouldn't load back counts as `null`. It must take the same time whether or not a user is found. `identificationRules()` validates the identifying fields. |
 | `Keyring\Contracts\DiscoverableFactor` | A primary factor that needs no username, like a passkey. | `loginOptions($request)` returns what the browser needs, served at `GET /login/{key}/options`. |
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment()`, `enrollmentRules()`, `confirmEnrollment()` and `multiple()`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |

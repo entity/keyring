@@ -1,5 +1,6 @@
 <?php
 
+use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -19,6 +20,15 @@ const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/537.36 
 function taylor(array $attributes = []): User
 {
     return User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now(), ...$attributes]);
+}
+
+/**
+ * An account of a second model, whose ID overlaps with the users'. The
+ * password is "password".
+ */
+function staff(): Staff
+{
+    return Staff::create(['name' => 'Staff', 'email' => 'staff@example.com', 'password' => 'password']);
 }
 
 /**

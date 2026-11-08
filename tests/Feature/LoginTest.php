@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Events\Authenticated;
@@ -14,8 +15,10 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
+use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
 function totpFor(User $user, bool $default = false): Authenticator
@@ -29,6 +32,49 @@ it('renders the login page through inertia', function () {
         ->assertJsonPath('component', 'auth/login')
         ->assertJsonPath('props.canRegister', true)
         ->assertJsonPath('props.canResetPassword', true);
+});
+
+it('answers like an unknown user when the finder returns someone the guard would not load back', function () {
+    taylor();
+    $staff = staff();
+    Keyring::findUsersUsing(fn () => $staff);
+
+    $this->post('/login', ['email' => 'staff@example.com', 'password' => 'password'])
+        ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+    $this->assertGuest();
+});
+
+it('drops a sign in that started under another guard', function () {
+    taylor();
+    $totp = Authenticator::factory()->totp()->for(staff(), 'authenticatable')->create();
+    config([
+        'auth.providers.staff' => ['driver' => 'eloquent', 'model' => Staff::class],
+        'auth.guards.staff' => ['driver' => 'session', 'provider' => 'staff'],
+        'keyring.guard' => 'staff',
+    ]);
+
+    $this->post('/login', ['email' => 'staff@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    config(['keyring.guard' => 'web']);
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect('/login')
+        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+    $this->assertGuest('web');
+    expect($totp->fresh()->last_used_at)->toBeNull();
+});
+
+it('refuses to log in anyone the guard would not load back', function () {
+    taylor();
+    $staff = staff();
+
+    expect(fn () => app(SignIn::class)->as(request(), $staff, []))
+        ->toThrow(ValidationException::class, __('auth.failed'));
+
+    $this->assertGuest('web');
 });
 
 it('signs in with just a password when nothing else is enrolled', function () {
