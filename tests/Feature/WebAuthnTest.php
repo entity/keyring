@@ -50,8 +50,7 @@ it('registers a passkey', function () {
         ->and($passkey->factor()->categories($passkey))->toBe([Category::Possession, Category::Inherence]);
 });
 
-it('signs in with a passkey alone, without a username', function () {
-    $key = new VirtualAuthenticator;
+it('signs in with a passkey alone, without a username', function (VirtualAuthenticator $key) {
     enroll('passkey', $key);
 
     $options = $this->getJson(route('keyring.login.options', 'passkey'))
@@ -64,7 +63,10 @@ it('signs in with a passkey alone, without a username', function () {
 
     $this->assertAuthenticatedAs($this->user);
     expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
-});
+})->with([
+    'P-256' => fn () => new VirtualAuthenticator,
+    'Ed25519' => fn () => VirtualAuthenticator::eddsa(),
+]);
 
 it('uses a security key as a second factor', function () {
     $key = new VirtualAuthenticator(userVerification: false);

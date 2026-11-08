@@ -2,6 +2,11 @@
 
 namespace Keyring\WebAuthn;
 
+use Cose\Algorithm\Algorithm;
+use Cose\Algorithm\Manager;
+use Cose\Algorithm\Signature\ECDSA\ES256;
+use Cose\Algorithm\Signature\EdDSA\Ed25519;
+use Cose\Algorithm\Signature\RSA\RS256;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Facades\Keyring;
@@ -55,11 +60,10 @@ class Ceremonies
                 displayName: (string) ($user->getAttribute('name') ?? $user->getAttribute(Keyring::username())),
             ),
             challenge: random_bytes(32),
-            pubKeyCredParams: [
-                PublicKeyCredentialParameters::createPk(-7),   // ES256
-                PublicKeyCredentialParameters::createPk(-8),   // EdDSA
-                PublicKeyCredentialParameters::createPk(-257), // RS256 (older Windows Hello)
-            ],
+            pubKeyCredParams: array_map(
+                fn (Algorithm $algorithm) => PublicKeyCredentialParameters::createPk($algorithm::identifier()),
+                [...$this->algorithms()->all()],
+            ),
             authenticatorSelection: AuthenticatorSelectionCriteria::create(
                 authenticatorAttachment: $profile->attachment,
                 userVerification: $profile->userVerification,
@@ -222,9 +226,24 @@ class Ceremonies
         return $this->serializer()->deserialize($json, $class, 'json');
     }
 
+    /**
+     * The signature algorithms keys may use, in order of preference. Only
+     * these are offered to the browser, so every key it creates can be
+     * checked.
+     */
+    public function algorithms(): Manager
+    {
+        return Manager::create()->add(...array_filter([
+            ES256::create(),
+            Ed25519::isSupported() ? Ed25519::create() : null,
+            RS256::create(), // older Windows Hello
+        ]));
+    }
+
     protected function steps(): CeremonyStepManagerFactory
     {
         $factory = new CeremonyStepManagerFactory;
+        $factory->setAlgorithmManager($this->algorithms());
         $factory->setAllowedOrigins($this->origins());
         $factory->setAttestationStatementSupportManager($this->attestationSupport());
 

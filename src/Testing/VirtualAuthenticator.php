@@ -24,7 +24,7 @@ class VirtualAuthenticator
 {
     public readonly string $credentialId;
 
-    protected OpenSSLAsymmetricKey $key;
+    protected OpenSSLAsymmetricKey|string $key;
 
     protected int $counter = 0;
 
@@ -34,9 +34,20 @@ class VirtualAuthenticator
         public string $origin = 'http://localhost',
         public bool $userVerification = true,
         public string $aaguid = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+        public string $algorithm = 'ES256',
     ) {
         $this->credentialId = random_bytes(32);
-        $this->key = openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
+        $this->key = $algorithm === 'EdDSA'
+            ? sodium_crypto_sign_keypair()
+            : openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
+    }
+
+    /**
+     * A key that signs with Ed25519 instead of P-256.
+     */
+    public static function eddsa(): self
+    {
+        return new self(algorithm: 'EdDSA');
     }
 
     /**
@@ -82,7 +93,7 @@ class VirtualAuthenticator
         $clientData = $this->clientData('webauthn.get', $options['challenge'], $origin);
         $authData = $this->authenticatorData($options['rpId'], attested: false);
 
-        openssl_sign($authData.hash('sha256', $clientData, true), $signature, $this->key, OPENSSL_ALGO_SHA256);
+        $signature = $this->sign($authData.hash('sha256', $clientData, true));
 
         return [
             'id' => Base64UrlSafe::encodeUnpadded($this->credentialId),
@@ -131,8 +142,28 @@ class VirtualAuthenticator
         return $data;
     }
 
+    protected function sign(string $data): string
+    {
+        if (is_string($this->key)) {
+            return sodium_crypto_sign_detached($data, sodium_crypto_sign_secretkey($this->key));
+        }
+
+        openssl_sign($data, $signature, $this->key, OPENSSL_ALGO_SHA256);
+
+        return $signature;
+    }
+
     protected function publicKey(): string
     {
+        if (is_string($this->key)) {
+            return (string) MapObject::create([
+                MapItem::create(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(1)),     // kty: OKP
+                MapItem::create(UnsignedIntegerObject::create(3), NegativeIntegerObject::create(-8)),    // alg: EdDSA
+                MapItem::create(NegativeIntegerObject::create(-1), UnsignedIntegerObject::create(6)),    // crv: Ed25519
+                MapItem::create(NegativeIntegerObject::create(-2), ByteStringObject::create(sodium_crypto_sign_publickey($this->key))),
+            ]);
+        }
+
         $ec = openssl_pkey_get_details($this->key)['ec'];
 
         return (string) MapObject::create([
