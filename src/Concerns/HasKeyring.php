@@ -4,6 +4,7 @@ namespace Keyring\Concerns;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Keyring\Changes\EmailChanges;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
@@ -19,11 +20,13 @@ use Keyring\UserKeyring;
 trait HasKeyring
 {
     /**
-     * Protected attributes (email, password) can only change through Keyring.
+     * Protected attributes (email, password) can only change through Keyring,
+     * and nobody can take an address an email change may still revert to.
      */
     public static function bootHasKeyring(): void
     {
         static::updating(fn (self $user) => Keyring::guardProtectedAttributes($user));
+        static::saving(fn (self $user) => app(EmailChanges::class)->guardReserved($user));
 
         // Clean up once the user is really gone (not when soft deleted), so a
         // passkey can be registered again on a new account.
@@ -36,7 +39,7 @@ trait HasKeyring
 
             $user->authenticators()->delete();
             $user->devices()->delete();
-            PendingChange::query()->whereMorphedTo('authenticatable', $user)->delete();
+            PendingChange::query()->ownedBy($user)->delete();
         });
     }
 

@@ -3,6 +3,7 @@
 namespace Keyring\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Builder;
@@ -10,17 +11,21 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use Keyring\Models\Concerns\BelongsToUser;
+use Keyring\Support\KeyedHash;
 
 /**
  * A change to a protected attribute (like the email address) waiting for
  * confirmation, and the record that lets it be reverted afterwards.
- * Tokens are stored as SHA-256 hashes.
+ * Tokens are stored as SHA-256 hashes. The previous value is encrypted, with
+ * a keyed hash beside it so it can be found while it's reserved.
  *
  * @property string $id
  * @property string $attribute
  * @property string $value
  * @property string|null $previous_value
+ * @property string|null $previous_value_hash
  * @property string $confirm_token
  * @property string|null $current_token
  * @property string $revert_token
@@ -35,10 +40,19 @@ use Keyring\Models\Concerns\BelongsToUser;
  */
 #[Table('keyring_pending_changes')]
 #[Unguarded]
-#[Hidden('confirm_token', 'current_token', 'revert_token', 'value', 'previous_value')]
+#[Hidden('confirm_token', 'current_token', 'revert_token', 'value', 'previous_value', 'previous_value_hash')]
 class PendingChange extends Model
 {
     use BelongsToUser, HasUlids, MassPrunable;
+
+    protected static function booted(): void
+    {
+        static::saving(function (self $change) {
+            if ($change->isDirty('previous_value')) {
+                $change->previous_value_hash = $change->previous_value === null ? null : KeyedHash::make(Str::lower($change->previous_value));
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -96,8 +110,26 @@ class PendingChange extends Model
     /**
      * @param  Builder<static>  $query
      */
-    protected function scopePending(Builder $query): void
+    #[Scope]
+    protected function pending(Builder $query): void
     {
         $query->whereNull('applied_at')->whereNull('cancelled_at')->whereNull('reverted_at')->where('expires_at', '>', now());
+    }
+
+    /**
+     * Applied changes that can still be reverted, which keep the address they
+     * replaced for their owner: if someone else could take it meanwhile, the
+     * owner couldn't get it back.
+     *
+     * @param  Builder<static>  $query
+     */
+    #[Scope]
+    protected function reserving(Builder $query, string $value): void
+    {
+        $query->whereIn('previous_value_hash', KeyedHash::candidates(Str::lower($value)))
+            ->whereNotNull('applied_at')
+            ->whereNull('cancelled_at')
+            ->whereNull('reverted_at')
+            ->where('revertable_until', '>', now());
     }
 }

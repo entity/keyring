@@ -7,11 +7,14 @@ use Illuminate\Support\Facades\Password;
 use Keyring\Changes\EmailChanges;
 use Keyring\Enums\Assurance;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Exceptions\ReservedAddressException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Tests\Fixtures\CreateNewUser;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -205,4 +208,52 @@ it('cancels pending email changes on a password change, even keeping other sessi
     ])->assertOk();
 
     expect($change->fresh()->cancelled_at)->not->toBeNull();
+});
+
+describe('the address a change replaced', function () {
+    beforeEach(function () {
+        $change = requestChange($this->user, 'attacker@example.com');
+        confirmBoth($change, $this->tokens = tokensFor('attacker@example.com', 'taylor@example.com'));
+        $this->change = $change->fresh();
+    });
+
+    it('cannot be registered while the change can be reverted', function () {
+        Keyring::createUsersUsing(CreateNewUser::class);
+        $this->post('/logout');
+
+        $this->post('/register', [
+            'name' => 'Someone',
+            'email' => 'Taylor@Example.com',
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ])->assertSessionHasErrors(['email' => 'The email has already been taken.']);
+
+        expect(User::count())->toBe(1);
+    });
+
+    it('cannot be moved to by another account', function () {
+        $other = taylor(['email' => 'other@example.com']);
+        $this->flushSession();
+
+        $this->actingAs($other)->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.email.store'), ['email' => 'taylor@example.com'])->assertOk();
+
+        expect(PendingChange::query()->ownedBy($other)->exists())->toBeFalse();
+        Notification::assertSentTo(new AnonymousNotifiable, EmailAddressInUse::class, fn ($n, $c, $to) => $to->routes['mail'] === 'taylor@example.com');
+    });
+
+    it('cannot be given to another user however they are saved', function () {
+        expect(fn () => taylor())->toThrow(ReservedAddressException::class);
+    });
+
+    it('still goes back to its owner when the change is reverted', function () {
+        expect(app(EmailChanges::class)->revert($this->change, $this->tokens['revert']))->toBeTrue()
+            ->and($this->user->fresh()->email)->toBe('taylor@example.com');
+    });
+
+    it('is free again once the change can no longer be reverted', function () {
+        $this->travel(8)->days();
+
+        expect(taylor()->exists)->toBeTrue();
+    });
 });

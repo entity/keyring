@@ -3,6 +3,7 @@
 namespace Keyring\Changes;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EmailChanged;
 use Keyring\Events\EmailChangeRequested;
 use Keyring\Events\EmailChangeReverted;
+use Keyring\Exceptions\ReservedAddressException;
 use Keyring\KeyringManager;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -34,8 +36,9 @@ use function Illuminate\Support\defer;
  *     notice with a "this wasn't me" link, and must confirm too unless this
  *     session proved a second factor.
  *  3. Once confirmed, the change applies, and can still be reverted from the
- *     old address for a while. Reverting signs everything out, closes any
- *     later changes, and removes sign-in methods added since the request.
+ *     old address for a while. Meanwhile nobody else can take the old
+ *     address. Reverting signs everything out, closes any later changes, and
+ *     removes sign-in methods added since the request.
  *
  * Nothing reveals whether the new address belongs to another account.
  */
@@ -178,7 +181,7 @@ class EmailChanges
 
                 // One by one, so each removal is logged and announced.
                 $this->keyring->authenticatorModel()::query()
-                    ->whereMorphedTo('authenticatable', $user)
+                    ->ownedBy($user)
                     ->where('created_at', '>=', $change->created_at)
                     ->get()
                     ->each(function (Authenticator $authenticator) use ($user) {
@@ -208,7 +211,7 @@ class EmailChanges
     public function cancel(Authenticatable&Model $user): void
     {
         PendingChange::query()
-            ->whereMorphedTo('authenticatable', $user)
+            ->ownedBy($user)
             ->where('attribute', $this->attribute())
             ->pending()
             ->update(['cancelled_at' => now()]);
@@ -217,7 +220,7 @@ class EmailChanges
     public function pending(Authenticatable&Model $user): ?PendingChange
     {
         return PendingChange::query()
-            ->whereMorphedTo('authenticatable', $user)
+            ->ownedBy($user)
             ->where('attribute', $this->attribute())
             ->pending()
             ->latest()
@@ -231,7 +234,7 @@ class EmailChanges
     public function lastChangedAt(Authenticatable&Model $user): ?Carbon
     {
         $times = PendingChange::query()
-            ->whereMorphedTo('authenticatable', $user)
+            ->ownedBy($user)
             ->where('attribute', $this->attribute())
             ->whereNotNull('applied_at')
             ->get(['applied_at', 'reverted_at'])
@@ -301,7 +304,7 @@ class EmailChanges
     protected function closeLaterChanges(Authenticatable&Model $user, PendingChange $change): void
     {
         PendingChange::query()
-            ->whereMorphedTo('authenticatable', $user)
+            ->ownedBy($user)
             ->where('attribute', $change->attribute)
             ->where($change->getKeyName(), '>', $change->getKey()) // ULIDs sort by creation
             ->whereNull('reverted_at')
@@ -313,12 +316,38 @@ class EmailChanges
         return PendingChange::query()->lockForUpdate()->find($change->getKey());
     }
 
+    /**
+     * Whether an address is held for someone else: while an email change can
+     * still be reverted, the address it replaced stays with its owner.
+     */
+    public function reserved(string $email, ?Model $for = null): bool
+    {
+        return PendingChange::query()
+            ->where('attribute', $this->attribute())
+            ->reserving($email)
+            ->when($for?->exists, fn (Builder $query) => $query->whereNot(fn (Builder $query) => $query->ownedBy($for)))
+            ->exists();
+    }
+
+    /**
+     * Refuse to give a user an address reserved for someone else, however
+     * it's saved.
+     *
+     * @internal
+     */
+    public function guardReserved(Model $user): void
+    {
+        $email = $user->getAttribute($this->attribute());
+
+        if ($user->isDirty($this->attribute()) && is_string($email) && $this->reserved($email, $user)) {
+            throw ReservedAddressException::for($user, $this->attribute());
+        }
+    }
+
     protected function taken(Authenticatable&Model $user, string $email): bool
     {
-        return $user->newQuery()
-            ->where($this->attribute(), $email)
-            ->whereKeyNot($user->getKey())
-            ->exists();
+        return $user->newQuery()->where($this->attribute(), $email)->whereKeyNot($user->getKey())->exists()
+            || $this->reserved($email, $user);
     }
 
     protected function attribute(): string
