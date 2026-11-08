@@ -77,15 +77,14 @@ Adding a factor on the server means adding one line here. In React, use `lazy()`
 ```vue
 <script setup lang="ts">
 import { useChallenge, type ChallengeProps } from '@entity/keyring/vue'
-import { reactive } from 'vue'
 import factors from '../../keyring/factors'
 
 const props = defineProps<ChallengeProps>()
-const challenge = reactive(useChallenge(props, factors))
+const challenge = useChallenge(props, factors)
 </script>
 
 <template>
-  <component :is="challenge.component" :key="`${props.factor}:${props.authenticator.id}`" :challenge="challenge" :page="props" />
+  <component :is="challenge.component" :key="`${props.factor}:${props.authenticator.id}`" :challenge="challenge" />
 
   <label v-if="props.canTrustDevice">
     <input v-model="challenge.form.trust" type="checkbox"> Don't ask again on this device
@@ -97,20 +96,20 @@ const challenge = reactive(useChallenge(props, factors))
 </template>
 ```
 
-`useChallenge(props, factors)` returns:
+`useChallenge(props, factors)` returns a reactive object, typed `Challenge`:
 
 | | |
 |---|---|
 | `form` | An Inertia form with `code`, `password` and `trust`. |
 | `props` | The page props you passed in. |
-| `component` | The component for `props.factor` (a computed ref), or `undefined` when the map has none. |
+| `component` | The component for `props.factor`, or `undefined` when the map has none. |
 | `submit(data?)` | Posts the form, plus `data` and the authenticator ID, to the verify route. Clears `code` and `password` afterwards. |
 | `switchTo(option)` | Visits the challenge page for one of `props.alternatives`. |
 | `send()` | Asks the server to send a code, for factors that send one. |
-| `verifyKey()` | Runs the WebAuthn ceremony with `props.challenge.options` and submits the result. Browser errors (like the user cancelling) are set on `form.errors.credential`. |
-| `alternatives` | `props.alternatives`, as a computed ref. |
+| `verifyKey()` | Runs the WebAuthn ceremony with `props.challenge.options` and submits the result. Calling it again while the prompt is open replaces that prompt. Closing the prompt does nothing; other browser errors are set on `form.errors.credential`. |
+| `alternatives` | `props.alternatives`. |
 
-The Vue factor components receive `challenge` and `page` (the page props).
+Factor components receive `challenge`, and read the page from `challenge.props`.
 
 The published page falls back to a built-in component when a factor has none in the map: `SecurityKey` when the challenge has WebAuthn `options`, otherwise `Code`.
 
@@ -146,7 +145,7 @@ export default function ChallengePage(props: ChallengeProps) {
 }
 ```
 
-The React hook returns the same as Vue's, except `Component` (capitalised) instead of `component`, and plain values instead of refs. React factor components receive only `challenge` (typed `Challenge`), and read the page from `challenge.props`.
+The React hook returns the same as Vue's, except `Component` (capitalised) instead of `component`. Factor components receive `challenge` (typed `Challenge`) the same way.
 
 ### Factor Components
 
@@ -154,13 +153,13 @@ A factor component shows the right input and calls the challenge's methods. Fact
 
 ```vue
 <script setup lang="ts">
-import type { ChallengeProps } from '@entity/keyring'
+import type { Challenge } from '@entity/keyring/vue'
 
-const { challenge, page } = defineProps<{ challenge: any, page: ChallengeProps }>()
+const { challenge } = defineProps<{ challenge: Challenge }>()
 </script>
 
 <template>
-  <button v-if="'sent' in page.challenge && !page.challenge.sent" @click="challenge.send()">Send code</button>
+  <button v-if="'sent' in challenge.props.challenge && !challenge.props.challenge.sent" @click="challenge.send()">Send code</button>
 
   <form v-else @submit.prevent="challenge.submit()">
     <input v-model="challenge.form.code" autocomplete="one-time-code" inputmode="numeric">
@@ -199,7 +198,7 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 | `factor` | The factor key, `passkey` by default. |
 | `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. The same in Vue and React, for example `remember: () => form.data.remember` in React. |
 
-It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`.
+It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`. Closing the prompt isn't an error. After an explicit sign in that didn't work, the email field offers passkeys again.
 
 ## Challenge Helpers Without Vue or React
 
@@ -210,10 +209,12 @@ The Vue and React bindings are thin layers over these helpers, exported from `@e
 | `challengeFields()` | The fields a challenge form starts with: `code`, `password` and `trust`. |
 | `switchTo(props, option)` | Visits the challenge page for one of `props.alternatives`. |
 | `sendCode(props)` | Asks the server to send a code for the current authenticator. |
-| `keyCredential(props)` | Runs the browser prompt with `props.challenge.options` and resolves to the credential to post as `credential`. |
+| `keyCredential(props, signal?)` | Runs the browser prompt with `props.challenge.options` and resolves to the credential to post as `credential`. |
+| `keyPrompt()` | Makes a prompt function for a challenge page: `await prompt(props)` resolves to the credential, or `null` when the user closed the prompt or a newer call replaced it. |
 | `passkeyCredential(factor, { autofill?, signal? })` | Fetches the usernameless options and runs the prompt (or autofill). |
 | `signInWith(factor, credential, remember, { onError, onFinish })` | Posts a credential from `passkeyCredential()` to sign in. `onError` gets the first error message. |
-| `isAbort(error)` | Whether the error means the user closed the prompt, or a newer request replaced it. |
+| `passkeyLogin(options, onChange)` | The state behind `usePasskeyLogin()`: call `start()` once mounted, `signIn()` for the button and `stop()` when unmounting. `onChange` gets `{ processing, error }`. |
+| `isAbort(error)` | Whether the error means the user closed the prompt (or it timed out), or a newer request replaced it. |
 | `errorMessage(error)` | A readable message for any thrown value. |
 
 ```ts
@@ -339,7 +340,9 @@ The keys are `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`
 configureRoutes({
   challengeBase: purpose => purpose === 'login' ? '/account/login/challenge' : '/account/confirm',
 })
-``` The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
+```
+
+The published pages also link to a few paths directly (`/login`, `/register`, `/forgot-password`), so update those too.
 
 ## Flash Messages and Alerts
 
