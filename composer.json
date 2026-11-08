@@ -54,11 +54,15 @@
         "test": "pest",
         "lint": "pint",
         "refactor": "rector",
-        "analyse": "phpstan analyse",
+        "analyse": [
+            "phpstan analyse",
+            "phpstan analyse -c phpstan.stubs.neon"
+        ],
         "check": [
             "rector --dry-run",
             "pint --test",
             "phpstan analyse",
+            "phpstan analyse -c phpstan.stubs.neon",
             "pest"
         ]
     },
