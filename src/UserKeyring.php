@@ -93,6 +93,7 @@ class UserKeyring
                 $verifications,
                 $authenticator->factor()->categories($authenticator),
                 $authenticator->factor()->phishingResistant($authenticator),
+                $authenticator->factor,
             ))
             ->values();
     }

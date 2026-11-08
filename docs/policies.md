@@ -70,9 +70,15 @@ Without `ifEnrolled()`, users who can't meet the requirement can't sign in at al
 
 ## No Downgrade
 
-`noDowngrade()` stops users with a phishing-resistant authenticator from being talked into a weaker one. When a user has any passkey or security key, the requirement gains `phishingResistant()`, and "try another way" only offers their other passkeys and security keys.
+`noDowngrade()` stops users with a phishing-resistant authenticator from being talked into a weaker one. When a user has any passkey or security key, the requirement gains `phishingResistant()`, and "try another way" only offers their other passkeys and security keys, plus recovery codes.
 
-This has a cost. A user with a security key, an authenticator app and recovery codes won't be offered the app or the codes at sign in, so losing their only key locks them out until support helps. Encourage users to register two keys, or leave `noDowngrade()` off.
+Recovery codes stay on offer because they're the way back in when the only key is lost: each one works once, and using one sends a [security email](security-log-and-emails.md) when those are on. To refuse them too, and accept only keys:
+
+```php
+Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade(except: []));
+```
+
+`except` lists factor keys that may stand in for a key, so a custom recovery factor can be added there. An explicit `phishingResistant()` never makes exceptions.
 
 ## Deciding Per User and Attempt
 

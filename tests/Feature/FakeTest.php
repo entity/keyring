@@ -62,3 +62,28 @@ it('enforces no downgrade for users with phishing resistant factors', function (
     $this->post(route('keyring.login.verify', 'totp'))->assertSessionHasErrors();
     $this->assertGuest();
 });
+
+it('still offers recovery codes under no downgrade, so a lost key is not a lockout', function () {
+    Keyring::require(Requirement::aal2()->noDowngrade());
+    Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    $response = $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.factor', 'security-key');
+    expect(collect($response->json('props.alternatives'))->pluck('factor')->all())->toBe(['recovery']);
+    $this->flushHeaders();
+
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+});
+
+it('can refuse recovery codes under no downgrade as well', function () {
+    Keyring::require(Requirement::aal2()->noDowngrade(except: []));
+    Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    expect($this->inertia()->get(route('keyring.login.challenge'))->json('props.alternatives'))->toBe([]);
+});
