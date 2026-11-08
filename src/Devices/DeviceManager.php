@@ -83,7 +83,7 @@ class DeviceManager
         ]);
 
         if ($trust && ($for = config('keyring.devices.trust_for')) !== null) {
-            $device->trusted_until = now()->addSeconds(Duration::seconds($for));
+            $device->trusted_until = Duration::fromNow($for);
         }
 
         $device->save();
