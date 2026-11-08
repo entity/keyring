@@ -17,6 +17,7 @@ use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
+use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\AuthenticatorSelectionCriteria;
 use Webauthn\CredentialRecord;
 use Webauthn\Exception\CounterException;
@@ -218,10 +219,10 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             return null;
         }
 
-        $id = $this->ceremonies()->credentialId($this->credential($request));
+        $id = Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId);
 
         // Already registered (to anyone), or longer than the column allows.
-        if ($id === null || strlen($id) > 512 || Keyring::authenticatorModel()::query()->where('credential_id', $id)->exists()) {
+        if (strlen($id) > 512 || Keyring::authenticatorModel()::query()->where('credential_id', $id)->exists()) {
             return null;
         }
 
