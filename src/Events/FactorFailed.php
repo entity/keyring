@@ -4,6 +4,7 @@ namespace Keyring\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Http\Request;
+use Illuminate\Queue\SerializesModels;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Login\Attempt;
@@ -15,7 +16,7 @@ use Keyring\Models\Authenticator;
  */
 class FactorFailed
 {
-    use Dispatchable;
+    use Dispatchable, SerializesModels;
 
     public function __construct(
         public readonly ?Attempt $attempt,

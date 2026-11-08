@@ -3,6 +3,7 @@
 namespace Keyring\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
 use Keyring\Models\Authenticator;
 
 /**
@@ -11,7 +12,7 @@ use Keyring\Models\Authenticator;
  */
 class CloneSuspected
 {
-    use Dispatchable;
+    use Dispatchable, SerializesModels;
 
     public function __construct(
         public readonly Authenticator $authenticator,

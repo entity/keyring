@@ -2,7 +2,6 @@
 
 namespace Keyring\Models;
 
-use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
@@ -10,8 +9,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
+use Keyring\Models\Concerns\BelongsToUser;
 
 /**
  * A change to a protected attribute (like the email address) waiting for
@@ -39,7 +38,7 @@ use Illuminate\Support\Carbon;
 #[Hidden('confirm_token', 'current_token', 'revert_token', 'value', 'previous_value')]
 class PendingChange extends Model
 {
-    use HasUlids, MassPrunable;
+    use BelongsToUser, HasUlids, MassPrunable;
 
     protected function casts(): array
     {
@@ -54,21 +53,6 @@ class PendingChange extends Model
             'expires_at' => 'datetime',
             'revertable_until' => 'datetime',
         ];
-    }
-
-    /**
-     * @return MorphTo<Model, $this>
-     */
-    public function authenticatable(): MorphTo
-    {
-        return $this->morphTo();
-    }
-
-    public function user(): (Authenticatable&Model)|null
-    {
-        $user = $this->authenticatable;
-
-        return $user instanceof Authenticatable ? $user : null;
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Keyring\Events;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
 use Keyring\Models\Authenticator;
 
 /**
@@ -11,7 +12,7 @@ use Keyring\Models\Authenticator;
  */
 class RecoveryCodesGenerated
 {
-    use Dispatchable;
+    use Dispatchable, SerializesModels;
 
     public function __construct(
         public readonly Authenticatable $user,

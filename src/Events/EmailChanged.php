@@ -4,6 +4,7 @@ namespace Keyring\Events;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
 use Keyring\Models\PendingChange;
 
 /**
@@ -11,7 +12,7 @@ use Keyring\Models\PendingChange;
  */
 class EmailChanged
 {
-    use Dispatchable;
+    use Dispatchable, SerializesModels;
 
     public function __construct(
         public readonly Authenticatable $user,

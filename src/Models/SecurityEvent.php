@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
+use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Support\Duration;
 
 /**
@@ -30,7 +30,7 @@ use Keyring\Support\Duration;
 #[Unguarded]
 class SecurityEvent extends Model
 {
-    use HasUlids, MassPrunable;
+    use BelongsToUser, HasUlids, MassPrunable;
 
     public const UPDATED_AT = null;
 
@@ -44,14 +44,6 @@ class SecurityEvent extends Model
             'seen_at' => 'datetime',
             'created_at' => 'datetime',
         ];
-    }
-
-    /**
-     * @return MorphTo<Model, $this>
-     */
-    public function authenticatable(): MorphTo
-    {
-        return $this->morphTo();
     }
 
     /**

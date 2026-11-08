@@ -11,11 +11,11 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
 use Keyring\Contracts\Factor;
 use Keyring\Database\Factories\AuthenticatorFactory;
 use Keyring\Facades\Keyring;
+use Keyring\Models\Concerns\BelongsToUser;
 use LogicException;
 
 /**
@@ -45,7 +45,7 @@ use LogicException;
 class Authenticator extends Model
 {
     /** @use HasFactory<AuthenticatorFactory> */
-    use HasFactory, HasUlids;
+    use BelongsToUser, HasFactory, HasUlids;
 
     protected function casts(): array
     {
@@ -77,14 +77,6 @@ class Authenticator extends Model
         $authenticator->setRelation('authenticatable', $user);
 
         return $authenticator;
-    }
-
-    /**
-     * @return MorphTo<Model, $this>
-     */
-    public function authenticatable(): MorphTo
-    {
-        return $this->morphTo();
     }
 
     public function user(): Authenticatable&Model

@@ -4,6 +4,7 @@ namespace Keyring\Events;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
 use Keyring\Models\Device;
 
 /**
@@ -12,7 +13,7 @@ use Keyring\Models\Device;
  */
 class NewDeviceSignedIn
 {
-    use Dispatchable;
+    use Dispatchable, SerializesModels;
 
     public function __construct(
         public readonly Authenticatable $user,

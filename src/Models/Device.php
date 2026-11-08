@@ -2,7 +2,6 @@
 
 namespace Keyring\Models;
 
-use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\Table;
@@ -11,8 +10,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
+use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Support\Url;
 
 /**
@@ -35,7 +34,7 @@ use Keyring\Support\Url;
 #[Hidden('token_hash', 'authenticatable_type', 'authenticatable_id')]
 class Device extends Model
 {
-    use HasUlids, MassPrunable;
+    use BelongsToUser, HasUlids, MassPrunable;
 
     protected function casts(): array
     {
@@ -46,14 +45,6 @@ class Device extends Model
             'trusted_until' => 'datetime',
             'revoked_at' => 'datetime',
         ];
-    }
-
-    /**
-     * @return MorphTo<Model, $this>
-     */
-    public function authenticatable(): MorphTo
-    {
-        return $this->morphTo();
     }
 
     /**
@@ -82,13 +73,6 @@ class Device extends Model
     public function prunable(): Builder
     {
         return static::query()->where('revoked_at', '<', now()->subDays(30));
-    }
-
-    public function user(): ?Authenticatable
-    {
-        $user = $this->authenticatable;
-
-        return $user instanceof Authenticatable ? $user : null;
     }
 
     public function isTrusted(): bool

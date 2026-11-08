@@ -4,6 +4,7 @@ namespace Keyring\Events;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
 use Keyring\Risk\Action;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Risk;
@@ -13,7 +14,7 @@ use Keyring\Risk\Risk;
  */
 class RiskAssessed
 {
-    use Dispatchable;
+    use Dispatchable, SerializesModels;
 
     public function __construct(
         public readonly Authenticatable $user,
