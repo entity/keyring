@@ -82,3 +82,9 @@ it('works out assurance from verifications', function () {
         ->and(Assurance::of([$password, $totp]))->toBe(Assurance::AAL2)
         ->and(Assurance::of([$password, $key]))->toBe(Assurance::AAL3);
 });
+
+it('reads assurance levels from middleware parameters in any case', function () {
+    expect(Assurance::fromName('none'))->toBe(Assurance::None)
+        ->and(Assurance::fromName('aal3'))->toBe(Assurance::AAL3)
+        ->and(fn () => Assurance::fromName('aal4'))->toThrow(InvalidArgumentException::class, 'Unknown assurance level [aal4].');
+});

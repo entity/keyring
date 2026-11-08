@@ -97,13 +97,7 @@ class VerifyFactor
             return $context->factor->verify($context->attempt, $context->authenticator, $context->request);
         }
 
-        return $decision ? new Verification(
-            factor: $context->factor->key(),
-            authenticator: $context->authenticator->isVirtual() ? null : $context->authenticator->id,
-            categories: $context->factor->categories($context->authenticator),
-            phishingResistant: $context->factor->phishingResistant($context->authenticator),
-            at: now()->getTimestamp(),
-        ) : null;
+        return $decision ? Verification::of($context->authenticator) : null;
     }
 
     /**

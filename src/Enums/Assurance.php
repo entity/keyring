@@ -2,6 +2,8 @@
 
 namespace Keyring\Enums;
 
+use InvalidArgumentException;
+use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
 /**
@@ -21,36 +23,26 @@ enum Assurance: int
     case AAL3 = 3;
 
     /**
-     * Work out the level a set of verifications reaches.
+     * The highest level a set of verifications reaches. Defined by the same
+     * requirements step-up uses, so the two can never disagree.
      *
-     * @param  iterable<Verification>  $verifications
+     * @param  list<Verification>  $verifications
      */
-    public static function of(iterable $verifications): self
+    public static function of(array $verifications): self
     {
-        $categories = [];
-        $phishingResistantPossession = false;
-
-        foreach ($verifications as $verification) {
-            foreach ($verification->categories as $category) {
-                $categories[$category->value] = true;
-            }
-
-            if ($verification->phishingResistant && in_array(Category::Possession, $verification->categories, true)) {
-                $phishingResistantPossession = true;
-            }
-        }
-
-        return match (true) {
-            count($categories) >= 2 && $phishingResistantPossession => self::AAL3,
-            count($categories) >= 2 => self::AAL2,
-            count($categories) === 1 => self::AAL1,
-            default => self::None,
-        };
+        return array_find(
+            [self::AAL3, self::AAL2, self::AAL1],
+            fn (self $level) => Requirement::for($level)->isMetBy($verifications),
+        ) ?? self::None;
     }
 
+    /**
+     * The level named in middleware parameters, e.g. keyring:aal2.
+     */
     public static function fromName(string $name): self
     {
-        return constant(self::class.'::'.strtoupper($name));
+        return array_find(self::cases(), fn (self $case) => strcasecmp($case->name, $name) === 0)
+            ?? throw new InvalidArgumentException("Unknown assurance level [{$name}].");
     }
 
     public function atLeast(self $level): bool

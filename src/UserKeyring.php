@@ -69,12 +69,7 @@ class UserKeyring
      */
     public function canMeet(Requirement $requirement): bool
     {
-        return $requirement->isMetBy($this->all()->map(fn (Authenticator $authenticator) => new Verification(
-            factor: $authenticator->factor,
-            authenticator: $authenticator->id,
-            categories: $authenticator->factor()->categories($authenticator),
-            phishingResistant: $authenticator->factor()->phishingResistant($authenticator),
-        )));
+        return $requirement->isMetBy($this->all()->map(fn (Authenticator $authenticator) => Verification::of($authenticator))->all());
     }
 
     /**

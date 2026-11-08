@@ -116,33 +116,25 @@ final readonly class Requirement
     }
 
     /**
-     * @param  iterable<Verification>  $verifications
+     * @param  list<Verification>  $verifications
      */
-    public function isMetBy(iterable $verifications): bool
+    public function isMetBy(array $verifications): bool
     {
         $verified = $this->categoriesIn($verifications);
 
-        if (count($verified) < $this->factors) {
-            return false;
-        }
-
-        foreach ($this->categories as $category) {
-            if (! in_array($category, $verified, true)) {
-                return false;
-            }
-        }
-
-        return ! $this->requiresPhishingResistance || $this->hasPhishingResistant($verifications);
+        return count($verified) >= $this->factors
+            && array_all($this->categories, fn (Category $category) => in_array($category, $verified, true))
+            && (! $this->requiresPhishingResistance || $this->hasPhishingResistant($verifications));
     }
 
     /**
      * Whether a further verification with these properties would bring the
      * given verifications closer to meeting the requirement.
      *
-     * @param  iterable<Verification>  $verifications
+     * @param  list<Verification>  $verifications
      * @param  list<Category>  $categories
      */
-    public function wouldProgress(iterable $verifications, array $categories, bool $phishingResistant, ?string $factor = null): bool
+    public function wouldProgress(array $verifications, array $categories, bool $phishingResistant, ?string $factor = null): bool
     {
         $verified = $this->categoriesIn($verifications);
         $new = array_filter($categories, fn (Category $category) => ! in_array($category, $verified, true));
@@ -188,15 +180,6 @@ final readonly class Requirement
         ]);
     }
 
-    public function assurance(): Assurance
-    {
-        return match (true) {
-            $this->factors >= 2 && $this->requiresPhishingResistance => Assurance::AAL3,
-            $this->factors >= 2 => Assurance::AAL2,
-            default => Assurance::AAL1,
-        };
-    }
-
     /**
      * @return array{factors: int, categories: list<string>, phishing_resistant: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>}
      */
@@ -230,10 +213,10 @@ final readonly class Requirement
     }
 
     /**
-     * @param  iterable<Verification>  $verifications
+     * @param  list<Verification>  $verifications
      * @return list<Category>
      */
-    private function categoriesIn(iterable $verifications): array
+    private function categoriesIn(array $verifications): array
     {
         $categories = [];
 
@@ -247,16 +230,11 @@ final readonly class Requirement
     }
 
     /**
-     * @param  iterable<Verification>  $verifications
+     * @param  list<Verification>  $verifications
      */
-    private function hasPhishingResistant(iterable $verifications): bool
+    private function hasPhishingResistant(array $verifications): bool
     {
-        foreach ($verifications as $verification) {
-            if ($verification->phishingResistant || in_array($verification->factor, $this->phishingResistanceExceptions, true)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any($verifications, fn (Verification $verification) => $verification->phishingResistant
+            || in_array($verification->factor, $this->phishingResistanceExceptions, true));
     }
 }

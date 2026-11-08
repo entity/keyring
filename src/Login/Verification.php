@@ -3,6 +3,7 @@
 namespace Keyring\Login;
 
 use Keyring\Enums\Category;
+use Keyring\Models\Authenticator;
 
 /**
  * A record that a factor was verified, and what it proved.
@@ -23,6 +24,25 @@ final readonly class Verification
         public bool $phishingResistant = false,
         public int $at = 0,
     ) {}
+
+    /**
+     * A verification of the authenticator now. Categories and phishing
+     * resistance come from its factor unless the factor saw otherwise.
+     *
+     * @param  list<Category>|null  $categories
+     */
+    public static function of(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null): self
+    {
+        $factor = $authenticator->factor();
+
+        return new self(
+            factor: $factor->key(),
+            authenticator: $authenticator->isVirtual() ? null : $authenticator->id,
+            categories: $categories ?? $factor->categories($authenticator),
+            phishingResistant: $phishingResistant ?? $factor->phishingResistant($authenticator),
+            at: now()->getTimestamp(),
+        );
+    }
 
     /**
      * @return array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant: bool, at: int}
