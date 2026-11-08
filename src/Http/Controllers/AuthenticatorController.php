@@ -81,7 +81,7 @@ class AuthenticatorController
 
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
-        $this->changes->remove($request->user(), $authenticator);
+        $this->changes->remove($request->user(), $authenticator, $request->input('password'));
 
         return $this->status('authenticator-removed');
     }

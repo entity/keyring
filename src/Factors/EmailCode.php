@@ -38,9 +38,11 @@ class EmailCode extends CodeFactor
         return new static(acceptRisk: true);
     }
 
+    public const string KEY = 'email-code';
+
     public function key(): string
     {
-        return 'email-code';
+        return self::KEY;
     }
 
     public function present(Authenticator $authenticator): array

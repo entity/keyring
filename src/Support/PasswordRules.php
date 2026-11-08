@@ -7,9 +7,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
-use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
-use Keyring\Login\Requirement;
 
 /**
  * Password rules following OWASP: length over complexity, no composition
@@ -26,7 +24,7 @@ final class PasswordRules
      */
     public static function for((Authenticatable&Model)|null $user = null, ?Closure $adjust = null): array
     {
-        $hasMfa = $user !== null && Keyring::for($user)->canMeet(Requirement::aal2()->including(Category::Possession));
+        $hasMfa = $user !== null && Keyring::for($user)->hasSecondFactor();
 
         $rule = Password::min(config($hasMfa ? 'keyring.passwords.min_with_mfa' : 'keyring.passwords.min_without_mfa'))
             ->max(config('keyring.passwords.max'));
