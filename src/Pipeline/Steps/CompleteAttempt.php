@@ -3,32 +3,21 @@
 namespace Keyring\Pipeline\Steps;
 
 use Closure;
-use Keyring\Activity\SecurityLog;
-use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Purpose;
-use Keyring\Events\Authenticated;
-use Keyring\Events\Confirmed;
-use Keyring\Events\NewDeviceSignedIn;
-use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\SignIn;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
-use Keyring\Session\SessionAssurance;
-use Keyring\Sessions\Sessions;
 
 /**
- * Signs the user in once the requirement is met, or saves the attempt and
- * asks for another factor.
+ * Signs the user in (or confirms them) once the requirement is met, or saves
+ * the attempt and asks for another factor.
  */
 class CompleteAttempt
 {
     public function __construct(
-        protected KeyringManager $keyring,
         protected AttemptStore $attempts,
-        protected SessionAssurance $assurance,
-        protected DeviceManager $devices,
-        protected Sessions $sessions,
-        protected SecurityLog $log,
+        protected SignIn $signIn,
     ) {}
 
     public function handle(Context $context, Closure $next): Context
@@ -44,39 +33,9 @@ class CompleteAttempt
 
         $this->attempts->forget($attempt->purpose);
 
-        if ($attempt->purpose === Purpose::Login) {
-            $user = $attempt->user();
-
-            $this->keyring->guard()->login($user, $attempt->remember);
-            $context->request->session()->regenerate();
-            $this->assurance->reset($attempt->verifications);
-
-            [$device, $new] = $this->devices->signIn($context->request, $user, $attempt->trustDevice);
-            $this->sessions->start($context->request, $user, $device, $this->assurance->level());
-
-            Authenticated::dispatch($user, $attempt, $device);
-
-            // "Was this you?" for anything suspicious since they last signed in.
-            $context->request->session()->flash('keyring.alerts', $this->log->alerts($user)->map(fn ($event) => [
-                'type' => $event->type,
-                'factor' => $event->factor,
-                'at' => $event->created_at->toIso8601String(),
-                'ip' => $event->ip,
-            ])->all());
-
-            if ($new) {
-                NewDeviceSignedIn::dispatch($user, $device);
-            }
-        } else {
-            $context->request->session()->regenerate();
-            $this->assurance->record($attempt->verifications);
-            $this->sessions->elevate($context->request, $this->assurance->level());
-
-            // Keep Laravel's own password.confirm middleware happy too.
-            $context->request->session()->put('auth.password_confirmed_at', now()->getTimestamp());
-
-            Confirmed::dispatch($attempt->user(), $attempt);
-        }
+        $attempt->purpose === Purpose::Login
+            ? $this->signIn->complete($context->request, $attempt)
+            : $this->signIn->confirm($context->request, $attempt);
 
         $context->outcome = Outcome::Complete;
 
