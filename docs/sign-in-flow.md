@@ -310,7 +310,7 @@ Keyring renders these pages:
 
 | Name | Props |
 |---|---|
-| `login` | `canResetPassword`, `status` |
+| `login` | `canResetPassword`, `canRegister`, `status` |
 | `challenge` | See [Page Props](#page-props). Used for logins. |
 | `confirm` | The same props, with `purpose: "confirm"`. Used for step-up. |
 | `register` | none |

@@ -2,7 +2,7 @@
 import { usePasskeyLogin } from '@entity/keyring/vue'
 import { Head, Link, useForm } from '@inertiajs/vue3'
 
-defineProps<{ canResetPassword: boolean, status?: string }>()
+defineProps<{ canResetPassword: boolean, canRegister: boolean, status?: string }>()
 
 const form = useForm({ email: '', password: '', remember: false })
 const { supported, processing, error: passkeyError, signIn } = usePasskeyLogin({ autofill: true, remember: () => form.remember })
@@ -49,6 +49,6 @@ function submit() {
       <p v-if="passkeyError" class="text-sm text-red-600">{{ passkeyError }}</p>
     </div>
 
-    <p class="text-center text-sm">New here? <Link href="/register" class="underline">Create an account</Link></p>
+    <p v-if="canRegister" class="text-center text-sm">New here? <Link href="/register" class="underline">Create an account</Link></p>
   </main>
 </template>

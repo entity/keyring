@@ -2,10 +2,13 @@ import { json } from './http'
 import { routes } from './routes'
 import { createCredential } from './webauthn'
 
-const webauthnFactors = new Set(['passkey', 'security-key'])
-
-export function isWebAuthn(factor: string): boolean {
-  return webauthnFactors.has(factor)
+/**
+ * Whether an enrollment needs the browser's WebAuthn ceremony. Decided by
+ * what the server sent (creation options), so factors registered under
+ * their own key work too.
+ */
+export function isWebAuthn(enrollment: Record<string, any>): boolean {
+  return enrollment.options?.challenge !== undefined && enrollment.options?.rp !== undefined
 }
 
 /**
@@ -19,7 +22,7 @@ export function beginEnrollment(factor: string, data: Record<string, unknown> = 
  * Finish enrolling. WebAuthn factors run the browser ceremony for you.
  */
 export async function confirmEnrollment(factor: string, enrollment: Record<string, any>, data: Record<string, unknown> = {}) {
-  const payload = isWebAuthn(factor)
+  const payload = isWebAuthn(enrollment)
     ? { ...data, credential: await createCredential(enrollment.options) }
     : data
 

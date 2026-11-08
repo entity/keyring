@@ -1,7 +1,7 @@
 import { usePasskeyLogin } from '@entity/keyring/react'
 import { Head, Link, useForm } from '@inertiajs/react'
 
-export default function Login({ canResetPassword, status }: { canResetPassword: boolean, status?: string }) {
+export default function Login({ canResetPassword, canRegister, status }: { canResetPassword: boolean, canRegister: boolean, status?: string }) {
   const form = useForm({ email: '', password: '', remember: false })
   const passkey = usePasskeyLogin({ autofill: true, remember: form.data.remember })
 
@@ -48,7 +48,7 @@ export default function Login({ canResetPassword, status }: { canResetPassword: 
           </div>
         )}
 
-        <p className="text-center text-sm">New here? <Link href="/register" className="underline">Create an account</Link></p>
+        {canRegister && <p className="text-center text-sm">New here? <Link href="/register" className="underline">Create an account</Link></p>}
       </main>
     </>
   )

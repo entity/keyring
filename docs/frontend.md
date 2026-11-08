@@ -225,7 +225,7 @@ await removeAuthenticator(added.authenticator.id)
 | `renameAuthenticator(id, name)` | `PATCH` with `name`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. |
 | `removeAuthenticator(id)` | `DELETE`. |
-| `isWebAuthn(factor)` | Whether `confirmEnrollment()` runs the ceremony for this key. |
+| `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them.
 

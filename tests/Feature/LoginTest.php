@@ -37,7 +37,9 @@ function currentCode(Authenticator $authenticator): string
 it('renders the login page through inertia', function () {
     $this->inertia()->get('/login')
         ->assertOk()
-        ->assertJsonPath('component', 'auth/login');
+        ->assertJsonPath('component', 'auth/login')
+        ->assertJsonPath('props.canRegister', true)
+        ->assertJsonPath('props.canResetPassword', true);
 });
 
 it('signs in with just a password when nothing else is enrolled', function () {

@@ -29,6 +29,7 @@ class AuthenticatedSessionController
     {
         return $this->keyring->render('login', [
             'canResetPassword' => Route::has('password.request'),
+            'canRegister' => Route::has('register'),
             'status' => $request->session()->get('status'),
         ]);
     }
