@@ -4,11 +4,12 @@ namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Events\SessionsRevoked;
-use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Models\Device;
+use Keyring\Login\SignIn;
 use Keyring\Sessions\Sessions;
 
 /**
@@ -16,9 +17,10 @@ use Keyring\Sessions\Sessions;
  */
 class DeviceController
 {
-    use ChoosesFormat;
+    use RespondsWithStatus;
 
     public function __construct(
+        protected KeyringManager $keyring,
         protected DeviceManager $devices,
         protected Sessions $sessions,
     ) {}
@@ -29,49 +31,45 @@ class DeviceController
     }
 
     /**
-     * Sign one device out.
+     * Sign one device out. Signing out this one ends this session too.
      */
-    public function destroy(Request $request, string $device): mixed
+    public function destroy(Request $request, SignIn $signIn, string $device): StatusResponse
     {
-        $device = Device::query()->whereMorphedTo('authenticatable', $request->user())->whereNull('revoked_at')->findOrFail($device);
-        $current = $this->devices->find($request, $request->user())?->id === $device->id;
+        $device = $this->keyring->deviceModel()::query()->ownedBy($request->user())->active()->findOrFail($device);
+        $current = $this->devices->find($request, $request->user())?->is($device);
 
         $this->devices->revoke($device);
 
         if ($current) {
-            return $this->wantsJson($request)
-                ? new JsonResponse(['status' => 'device-revoked', 'redirect' => route('login')])
-                : redirect()->route('login');
+            $signIn->out($request);
+
+            return $this->status('device-revoked', redirect: route('login'));
         }
 
-        return $this->respond($request, 'device-revoked');
+        return $this->status('device-revoked');
     }
 
     /**
      * Sign out everywhere except here.
      */
-    public function destroyOthers(Request $request): mixed
+    public function destroyOthers(Request $request): StatusResponse
     {
-        $user = $request->user();
-        $current = $this->sessions->current($request);
+        $count = $this->sessions->revokeAll($request->user(), except: $this->sessions->current($request)?->id);
 
-        $count = $this->sessions->registry()->revokeAll($user, except: $current?->id);
-        $this->devices->cycleRememberToken($user);
+        SessionsRevoked::dispatch($request->user(), $count);
 
-        SessionsRevoked::dispatch($user, $count);
-
-        return $this->respond($request, 'sessions-revoked');
+        return $this->status('sessions-revoked');
     }
 
     /**
      * The page the signed "this wasn't me" link opens. It changes nothing;
      * its button POSTs back to the same signed URL.
      */
-    public function page(Request $request, KeyringManager $keyring, string $device): mixed
+    public function page(Request $request, string $device): mixed
     {
-        $device = Device::query()->findOrFail($device);
+        $device = $this->keyring->deviceModel()::query()->findOrFail($device);
 
-        return $keyring->render('device-report', [
+        return $this->keyring->render('device-report', [
             'device' => $device->description(),
             'url' => $request->getRequestUri(),
         ]);
@@ -80,19 +78,14 @@ class DeviceController
     /**
      * Sign the reported device out.
      */
-    public function report(Request $request, string $device): mixed
+    public function report(string $device): StatusResponse
     {
-        $device = Device::query()->findOrFail($device);
+        $device = $this->keyring->deviceModel()::query()->findOrFail($device);
 
         if (! $device->isRevoked()) {
             $this->devices->revoke($device, reported: true);
         }
 
-        return redirect()->route('login')->with('status', __('keyring::keyring.device_reported'));
-    }
-
-    protected function respond(Request $request, string $status): mixed
-    {
-        return $this->wantsJson($request) ? new JsonResponse(['status' => $status]) : back()->with('status', $status);
+        return $this->status('device-reported', redirect: route('login'));
     }
 }

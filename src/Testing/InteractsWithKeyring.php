@@ -7,6 +7,7 @@ use Illuminate\Support\Timebox;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Login\Verification;
+use Keyring\Sessions\SessionAssurance;
 
 /**
  * Test helpers for apps using Keyring.
@@ -64,7 +65,7 @@ trait InteractsWithKeyring
         };
 
         return $this->withSession([
-            'keyring.verified' => collect($verifications)
+            SessionAssurance::KEY => collect($verifications)
                 ->mapWithKeys(fn (Verification $verification) => [$verification->authenticator ?? $verification->factor => $verification->toArray()])
                 ->all(),
         ]);

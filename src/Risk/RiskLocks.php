@@ -6,8 +6,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository;
 
 /**
- * Temporary sign-in locks placed by risk actions. Password reset still works
- * while locked, so a lock can't be used to keep someone out for good.
+ * Temporary sign-in locks placed by risk actions. A password reset lifts
+ * them, so a lock can't be used to keep the owner out for good.
  */
 class RiskLocks
 {
@@ -17,12 +17,12 @@ class RiskLocks
 
     public function lock(Authenticatable $user, int $seconds): void
     {
-        $this->cache->put($this->key($user), now()->addSeconds($seconds)->getTimestamp(), $seconds);
+        $this->cache->put($this->key($user), true, $seconds);
     }
 
     public function locked(Authenticatable $user): bool
     {
-        return (int) $this->cache->get($this->key($user), 0) > now()->getTimestamp();
+        return $this->cache->has($this->key($user));
     }
 
     public function unlock(Authenticatable $user): void

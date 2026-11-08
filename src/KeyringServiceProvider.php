@@ -2,12 +2,17 @@
 
 namespace Keyring;
 
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Activity\RecordSecurityEvents;
@@ -23,7 +28,7 @@ use Keyring\Login\AttemptStore;
 use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Support\Features;
 use Keyring\Support\Url;
@@ -40,6 +45,7 @@ class KeyringServiceProvider extends ServiceProvider
         Responses\FailedResponse::class => DefaultResponses\FailedResponse::class,
         Responses\LockoutResponse::class => DefaultResponses\LockoutResponse::class,
         Responses\LogoutResponse::class => DefaultResponses\LogoutResponse::class,
+        Responses\StatusResponse::class => DefaultResponses\StatusResponse::class,
     ];
 
     public function register(): void
@@ -54,16 +60,34 @@ class KeyringServiceProvider extends ServiceProvider
         $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
         $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
 
-        $this->app->scoped(AttemptStore::class, fn (Application $app) => new AttemptStore($app['session.store']));
-        $this->app->scoped(EnrollmentStore::class, fn (Application $app) => new EnrollmentStore($app['session.store']));
-        $this->app->scoped(SessionAssurance::class, fn (Application $app) => new SessionAssurance($app['session.store']));
+        // Per request, since they wrap the current session.
+        $this->app->scoped(AttemptStore::class);
+        $this->app->scoped(EnrollmentStore::class);
+        $this->app->scoped(SessionAssurance::class);
     }
 
     public function boot(): void
     {
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'keyring');
 
+        $this->registerMiddleware();
+        $this->registerListeners();
+        $this->configureEmailLinks();
+        $this->configureRateLimiting();
+
+        if (config('keyring.routes')) {
+            $this->registerRoutes();
+        }
+
+        if ($this->app->runningInConsole()) {
+            $this->registerPublishing();
+        }
+    }
+
+    protected function registerMiddleware(): void
+    {
         $router = $this->app['router'];
+
         $router->aliasMiddleware('keyring', RequireAssurance::class);
         $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);
         $router->aliasMiddleware('keyring.session', AuthenticateSession::class);
@@ -71,13 +95,24 @@ class KeyringServiceProvider extends ServiceProvider
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);
         }
+    }
 
+    protected function registerListeners(): void
+    {
         if (config('keyring.events.enabled')) {
             Event::subscribe(RecordSecurityEvents::class);
         }
 
         Event::subscribe(SendSecurityNotifications::class);
+    }
 
+    /**
+     * Laravel's verification and reset emails, with links built from APP_URL
+     * rather than the request's Host header. Apps that set their own URL
+     * callbacks keep them.
+     */
+    protected function configureEmailLinks(): void
+    {
         if (Features::enabled('email_verification') && VerifyEmail::$createUrlCallback === null) {
             VerifyEmail::createUrlUsing(fn (MustVerifyEmail&Model $notifiable) => Url::signed(
                 'verification.verify',
@@ -86,25 +121,21 @@ class KeyringServiceProvider extends ServiceProvider
             ));
         }
 
-        if (config('keyring.routes')) {
-            $this->registerRoutes();
+        if (Features::enabled('password_reset') && ResetPassword::$createUrlCallback === null) {
+            ResetPassword::createUrlUsing(fn (CanResetPassword $notifiable, string $token) => Url::route('password.reset', [
+                'token' => $token,
+                'email' => $notifiable->getEmailForPasswordReset(),
+            ]));
         }
+    }
 
-        if ($this->app->runningInConsole()) {
-            $this->commands([Console\InstallCommand::class, Console\ImportCommand::class]);
-
-            $this->publishes([
-                __DIR__.'/../config/keyring.php' => config_path('keyring.php'),
-            ], 'keyring-config');
-
-            $this->publishesMigrations([
-                __DIR__.'/../database/migrations' => database_path('migrations'),
-            ], 'keyring-migrations');
-
-            $this->publishes([
-                __DIR__.'/../lang' => $this->app->langPath('vendor/keyring'),
-            ], 'keyring-lang');
-        }
+    /**
+     * The limit on Keyring's form routes (registration, resets, enrollment).
+     * Define your own "keyring" limiter to change it.
+     */
+    protected function configureRateLimiting(): void
+    {
+        RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by($request->user()?->getAuthIdentifier() ?: $request->ip()));
     }
 
     protected function registerRoutes(): void
@@ -116,5 +147,14 @@ class KeyringServiceProvider extends ServiceProvider
         Route::prefix(config('keyring.prefix'))
             ->domain(config('keyring.domain'))
             ->group(fn () => $this->app->make(KeyringManager::class)->routes());
+    }
+
+    protected function registerPublishing(): void
+    {
+        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class]);
+
+        $this->publishes([__DIR__.'/../config/keyring.php' => config_path('keyring.php')], 'keyring-config');
+        $this->publishesMigrations([__DIR__.'/../database/migrations' => database_path('migrations')], 'keyring-migrations');
+        $this->publishes([__DIR__.'/../lang' => $this->app->langPath('vendor/keyring')], 'keyring-lang');
     }
 }

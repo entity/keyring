@@ -1,6 +1,6 @@
 <?php
 
-namespace Keyring\Session;
+namespace Keyring\Sessions;
 
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
@@ -12,7 +12,7 @@ use Keyring\Login\Verification;
  */
 class SessionAssurance
 {
-    protected const KEY = 'keyring.verified';
+    public const KEY = 'keyring.verified';
 
     public function __construct(
         protected Session $session,
@@ -25,7 +25,7 @@ class SessionAssurance
      */
     public function reset(array $verifications): void
     {
-        $this->session->put(self::KEY, []);
+        $this->session->put(static::KEY, []);
         $this->record($verifications);
     }
 
@@ -36,13 +36,25 @@ class SessionAssurance
      */
     public function record(array $verifications): void
     {
-        $stored = $this->session->get(self::KEY, []);
+        $stored = $this->session->get(static::KEY, []);
 
         foreach ($verifications as $verification) {
             $stored[$verification->authenticator ?? $verification->factor] = $verification->toArray();
         }
 
-        $this->session->put(self::KEY, $stored);
+        $this->session->put(static::KEY, $stored);
+    }
+
+    /**
+     * Record a step-up confirmation. It also satisfies Laravel's own
+     * password.confirm middleware, so apps can keep using it.
+     *
+     * @param  list<Verification>  $verifications
+     */
+    public function confirm(array $verifications): void
+    {
+        $this->record($verifications);
+        $this->session->put('auth.password_confirmed_at', now()->getTimestamp());
     }
 
     /**
@@ -50,7 +62,7 @@ class SessionAssurance
      */
     public function all(): array
     {
-        return array_values(array_map(Verification::fromArray(...), $this->session->get(self::KEY, [])));
+        return array_values(array_map(Verification::fromArray(...), $this->session->get(static::KEY, [])));
     }
 
     /**
@@ -68,19 +80,12 @@ class SessionAssurance
         return Assurance::of($this->all());
     }
 
-    public function lastVerifiedAt(): ?int
-    {
-        $times = array_map(fn (Verification $verification) => $verification->at, $this->all());
-
-        return $times === [] ? null : max($times);
-    }
-
     /**
      * Forget everything proved this session, including the marker that keeps
      * Laravel's own password.confirm middleware satisfied.
      */
     public function flush(): void
     {
-        $this->session->forget([self::KEY, 'auth.password_confirmed_at']);
+        $this->session->forget([static::KEY, 'auth.password_confirmed_at']);
     }
 }

@@ -3,75 +3,73 @@
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Contracts\Auth\CanResetPassword;
-use Illuminate\Contracts\Auth\PasswordBroker as PasswordBrokerContract;
+use Illuminate\Contracts\Auth\PasswordBroker;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
-use Keyring\Devices\DeviceManager;
+use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Events\PasswordReset;
-use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Notifications\ResetPassword;
+use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
+use Symfony\Component\HttpFoundation\Response;
+
+use function Illuminate\Support\defer;
 
 /**
  * Forgotten passwords, the OWASP way: the same answer for every address,
  * links built from APP_URL, no referrer leaks, no automatic sign in, and
- * every session signed out afterwards. Works even while a login is locked.
+ * every session signed out afterwards. A reset also lifts risk locks, so
+ * a lock can't keep the owner out for good.
  */
 class PasswordResetController
 {
-    use ChoosesFormat;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
-        protected DeviceManager $devices,
+        protected EmailChanges $emailChanges,
+        protected RiskLocks $locks,
     ) {}
 
     public function create(Request $request): mixed
     {
-        return $this->keyring->render('forgot-password', ['status' => $request->session()->get('status')]);
+        return $this->keyring->render('forgot-password', ['status' => $this->statusMessage($request)]);
     }
 
-    public function store(Request $request): mixed
+    public function store(Request $request): StatusResponse
     {
         $request->validate([$this->keyring->username() => ['required', 'string', 'email', 'max:255']]);
 
-        $email = Str::lower($request->string($this->keyring->username()));
+        // After the response, so how long it takes doesn't give away whether
+        // the address has an account.
+        defer(fn () => $this->broker()->sendResetLink([
+            $this->keyring->username() => $request->string($this->keyring->username())->lower()->value(),
+        ]));
 
-        $this->broker()->sendResetLink([$this->keyring->username() => $email], function (CanResetPassword $user, string $token) {
-            Notification::send($user, new ResetPassword($token));
-        });
-
-        $status = __('keyring::keyring.reset_link_sent');
-
-        return $this->wantsJson($request) ? new JsonResponse(['status' => $status]) : back()->with('status', $status);
+        return $this->status('reset-link-sent');
     }
 
-    public function edit(Request $request, string $token): mixed
+    public function edit(Request $request, string $token): Response
     {
-        $response = $this->keyring->render('reset-password', [
+        $response = Router::toResponse($request, $this->keyring->render('reset-password', [
             'token' => $token,
             'email' => (string) $request->query($this->keyring->username()),
-        ]);
+        ]));
 
-        $response = Router::toResponse($request, $response);
         $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
     }
 
-    public function update(Request $request): mixed
+    public function update(Request $request): StatusResponse
     {
         // The password rules depend on the account (shorter with MFA), so they
         // only run once the broker has accepted the token. Checking them first
@@ -83,35 +81,31 @@ class PasswordResetController
         ]);
 
         $status = $this->broker()->reset([
-            $this->keyring->username() => Str::lower($request->string($this->keyring->username())),
+            $this->keyring->username() => $request->string($this->keyring->username())->lower()->value(),
             'token' => $request->input('token'),
             'password' => $request->input('password'),
-        ], function ($user, string $password) use ($request) {
-            $request->validate(['password' => PasswordRules::for($user instanceof Model && $user instanceof Authenticatable ? $user : null)]);
+        ], function (Authenticatable&Model $user, string $password) use ($request) {
+            $request->validate(['password' => PasswordRules::for($user)]);
 
-            $this->keyring->changing(fn () => $user->forceFill([
-                'password' => Hash::make($password),
-                'remember_token' => Str::random(60),
-            ])->save());
+            $this->keyring->changing(fn () => $user->forceFill(['password' => Hash::make($password)])->save());
 
-            $this->sessions->registry()->revokeAll($user);
-            app(EmailChanges::class)->cancel($user);
+            $this->sessions->revokeAll($user);
+            $this->emailChanges->cancel($user);
+            $this->locks->unlock($user);
 
             PasswordReset::dispatch($user);
         });
 
         // Laravel says "no user with that address" for unknown accounts. Answer
         // every failure like a bad token instead.
-        if ($status !== PasswordBrokerContract::PASSWORD_RESET) {
-            throw ValidationException::withMessages([$this->keyring->username() => __(PasswordBrokerContract::INVALID_TOKEN)]);
+        if ($status !== PasswordBroker::PASSWORD_RESET) {
+            throw ValidationException::withMessages([$this->keyring->username() => __(PasswordBroker::INVALID_TOKEN)]);
         }
 
-        return $this->wantsJson($request)
-            ? new JsonResponse(['status' => __($status)])
-            : redirect()->route('login')->with('status', __($status));
+        return $this->status('password-reset', redirect: route('login'));
     }
 
-    protected function broker(): PasswordBrokerContract
+    protected function broker(): PasswordBroker
     {
         return Password::broker(config('keyring.passwords.broker'));
     }

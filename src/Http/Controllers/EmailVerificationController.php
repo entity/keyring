@@ -4,14 +4,13 @@ namespace Keyring\Http\Controllers;
 
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 
 class EmailVerificationController
 {
-    use ChoosesFormat;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -21,7 +20,7 @@ class EmailVerificationController
     {
         return $this->verified($request)
             ? redirect()->intended(config('keyring.home'))
-            : $this->keyring->render('verify-email', ['status' => $request->session()->get('status')]);
+            : $this->keyring->render('verify-email', ['status' => $this->statusMessage($request)]);
     }
 
     public function verify(EmailVerificationRequest $request): mixed
@@ -41,9 +40,7 @@ class EmailVerificationController
 
         $request->user()->sendEmailVerificationNotification();
 
-        return $this->wantsJson($request)
-            ? new JsonResponse(['status' => 'verification-link-sent'], 202)
-            : back()->with('status', 'verification-link-sent');
+        return $this->status('verification-link-sent');
     }
 
     protected function verified(Request $request): bool

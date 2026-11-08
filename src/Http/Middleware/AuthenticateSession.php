@@ -3,18 +3,17 @@
 namespace Keyring\Http\Middleware;
 
 use Closure;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
-use Keyring\Events\RiskAssessed;
 use Keyring\KeyringManager;
+use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\RiskEngine;
-use Keyring\Risk\RiskLocks;
-use Keyring\Session\SessionAssurance;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -31,7 +30,7 @@ class AuthenticateSession
         protected SessionAssurance $assurance,
         protected DeviceManager $devices,
         protected RiskEngine $risk,
-        protected RiskLocks $locks,
+        protected SignIn $signIn,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -70,7 +69,7 @@ class AuthenticateSession
             return $this->signOut($request);
         }
 
-        if ($this->risk->hasRequestSignals() && ($response = $this->assessRisk($request, $user, $session)) !== null) {
+        if ($this->risk->signalsFor(Checkpoint::Request) !== [] && ($response = $this->assessRisk($request, $user, $session)) !== null) {
             return $response;
         }
 
@@ -88,25 +87,7 @@ class AuthenticateSession
     protected function assessRisk(Request $request, mixed $user, RegisteredSession $session): ?Response
     {
         $risk = $this->risk->assess(new Assessment(Checkpoint::Request, $request, $user, session: $session));
-
-        if (! $risk->isElevated()) {
-            return null;
-        }
-
-        $action = $this->risk->decide($risk, Checkpoint::Request);
-
-        if ($action->doesSomething()) {
-            RiskAssessed::dispatch($user, $risk, $action, Checkpoint::Request->value);
-        }
-
-        if ($action->revokeSessions) {
-            $this->sessions->registry()->revokeAll($user);
-            $this->devices->cycleRememberToken($user);
-        }
-
-        if ($action->lockSeconds !== null) {
-            $this->locks->lock($user, $action->lockSeconds);
-        }
+        $action = $this->risk->enforce($user, $risk, Checkpoint::Request);
 
         if ($action->reauthenticate || $action->deny || $action->revokeSessions) {
             return $this->signOut($request);
@@ -118,27 +99,20 @@ class AuthenticateSession
             $this->assurance->flush();
         }
 
-        $this->sessions->registry()->save($session->with([
-            'ip' => $request->ip(),
-            'userAgent' => Str::limit((string) $request->userAgent(), 500, ''),
-        ]));
+        if ($action->doesSomething()) {
+            $this->sessions->registry()->save($session->with([
+                'ip' => $request->ip(),
+                'userAgent' => Str::limit((string) $request->userAgent(), 500, ''),
+            ]));
+        }
 
         return null;
     }
 
     protected function signOut(Request $request): Response
     {
-        $this->sessions->end($request);
-        $this->keyring->guard()->logout();
-        $this->assurance->flush();
+        $this->signIn->out($request);
 
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
-        if ($request->expectsJson() && ! $request->hasHeader('X-Inertia')) {
-            return new JsonResponse(['message' => __('keyring::keyring.signed_out')], 401);
-        }
-
-        return redirect()->guest(route('login'))->with('status', __('keyring::keyring.signed_out'));
+        return app(StatusResponse::class, ['status' => 'signed-out', 'redirect' => route('login')])->toResponse($request);
     }
 }

@@ -1,10 +1,12 @@
 <?php
 
 use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Keyring\Changes\EmailChanges;
 use Keyring\Enums\Assurance;
+use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
@@ -124,6 +126,7 @@ it('cannot be confirmed twice from stale copies', function () {
 });
 
 it('removes sign-in methods added since the change when it is reverted', function () {
+    Event::fake([AuthenticatorRemoved::class]);
     $before = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
     $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);
     $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
@@ -136,6 +139,7 @@ it('removes sign-in methods added since the change when it is reverted', functio
 
     expect(Authenticator::find($planted->id))->toBeNull()
         ->and(Authenticator::find($before->id))->not->toBeNull();
+    Event::assertDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->authenticator->is($planted));
 });
 
 it('cancels pending email changes when the password is reset', function () {
@@ -188,4 +192,17 @@ it('says a link was invalid when the token is wrong', function () {
 
     $this->post(route('keyring.email.confirm.store', [$change->id, 'wrong-token']))
         ->assertSessionHas('status', 'email-change-invalid');
+});
+
+it('cancels pending email changes on a password change, even keeping other sessions', function () {
+    $change = requestChange($this->user, 'attacker@example.com');
+
+    $this->putJson(route('user-password.update'), [
+        'current_password' => 'password',
+        'password' => 'a much longer passphrase',
+        'password_confirmation' => 'a much longer passphrase',
+        'sign_out_others' => false,
+    ])->assertOk();
+
+    expect($change->fresh()->cancelled_at)->not->toBeNull();
 });

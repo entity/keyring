@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\LocatesIps;
@@ -113,6 +114,21 @@ it('can lock sign in for a while', function () {
 
     $this->travel(61)->minutes();
     signInAs()->assertRedirect('/dashboard');
+});
+
+it('lifts a risk lock when the password is reset', function () {
+    Keyring::risk([new AlwaysRisky(40)])->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->lockFor('1h') : Action::allow());
+    signInAs()->assertSessionHasErrors('email');
+    Keyring::risk([]);
+
+    $this->post(route('password.update'), [
+        'token' => Password::broker()->createToken(User::sole()),
+        'email' => User::sole()->email,
+        'password' => 'a much longer passphrase',
+        'password_confirmation' => 'a much longer passphrase',
+    ])->assertRedirect(route('login'));
+
+    $this->post('/login', ['email' => User::sole()->email, 'password' => 'a much longer passphrase'])->assertRedirect('/dashboard');
 });
 
 it('spots impossible travel', function () {

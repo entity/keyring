@@ -8,7 +8,7 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\CreateNewUser;
 use Keyring\Tests\Fixtures\User;
 

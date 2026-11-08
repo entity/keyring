@@ -2,24 +2,25 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Http\JsonResponse;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
+use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Factors\RecoveryCodes;
-use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
-use Keyring\UserKeyring;
 
 /**
  * Adding, renaming, choosing the default and removing authenticators. One
@@ -27,7 +28,7 @@ use Keyring\UserKeyring;
  */
 class AuthenticatorController
 {
-    use ChoosesFormat;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -37,69 +38,72 @@ class AuthenticatorController
     /**
      * Begin enrolling: returns what the user needs to see (QR code, codes...).
      */
-    public function store(Request $request, string $factor): mixed
+    public function store(Request $request, string $factor): StatusResponse
     {
-        $this->ensureEmailVerified($request);
-        $factor = $this->enrollable($factor);
+        $factor = $this->enrollable($request, $factor);
         $enrollment = $factor->beginEnrollment($request->user(), $request);
 
         $this->enrollments->put($enrollment);
 
-        return $this->respond($request, ['factor' => $factor->key(), 'enrollment' => $enrollment->props], 'enrollment-started');
+        return $this->status('enrollment-started', ['factor' => $factor->key(), 'enrollment' => $enrollment->props]);
     }
 
     /**
      * Finish enrolling once the user proves it works.
      */
-    public function confirm(Request $request, string $factor): mixed
+    public function confirm(Request $request, string $factor): StatusResponse
     {
-        $this->ensureEmailVerified($request);
-        $factor = $this->enrollable($factor);
+        $factor = $this->enrollable($request, $factor);
         $user = $request->user();
 
         $enrollment = $this->enrollments->get($factor->key())
-            ?? throw ValidationException::withMessages(['code' => __('keyring::keyring.enrollment_expired')]);
+            ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
 
         $request->validate($factor->enrollmentRules());
 
         $authenticator = $factor->confirmEnrollment($user, $enrollment, $request)
-            ?? throw ValidationException::withMessages(['code' => __('keyring::keyring.invalid')]);
+            ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.invalid')]);
 
-        $recoveryCodes = DB::transaction(function () use ($factor, $user, $authenticator) {
-            $keyring = $this->keyring->for($user);
+        $keyring = $this->keyring->for($user);
+        $isRecovery = $factor->key() === RecoveryCodes::KEY;
+        $recovery = ! $isRecovery && $keyring->of(RecoveryCodes::KEY)->isEmpty() ? $this->recoveryCodes() : null;
 
+        DB::transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
             if (! $factor->multiple()) {
                 $keyring->of($factor->key())->each->delete();
             }
 
-            $authenticator->authenticatable()->associate($user);
-            $authenticator->forceFill([
-                'confirmed_at' => now(),
-                'is_default' => $keyring->default() === null && $factor->key() !== 'recovery',
-            ])->save();
+            $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
 
-            return $this->offerRecoveryCodes($user, $factor, $keyring->of('recovery')->isEmpty());
+            if ($recovery !== null) {
+                $this->save($user, $recovery['authenticator']);
+            }
         });
 
         $this->enrollments->forget($factor->key());
 
-        $authenticator->factor === 'recovery'
+        $isRecovery
             ? RecoveryCodesGenerated::dispatch($user, $authenticator)
             : AuthenticatorAdded::dispatch($user, $authenticator);
 
-        return $this->respond($request, array_filter([
+        if ($recovery !== null) {
+            RecoveryCodesGenerated::dispatch($user, $recovery['authenticator']);
+        }
+
+        return $this->status('authenticator-added', array_filter([
             'authenticator' => $authenticator->factor()->present($authenticator),
-            'recoveryCodes' => $recoveryCodes,
-        ]), 'authenticator-added');
+            'recoveryCodes' => $recovery['codes'] ?? null,
+        ]));
     }
 
-    public function update(Request $request, string $authenticator): mixed
+    public function update(Request $request, string $authenticator): StatusResponse
     {
         $authenticator = $this->find($request, $authenticator);
 
         $validated = $request->validate([
             'name' => ['sometimes', 'string', 'max:64'],
-            'default' => ['sometimes', 'boolean'],
+            // Recovery codes are a fallback, never the way to sign in first.
+            'default' => ['sometimes', 'boolean', Rule::prohibitedIf($authenticator->factor === RecoveryCodes::KEY)],
         ]);
 
         DB::transaction(function () use ($authenticator, $validated) {
@@ -109,31 +113,34 @@ class AuthenticatorController
                     ->each(fn (Authenticator $other) => $other->forceFill(['is_default' => false])->save());
             }
 
-            $authenticator->forceFill(array_filter([
-                'name' => $validated['name'] ?? null,
-                'is_default' => ($validated['default'] ?? null) === null ? null : (bool) $validated['default'],
-            ], fn ($value) => $value !== null))->save();
+            $authenticator->fill(array_intersect_key($validated, ['name' => true]));
+
+            if (array_key_exists('default', $validated)) {
+                $authenticator->is_default = (bool) $validated['default'];
+            }
+
+            $authenticator->save();
         });
 
-        return $this->respond($request, ['authenticator' => $authenticator->factor()->present($authenticator)], 'authenticator-updated');
+        return $this->status('authenticator-updated', ['authenticator' => $authenticator->factor()->present($authenticator)]);
     }
 
     /**
      * Remove an authenticator, unless that would leave the user unable to
      * sign in the way their policy requires.
      */
-    public function destroy(Request $request, string $authenticator): mixed
+    public function destroy(Request $request, string $authenticator): StatusResponse
     {
         $authenticator = $this->find($request, $authenticator);
         $user = $request->user();
         $remaining = $this->keyring->for($user)->without($authenticator);
 
         // Recovery codes are only useful while there's a second factor to
-        // recover, so they go too when this was the last one. Check the policy
-        // against what will actually be left.
-        $others = $remaining->all()->reject(fn (Authenticator $other) => $other->isVirtual() || $other->factor === 'recovery');
-        $cascade = $others->isEmpty() ? $remaining->of('recovery') : new Collection;
-        $left = $cascade->reduce(fn (UserKeyring $keyring, Authenticator $recovery) => $keyring->without($recovery), $remaining);
+        // recover, so they go too when this was the last one. The policy is
+        // checked against what will actually be left.
+        $onlyRecoveryLeft = $remaining->all()->every(fn (Authenticator $other) => $other->isVirtual() || $other->factor === RecoveryCodes::KEY);
+        $cascade = $onlyRecoveryLeft ? $remaining->of(RecoveryCodes::KEY)->all() : [];
+        $left = $remaining->without(...$cascade);
 
         $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
 
@@ -141,61 +148,49 @@ class AuthenticatorController
             throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
         }
 
-        DB::transaction(function () use ($authenticator, $cascade) {
-            $authenticator->delete();
-            $cascade->each->delete();
-        });
+        DB::transaction(fn () => collect([$authenticator, ...$cascade])->each->delete());
 
         AuthenticatorRemoved::dispatch($user, $authenticator);
 
-        return $this->respond($request, [], 'authenticator-removed');
+        return $this->status('authenticator-removed');
     }
 
     /**
-     * After the first extra factor, hand out recovery codes automatically.
+     * A fresh set of recovery codes to hand out with the first extra factor.
      *
-     * @return list<string>|null
+     * @return array{codes: list<string>, authenticator: Authenticator}|null
      */
-    protected function offerRecoveryCodes(mixed $user, Enrollable $factor, bool $hasNone): ?array
+    protected function recoveryCodes(): ?array
     {
-        if ($factor->key() === 'recovery' || ! $hasNone || ! $this->keyring->hasFactor('recovery')) {
+        $factor = $this->keyring->hasFactor(RecoveryCodes::KEY) ? $this->keyring->factor(RecoveryCodes::KEY) : null;
+
+        if (! $factor instanceof RecoveryCodes) {
             return null;
         }
 
-        $recovery = $this->keyring->factor('recovery');
+        ['codes' => $codes, 'secret' => $secret] = $factor->generate();
 
-        if (! $recovery instanceof RecoveryCodes) {
-            return null;
-        }
+        return ['codes' => $codes, 'authenticator' => $factor->make($secret)];
+    }
 
-        ['codes' => $codes, 'secret' => $secret] = $recovery->generate();
-
-        $authenticator = $recovery->make($secret);
+    protected function save(Authenticatable&Model $user, Authenticator $authenticator, bool $default = false): void
+    {
         $authenticator->authenticatable()->associate($user);
-        $authenticator->forceFill(['confirmed_at' => now()])->save();
-
-        RecoveryCodesGenerated::dispatch($user, $authenticator);
-
-        return $codes;
+        $authenticator->forceFill(['confirmed_at' => now(), 'is_default' => $default])->save();
     }
 
     /**
-     * Until the email address is proven, the account may belong to someone
-     * who registered it first. Factors added then would survive the real
-     * owner's password reset.
+     * The factor to enroll. Until the email address is proven, the account
+     * may belong to someone who registered it first, and factors they added
+     * would survive the real owner's password reset.
      */
-    protected function ensureEmailVerified(Request $request): void
+    protected function enrollable(Request $request, string $key): Enrollable
     {
         $user = $request->user();
 
-        if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
-            abort(403, __('keyring::keyring.verify_email_first'));
-        }
-    }
+        abort_if($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail(), 403, __('keyring::keyring.verify_email_first'));
 
-    protected function enrollable(string $key): Enrollable
-    {
-        $factor = $this->keyring->hasFactor($key) ? $this->keyring->factor($key) : null;
+        $factor = $this->keyring->factor($key);
 
         return $factor instanceof Enrollable ? $factor : abort(404);
     }
@@ -206,19 +201,5 @@ class AuthenticatorController
             ->whereMorphedTo('authenticatable', $request->user())
             ->findOrFail($id)
             ->setRelation('authenticatable', $request->user());
-    }
-
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    protected function respond(Request $request, array $data, string $status): mixed
-    {
-        if ($this->wantsJson($request)) {
-            return new JsonResponse(['status' => $status, ...$data]);
-        }
-
-        // Under keyring.result: flashing "keyring" itself would replace the
-        // session's verifications and registry ID, which live under keyring.*.
-        return back()->with('status', $status)->with('keyring.result', $data);
     }
 }

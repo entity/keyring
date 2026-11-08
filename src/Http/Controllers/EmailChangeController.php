@@ -6,13 +6,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Keyring\Changes\EmailChanges;
-use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Models\PendingChange;
 
 class EmailChangeController
 {
-    use ChoosesFormat;
+    use RespondsWithStatus;
 
     public function __construct(
         protected EmailChanges $changes,
@@ -23,7 +24,7 @@ class EmailChangeController
      * Ask to change the email. Always answers the same way, whether or not
      * the address belongs to someone else.
      */
-    public function store(Request $request): mixed
+    public function store(Request $request): StatusResponse
     {
         $validated = $request->validate([
             'email' => ['required', 'string', 'email', 'max:255'],
@@ -31,7 +32,7 @@ class EmailChangeController
 
         $this->changes->request($request->user(), $validated['email']);
 
-        return $this->respond($request, 'email-change-requested');
+        return $this->status('email-change-requested');
     }
 
     public function show(Request $request): JsonResponse
@@ -46,11 +47,11 @@ class EmailChangeController
         ]]);
     }
 
-    public function destroy(Request $request): mixed
+    public function destroy(Request $request): StatusResponse
     {
         $this->changes->cancel($request->user());
 
-        return $this->respond($request, 'email-change-cancelled');
+        return $this->status('email-change-cancelled');
     }
 
     /**
@@ -73,7 +74,7 @@ class EmailChangeController
      * Confirm from either address. Works signed out, since the link may open
      * in another browser.
      */
-    public function confirm(string $change, string $token): mixed
+    public function confirm(string $change, string $token): StatusResponse
     {
         $change = PendingChange::query()->findOrFail($change);
         $applied = $this->changes->confirm($change, $token);
@@ -85,21 +86,17 @@ class EmailChangeController
             default => 'email-change-invalid',
         };
 
-        return redirect($this->keyring->guard()->check() ? config('keyring.home') : route('login'))->with('status', $status);
+        return $this->status($status, redirect: $this->keyring->guard()->check() ? config('keyring.home') : route('login'));
     }
 
-    public function revert(string $change, string $token): mixed
+    public function revert(string $change, string $token): StatusResponse
     {
         $change = PendingChange::query()->findOrFail($change);
         $reverted = $this->changes->revert($change, $token);
 
         // Send them to reset their password, when the app has that flow.
-        return redirect()->route($reverted && Route::has('password.request') ? 'password.request' : 'login')
-            ->with('status', $reverted ? 'email-change-reverted' : 'email-change-invalid');
-    }
-
-    protected function respond(Request $request, string $status): mixed
-    {
-        return $this->wantsJson($request) ? new JsonResponse(['status' => $status]) : back()->with('status', $status);
+        return $reverted
+            ? $this->status('email-change-reverted', redirect: route(Route::has('password.request') ? 'password.request' : 'login'))
+            : $this->status('email-change-invalid', redirect: route('login'));
     }
 }

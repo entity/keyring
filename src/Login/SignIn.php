@@ -13,7 +13,7 @@ use Keyring\Events\Confirmed;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 
 /**
@@ -60,13 +60,27 @@ class SignIn
     public function confirm(Request $request, Attempt $attempt): void
     {
         $request->session()->regenerate();
-        $this->assurance->record($attempt->verifications);
+        $this->assurance->confirm($attempt->verifications);
         $this->sessions->elevate($request, $this->assurance->level());
 
-        // Keep Laravel's own password.confirm middleware happy too.
-        $request->session()->put('auth.password_confirmed_at', now()->getTimestamp());
-
         Confirmed::dispatch($attempt->user(), $attempt);
+    }
+
+    /**
+     * Sign the current user out of this session. Returns who it was.
+     */
+    public function out(Request $request): ?Authenticatable
+    {
+        $user = $this->keyring->guard()->user();
+
+        $this->sessions->end($request);
+        $this->keyring->guard()->logout();
+        $this->assurance->flush();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return $user;
     }
 
     /**

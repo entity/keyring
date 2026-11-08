@@ -73,3 +73,11 @@ it('does not count a security key as a way to sign in on its own', function () {
         ->deleteJson(route('keyring.authenticators.destroy', $passkey->id))
         ->assertUnprocessable();
 });
+
+it('never makes recovery codes the default', function () {
+    $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+        ->patchJson(route('keyring.authenticators.update', $codes->id), ['default' => true])
+        ->assertJsonValidationErrors('default');
+});

@@ -24,9 +24,11 @@ class RecoveryCodes extends Factor implements Enrollable
         protected int $count = 8,
     ) {}
 
+    public const KEY = 'recovery';
+
     public function key(): string
     {
-        return 'recovery';
+        return self::KEY;
     }
 
     /**

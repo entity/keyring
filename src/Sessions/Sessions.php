@@ -3,6 +3,7 @@
 namespace Keyring\Sessions;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Keyring\Contracts\SessionRegistry;
@@ -92,6 +93,31 @@ class Sessions
             'keyring.sessions.levels.'.strtolower($assurance->name).'.absolute',
             config('keyring.sessions.absolute', '30d'),
         ));
+    }
+
+    /**
+     * Sign the user out everywhere but the given session. Laravel keeps one
+     * remember token per user, so it's cycled too: every "remember me"
+     * cookie stops working.
+     */
+    public function revokeAll(Authenticatable $user, ?string $except = null): int
+    {
+        $count = $this->registry->revokeAll($user, $except);
+
+        $this->cycleRememberToken($user);
+
+        return $count;
+    }
+
+    public function cycleRememberToken(Authenticatable $user): void
+    {
+        if ($user->getRememberToken() !== null) {
+            $user->setRememberToken(Str::random(60));
+
+            if ($user instanceof Model) {
+                $user->save();
+            }
+        }
     }
 
     public function registry(): SessionRegistry

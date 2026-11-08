@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
@@ -19,7 +20,6 @@ use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
-use Keyring\Notifications\ResetPassword;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;

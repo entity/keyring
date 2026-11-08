@@ -3,7 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
 use Keyring\Models\Authenticator;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 

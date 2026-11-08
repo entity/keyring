@@ -11,15 +11,15 @@ use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Enums\Purpose;
 use Keyring\Events\LoggedOut;
 use Keyring\Http\Controllers\Concerns\RespondsToVerification;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\SignIn;
 use Keyring\Pipeline\Context;
-use Keyring\Session\SessionAssurance;
-use Keyring\Sessions\Sessions;
 
 class AuthenticatedSessionController
 {
-    use RespondsToVerification;
+    use RespondsToVerification, RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -30,7 +30,7 @@ class AuthenticatedSessionController
         return $this->keyring->render('login', [
             'canResetPassword' => Route::has('password.request'),
             'canRegister' => Route::has('register'),
-            'status' => $request->session()->get('status'),
+            'status' => $this->statusMessage($request),
         ]);
     }
 
@@ -39,7 +39,7 @@ class AuthenticatedSessionController
      */
     public function options(Request $request, string $factor): JsonResponse
     {
-        $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
+        $factor = $this->keyring->factor($factor);
 
         abort_unless($factor instanceof DiscoverableFactor && $factor->startsLogin(), 404);
 
@@ -51,7 +51,7 @@ class AuthenticatedSessionController
      */
     public function store(Request $request, AttemptStore $attempts, string $factor = 'password'): mixed
     {
-        $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
+        $factor = $this->keyring->factor($factor);
 
         abort_unless($factor instanceof PrimaryFactor && $factor->startsLogin(), 404);
 
@@ -60,18 +60,9 @@ class AuthenticatedSessionController
         return $this->verifyAndRespond(new Context($request, Purpose::Login, $factor));
     }
 
-    public function destroy(Request $request, SessionAssurance $assurance, Sessions $sessions): mixed
+    public function destroy(Request $request, SignIn $signIn): mixed
     {
-        $user = $this->keyring->guard()->user();
-
-        $sessions->end($request);
-        $this->keyring->guard()->logout();
-        $assurance->flush();
-
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
-        if ($user !== null) {
+        if ($user = $signIn->out($request)) {
             LoggedOut::dispatch($user);
         }
 

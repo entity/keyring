@@ -2,26 +2,24 @@
 
 namespace Keyring\Http\Controllers;
 
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
-use Keyring\Devices\DeviceManager;
+use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Events\PasswordChanged;
-use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
 
 class PasswordController
 {
-    use ChoosesFormat;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
-        protected DeviceManager $devices,
+        protected EmailChanges $emailChanges,
     ) {}
 
     /**
@@ -29,35 +27,32 @@ class PasswordController
      * session left open on a shared computer); passwordless users rely on the
      * fresh verification the route already requires.
      */
-    public function update(Request $request): mixed
+    public function update(Request $request): StatusResponse
     {
         $user = $request->user();
-        $hasPassword = filled($user->getAuthPassword());
 
         $validated = $request->validate([
-            'current_password' => $hasPassword ? ['required', 'string'] : ['nullable'],
+            'current_password' => filled($user->getAuthPassword())
+                ? ['required', 'string', 'current_password:'.config('keyring.guard')]
+                : ['nullable'],
             'password' => PasswordRules::for($user),
             'sign_out_others' => ['sometimes', 'boolean'],
         ]);
-
-        if ($hasPassword && ! Hash::check($validated['current_password'], $user->getAuthPassword())) {
-            throw ValidationException::withMessages(['current_password' => __('auth.password')]);
-        }
 
         $this->keyring->changing(fn () => $user->forceFill(['password' => Hash::make($validated['password'])])->save());
 
         $request->session()->regenerate();
 
+        // Whoever might know the old password shouldn't keep a change of
+        // address they started with it.
+        $this->emailChanges->cancel($user);
+
         if ($validated['sign_out_others'] ?? true) {
-            $this->sessions->registry()->revokeAll($user, except: $this->sessions->current($request)?->id);
-            $this->devices->cycleRememberToken($user);
-            app(EmailChanges::class)->cancel($user);
+            $this->sessions->revokeAll($user, except: $this->sessions->current($request)?->id);
         }
 
         PasswordChanged::dispatch($user);
 
-        return $this->wantsJson($request)
-            ? new JsonResponse(['status' => 'password-updated'])
-            : back()->with('status', 'password-updated');
+        return $this->status('password-updated');
     }
 }

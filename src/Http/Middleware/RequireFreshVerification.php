@@ -8,7 +8,7 @@ use Keyring\Enums\Category;
 use Keyring\KeyringManager;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\Duration;
 use Symfony\Component\HttpFoundation\Response;
 

@@ -26,6 +26,7 @@ use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
@@ -53,6 +54,9 @@ class KeyringManager
 
     /** @var class-string<Authenticator> */
     protected string $authenticatorModel = Authenticator::class;
+
+    /** @var class-string<Device> */
+    protected string $deviceModel = Device::class;
 
     /** @var list<string>|null Security emails to send, null for the config value. */
     protected ?array $notifications = null;
@@ -329,7 +333,7 @@ class KeyringManager
      */
     public function for(Authenticatable&Model $user): UserKeyring
     {
-        return new UserKeyring($user);
+        return $this->container->make(UserKeyring::class, ['user' => $user]);
     }
 
     public function username(): string
@@ -418,5 +422,23 @@ class KeyringManager
     public function authenticatorModel(): string
     {
         return $this->authenticatorModel;
+    }
+
+    /**
+     * @param  class-string<Device>  $model
+     */
+    public function useDeviceModel(string $model): static
+    {
+        $this->deviceModel = $model;
+
+        return $this;
+    }
+
+    /**
+     * @return class-string<Device>
+     */
+    public function deviceModel(): string
+    {
+        return $this->deviceModel;
     }
 }

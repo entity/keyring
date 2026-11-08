@@ -11,10 +11,11 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Contracts\LocatesIps;
-use Keyring\Contracts\SessionRegistry;
 use Keyring\Events\DeviceRevoked;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 
 /**
@@ -24,7 +25,7 @@ class DeviceManager
 {
     public function __construct(
         protected LocatesIps $locator,
-        protected SessionRegistry $sessions,
+        protected Sessions $sessions,
     ) {}
 
     /**
@@ -45,9 +46,9 @@ class DeviceManager
     {
         $token = $this->token($request);
 
-        return $token === null ? new EloquentCollection : Device::query()
+        return $token === null ? new EloquentCollection : Keyring::deviceModel()::query()
             ->where('token_hash', hash('sha256', $token))
-            ->whereNull('revoked_at')
+            ->active()
             ->get();
     }
 
@@ -69,7 +70,7 @@ class DeviceManager
                 $token = Str::random(40);
             }
 
-            $device = new Device(['token_hash' => hash('sha256', $token), 'first_seen_at' => now()]);
+            $device = Keyring::deviceModel()::make(['token_hash' => hash('sha256', $token), 'first_seen_at' => now()]);
             $device->authenticatable()->associate($user);
 
             $this->queueCookie($token);
@@ -100,8 +101,8 @@ class DeviceManager
         $device->forceFill(['revoked_at' => now(), 'trusted_until' => null])->save();
 
         if ($user = $device->user()) {
-            $this->sessions->revokeDevice($user, $device->id);
-            $this->cycleRememberToken($user);
+            $this->sessions->registry()->revokeDevice($user, $device->id);
+            $this->sessions->cycleRememberToken($user);
 
             DeviceRevoked::dispatch($user, $device, $reported);
         }
@@ -116,10 +117,10 @@ class DeviceManager
     public function list(Request $request, Authenticatable&Model $user): Collection
     {
         $current = $this->find($request, $user)?->id;
-        $sessions = $this->sessions->forUser($user)->groupBy(fn (RegisteredSession $session) => $session->deviceId);
+        $sessions = $this->sessions->registry()->forUser($user)->groupBy(fn (RegisteredSession $session) => $session->deviceId);
 
         return $this->query($user)
-            ->whereNull('revoked_at')
+            ->active()
             ->orderByDesc('last_seen_at')
             ->get()
             ->map(fn (Device $device) => [
@@ -133,21 +134,6 @@ class DeviceManager
                 'current' => $device->id === $current,
                 'sessions' => count($sessions->get($device->id, [])),
             ]);
-    }
-
-    /**
-     * Laravel has one remember token per user, so changing it signs out every
-     * "remember me" cookie at once.
-     */
-    public function cycleRememberToken(Authenticatable $user): void
-    {
-        if ($user->getRememberToken() !== null) {
-            $user->setRememberToken(Str::random(60));
-
-            if ($user instanceof Model) {
-                $user->save();
-            }
-        }
     }
 
     public function token(Request $request): ?string
@@ -177,8 +163,8 @@ class DeviceManager
     /**
      * @return Builder<Device>
      */
-    protected function query(Authenticatable&Model $user)
+    protected function query(Authenticatable&Model $user): Builder
     {
-        return Device::query()->whereMorphedTo('authenticatable', $user);
+        return Keyring::deviceModel()::query()->ownedBy($user);
     }
 }

@@ -3,14 +3,17 @@
 namespace Keyring\Risk;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\Container;
 use Keyring\Contracts\Signal;
+use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\RecentlyChangedRecovery;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\Sessions;
 
 /**
  * Runs signals and decides what to do about the result.
@@ -33,18 +36,34 @@ class RiskEngine
     /** @var (Closure(Risk, Checkpoint): Action)|null */
     protected ?Closure $responder = null;
 
+    /** @var list<Signal>|null */
+    protected ?array $resolved = null;
+
     public function __construct(
         protected Container $container,
     ) {}
 
     /**
+     * Replace the signals.
+     *
      * @param  list<class-string<Signal>|Signal>  $signals
      */
     public function signals(array $signals): static
     {
         $this->signals = $signals;
+        $this->resolved = null;
 
         return $this;
+    }
+
+    /**
+     * Add signals to the defaults.
+     *
+     * @param  class-string<Signal>|Signal  ...$signals
+     */
+    public function push(string|Signal ...$signals): static
+    {
+        return $this->signals([...$this->signals, ...$signals]);
     }
 
     /**
@@ -59,17 +78,10 @@ class RiskEngine
 
     public function assess(Assessment $assessment): Risk
     {
-        $findings = [];
-
-        foreach ($this->signals as $signal) {
-            $signal = $signal instanceof Signal ? $signal : $this->container->make($signal);
-
-            if (in_array($assessment->checkpoint, $signal->checkpoints(), true) && $finding = $signal->assess($assessment)) {
-                $findings[] = $finding;
-            }
-        }
-
-        return new Risk($findings);
+        return new Risk(array_values(array_filter(array_map(
+            fn (Signal $signal) => $signal->assess($assessment),
+            $this->signalsFor($assessment->checkpoint),
+        ))));
     }
 
     public function decide(Risk $risk, Checkpoint $checkpoint): Action
@@ -86,16 +98,40 @@ class RiskEngine
         };
     }
 
-    public function hasRequestSignals(): bool
+    /**
+     * Decide what to do about the risk and carry out the parts that don't
+     * depend on where we are: announce it, sign out everywhere, lock. The
+     * caller handles deny, step-up and re-authentication.
+     */
+    public function enforce(Authenticatable $user, Risk $risk, Checkpoint $checkpoint): Action
     {
-        foreach ($this->signals as $signal) {
-            $signal = $signal instanceof Signal ? $signal : $this->container->make($signal);
+        $action = $this->decide($risk, $checkpoint);
 
-            if (in_array(Checkpoint::Request, $signal->checkpoints(), true)) {
-                return true;
-            }
+        if ($action->doesSomething()) {
+            RiskAssessed::dispatch($user, $risk, $action, $checkpoint);
         }
 
-        return false;
+        if ($action->revokeSessions) {
+            $this->container->make(Sessions::class)->revokeAll($user);
+        }
+
+        if ($action->lockSeconds !== null) {
+            $this->container->make(RiskLocks::class)->lock($user, $action->lockSeconds);
+        }
+
+        return $action;
+    }
+
+    /**
+     * @return list<Signal>
+     */
+    public function signalsFor(Checkpoint $checkpoint): array
+    {
+        $this->resolved ??= array_map(
+            fn (string|Signal $signal) => $signal instanceof Signal ? $signal : $this->container->make($signal),
+            $this->signals,
+        );
+
+        return array_values(array_filter($this->resolved, fn (Signal $signal) => in_array($checkpoint, $signal->checkpoints(), true)));
     }
 }

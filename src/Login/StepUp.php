@@ -6,7 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Enums\Purpose;
 use Keyring\KeyringManager;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Symfony\Component\HttpFoundation\Response;
 
 /**

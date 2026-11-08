@@ -5,6 +5,7 @@ namespace Keyring\Events;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
 use Keyring\Risk\Action;
+use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Risk;
 
 /**
@@ -18,6 +19,6 @@ class RiskAssessed
         public readonly Authenticatable $user,
         public readonly Risk $risk,
         public readonly Action $action,
-        public readonly string $checkpoint,
+        public readonly Checkpoint $checkpoint,
     ) {}
 }

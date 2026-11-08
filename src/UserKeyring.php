@@ -19,7 +19,7 @@ use Keyring\Models\Authenticator;
 class UserKeyring
 {
     /** @var Collection<int, Authenticator>|null */
-    private ?Collection $authenticators = null;
+    protected ?Collection $authenticators = null;
 
     public function __construct(
         public readonly Authenticatable&Model $user,
@@ -94,12 +94,14 @@ class UserKeyring
     }
 
     /**
-     * The keyring as it would be without the given authenticator.
+     * The keyring as it would be without the given authenticators.
      */
-    public function without(Authenticator $authenticator): self
+    public function without(Authenticator ...$authenticators): static
     {
-        $keyring = new self($this->user);
-        $keyring->authenticators = $this->all()->reject(fn (Authenticator $other) => $other->id === $authenticator->id)->values();
+        $ids = array_map(fn (Authenticator $authenticator) => $authenticator->id, $authenticators);
+
+        $keyring = clone $this;
+        $keyring->authenticators = $this->all()->reject(fn (Authenticator $other) => in_array($other->id, $ids, true))->values();
 
         return $keyring;
     }
@@ -126,7 +128,7 @@ class UserKeyring
     /**
      * @return Collection<int, Authenticator>
      */
-    private function load(): Collection
+    protected function load(): Collection
     {
         $stored = Keyring::authenticatorModel()::query()
             ->whereMorphedTo('authenticatable', $this->user)

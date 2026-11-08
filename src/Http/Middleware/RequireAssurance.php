@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use Keyring\Enums\Assurance;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Symfony\Component\HttpFoundation\Response;
 
 /**

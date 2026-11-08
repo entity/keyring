@@ -3,7 +3,7 @@
 namespace Keyring\Risk\Signals;
 
 use Keyring\Contracts\Signal;
-use Keyring\Models\Device;
+use Keyring\Facades\Keyring;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
@@ -25,9 +25,9 @@ class NewCountry implements Signal
             return null;
         }
 
-        $known = Device::query()
-            ->whereMorphedTo('authenticatable', $assessment->user)
-            ->whereNull('revoked_at')
+        $known = Keyring::deviceModel()::query()
+            ->ownedBy($assessment->user)
+            ->active()
             ->pluck('location')
             ->map(fn (?array $location) => $location['country'] ?? null)
             ->filter();

@@ -3,7 +3,7 @@
 namespace Keyring\Risk\Signals;
 
 use Keyring\Contracts\Signal;
-use Keyring\Models\Device;
+use Keyring\Facades\Keyring;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
@@ -28,12 +28,12 @@ class ImpossibleTravel implements Signal
             return null;
         }
 
-        $last = Device::query()
-            ->whereMorphedTo('authenticatable', $assessment->user)
-            ->whereNotNull('last_seen_at')
+        $last = Keyring::deviceModel()::query()
+            ->ownedBy($assessment->user)
+            ->whereNotNull('location->latitude')
+            ->whereNotNull('location->longitude')
             ->latest('last_seen_at')
-            ->get()
-            ->first(fn (Device $device) => isset($device->location['latitude'], $device->location['longitude']));
+            ->first();
 
         if ($last === null) {
             return null;

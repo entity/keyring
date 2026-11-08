@@ -213,3 +213,13 @@ it('keeps recognising two accounts that share a browser', function () {
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 2);
     expect(Device::count())->toBe(2);
 });
+
+it('signs this session out when its own device is revoked', function () {
+    $token = deviceCookie(login());
+
+    $this->withCookie('keyring_device', $token)->withAssurance(Assurance::AAL1)
+        ->delete(route('keyring.devices.destroy', Device::sole()->id))
+        ->assertRedirect(route('login'));
+
+    $this->assertGuest();
+});

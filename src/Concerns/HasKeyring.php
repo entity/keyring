@@ -53,7 +53,7 @@ trait HasKeyring
      */
     public function devices(): MorphMany
     {
-        return $this->morphMany(Device::class, 'authenticatable');
+        return $this->morphMany(Keyring::deviceModel(), 'authenticatable');
     }
 
     /**

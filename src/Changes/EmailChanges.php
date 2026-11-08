@@ -8,18 +8,19 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
-use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Category;
+use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EmailChanged;
 use Keyring\Events\EmailChangeRequested;
 use Keyring\Events\EmailChangeReverted;
 use Keyring\KeyringManager;
 use Keyring\Login\Verification;
+use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
-use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 
@@ -41,7 +42,6 @@ class EmailChanges
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
-        protected DeviceManager $devices,
         protected SessionAssurance $assurance,
     ) {}
 
@@ -107,19 +107,21 @@ class EmailChanges
                 return false;
             }
 
-            match (true) {
-                hash_equals($change->confirm_token, $hash) => $change->confirmed_at ??= now(),
-                $change->current_token !== null && hash_equals($change->current_token, $hash) => $change->current_confirmed_at ??= now(),
-                default => null,
-            };
+            if (hash_equals($change->confirm_token, $hash)) {
+                $change->confirmed_at ??= now();
+            } elseif ($change->current_token !== null && hash_equals($change->current_token, $hash)) {
+                $change->current_confirmed_at ??= now();
+            }
 
             $change->save();
 
             return $change->isReady() && $this->apply($change);
         });
 
-        if ($applied && ($user = $change->fresh()?->user())) {
-            EmailChanged::dispatch($user, $change->fresh());
+        $change = $change->fresh();
+
+        if ($applied && ($user = $change?->user())) {
+            EmailChanged::dispatch($user, $change);
         }
 
         return $applied;
@@ -165,10 +167,15 @@ class EmailChanges
                 // links must not be able to move the address away again.
                 $this->closeLaterChanges($user, $change);
 
+                // One by one, so each removal is logged and announced.
                 $this->keyring->authenticatorModel()::query()
                     ->whereMorphedTo('authenticatable', $user)
                     ->where('created_at', '>=', $change->created_at)
-                    ->delete();
+                    ->get()
+                    ->each(function (Authenticator $authenticator) use ($user) {
+                        $authenticator->delete();
+                        AuthenticatorRemoved::dispatch($user, $authenticator);
+                    });
             }
 
             return true;
@@ -177,8 +184,7 @@ class EmailChanges
         $user = $change->fresh()?->user();
 
         if ($reverted && $user !== null) {
-            $this->sessions->registry()->revokeAll($user);
-            $this->devices->cycleRememberToken($user);
+            $this->sessions->revokeAll($user);
 
             EmailChangeReverted::dispatch($user, $change->fresh());
         }

@@ -166,7 +166,7 @@ class RecordSecurityEvents
     public function riskAssessed(Events\RiskAssessed $event): void
     {
         $this->log->record('risk_'.$event->action->name(), $event->user, meta: [
-            'checkpoint' => $event->checkpoint,
+            'checkpoint' => $event->checkpoint->value,
             'score' => $event->risk->score,
             'reasons' => $event->risk->reasons(),
         ]);
