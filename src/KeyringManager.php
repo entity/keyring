@@ -3,6 +3,7 @@
 namespace Keyring;
 
 use Closure;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\Auth\UserProvider;
@@ -12,6 +13,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use InvalidArgumentException;
 use Keyring\Activity\SecurityLog;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
@@ -114,18 +116,35 @@ class KeyringManager
         if ($this->resolvedFactors === null) {
             $this->resolvedFactors = [];
 
-            foreach ([...$this->factorDefinitions, ...array_values($this->extensions)] as $definition) {
-                $factor = match (true) {
-                    $definition instanceof Factor => $definition,
-                    $definition instanceof Closure => $definition($this->container),
-                    default => $this->container->make($definition),
-                };
-
+            foreach ($this->factorDefinitions as $definition) {
+                $factor = $this->resolveFactor($definition);
                 $this->resolvedFactors[$factor->key()] = $factor;
+            }
+
+            foreach ($this->extensions as $key => $resolver) {
+                $factor = $this->resolveFactor($resolver);
+
+                if ($factor->key() !== $key) {
+                    throw new InvalidArgumentException("Factor registered as [{$key}] reports the key [{$factor->key()}].");
+                }
+
+                $this->resolvedFactors[$key] = $factor;
             }
         }
 
         return new Collection($this->resolvedFactors);
+    }
+
+    /**
+     * @param  class-string<Factor>|Factor|Closure(Container): Factor  $definition
+     */
+    protected function resolveFactor(string|Factor|Closure $definition): Factor
+    {
+        return match (true) {
+            $definition instanceof Factor => $definition,
+            $definition instanceof Closure => $definition($this->container),
+            default => $this->container->make($definition),
+        };
     }
 
     /**
@@ -319,6 +338,19 @@ class KeyringManager
     public function guard(): StatefulGuard
     {
         return Auth::guard(config('keyring.guard'));
+    }
+
+    /**
+     * The user signed in to Keyring's guard. Step-up middleware may sit
+     * behind an app's own auth middleware, so it never relies on the default.
+     *
+     * @throws AuthenticationException
+     */
+    public function user(): Authenticatable&Model
+    {
+        $user = $this->guard()->user();
+
+        return $user instanceof Model ? $user : throw new AuthenticationException(guards: [config('keyring.guard')]);
     }
 
     public function provider(?string $guard = null): UserProvider

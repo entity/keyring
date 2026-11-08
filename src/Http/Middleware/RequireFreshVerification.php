@@ -29,7 +29,7 @@ class RequireFreshVerification
     public function handle(Request $request, Closure $next, string $window = '15m'): Response
     {
         $since = now()->getTimestamp() - Duration::seconds($window);
-        $requirement = $this->requirement($request);
+        $requirement = $this->requirement();
 
         if ($requirement->isMetBy($this->assurance->since($since))) {
             return $next($request);
@@ -43,11 +43,9 @@ class RequireFreshVerification
      * stolen session plus a phished password could add new factors without
      * ever touching the existing ones.
      */
-    protected function requirement(Request $request): Requirement
+    protected function requirement(): Requirement
     {
-        $user = $request->user();
-
-        return $user !== null && $this->keyring->for($user)->has(Category::Possession)
+        return $this->keyring->for($this->keyring->user())->has(Category::Possession)
             ? Requirement::aal1()->including(Category::Possession)
             : Requirement::aal1();
     }

@@ -28,7 +28,7 @@ class StepUp
     {
         // Without the sign-in methods to meet it, confirming can't help, and
         // would only send the user round in a loop.
-        abort_unless($this->keyring->for($request->user())->canMeet($requirement), 403, __('keyring::keyring.needs_factor'));
+        abort_unless($this->keyring->for($this->keyring->user())->canMeet($requirement), 403, __('keyring::keyring.needs_factor'));
 
         $this->begin($request, $requirement, $building);
 
@@ -48,7 +48,7 @@ class StepUp
     {
         return $this->attempts->start(
             Purpose::Confirm,
-            $request->user(),
+            $this->keyring->user(),
             requirement: $requirement,
             verifications: $building ? $this->assurance->all() : [],
         );
