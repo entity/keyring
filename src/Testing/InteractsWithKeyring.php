@@ -3,6 +3,7 @@
 namespace Keyring\Testing;
 
 use DateTimeInterface;
+use Illuminate\Support\Timebox;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Login\Verification;
@@ -18,6 +19,15 @@ trait InteractsWithKeyring
     protected Assurance $keyringAssurance = Assurance::AAL1;
 
     protected ?DateTimeInterface $keyringVerifiedAt = null;
+
+    /**
+     * Laravel calls this for every test using the trait. Failed checks are
+     * slowed down to hide timing in production; tests shouldn't wait.
+     */
+    protected function setUpInteractsWithKeyring(): void
+    {
+        $this->app->bind(Timebox::class, InstantTimebox::class);
+    }
 
     /**
      * Pretend the signed-in user reached this assurance level.

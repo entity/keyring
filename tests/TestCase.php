@@ -3,9 +3,7 @@
 namespace Keyring\Tests;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Timebox;
 use Keyring\KeyringServiceProvider;
-use Keyring\Testing\InstantTimebox;
 use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -32,13 +30,6 @@ abstract class TestCase extends Orchestra
     {
         $this->loadMigrationsFrom(__DIR__.'/database/migrations');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        $this->app->bind(Timebox::class, InstantTimebox::class);
     }
 
     /**

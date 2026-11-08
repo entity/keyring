@@ -17,8 +17,6 @@ Keyring ships helpers in `Keyring\Testing` so your tests can exercise your app's
 A few settings keep tests fast and offline. In your base `TestCase`:
 
 ```php
-use Illuminate\Support\Timebox;
-use Keyring\Testing\InstantTimebox;
 use Keyring\Testing\InteractsWithKeyring;
 
 abstract class TestCase extends BaseTestCase
@@ -29,14 +27,13 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
-        // Failed factor checks normally take at least 250ms.
-        $this->app->bind(Timebox::class, InstantTimebox::class);
-
         // Don't check new passwords against the breach list over the network.
         config(['keyring.passwords.uncompromised' => false]);
     }
 }
 ```
+
+`InteractsWithKeyring` also swaps in an instant timebox, so failed factor checks don't wait the usual 250ms.
 
 Keyring doesn't swap the timebox for you, so without the binding every failed verification in your tests waits for the full `timebox`.
 
