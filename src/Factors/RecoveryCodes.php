@@ -14,6 +14,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Support\KeyedHash;
+use ParagonIE\ConstantTime\Base32;
 
 /**
  * Single-use codes the user saved when setting up their first second factor.
@@ -122,8 +123,10 @@ class RecoveryCodes extends Factor implements Enrollable
      */
     public function generate(): array
     {
+        // 120 random bits each (ASVS asks for 112), as lowercase base32 in
+        // groups of four: xxxx-xxxx-xxxx-xxxx-xxxx-xxxx.
         $codes = array_map(
-            fn () => Str::lower(Str::random(5).'-'.Str::random(5)),
+            fn () => implode('-', str_split(Str::lower(Base32::encodeUnpadded(random_bytes(15))), 4)),
             range(1, $this->count),
         );
 

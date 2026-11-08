@@ -48,3 +48,19 @@ it('keeps recovery codes working after APP_KEY is rotated', function () {
 
     expect(Keyring::factor('recovery')->verify($this->attempt, Authenticator::find($id), Request::create('/', 'POST', ['code' => 'aaaaa-11111'])))->not->toBeNull();
 });
+
+it('makes recovery codes with 120 random bits each, and still takes older shorter ones', function () {
+    ['codes' => $codes, 'secret' => $secret] = Keyring::factor('recovery')->generate();
+
+    expect($codes)->each->toMatch('/^[a-z2-7]{4}(-[a-z2-7]{4}){5}$/')
+        ->and(array_unique($codes))->toHaveCount(count($codes));
+
+    $new = Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'recovery', 'secret' => $secret]);
+    $typed = strtoupper(str_replace('-', ' ', $codes[0]));
+
+    expect(Keyring::factor('recovery')->verify($this->attempt, $new, Request::create('/', 'POST', ['code' => $typed])))->not->toBeNull();
+
+    $old = Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($this->user, 'authenticatable')->create();
+
+    expect(Keyring::factor('recovery')->verify($this->attempt, $old, Request::create('/', 'POST', ['code' => 'aaaaa-11111'])))->not->toBeNull();
+});
