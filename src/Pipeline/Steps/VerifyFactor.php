@@ -9,6 +9,7 @@ use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
 use Keyring\Login\Attempt;
+use Keyring\Login\AttemptStore;
 use Keyring\Pipeline\Context;
 
 /**
@@ -19,6 +20,7 @@ class VerifyFactor
 {
     public function __construct(
         protected Container $container,
+        protected AttemptStore $attempts,
     ) {}
 
     public function handle(Context $context, Closure $next): Context
@@ -51,6 +53,11 @@ class VerifyFactor
 
         if ($context->verification === null) {
             FactorFailed::dispatch($context->attempt, $context->authenticator, $context->factor->key(), $context->request);
+
+            // Keep factor state, like a code's remaining guesses.
+            if (! $context->identifying && $context->attempt !== null) {
+                $this->attempts->save($context->attempt);
+            }
 
             return $context->fail();
         }

@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Keyring\Http\Controllers\AuthenticatedSessionController;
+use Keyring\Http\Controllers\AuthenticatorController;
 use Keyring\Http\Controllers\ChallengeController;
 
 $guard = config('keyring.guard');
@@ -13,12 +14,21 @@ Route::middleware('guest:'.$guard)->group(function () {
     Route::prefix('/login/challenge')->name('keyring.login.')->group(function () {
         Route::get('/{factor?}', [ChallengeController::class, 'show'])->name('challenge');
         Route::post('/{factor}', [ChallengeController::class, 'verify'])->name('verify');
+        Route::post('/{factor}/send', [ChallengeController::class, 'send'])->name('send');
     });
 });
 
 Route::middleware('auth:'.$guard)->prefix('/confirm')->name('keyring.confirm.')->group(function () {
     Route::get('/{factor?}', [ChallengeController::class, 'show'])->name('challenge');
     Route::post('/{factor}', [ChallengeController::class, 'verify'])->name('verify');
+    Route::post('/{factor}/send', [ChallengeController::class, 'send'])->name('send');
+});
+
+Route::middleware(config('keyring.manage_middleware'))->prefix('/user/authenticators')->name('keyring.authenticators.')->group(function () {
+    Route::post('/{factor}', [AuthenticatorController::class, 'store'])->name('store');
+    Route::post('/{factor}/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:6,1')->name('confirm');
+    Route::patch('/{authenticator}', [AuthenticatorController::class, 'update'])->name('update');
+    Route::delete('/{authenticator}', [AuthenticatorController::class, 'destroy'])->name('destroy');
 });
 
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])

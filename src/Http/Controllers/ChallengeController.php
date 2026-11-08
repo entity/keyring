@@ -2,10 +2,14 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Cache\RateLimiter;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
 use Keyring\Http\Controllers\Concerns\RespondsToVerification;
@@ -75,6 +79,40 @@ class ChallengeController
         ]);
     }
 
+    /**
+     * Send a code for factors that need one. Separate from viewing the page,
+     * so prefetching or reloading never sends anything.
+     */
+    public function send(Request $request, RateLimiter $limiter, string $factor): mixed
+    {
+        $purpose = $this->purpose($request);
+        $attempt = $this->attempts->current($purpose);
+
+        if ($attempt === null) {
+            return $this->expired($purpose);
+        }
+
+        $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
+        abort_unless($factor instanceof SendsCodes, 404);
+
+        $authenticator = $this->authenticatorFor($request, $attempt, $factor->key());
+        $key = 'keyring-send:'.$attempt->id;
+
+        if ($authenticator === null || $limiter->tooManyAttempts($key, 3)) {
+            throw ValidationException::withMessages([
+                'code' => __('auth.throttle', ['seconds' => $limiter->availableIn($key), 'minutes' => ceil($limiter->availableIn($key) / 60)]),
+            ]);
+        }
+
+        $limiter->hit($key, 600);
+        $factor->send($attempt, $authenticator);
+        $this->attempts->save($attempt);
+
+        return $request->expectsJson() && ! $request->hasHeader('X-Inertia')
+            ? new JsonResponse(['status' => 'code-sent'])
+            : back()->with('status', 'code-sent');
+    }
+
     public function verify(Request $request, string $factor): mixed
     {
         $purpose = $this->purpose($request);
@@ -85,13 +123,22 @@ class ChallengeController
         }
 
         $factor = $this->keyring->hasFactor($factor) ? $this->keyring->factor($factor) : abort(404);
-        $options = $attempt->options()->where('factor', $factor->key());
-
-        $authenticator = $options->first(
-            fn (Authenticator $option) => $option->id === ($request->input('authenticator') ?? $attempt->presented($factor->key())),
-        ) ?? ($options->count() === 1 ? $options->first() : null);
+        $authenticator = $this->authenticatorFor($request, $attempt, $factor->key());
 
         return $this->verifyAndRespond(new Context($request, $purpose, $factor, $attempt, $authenticator));
+    }
+
+    /**
+     * The authenticator a request is aimed at: the one it names, the one the
+     * page showed, or the only one of that factor.
+     */
+    protected function authenticatorFor(Request $request, Attempt $attempt, string $factor): ?Authenticator
+    {
+        $options = $attempt->options()->where('factor', $factor);
+
+        return $options->first(
+            fn (Authenticator $option) => $option->id === ($request->input('authenticator') ?? $attempt->presented($factor)),
+        ) ?? ($options->count() === 1 ? $options->first() : null);
     }
 
     /**
