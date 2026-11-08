@@ -101,7 +101,7 @@ class ChallengeController
 
         // Three codes per sign in attempt every ten minutes.
         if (! $limiter->attempt($key, 3, fn () => $factor->send($attempt, $authenticator), 600)) {
-            Throttle::fail('code', $limiter->availableIn($key));
+            throw Throttle::exception('code', $limiter->availableIn($key));
         }
 
         $this->attempts->save($attempt);

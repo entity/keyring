@@ -14,6 +14,6 @@ class LockoutResponse implements LockoutResponseContract
 
     public function toResponse($request)
     {
-        Throttle::fail($this->context->errorKey(), $this->context->retryAfter);
+        throw Throttle::exception($this->context->errorKey(), $this->context->retryAfter);
     }
 }
