@@ -10,6 +10,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Exceptions\AttemptExpired;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Models\Device;
 use Keyring\UserKeyring;
 
 /**
@@ -32,6 +33,14 @@ final class Attempt
     private (Authenticatable&Model)|null $resolvedUser = null;
 
     private ?UserKeyring $resolvedKeyring = null;
+
+    /** Whether the user asked not to be asked again on this device. */
+    public bool $trustDevice = false;
+
+    /** The known device this attempt comes from, null for a new device. */
+    public private(set) ?string $deviceId = null;
+
+    public private(set) bool $deviceResolved = false;
 
     /**
      * @param  list<Verification>  $verifications
@@ -86,6 +95,25 @@ final class Attempt
         }
 
         return $this->resolvedUser;
+    }
+
+    public function resolveDevice(?string $deviceId): void
+    {
+        $this->deviceId = $deviceId;
+        $this->deviceResolved = true;
+    }
+
+    /**
+     * The device this attempt comes from, if it's been seen before.
+     */
+    public function device(): ?Device
+    {
+        return $this->deviceId === null ? null : Device::find($this->deviceId);
+    }
+
+    public function isNewDevice(): bool
+    {
+        return $this->deviceResolved && $this->deviceId === null;
     }
 
     public function keyring(): UserKeyring
@@ -165,6 +193,7 @@ final class Attempt
             'requirement' => $this->requirement?->toArray(),
             'state' => $this->state,
             'presented' => $this->presented,
+            'device' => ['id' => $this->deviceId, 'resolved' => $this->deviceResolved, 'trust' => $this->trustDevice],
         ];
     }
 
@@ -173,7 +202,7 @@ final class Attempt
      */
     public static function fromArray(array $data): self
     {
-        return new self(
+        $attempt = new self(
             id: $data['id'],
             purpose: Purpose::from($data['purpose']),
             guard: $data['guard'],
@@ -185,5 +214,11 @@ final class Attempt
             state: $data['state'],
             presented: $data['presented'],
         );
+
+        $attempt->deviceId = $data['device']['id'] ?? null;
+        $attempt->deviceResolved = $data['device']['resolved'] ?? false;
+        $attempt->trustDevice = $data['device']['trust'] ?? false;
+
+        return $attempt;
     }
 }

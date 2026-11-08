@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use Keyring\Pipeline\Steps\CompleteAttempt;
 use Keyring\Pipeline\Steps\DetermineRequirement;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
+use Keyring\Pipeline\Steps\ResolveDevice;
 use Keyring\Pipeline\Steps\VerifyFactor;
 
 /**
@@ -26,6 +27,7 @@ final class Steps
         return new self([
             EnsureNotThrottled::class,
             VerifyFactor::class,
+            ResolveDevice::class,
             DetermineRequirement::class,
             CompleteAttempt::class,
         ]);

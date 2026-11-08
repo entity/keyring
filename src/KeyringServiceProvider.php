@@ -3,15 +3,21 @@
 namespace Keyring;
 
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Http\Middleware\AuthenticateSession;
+use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Login\AttemptStore;
 use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\WebAuthn\Ceremonies;
 
 class KeyringServiceProvider extends ServiceProvider
@@ -33,6 +39,9 @@ class KeyringServiceProvider extends ServiceProvider
 
         $this->app->singleton(KeyringManager::class);
         $this->app->singleton(Ceremonies::class);
+        $this->app->singleton(SessionRegistryManager::class);
+        $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
+        $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
 
         $this->app->scoped(AttemptStore::class, fn (Application $app) => new AttemptStore($app['session.store']));
         $this->app->scoped(EnrollmentStore::class, fn (Application $app) => new EnrollmentStore($app['session.store']));
@@ -46,6 +55,11 @@ class KeyringServiceProvider extends ServiceProvider
         $router = $this->app['router'];
         $router->aliasMiddleware('keyring', RequireAssurance::class);
         $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);
+        $router->aliasMiddleware('keyring.session', AuthenticateSession::class);
+
+        if (config('keyring.sessions.middleware')) {
+            $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);
+        }
 
         if (config('keyring.routes')) {
             $this->registerRoutes();
@@ -71,7 +85,7 @@ class KeyringServiceProvider extends ServiceProvider
         Route::group([
             'prefix' => config('keyring.prefix'),
             'domain' => config('keyring.domain'),
-            'middleware' => config('keyring.middleware'),
+            'middleware' => [...config('keyring.middleware'), PreventCaching::class],
         ], function () {
             $this->loadRoutesFrom(__DIR__.'/../routes/keyring.php');
         });

@@ -11,6 +11,12 @@ class LogoutResponse implements LogoutResponseContract
 
     public function toResponse($request)
     {
-        return $this->wantsJson($request) ? new Response(status: 204) : redirect('/');
+        $response = $this->wantsJson($request) ? new Response(status: 204) : redirect('/');
+
+        // Not "cookies": that would also clear the device cookie and make the
+        // next sign in look like a new device. The session itself is gone.
+        $response->headers->set('Clear-Site-Data', '"cache", "storage"');
+
+        return $response;
     }
 }

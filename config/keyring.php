@@ -1,5 +1,7 @@
 <?php
 
+use Keyring\Devices\NullLocator;
+
 return [
 
     /*
@@ -75,6 +77,49 @@ return [
     */
 
     'manage_middleware' => ['auth', 'keyring.fresh:15m'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Devices
+    |--------------------------------------------------------------------------
+    |
+    | Devices are recognised by a long-lived cookie. "trust_for" enables the
+    | "don't ask again on this device" option (set to null to turn it off).
+    | A trusted device is only an input to your policy, never a factor.
+    |
+    */
+
+    'devices' => [
+        'cookie' => 'keyring_device',
+        'trust_for' => '30d',
+        'locator' => NullLocator::class,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sessions
+    |--------------------------------------------------------------------------
+    |
+    | Keyring keeps its own registry of signed-in sessions so they can be
+    | listed and revoked on any session driver. Drivers: "database" (the
+    | keyring_sessions table) or "cache" (any persistent cache store).
+    |
+    | Timeouts accept "30m", "12h", "30d"... "idle" null leaves inactivity to
+    | Laravel's session lifetime. Levels can override them, e.g.
+    | 'levels' => ['aal3' => ['idle' => '15m', 'absolute' => '8h']].
+    |
+    */
+
+    'sessions' => [
+        'driver' => env('KEYRING_SESSION_DRIVER', 'database'),
+        'connection' => null,
+        'table' => 'keyring_sessions',
+        'store' => null,
+        'idle' => null,
+        'absolute' => '30d',
+        'levels' => [],
+        'middleware' => true,
+    ],
 
     /*
     |--------------------------------------------------------------------------

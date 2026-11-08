@@ -75,6 +75,7 @@ class ChallengeController
                 ->map(fn (Authenticator $option) => $option->factor()->present($option))
                 ->values()
                 ->all(),
+            'canTrustDevice' => $purpose === Purpose::Login && config('keyring.devices.trust_for') !== null,
             'expiresAt' => date(DATE_ATOM, $attempt->expiresAt),
         ]);
     }

@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Keyring\Http\Controllers\AuthenticatedSessionController;
 use Keyring\Http\Controllers\AuthenticatorController;
 use Keyring\Http\Controllers\ChallengeController;
+use Keyring\Http\Controllers\DeviceController;
 
 $guard = config('keyring.guard');
 
@@ -38,6 +39,17 @@ Route::middleware(config('keyring.manage_middleware'))->prefix('/user/authentica
     Route::patch('/{authenticator}', [AuthenticatorController::class, 'update'])->name('update');
     Route::delete('/{authenticator}', [AuthenticatorController::class, 'destroy'])->name('destroy');
 });
+
+Route::middleware(config('keyring.manage_middleware'))->prefix('/user/devices')->name('keyring.devices.')->group(function () {
+    Route::delete('/', [DeviceController::class, 'destroyOthers'])->name('destroy-others');
+    Route::delete('/{device}', [DeviceController::class, 'destroy'])->name('destroy');
+});
+
+Route::get('/user/devices', [DeviceController::class, 'index'])->middleware('auth:'.$guard)->name('keyring.devices.index');
+
+Route::get('/devices/{device}/report', [DeviceController::class, 'report'])
+    ->middleware(['signed', 'throttle:6,1'])
+    ->name('keyring.devices.report');
 
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth:'.$guard)

@@ -1,0 +1,35 @@
+<?php
+
+namespace Keyring\Sessions;
+
+use Illuminate\Support\Manager;
+use Keyring\Contracts\SessionRegistry;
+
+/**
+ * Picks the session registry driver. Add your own with
+ * app(SessionRegistryManager::class)->extend('name', fn ($app) => ...).
+ *
+ * @mixin SessionRegistry
+ */
+class SessionRegistryManager extends Manager
+{
+    public function getDefaultDriver(): string
+    {
+        return $this->config->get('keyring.sessions.driver', 'database');
+    }
+
+    protected function createDatabaseDriver(): SessionRegistry
+    {
+        return new DatabaseSessionRegistry(
+            $this->container['db']->connection($this->config->get('keyring.sessions.connection')),
+            $this->config->get('keyring.sessions.table', 'keyring_sessions'),
+        );
+    }
+
+    protected function createCacheDriver(): SessionRegistry
+    {
+        return new CacheSessionRegistry(
+            $this->container['cache']->store($this->config->get('keyring.sessions.store')),
+        );
+    }
+}

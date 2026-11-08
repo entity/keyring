@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Models\Device;
 use Keyring\UserKeyring;
 
 /**
@@ -21,6 +22,14 @@ trait HasKeyring
     public function authenticators(): MorphMany
     {
         return $this->morphMany(Keyring::authenticatorModel(), 'authenticatable');
+    }
+
+    /**
+     * @return MorphMany<Device, $this>
+     */
+    public function devices(): MorphMany
+    {
+        return $this->morphMany(Device::class, 'authenticatable');
     }
 
     /**

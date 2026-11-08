@@ -15,6 +15,7 @@ use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
 use Keyring\Pipeline\Context;
 use Keyring\Session\SessionAssurance;
+use Keyring\Sessions\Sessions;
 
 class AuthenticatedSessionController
 {
@@ -58,10 +59,11 @@ class AuthenticatedSessionController
         return $this->verifyAndRespond(new Context($request, Purpose::Login, $factor));
     }
 
-    public function destroy(Request $request, SessionAssurance $assurance): mixed
+    public function destroy(Request $request, SessionAssurance $assurance, Sessions $sessions): mixed
     {
         $user = $this->keyring->guard()->user();
 
+        $sessions->end($request);
         $this->keyring->guard()->logout();
         $assurance->flush();
 
