@@ -176,10 +176,16 @@ class Ceremonies
 
     /**
      * An opaque, stable handle for the user. Never their real ID or email.
+     * Taken from a key they already have, so one added after APP_KEY was
+     * rotated doesn't show up as another account in their password manager.
      */
-    public function userHandle(Authenticatable $user): string
+    public function userHandle(Authenticatable&Model $user): string
     {
-        return KeyedHash::make('keyring|'.$user->getAuthIdentifier());
+        $existing = Keyring::authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
+
+        return $existing === null
+            ? KeyedHash::make('keyring|'.$user->getAuthIdentifier())
+            : $this->fromJson($existing, CredentialRecord::class)->userHandle;
     }
 
     public function relyingPartyId(): string
