@@ -6,10 +6,12 @@ use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\ProtectionBypassed;
 use Keyring\Exceptions\ProtectedAttributeException;
+use Keyring\Features;
 
 /**
- * The user attributes (email and password by default) that may only change
- * through Keyring's flows, and the flows allowed to change them right now.
+ * The user attributes (the password and email, once Keyring handles
+ * changing them) that may only change through Keyring's flows, and the flows
+ * allowed to change them right now.
  */
 class ProtectedAttributes
 {
@@ -22,11 +24,18 @@ class ProtectedAttributes
     protected array $flows = [];
 
     /**
+     * The password once Keyring handles changing it, the email once Keyring
+     * handles changing that, plus any the app lists.
+     *
      * @return list<string>
      */
     public function all(): array
     {
-        return config('keyring.protected', ['email', 'password']);
+        return array_values(array_unique([
+            ...Features::enabled(Features::updatePasswords()) ? ['password'] : [],
+            ...Features::enabled(Features::emailChanges()) ? ['email'] : [],
+            ...config('keyring.protected', []),
+        ]));
     }
 
     /**

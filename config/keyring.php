@@ -1,6 +1,7 @@
 <?php
 
 use Keyring\Devices\NullLocator;
+use Keyring\Features;
 
 return [
 
@@ -24,15 +25,21 @@ return [
     | Features
     |--------------------------------------------------------------------------
     |
-    | Turn off flows your app handles itself. Sign in, challenges, step-up,
-    | authenticators, devices and protected changes are always on.
+    | Signing in and out, challenges and step-up are always on. Add the rest
+    | as your app needs them. Each one brings its routes, and anything else
+    | it needs, only once it's here.
     |
     */
 
     'features' => [
-        'registration' => true,
-        'password_reset' => true,
-        'email_verification' => true,
+        Features::registration(),
+        Features::resetPasswords(),
+        // Features::emailVerification(),
+        // Features::updatePasswords(),
+        // Features::manageAuthenticators(),
+        // Features::devices(),
+        // Features::emailChanges(),
+        // Features::securityLog(),
     ],
 
     /*
@@ -158,13 +165,14 @@ return [
     | Protected Attributes
     |--------------------------------------------------------------------------
     |
-    | These user attributes can only change through Keyring's flows (email
-    | change with confirmation, password change, password reset). Anything
-    | else throws, unless wrapped in Keyring::withoutProtection().
+    | Attributes that may only change through Keyring's flows: anything else
+    | throws, unless wrapped in Keyring::withoutProtection(). The password is
+    | added with Features::updatePasswords(), the email with
+    | Features::emailChanges(). List any others here.
     |
     */
 
-    'protected' => ['email', 'password'],
+    'protected' => [],
 
     'email_changes' => [
         'expire' => '24h',
@@ -218,13 +226,13 @@ return [
     | Security Log
     |--------------------------------------------------------------------------
     |
-    | Sign ins, failures, lockouts, changes and automatic actions are logged to
-    | keyring_events. Prune with `php artisan model:prune`.
+    | With Features::securityLog(), sign ins, failures, lockouts, changes and
+    | automatic actions are logged to keyring_events. Prune with
+    | `php artisan model:prune`.
     |
     */
 
     'events' => [
-        'enabled' => true,
         'keep_for' => '180d',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).

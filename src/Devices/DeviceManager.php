@@ -12,13 +12,15 @@ use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Events\DeviceRevoked;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Models\Device;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 
 /**
- * Recognises devices by a long-lived, httpOnly cookie (stored hashed).
+ * Recognises devices by a long-lived, httpOnly cookie (stored hashed), with
+ * Features::devices(). Without it, no device is ever recorded or found.
  */
 class DeviceManager
 {
@@ -42,7 +44,7 @@ class DeviceManager
      */
     public function forBrowser(Request $request): EloquentCollection
     {
-        $token = $this->token($request);
+        $token = Features::enabled(Features::devices()) ? $this->token($request) : null;
 
         return $token === null ? new EloquentCollection : Keyring::deviceModel()::query()
             ->withToken($token)
@@ -51,12 +53,17 @@ class DeviceManager
     }
 
     /**
-     * Record a sign in from this browser. Returns the device and whether it's new.
+     * Record a sign in from this browser. Returns the device and whether it's
+     * new, or no device when the feature is off.
      *
-     * @return array{0: Device, 1: bool}
+     * @return array{0: ?Device, 1: bool}
      */
     public function signIn(Request $request, Authenticatable&Model $user, bool $trust = false): array
     {
+        if (! Features::enabled(Features::devices())) {
+            return [null, false];
+        }
+
         $device = $this->find($request, $user);
         $new = $device === null;
 

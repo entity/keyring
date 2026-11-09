@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Keyring\Devices\UserAgent;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Models\SecurityEvent;
 
 /**
@@ -17,10 +18,16 @@ use Keyring\Models\SecurityEvent;
 class SecurityLog
 {
     /**
+     * Log an event, with Features::securityLog(). Without it, nothing is kept.
+     *
      * @param  array<string, mixed>  $meta
      */
-    public function record(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = []): SecurityEvent
+    public function record(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = []): ?SecurityEvent
     {
+        if (! Features::enabled(Features::securityLog())) {
+            return null;
+        }
+
         $model = Keyring::securityEventModel();
         $event = new $model([
             'type' => $type,

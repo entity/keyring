@@ -37,7 +37,6 @@ use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Support\Duration;
-use Keyring\Support\Features;
 use Keyring\Support\Url;
 use Keyring\WebAuthn\Ceremonies;
 
@@ -129,10 +128,7 @@ class KeyringServiceProvider extends ServiceProvider
 
     protected function registerListeners(): void
     {
-        if (config('keyring.events.enabled')) {
-            Event::subscribe(RecordSecurityEvents::class);
-        }
-
+        Event::subscribe(RecordSecurityEvents::class);
         Event::subscribe(SendSecurityNotifications::class);
         Event::subscribe(DispatchLaravelEvents::class);
     }
@@ -144,7 +140,7 @@ class KeyringServiceProvider extends ServiceProvider
      */
     protected function configureEmailLinks(): void
     {
-        if (Features::enabled('email_verification') && VerifyEmail::$createUrlCallback === null) {
+        if (Features::enabled(Features::emailVerification()) && VerifyEmail::$createUrlCallback === null) {
             VerifyEmail::createUrlUsing(fn (MustVerifyEmail&Model $notifiable) => Url::signed(
                 'verification.verify',
                 now()->addMinutes((int) config('auth.verification.expire', 60)),
@@ -152,7 +148,7 @@ class KeyringServiceProvider extends ServiceProvider
             ));
         }
 
-        if (Features::enabled('password_reset') && ResetPassword::$createUrlCallback === null) {
+        if (Features::enabled(Features::resetPasswords()) && ResetPassword::$createUrlCallback === null) {
             ResetPassword::createUrlUsing(fn (CanResetPassword $notifiable, string $token) => Url::route('password.reset', [
                 'token' => $token,
                 'email' => $notifiable->getEmailForPasswordReset(),
@@ -205,7 +201,7 @@ class KeyringServiceProvider extends ServiceProvider
         AboutCommand::add('Keyring', fn () => [
             'Guard' => config('keyring.guard'),
             'Factors' => $this->app->make(KeyringManager::class)->registered()->keys()->implode(', '),
-            'Features' => collect(config('keyring.features'))->filter()->keys()->implode(', ') ?: 'none',
+            'Features' => implode(', ', config('keyring.features', [])) ?: 'none',
             'Session registry' => config('keyring.sessions.driver'),
         ]);
     }

@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Routing\RouteCollection;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
@@ -40,4 +41,19 @@ function totpCode(string $secret, int $step = 0): string
     $engine = app(Google2FA::class);
 
     return $engine->oathTotp($secret, $engine->getTimestamp() + $step);
+}
+
+/**
+ * Turn on only these features and register Keyring's routes again, since
+ * they're read once at boot.
+ *
+ * @param  list<string>  $features
+ */
+function withFeatures(array $features): void
+{
+    config(['keyring.features' => $features]);
+
+    app('router')->setRoutes(new RouteCollection);
+    Keyring\Facades\Keyring::routes();
+    app('router')->getRoutes()->refreshNameLookups();
 }
