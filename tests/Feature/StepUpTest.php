@@ -276,6 +276,24 @@ describe('levels lapsing, as nist sp 800-63b asks', function () {
         $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'password');
     });
 
+    it('does not bring a lapsed level back with one factor confirmed somewhere else', function () {
+        $this->travel(61)->minutes();
+        $this->get('/home')->assertOk();
+
+        // The plain confirm page only asks for one factor. The TOTP code from
+        // sign in is still within its 24 hours, but it was before the lapse.
+        $this->inertia()->get(route('keyring.confirm.challenge'));
+        $this->flushHeaders();
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+
+        // What was proved since the lapse does count, so only TOTP is left.
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])->assertRedirect('/billing');
+        $this->get('/billing')->assertOk();
+    });
+
     it('lapses aal2 after 24 hours however active the session is', function () {
         foreach (range(1, 30) as $request) {
             $this->travel(50)->minutes();
