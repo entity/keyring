@@ -92,7 +92,7 @@ On success, the response contains the new authenticator, presented the same way 
 {
   "status": "authenticator-added",
   "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
-  "recoveryCodes": ["k3j9d-p2x8q", "..."]
+  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp", "..."]
 }
 ```
 

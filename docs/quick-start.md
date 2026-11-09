@@ -17,7 +17,12 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-> Keyring has no tagged release yet. Until it does, add the repository to your `composer.json` and require `entity/keyring:@dev`.
+> Keyring has no tagged release yet. Until it does, install it from GitHub:
+>
+> ```bash
+> composer config repositories.keyring vcs https://github.com/entity/keyring
+> composer require entity/keyring:dev-main
+> ```
 
 `keyring:install` asks which sign-in methods you want besides the password, which features to turn on, and whether to send the security emails NIST asks for. With `--no-interaction` you get the password, registration and password resets. You can add the rest later.
 
@@ -43,7 +48,7 @@ To start, you need:
 | `login` | Always. |
 | `challenge` | When you add a second sign-in method. It asks for the next factor. |
 | `confirm` | When you use step-up. It's the challenge page for confirming. |
-| `register` | With `Features::registration()`. |
+| `register` | With `Features::registration()`. It posts `name`, `email`, `password` and `password_confirmation` to `/register`. |
 | `forgot-password`, `reset-password` | With `Features::resetPasswords()`. |
 
 A login page posts `email`, `password` and, optionally, `remember` to `/login`:
@@ -101,17 +106,24 @@ use Keyring\Features;
 | `emailChanges()` | Email changes confirmed by the new address and undoable from the old one. Changing the email elsewhere then throws. | [Protected Changes](protected-changes.md#changing-the-email-address) |
 | `securityLog()` | A log of sign ins, failures and changes, and "was this you?" alerts. | [Security Log & Emails](security-log-and-emails.md) |
 
-Some things are set up in your `KeyringServiceProvider` instead, since they take code:
+A few more things are opt-in, but aren't in the features list:
 
-- [Risk signals](risk.md): `Keyring::risk([...])`.
-- [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware.
-- Security emails: the `notifications` list in `config/keyring.php`. See [Security Emails](security-log-and-emails.md#security-emails).
+- [Security emails](security-log-and-emails.md#security-emails): the `notifications` list in `config/keyring.php`.
+- [Risk signals](risk.md): `Keyring::risk([...])` in your `KeyringServiceProvider`.
+- [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. Step-up sends users there too when they don't have what a route needs.
 
 ## Adding Sign-In Methods
 
 List them in `app/Providers/KeyringServiceProvider.php`, and turn on `Features::manageAuthenticators()` so users can set them up:
 
 ```php
+use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
+use Keyring\Login\Requirement;
+
 Keyring::factors([
     Password::class,
     Totp::class,
@@ -119,10 +131,10 @@ Keyring::factors([
     WebAuthn::passkeys(),
 ]);
 
-Keyring::require(Requirement::aal2()->ifEnrolled());
+Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
-`Requirement::aal2()->ifEnrolled()` asks for a second factor once a user has set one up, as Fortify does. See [Factors](factors.md) and [Policies](policies.md).
+`Requirement::aal2()->ifEnrolled()` asks for a second factor once a user has set one up, as Fortify does. `noDowngrade()` means a user with a passkey can't be talked into using something weaker. See [Factors](factors.md) and [Policies](policies.md).
 
 ## What Keyring Does Without Being Asked
 
@@ -133,7 +145,7 @@ These are part of the foundation. You don't need to set them up, but you can cha
 | Rate limits on signing in | 5 a minute per account, 20 per IP, and a factor refused after 100 failures in a row until a success or a password reset | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Failed checks take the same time | 250ms | `timebox` |
 | Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
-| A record of each session, so Keyring can sign them out | Sessions end after 30 days, and "remember me" lasts no longer | `sessions` in [Configuration](configuration.md#sessions) |
+| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and "remember me" lasts no longer | `sessions` in [Configuration](configuration.md#sessions) |
 | Assurance levels lapse, as NIST asks | AAL2 after an hour idle or 24 hours, AAL3 after 15 minutes or 12 hours | `sessions.levels` |
 | Browsers are told to clear their cache and storage on sign out | On | A custom [`LogoutResponse`](sign-in-flow.md#responses) |
 | Step-up middleware | `keyring:aal2` and `keyring.fresh:15m`, for your routes | [Step-Up](step-up.md) |

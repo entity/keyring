@@ -46,6 +46,14 @@ $this->actingAs($user)->freshAt(now()->subHour())->deleteJson('/account')->asser
 
 You can chain both, in either order. The level defaults to AAL1, so `freshAt()` alone gives a password verification at that time.
 
+A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, answer `423`. Add `withAssurance()` for those:
+
+```php
+$this->actingAs($user)->withAssurance(Assurance::AAL1)
+    ->postJson(route('keyring.authenticators.store', 'totp'))
+    ->assertOk();
+```
+
 `sessionErrors()` returns the validation errors the last request flashed, as a `MessageBag`. Use it rather than `session('errors')`, which is a plain array right after a request when the session is serialized as JSON, the default in new Laravel apps:
 
 ```php

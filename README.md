@@ -14,9 +14,9 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 - **Protected account changes:** once Keyring handles them, `email` and `password` can only change through its flows (OWASP). Email changes are confirmed from both addresses and can be reverted.
 - **Risk signals:** new device, new country, impossible travel, a session cookie showing up in another browser, repeated failures. Each level maps to an action.
 - **A security log and security emails.**
-
-Each of these is opt-in. See [Adding Features](docs/quick-start.md#adding-features).
 - **Headless:** like Fortify, Keyring renders your pages with props and answers JSON, with swappable responses and published actions. A browser package handles WebAuthn and the challenge page for Vue and React.
+
+Everything beyond signing in is opt-in. See [Adding Features](docs/quick-start.md#adding-features).
 
 > Work in progress: not tagged or production-tested yet.
 
@@ -34,7 +34,12 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-> Keyring has no tagged release yet. Until it does, add the repository to your `composer.json` and require `entity/keyring:@dev`.
+> Keyring has no tagged release yet. Until it does, install it from GitHub:
+>
+> ```bash
+> composer config repositories.keyring vcs https://github.com/entity/keyring
+> composer require entity/keyring:dev-main
+> ```
 
 `keyring:install` asks which sign-in methods and features you want, and publishes only what they need. Then add the trait to your user model:
 

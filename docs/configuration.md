@@ -26,7 +26,7 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features` and `notifications`. Every other option on this page keeps its default until you copy it into that file. Keyring merges the file over its defaults one top-level key at a time, so copy a whole option, such as all of `sessions`, not part of it. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `notifications` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges the file over its defaults one top-level key at a time, so copy a whole option, such as all of `sessions`, not part of it. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 

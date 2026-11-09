@@ -206,7 +206,7 @@ Keyring::signInAfterRegistering(fn (User $user, Request $request) => ! $user->ne
 
 The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
 
-The published action validates `name`, `email` and `password` (with `PasswordRules::for()`, see [Password Rules](protected-changes.md#password-rules)). Change it to fit your app.
+The published action validates `name`, `email`, `password` and `password_confirmation` (with `PasswordRules::for()`, see [Password Rules](protected-changes.md#password-rules)). Change it to fit your app.
 
 ## Signing Out
 
@@ -373,7 +373,7 @@ Other requests are redirected (back, or to `redirect`) with the slug flashed as 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enrollment-started`, `password-reset`, `password-updated`, `reset-link-sent`, `sessions-revoked`, `signed-out` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `reset-link-sent`, `sessions-revoked`, `signed-out` and `verification-link-sent`.
 
 Swap it like the others. Your class receives the same named arguments:
 
@@ -392,7 +392,7 @@ Keyring renders these pages:
 | `login` | `canResetPassword`, `canRegister`, `status` (a translated message) |
 | `challenge` | See [Page Props](#page-props). Used for logins. |
 | `confirm` | The same props, with `purpose: "confirm"`. Used for step-up. |
-| `register` | none |
+| `register` | none. The published action expects `name`, `email`, `password` and `password_confirmation`. |
 | `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` (a translated message) |

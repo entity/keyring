@@ -47,9 +47,10 @@ return [
     | Security Emails
     |--------------------------------------------------------------------------
     |
-    | The notices Keyring sends users about their account. These four are the
-    | ones NIST SP 800-63B asks for. The others: new_device,
-    | second_factor_failed, suspicious_activity and clone_suspected.
+    | The notices Keyring sends users about their account. NIST SP 800-63B
+    | asks for password_changed, authenticator_added, authenticator_removed
+    | and recovery_code_used. The others: new_device, second_factor_failed,
+    | suspicious_activity and clone_suspected.
     |
     */
 
@@ -59,6 +60,19 @@ return [
         'authenticator_removed',
         'recovery_code_used',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Enrollment Page
+    |--------------------------------------------------------------------------
+    |
+    | Your page for adding a sign-in method. Step-up and the keyring.enrolled
+    | middleware send users there when they don't have what a route needs.
+    | Null answers 403 instead.
+    |
+    */
+
+    'enrollment_url' => null,
 
     /*
     |--------------------------------------------------------------------------
