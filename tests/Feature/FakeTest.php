@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
@@ -9,11 +10,60 @@ use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Testing\KeyringFake;
 
 beforeEach(function () {
     Keyring::factors([Password::class, Totp::class, WebAuthn::securityKeys(), RecoveryCodes::class]);
     $this->user = taylor();
 });
+
+afterEach(function () {
+    // Testbench rolls back migrations after a test, which asks to confirm in production.
+    app()->detectEnvironment(fn () => 'testing');
+});
+
+function runningIn(string $environment): void
+{
+    app()->detectEnvironment(fn () => $environment);
+
+    // Laravel only skips this check in the testing environment.
+    test()->withoutMiddleware(PreventRequestForgery::class);
+}
+
+it('refuses to fake in production', function () {
+    runningIn('production');
+
+    expect(fn () => Keyring::fake())->toThrow(LogicException::class, 'cannot be used in production');
+    expect(app()->bound(KeyringFake::class))->toBeFalse();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
+    $this->assertGuest();
+});
+
+it('does not pass a factor for a fake bound by hand in production', function () {
+    runningIn('production');
+    app()->instance(KeyringFake::class, (new KeyringFake)->pass('password'));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
+    $this->post('/login', ['email' => 'taylor@example.com'])->assertSessionHasErrors('password');
+    $this->assertGuest();
+});
+
+it('does not fail a factor for a fake bound by hand in production', function () {
+    runningIn('production');
+    app()->instance(KeyringFake::class, (new KeyringFake)->fail('password'));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+});
+
+it('still fakes outside production, so browser suites keep working', function (string $environment) {
+    runningIn($environment);
+    Keyring::fake()->pass('password');
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+})->with(['local', 'staging']);
 
 it('passes factors without real proofs', function () {
     Keyring::require(Requirement::aal2()->phishingResistant());

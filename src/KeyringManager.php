@@ -41,6 +41,7 @@ use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
 use Keyring\Testing\KeyringFake;
+use LogicException;
 
 class KeyringManager
 {
@@ -299,6 +300,10 @@ class KeyringManager
      */
     public function fake(): KeyringFake
     {
+        if (app()->environment('production')) {
+            throw new LogicException('Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
+        }
+
         $this->container->singletonIf(KeyringFake::class);
 
         return $this->container->make(KeyringFake::class);
