@@ -4,11 +4,14 @@ namespace Keyring\Testing;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Keyring\Contracts\Enrollable;
+use Keyring\Contracts\Factor;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Sessions\Sessions;
 
 /**
@@ -80,6 +83,10 @@ trait KeyringConformance
     {
         $user = $this->keyringUser();
 
+        if (Keyring::protectedAttributes() === []) {
+            $this->markTestSkipped('Nothing is protected: Features::updatePasswords() protects the password, and Features::emailChanges() the email.');
+        }
+
         foreach (Keyring::protectedAttributes() as $attribute) {
             try {
                 $user->fresh()->update([$attribute => $attribute === 'password' ? 'something-new-and-long' : 'changed-'.uniqid().'@example.com']);
@@ -93,10 +100,10 @@ trait KeyringConformance
     public function test_keyring_requires_a_fresh_verification_to_change_sign_in_methods(): void
     {
         $user = $this->keyringUser();
-        $factor = Keyring::registered()->first(fn ($factor) => $factor instanceof Enrollable);
+        $factor = $this->enrollableFactors()->first();
 
         if ($factor === null) {
-            $this->markTestSkipped('No enrollable factors are registered.');
+            $this->markTestSkipped('No sign-in methods to set up: register some, and turn on Features::manageAuthenticators().');
         }
 
         $this->actingAs($user)->withAssurance(Assurance::AAL1)->freshAt(now()->subDay())
@@ -108,12 +115,14 @@ trait KeyringConformance
     {
         $user = $this->keyringUser();
 
-        foreach (Keyring::registered() as $factor) {
-            if ($factor instanceof Enrollable) {
-                $this->actingAs($user)->withAssurance(Assurance::AAL1)
-                    ->postJson(route('keyring.authenticators.store', $factor->key()))
-                    ->assertOk();
-            }
+        if ($this->enrollableFactors()->isEmpty()) {
+            $this->markTestSkipped('No sign-in methods to set up: register some, and turn on Features::manageAuthenticators().');
+        }
+
+        foreach ($this->enrollableFactors() as $factor) {
+            $this->actingAs($user)->withAssurance(Assurance::AAL1)
+                ->postJson(route('keyring.authenticators.store', $factor->key()))
+                ->assertOk();
         }
     }
 
@@ -121,12 +130,27 @@ trait KeyringConformance
     {
         $user = $this->keyringUser();
 
-        $this->actingAs($user)->withAssurance(Assurance::AAL1)->get(route('keyring.devices.index'))->assertOk();
+        // Any request registers the session; a signed-in user is sent home from the login page.
+        $this->actingAs($user)->withAssurance(Assurance::AAL1)->get(route('login'))->assertRedirect();
         $id = session(Sessions::KEY);
 
         $this->post(route('logout'));
 
         $this->assertNotNull($id, 'Signed-in sessions should be registered.');
         $this->assertNotNull(app(SessionRegistry::class)->find($id)?->revokedAt, 'Signing out should revoke the registered session.');
+    }
+
+    /**
+     * The factors users can add themselves, when they're allowed to.
+     *
+     * @return Collection<int, Enrollable>
+     */
+    protected function enrollableFactors(): Collection
+    {
+        if (! Features::enabled(Features::manageAuthenticators())) {
+            return new Collection;
+        }
+
+        return Keyring::registered()->filter(fn (Factor $factor) => $factor instanceof Enrollable)->values();
     }
 }
