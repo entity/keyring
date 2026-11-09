@@ -18,6 +18,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
@@ -49,6 +50,20 @@ it('does not let junk passkey requests lock everyone out of passkey sign in', fu
     $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])
         ->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
+});
+
+it('counts password guesses at login and when confirming together', function () {
+    config(['keyring.limits.per_account' => 3]);
+    $user = account('taylor@example.com');
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+
+    $this->actingAs($user)->get(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+        ->assertSessionHasErrors('password');
+    expect(session(\Keyring\Sessions\SessionAssurance::KEY))->toBeNull();
 });
 
 it('does not reset the per-ip counter when the attacker signs in to their own account', function () {
