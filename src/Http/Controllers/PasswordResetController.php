@@ -42,9 +42,7 @@ class PasswordResetController
 
         // After the response, so how long it takes doesn't give away whether
         // the address has an account.
-        defer(fn () => $this->broker()->sendResetLink([
-            $this->keyring->username() => $this->keyring->normalizeUsername((string) $request->input($this->keyring->username())),
-        ]));
+        defer(fn () => $this->broker()->sendResetLink($this->credentials($request)));
 
         return $this->status('reset-link-sent');
     }
@@ -70,9 +68,8 @@ class PasswordResetController
         ]);
 
         $status = $this->broker()->reset([
-            $this->keyring->username() => $this->keyring->normalizeUsername((string) $request->input($this->keyring->username())),
-            'token' => $request->input('token'),
-            'password' => $request->input('password'),
+            ...$this->credentials($request),
+            ...$request->only('token', 'password'),
         ], fn (Authenticatable&Model $user) => $this->passwords->reset(
             $user,
             fn () => $resetter->reset($user, $request->all()),
@@ -85,6 +82,16 @@ class PasswordResetController
         }
 
         return $this->status('password-reset', redirect: route('login'));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function credentials(Request $request): array
+    {
+        $username = $this->keyring->username();
+
+        return [$username => $this->keyring->normalizeUsername((string) $request->input($username))];
     }
 
     protected function broker(): PasswordBroker

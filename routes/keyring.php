@@ -19,7 +19,14 @@ $guard = config('keyring.guard');
 // call block() to take the session lock, so parallel requests can't each
 // spend the same state or write back a stale copy of it.
 
-Route::middleware('guest:'.$guard)->group(function () {
+// One challenge controller serves signing in and step-up alike.
+$challenge = function () {
+    Route::get('/{factor?}', [ChallengeController::class, 'show'])->block()->name('challenge');
+    Route::post('/{factor}', [ChallengeController::class, 'verify'])->block()->name('verify');
+    Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
+};
+
+Route::middleware('guest:'.$guard)->group(function () use ($challenge) {
     if (Features::enabled(Features::registration())) {
         Route::get('/register', [RegisteredUserController::class, 'create'])->name('register');
         Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:keyring')->name('register.store');
@@ -35,11 +42,7 @@ Route::middleware('guest:'.$guard)->group(function () {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->block()->name('login.store');
 
-    Route::prefix('/login/challenge')->name('keyring.login.')->group(function () {
-        Route::get('/{factor?}', [ChallengeController::class, 'show'])->block()->name('challenge');
-        Route::post('/{factor}', [ChallengeController::class, 'verify'])->block()->name('verify');
-        Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
-    });
+    Route::prefix('/login/challenge')->name('keyring.login.')->group($challenge);
 
     // Sign in with another primary factor, like a passkey: /login/passkey
     Route::get('/login/{factor}/options', [AuthenticatedSessionController::class, 'options'])
@@ -52,12 +55,8 @@ Route::middleware('guest:'.$guard)->group(function () {
         ->name('keyring.login.factor');
 });
 
-Route::middleware('auth:'.$guard)->group(function () {
-    Route::prefix('/confirm')->name('keyring.confirm.')->group(function () {
-        Route::get('/{factor?}', [ChallengeController::class, 'show'])->block()->name('challenge');
-        Route::post('/{factor}', [ChallengeController::class, 'verify'])->block()->name('verify');
-        Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
-    });
+Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
+    Route::prefix('/confirm')->name('keyring.confirm.')->group($challenge);
 
     // Changing how someone signs in needs a recent verification.
     Route::middleware(config('keyring.changes_middleware'))->group(function () {
