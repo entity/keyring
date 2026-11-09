@@ -5,7 +5,13 @@ namespace Keyring\Pipeline\Steps;
 use Closure;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\Lockout;
+use Keyring\Facades\Keyring;
+use Keyring\Factors\Factor;
+use Keyring\Features;
 use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
@@ -43,6 +49,8 @@ class EnsureNotThrottled
                 return $this->lockout($context, $this->limiter->availableIn(static::key($limit)));
             }
         }
+
+        $context->throttleChecked = true;
 
         $context = $next($context);
 
@@ -118,5 +126,50 @@ class EnsureNotThrottled
     protected function lock(Limit $limit): string
     {
         return static::key($limit).':locked';
+    }
+
+    /**
+     * Clear the user's per-account limits on the factors that can start a
+     * sign in: the in-a-row count, and the counts, locks and escalation.
+     * Limits start under the typed username (before the user is known) and
+     * continue under their ID, with a bucket for each known device. The
+     * per-IP limits stay, or a reset would be a way around them. A second
+     * factor's counts and locks stay too: a reset only proves control of the
+     * mailbox, which is what they defend against, and it could be repeated to
+     * keep guessing.
+     *
+     * The user's username is cleared by default. Apps whose findUsersUsing()
+     * also accepts something else pass it in $usernames: nothing on the user
+     * says what else was typed.
+     */
+    public static function clearAccount(Authenticatable&Model $user, ?string ...$usernames): void
+    {
+        $limiter = app(RateLimiter::class);
+
+        $accounts = [
+            (string) $user->getAuthIdentifier(),
+            ...array_map(fn (?string $username) => Factor::accountKey((string) $username), [$user->getAttribute(Keyring::username()), ...$usernames]),
+        ];
+
+        $devices = Features::enabled(Features::devices())
+            ? Keyring::deviceModel()::query()->ownedBy($user)->active()->pluck('id')->all()
+            : [];
+
+        foreach (Keyring::registered() as $name => $factor) {
+            if (! $factor instanceof PrimaryFactor) {
+                continue;
+            }
+
+            foreach ($accounts as $account) {
+                foreach ([null, ...$devices] as $device) {
+                    $key = static::key(new Limit(Factor::accountBucket($name, $account, $device)));
+
+                    $limiter->clear($key);
+                    $limiter->clear($key.':locked');
+                    $limiter->clear($key.':lockouts');
+                    $limiter->clear(static::key(new Limit(ConsecutiveLimit::keyFor($name, $account, $device))));
+                }
+            }
+        }
     }
 }

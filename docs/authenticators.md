@@ -45,13 +45,15 @@ When your user model implements `MustVerifyEmail`, users must verify their email
 
 Until the address is verified, the account may belong to whoever typed that address first. Factors they added would survive the real owner's password reset.
 
+So with `Features::registration()` on, where anyone can type any address, users must be able to verify theirs: your user model must implement `MustVerifyEmail`, with `Features::emailVerification()` on. Otherwise enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` that says what to change. Without registration, accounts come from you (an admin, an import, an invitation), so this isn't required. `keyring:install` turns on email verification when you pick registration and a sign-in method.
+
 ## Adding an Authenticator
 
 Adding is always two steps. Nothing is saved until the second one succeeds.
 
 ### Beginning
 
-`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes. Starting again replaces it. The response's `enrollment` holds what to show the user:
+`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes. Starting again replaces it. Starting one for a factor that sends a code counts toward the account's [three codes per 10 minutes](sign-in-flow.md#sending-codes). The response's `enrollment` holds what to show the user:
 
 | Factor | Request fields | `enrollment` |
 |---|---|---|
@@ -102,11 +104,11 @@ The user's first saved authenticator becomes their default (never recovery codes
 
 ## Recovery Codes
 
-The first time a user adds an extra factor and has no recovery codes, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered.
+The first time a user adds an extra factor and has no recovery codes, or has used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered.
 
-To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set.
+To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored.
 
-Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count, so you can suggest new codes when they run low. Users with no codes left keep the (empty) set until they make a new one or it's removed along with their last factor.
+Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count, so you can suggest new codes when they run low. Users with no codes left keep the (empty) set until they make a new one, add another factor (which replaces it with a new set) or it's removed along with their last factor. An empty set is never offered as a way in.
 
 ## Renaming and Choosing the Default
 

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -9,6 +10,7 @@ use Keyring\Enums\Category;
 use Keyring\Events\Authenticated;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\RecoveryCodeUsed;
+use Keyring\Exceptions\UnregisteredFactor;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -302,6 +304,36 @@ it('still accepts a recovery code when the policy is out of reach', function () 
     $this->assertAuthenticatedAs($user);
 });
 
+it('does not offer a used-up recovery set under no downgrade', function () {
+    Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
+    Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
+    $user = taylor();
+    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes([])->for($user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->inertia()->get(route('keyring.login.challenge'))
+        ->assertJsonPath('props.factor', 'security-key')
+        ->assertJsonPath('props.alternatives', []);
+});
+
+it('does not offer a used-up recovery set under a one-factor no downgrade', function () {
+    Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
+    Keyring::require(Requirement::aal1()->noDowngrade());
+    $user = taylor();
+    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes([])->for($user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->inertia()->get(route('keyring.login.challenge'))
+        ->assertJsonPath('props.factor', 'security-key')
+        ->assertJsonPath('props.alternatives', []);
+});
+
 it('keeps no-downgrade when the rest of the policy is out of reach', function () {
     Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
     Keyring::require(Requirement::factors(3)->ifEnrolled()->noDowngrade());
@@ -398,4 +430,30 @@ it('normalises usernames the app\'s way', function () {
     taylor();
 
     $this->post('/login', ['email' => ' Taylor ', 'password' => 'password'])->assertRedirect('/dashboard');
+});
+
+describe('authenticators for a factor that isn\'t registered', function () {
+    beforeEach(function () {
+        Exceptions::fake();
+        $this->user = taylor();
+        totpFor($this->user);
+        Keyring::factors([Password::class]);
+    });
+
+    it('refuses the sign in rather than skip them, and says why in the log', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertSessionHasErrors(['email' => __('keyring::keyring.unavailable')]);
+
+        $this->assertGuest();
+        expect(session()->has('keyring.attempt.login'))->toBeFalse();
+        Exceptions::assertReported(fn (UnregisteredFactor $e) => str_contains($e->getMessage(), '[totp]'));
+    });
+
+    it('refuses step-up too', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subDay());
+        $this->get(route('keyring.confirm.challenge', 'password'));
+
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+            ->assertSessionHasErrors(['password' => __('keyring::keyring.unavailable')]);
+    });
 });

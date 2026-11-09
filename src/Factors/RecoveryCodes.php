@@ -6,10 +6,12 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Category;
 use Keyring\Events\RecoveryCodeUsed;
+use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -105,7 +107,26 @@ class RecoveryCodes extends Factor implements Enrollable
      */
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
+        $this->ensureSomethingToRecover($user);
+
         return $this->make($enrollment->state('secret'));
+    }
+
+    /**
+     * Codes are a fallback, so the first set needs a real second factor to
+     * back up, or every login would spend one. A live set can be replaced.
+     * Checked here, when a set would be stored, rather than at begin, which
+     * every factor allows.
+     *
+     * @throws ValidationException
+     */
+    protected function ensureSomethingToRecover(Authenticatable&Model $user): void
+    {
+        $keyring = Keyring::for($user);
+
+        if (! $keyring->hasFactorToRecover() && ! $keyring->hasRecoveryCodes()) {
+            throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.recovery_needs_second_factor')]);
+        }
     }
 
     /**

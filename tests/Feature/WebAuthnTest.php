@@ -1,22 +1,28 @@
 <?php
 
 use Illuminate\Contracts\Auth\UserProvider;
+use Illuminate\Http\Request;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Features;
+use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\Staff;
+use Keyring\WebAuthn\Ceremonies;
+use Webauthn\CredentialRecord;
 
 beforeEach(function () {
     Keyring::factors([
@@ -88,6 +94,8 @@ it('caps a passkey that syncs at aal2, as nist does', function () {
 it('will not sign in with a passkey that belongs to another model with the same id', function () {
     $user = $this->user;
     $key = new VirtualAuthenticator;
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     enroll('passkey', $key);
 
@@ -170,6 +178,8 @@ it('signs in the other model with its passkey when that model is behind keyring\
     Keyring::routes();
 
     $key = new VirtualAuthenticator;
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     enroll('passkey', $key);
 
@@ -185,6 +195,8 @@ it('keeps credential ids unique across models', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
     $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
@@ -333,4 +345,123 @@ it('answers from the app\'s own origin by default, port and all', function () {
     $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+});
+
+it('does not let a usernameless challenge finish the second factor of a password login', function () {
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+
+    // Autofill on the login page minted this, then the user typed a password.
+    $usernameless = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->post(route('keyring.login.verify', 'passkey'), ['credential' => $key->assert($usernameless)])
+        ->assertSessionHasErrors('credential');
+    $this->assertGuest();
+
+    // The challenge page's own still works.
+    $options = $this->inertia()->get(route('keyring.login.challenge'))->json('props.challenge.options');
+    $this->post(route('keyring.login.verify', 'passkey'), ['credential' => $key->assert($options)])
+        ->assertRedirect('/dashboard');
+});
+
+it('does not let a usernameless challenge confirm a step-up', function () {
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+
+    $usernameless = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+
+    $this->actingAs($this->user);
+    $this->inertia()->get(route('keyring.confirm.challenge', 'password'))->assertJsonPath('props.factor', 'password');
+
+    $this->post(route('keyring.confirm.verify', 'passkey'), ['credential' => $key->assert($usernameless)])
+        ->assertSessionHasErrors('credential');
+
+    $options = $this->inertia()->get(route('keyring.confirm.challenge', 'passkey'))->json('props.challenge.options');
+    $this->post(route('keyring.confirm.verify', 'passkey'), ['credential' => $key->assert($options)])
+        ->assertSessionHasNoErrors();
+});
+
+it('spends a usernameless challenge even when the key that answered is unknown', function () {
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => new VirtualAuthenticator()->assert($options)])
+        ->assertSessionHasErrors('credential');
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
+        ->assertSessionHasErrors('credential');
+    $this->assertGuest();
+
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
+        ->assertRedirect('/dashboard');
+});
+
+it('spends a second factor challenge even when the key that answered is unknown', function () {
+    $key = new VirtualAuthenticator(userVerification: false);
+    enroll('security-key', $key);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $options = $this->inertia()->get(route('keyring.login.challenge'))->json('props.challenge.options');
+
+    $this->post(route('keyring.login.verify', 'security-key'), ['credential' => new VirtualAuthenticator(userVerification: false)->assert($options)])
+        ->assertSessionHasErrors('credential');
+    $this->post(route('keyring.login.verify', 'security-key'), ['credential' => $key->assert($options)])
+        ->assertSessionHasErrors('credential');
+    $this->assertGuest();
+
+    $options = $this->inertia()->get(route('keyring.login.challenge'))->json('props.challenge.options');
+    $this->post(route('keyring.login.verify', 'security-key'), ['credential' => $key->assert($options)])
+        ->assertRedirect('/dashboard');
+});
+
+it('spends a registration challenge when the confirm fails', function () {
+    $key = new VirtualAuthenticator;
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+
+    $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => new VirtualAuthenticator(origin: 'https://evil.example')->register($options)])
+        ->assertUnprocessable();
+    $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])
+        ->assertUnprocessable();
+
+    expect(Authenticator::where('factor', 'passkey')->exists())->toBeFalse();
+
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])
+        ->assertOk();
+});
+
+it('checks an assertion against the stored count, not a copy read before another finished', function () {
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+
+    $ceremonies = app(Ceremonies::class);
+    $options = $ceremonies->requestOptions([], 'required');
+
+    // Both requests read the row before either wrote to it.
+    $first = Authenticator::where('factor', 'passkey')->sole();
+    $second = Authenticator::where('factor', 'passkey')->sole();
+
+    $older = $key->assert($ceremonies->toBrowser($options));
+    $newer = $key->assert($ceremonies->toBrowser($options));
+
+    $verify = function (Authenticator $authenticator, array $credential) use ($ceremonies, $options) {
+        $attempt = Attempt::start(Purpose::Login, $this->user);
+        $attempt->put('passkey', 'options', $ceremonies->toJson($options));
+
+        return Keyring::factor('passkey')->verify($attempt, $authenticator, Request::create('/', 'POST', ['credential' => $credential]));
+    };
+
+    expect($verify($first, $newer))->not->toBeNull()
+        ->and($verify($second, $older))->toBeNull();
+
+    $stored = Authenticator::where('factor', 'passkey')->sole();
+
+    expect($stored->sign_count)->toBe($first->sign_count)
+        ->and($ceremonies->fromJson($stored->public_key, CredentialRecord::class)->counter)->toBe($first->sign_count);
 });

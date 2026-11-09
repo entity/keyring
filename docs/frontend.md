@@ -250,7 +250,7 @@ await removeAuthenticator(added.authenticator.id)
 | Function | Does |
 |---|---|
 | `beginEnrollment(factor, data?)` | `POST /user/authenticators/{factor}`. Resolves to `{ factor, enrollment }`. |
-| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first. Resolves to `{ authenticator, recoveryCodes? }`. |
+| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first; if the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes? }`. |
 | `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
 | `renameAuthenticator(id, name)` | `PATCH` with `name`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. |

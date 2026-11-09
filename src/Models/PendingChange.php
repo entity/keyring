@@ -34,6 +34,7 @@ use Keyring\Support\KeyedHash;
  * @property CarbonInterface|null $applied_at
  * @property CarbonInterface|null $reverted_at
  * @property CarbonInterface|null $cancelled_at
+ * @property CarbonInterface|null $signed_in_at When the session that asked for the change signed in
  * @property CarbonInterface $expires_at
  * @property CarbonInterface|null $revertable_until
  * @property CarbonInterface|null $created_at
@@ -91,6 +92,7 @@ class PendingChange extends Model
             'applied_at' => 'datetime',
             'reverted_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'signed_in_at' => 'datetime',
             'expires_at' => 'datetime',
             'revertable_until' => 'datetime',
         ];
@@ -129,8 +131,8 @@ class PendingChange extends Model
     }
 
     /**
-     * A cancelled change only stays revertable when cancelling set
-     * revertable_until, as signing out everywhere does.
+     * A cancelled change stays revertable until it would have expired
+     * (EmailChanges::cancel() sets revertable_until).
      */
     public function canRevert(): bool
     {

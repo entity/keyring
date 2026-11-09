@@ -27,6 +27,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 - A wrong password and an unknown account give the same error, on the same field, with the same status code.
 - A sign-in only succeeds for a user Keyring's guard would load back through its provider. A passkey that belongs to another model (say, staff when the guard signs in users) fails like an unknown one, even when the IDs match.
 - Every failed factor check takes at least `timebox` microseconds (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist.
+- A password longer than its stored hash can check (72 bytes for bcrypt) fails like a wrong one, with the same error, timing and throttling, wherever Keyring checks a password: signing in, step-up, removing the last second factor and the current password on a change. The over-long value never reaches the hasher.
 - Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, as soon as the user's password changes, or when `keyring.guard` is no longer the guard they started under.
 - The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
@@ -39,25 +40,27 @@ Every factor has its own limits, checked in the pipeline before the proof is loo
 
 - **Per account**: `limits.per_account` attempts a minute (5). Before the user is identified, the account is the typed username, lowercased and transliterated, so spelling variants of one address share a limit. After that, it's the user's ID. A browser the account has signed in from before (it carries the account's device cookie) counts in a bucket of its own, so someone guessing from elsewhere can't lock the owner out (OWASP's "device cookies").
 - **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address. A browser carrying the account's device cookie counts per IP for that account alone, so others on a shared address can't hold it up, and an attacker holding several of the account's device cookies still gets one count. Behind a load balancer, configure Laravel's trusted proxies, or every user shares the balancer's address.
-- **In a row**: `limits.consecutive` failures (100, as NIST SP 800-63B caps them) on one account's factor, however slowly they come and from any browser. Only a success clears the count. At the cap that factor is refused for the account until a password reset, though the user can still sign in with another factor; `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop.
+- **In a row**: `limits.consecutive` failures (100, as NIST SP 800-63B caps them) on one account's factor, however slowly they come. Only a success clears the count, or a password reset for the factors that can start a sign in. At the cap that factor is refused for the account, though the user can still sign in with another factor; `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop. With `Features::devices()` on, a browser the account has signed in from before keeps a count of its own, so guesses made elsewhere can't use it up. A second factor at the cap stays refused for up to 30 days. Until then it works from a known browser, or the user signs in with another factor or a recovery code.
 
 How they count:
 
 - Each attempt is counted before it's verified, so overlapping requests can't all slip under the limit while they're being checked.
 - Routes that spend session state (sign in, challenge pages and verifications, enrollment) take Laravel's session lock (`->block()`), so parallel requests in one session can't reuse an email code's guesses or a WebAuthn challenge. Your cache store must support locks, as the database, Redis, file and array stores do.
 - When failures reach an account's limit, that key is locked. Each lock lasts twice as long as the one before (one minute, then two, then four...), up to a day. The count of lockouts resets a day after the first one.
-- The per-IP limit never locks or escalates. Once it's reached, attempts are refused until its minute is up, however many times it's been reached before, and refused attempts don't count against the account. Someone behind a shared address (carrier-grade NAT, an office) who keeps refilling it every minute does keep refusing browsers without the account's device cookie for as long as they continue; with `Features::devices()` off, that's everyone on the address.
+- The per-IP limit locks the same way, but never for longer than 15 minutes. One person failing behind a shared address (carrier-grade NAT, an office) holds the others up for a quarter of an hour at most, while someone spraying passwords from one address still slows to about `limits.per_ip` guesses every 15 minutes. A browser carrying the account's device cookie isn't held up, and an attempt the address refuses doesn't count against the account. With `Features::devices()` off, everyone on the address waits.
 - A success clears the account's count. On the per-IP count, a success only takes back its own attempt. People signing in from one office address don't use up its limit, and an attacker can't reset the limit by signing in to an account of their own between guesses.
+- A completed password reset clears the account's in-a-row counts, per-minute counts, locks and lockout count on the factors that can start a sign in, under the account's `username` attribute, the user's ID and each of the account's known devices, so the owner can sign in straight away. Second factors keep their counts and locks, because a reset only proves control of the mailbox and could otherwise be repeated to keep guessing a code. The `password_reset` log entry records it. Per-IP limits stay, so a reset can't be used to get around them. If a custom [`findUsersUsing()`](sign-in-flow.md#finding-the-user) also accepts something else, like a username next to the email address, failures typed under that are only cleared if the app says so.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
 
-Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
+Factors can set their own limits by overriding `limits()`. A reset only clears the keys the default `limits()` builds, so a factor with its own per-account keys should clear them in a `PasswordReset` listener. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Usernameless passkey options have their own limiter, `keyring-login-options`, at 60 requests a minute per IP address, because the login page fetches them on every load for autofill. Apps can redefine either limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each account can be sent three codes per factor every 10 minutes, however many sign ins, step-ups or enrollments ask for them.
 
 ### Single-Use Codes
 
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
-- Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses, and are replaced by any newer code. A sent code only verifies the authenticator it was sent to.
-- WebAuthn challenges are random 32 byte values, kept on the server and dropped after one verification, so a response can't be replayed.
+- Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses per pending attempt, and are replaced by any newer code. A newer code doesn't reset the count, and at the limit the user has to start signing in again. A sent code only verifies the authenticator it was sent to.
+- WebAuthn challenges are random 32 byte values, kept on the server and dropped on the first verification, whether it succeeds or not, so a response can't be replayed. If a passkey verifies on the second-factor step and a later check such as a risk lock refuses the login, the challenge stays with that pending login until it expires. A challenge only completes the ceremony it was issued for: one from the usernameless login options can't finish a second factor or a step-up.
+- A passkey's signature counter is checked and saved under the same kind of row lock, so two assertions can't both pass against one stored count, and a slower request can't lower it.
 
 ### Second Factors and Step-Up
 
@@ -69,7 +72,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - With `ifEnrolled()`, a policy the user can't fully meet still asks for the strongest version they can give, so a user with a second factor never signs in with one factor.
 - Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification of everything signing in would ask for (NIST SP 800-63B's rule for binding authenticators). Users with a possession factor always use one, so a stolen session plus one phished factor isn't enough.
 - The fresh window is fixed from the moment of verification and doesn't slide with activity.
-- Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset.
+- Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset. With registration on, a user model that can't verify its email can't add sign-in methods at all.
 - Users can't remove authenticators below what they need to sign in, even with several removals at once.
 
 ### Sessions and Devices
@@ -85,17 +88,17 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ### Account Changes
 
-- `email` and `password` can only change through Keyring's flows. Bypassing that needs `Keyring::withoutProtection()`, which is announced and logged.
+- With `Features::updatePasswords()` and `Features::emailChanges()` on, `password` and `email` can only change through Keyring's flows. Bypassing that needs `Keyring::withoutProtection()`, which is announced and logged. Without them, your app changes those attributes itself.
 - An email change needs a fresh verification, confirmation from the new address, and confirmation from the current address unless the session proved a second factor that existed before it signed in.
-- An email change never reveals whether the new address has an account, in its answer or its timing: its emails, like the reset email, are sent after the response.
+- An email change never reveals whether the new address has an account, in its answer, its timing or the pending change it shows: its emails, like the reset email, are sent after the response.
 - An email change only applies if the address is still the one it was requested from.
 - Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing.
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
-- Reverting an email change signs out every session, closes later changes and removes sign-in methods added since.
+- Reverting an email change signs out every session, closes later changes and removes sign-in methods added since the session that asked for it signed in. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
-- Password resets give the same answer for every address, sign out every session, cancel pending email changes and lift risk locks.
+- Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
-- New passwords follow OWASP's length rules, are checked against breach lists, and are refused rather than silently cut short by bcrypt.
+- New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
 
 ### Links and Headers
 
@@ -115,13 +118,13 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ## Known Limitations
 
-- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked for browsers it hasn't signed in from before. With `Features::devices()` on, known devices keep working. A password reset always does.
+- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked by guessing faster than the per-minute limit. With `Features::devices()` on, browsers the owner has signed in from before keep their own limit and keep working. Without devices, the lock reaches every browser while the guessing goes on. A password reset clears the password's counts and locks, but not a second factor's.
 - **No attestation.** Any WebAuthn authenticator is accepted, and AAGUIDs aren't verified, so you can't restrict which key models users register. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
 - **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and new passkeys get a different user handle. Recovery codes and reserved email addresses keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
 - **"Remember me" is all or nothing.** Laravel has one remember token per user, so revoking any device or signing out other sessions ends every remembered browser.
-- **Laravel's `cookie` session driver can't destroy an old session.** The session lives in the cookie, so a copied one keeps working after the ID changes, until the session is revoked or expires. Use a server-side session driver if that matters.
+- **Laravel's `cookie` session driver can't destroy an old session.** The session lives in the cookie, so a copied one keeps working after the ID changes, until the session is revoked or expires. Signing out everywhere else, a password change and an applied email change revoke the session's registry record and carry on under a new one, so a copy is signed out then. After a step-up it keeps working, without what the step-up proved. Use a server-side session driver if that matters.
 - **A request overlapping a session ID change can undo or lose it.** Laravel saves the session when each request ends, so a request still running when the ID changes can save the old session again, and a copied cookie would then keep working. A request sent with the old ID just after the change finds no session, and that browser has to sign in again.
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.

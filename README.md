@@ -41,7 +41,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods and features you want, and publishes only what they need. Then add the trait to your user model:
+`keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model:
 
 ```php
 use Keyring\Concerns\HasKeyring;

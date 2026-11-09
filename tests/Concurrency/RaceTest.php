@@ -3,6 +3,11 @@
 use Illuminate\Support\Facades\DB;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Testing\VirtualAuthenticator;
+use Keyring\WebAuthn\Ceremonies;
+use Keyring\WebAuthn\Profile;
+use ParagonIE\ConstantTime\Base64UrlSafe;
+use Webauthn\AuthenticatorSelectionCriteria;
 
 beforeEach(function () {
     if (DB::getDriverName() === 'sqlite') {
@@ -38,6 +43,35 @@ it('spends a recovery code once, however many requests bring it', function () {
 
     expect(outcomes($results, true))->toBe(1)
         ->and(outcomes($results, false))->toBe(1);
+});
+
+it('lets one of two assertions with the same count through, and keeps that count', function () {
+    $user = taylor();
+    $ceremonies = app(Ceremonies::class);
+    $key = new VirtualAuthenticator;
+
+    $creation = $ceremonies->creationOptions($user, Profile::passkeys(), []);
+    $record = $ceremonies->register(json_encode($key->register($ceremonies->toBrowser($creation))), $ceremonies->toJson($creation));
+
+    $passkey = Authenticator::factory()->passkey()->for($user, 'authenticatable')->create([
+        'credential_id' => Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId),
+        'public_key' => $ceremonies->toJson($record),
+        'sign_count' => $record->counter,
+    ]);
+
+    $options = $ceremonies->requestOptions([], AuthenticatorSelectionCriteria::USER_VERIFICATION_REQUIREMENT_REQUIRED);
+    $browser = $ceremonies->toBrowser($options);
+    $json = $ceremonies->toJson($options);
+
+    // A clone answers with the same counter as the original.
+    $results = contend($passkey, [
+        ['use-passkey', $passkey->id, (string) json_encode(['options' => $json, 'credential' => (clone $key)->assert($browser)])],
+        ['use-passkey', $passkey->id, (string) json_encode(['options' => $json, 'credential' => (clone $key)->assert($browser)])],
+    ]);
+
+    expect(outcomes($results, true))->toBe(1)
+        ->and(outcomes($results, false))->toBe(1)
+        ->and($passkey->fresh()->sign_count)->toBe($record->counter + 1);
 });
 
 it('ends with the old address whichever of confirm and revert wins', function () {

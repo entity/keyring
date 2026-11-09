@@ -5,6 +5,7 @@ namespace Keyring\Concerns;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Keyring\Changes\ReservedAddresses;
+use Keyring\Changes\ResetTokens;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
@@ -30,11 +31,22 @@ trait HasKeyring
             app(ReservedAddresses::class)->guard($user);
         });
 
-        // Signed out everywhere either way. A soft deleted user keeps their
-        // sign-in methods in case they're restored; once really gone, they go
-        // too, so a passkey can be registered again on a new account.
+        // A reset link is tied to an address, so one sent before the address
+        // changed must not work again if it comes back, or for whoever gets
+        // it next. Until the save finishes the original still holds it.
+        static::updated(function (self $user) {
+            if ($user->wasChanged(Keyring::username())) {
+                app(ResetTokens::class)->forget((clone $user)->setRawAttributes($user->getRawOriginal()));
+            }
+        });
+
+        // Signed out, and reset links ended, either way. A soft deleted user
+        // keeps their sign-in methods in case they're restored; once really
+        // gone, they go too, so a passkey can be registered again on a new
+        // account.
         static::deleted(function (self $user) {
             app(Sessions::class)->registry()->revokeAll($user);
+            app(ResetTokens::class)->forget($user);
 
             if (method_exists($user, 'isForceDeleting') && ! $user->isForceDeleting()) {
                 return;

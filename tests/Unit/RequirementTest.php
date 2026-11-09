@@ -82,6 +82,14 @@ it('round trips through an array', function () {
     expect(Requirement::fromArray($requirement->toArray()))->toEqual($requirement);
 });
 
+it('keeps refusing recovery codes through storage and when combined', function () {
+    $refusing = Requirement::aal1()->withoutRecoveryCodes();
+
+    expect(Requirement::fromArray($refusing->toArray()))->toEqual($refusing)
+        ->and(Requirement::aal2()->atLeast($refusing)->acceptsRecoveryCodes)->toBeFalse()
+        ->and(Requirement::aal2()->atLeast(Requirement::aal1())->acceptsRecoveryCodes)->toBeTrue();
+});
+
 it('works out assurance from verifications', function () {
     $password = verified('password', [Category::Knowledge]);
     $totp = verified('totp', [Category::Possession]);

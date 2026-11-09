@@ -97,6 +97,8 @@ $this->post('/login', ['email' => $user->email, 'password' => 'password'])
 $this->post(route('keyring.login.verify', 'totp'))->assertRedirect('/dashboard');
 ```
 
+`Keyring::fake()` throws a `LogicException` when the app environment is `production`, and a `KeyringFake` you bind in the container yourself is ignored there. Other environments can use it, so a browser suite running against `local` or `staging` keeps working.
+
 ## Factories
 
 `Keyring\Models\Authenticator` has a factory. Attach authenticators to a user through the `authenticatable` relationship:
@@ -180,7 +182,7 @@ The constructor options:
 
 ## The Conformance Suite
 
-`Keyring\Testing\KeyringConformance` is a set of tests that check your setup (policy, factors, swapped responses, pipeline changes) still keeps Keyring's guarantees. Add it to a test class and tell it how to make a user:
+`Keyring\Testing\KeyringConformance` is a set of tests that check your setup (policy, factors, swapped responses, pipeline changes) still keeps Keyring's guarantees. Checks for features that are off are skipped, with the reason, so a skipped check is something your setup doesn't use, not a pass. Add it to a test class and tell it how to make a user:
 
 ```php
 namespace Tests\Feature;
@@ -218,6 +220,9 @@ The suite checks that:
 - protected attributes can't change outside Keyring's flows,
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
-- signing out revokes the registered session.
+- signing out revokes the registered session,
+- no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
+
+If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
 
 `KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

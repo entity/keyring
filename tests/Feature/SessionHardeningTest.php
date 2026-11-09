@@ -115,6 +115,46 @@ it('stops the old session id working after :dataset, and keeps the user signed i
         ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
 })->with('session rotations');
 
+/**
+ * The cookies a browser would hold after the response: the session cookie
+ * and, on the cookie driver, the one holding the session itself.
+ *
+ * @return array<string, string>
+ */
+function sessionCookies(TestResponse $response): array
+{
+    $id = $response->getCookie(config('session.cookie'))->getValue();
+
+    return [config('session.cookie') => $id, $id => $response->getCookie($id)->getValue()];
+}
+
+it('signs out a copy of a cookie session after :dataset, and keeps the user signed in', function (string $method, string $uri, array $data) {
+    config(['session.driver' => 'cookie']);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+
+    $copied = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
+    $registered = session(Sessions::KEY);
+
+    $current = sessionCookies($this->withCredentials()->withCookies($copied)->{$method}($uri, $data)->assertOk());
+
+    expect(session(Sessions::KEY))->not->toBe($registered)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
+
+    session()->flush();
+    app('auth')->forgetGuards();
+    $this->withCredentials()->withCookies($copied)->getJson(route('keyring.devices.index'))->assertUnauthorized();
+
+    session()->flush();
+    app('auth')->forgetGuards();
+    $this->withCredentials()->withCookies($current)->getJson(route('keyring.devices.index'))->assertOk();
+    expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
+})->with([
+    'a password change' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1']],
+    'a password change that keeps other sessions' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1', 'sign_out_others' => false]],
+    'signing out everywhere else' => ['deleteJson', '/user/devices', []],
+]);
+
 it('replaces a planted session id when the password step leaves a pending login', function () {
     useFileSessions();
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
