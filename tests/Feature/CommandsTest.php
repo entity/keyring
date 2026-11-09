@@ -193,10 +193,9 @@ describe('keyring:import fortify', function () {
         $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcde-12345'])->assertRedirect('/dashboard');
     });
 
-    it('imports unconfirmed secrets only when asked, without adding a second default', function () {
+    it('imports unconfirmed secrets only when asked', function () {
         config(['fortify.features' => ['two-factor-authentication'], 'fortify-options.two-factor-authentication' => ['confirm' => true]]);
         DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey())]);
-        $existing = Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->default()->create(['factor' => 'passkey']);
 
         $this->artisan('keyring:import', ['source' => 'fortify'])
             ->expectsOutputToContain("Skipped user {$this->user->id}: its secret was never confirmed")
@@ -205,9 +204,35 @@ describe('keyring:import fortify', function () {
 
         $this->artisan('keyring:import', ['source' => 'fortify', '--unconfirmed' => true])->assertSuccessful();
 
+        expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+    });
+
+    it('never brings back what a user removed, or adds to what they set up in keyring', function () {
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
+            'two_factor_recovery_codes' => encrypt(json_encode(['abcde-12345'])),
+            'two_factor_confirmed_at' => now(),
+        ]);
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        // The phone is lost: the user swaps the imported app for a new one.
+        $this->user->keyring->of('totp')->first()->delete();
+        $new = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
         $keyring = $this->user->keyring->refresh();
-        expect($keyring->of('totp'))->toHaveCount(1)
-            ->and($keyring->default()->id)->toBe($existing->id);
+        expect($keyring->of('totp')->pluck('id')->all())->toBe([$new->id])
+            ->and($keyring->of('recovery'))->toHaveCount(1);
+
+        $other = taylor(['email' => 'abigail@example.com']);
+        Authenticator::factory()->securityKey()->for($other, 'authenticatable')->create(['factor' => 'passkey']);
+        DB::table('users')->where('id', $other->id)->update(['two_factor_secret' => encrypt('secret'), 'two_factor_confirmed_at' => now()]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Skipped user {$other->id}: they already have sign-in methods in Keyring")
+            ->assertSuccessful();
+        expect($other->keyring->refresh()->of('totp'))->toBeEmpty();
     });
 
     it('imports a secret with no confirmation when fortify enforces it without one, and challenges the user', function () {
@@ -369,7 +394,7 @@ describe('keyring:import fortify', function () {
             'credential' => $made->public_key,
             'created_at' => now(),
         ]);
-        $made->delete();
+        Authenticator::query()->delete();
 
         $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
 

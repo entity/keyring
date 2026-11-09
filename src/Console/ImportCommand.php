@@ -20,8 +20,10 @@ use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
  * Copies Fortify's two factor columns and laravel/passkeys' passkeys table
- * into Keyring's authenticators. Safe to run more than once; it never
- * deletes Fortify's data, so drop its columns yourself when you're happy.
+ * into Keyring's authenticators. Safe to run more than once: it only fills
+ * in users with no sign-in methods in Keyring yet, so a later run can't
+ * bring back one a user removed. It never deletes Fortify's data, so drop
+ * its columns yourself when you're happy.
  */
 #[AsCommand(name: 'keyring:import')]
 #[Description('Import authenticators from Fortify (TOTP, recovery codes and passkeys)')]
@@ -32,8 +34,18 @@ use Symfony\Component\Console\Attribute\AsCommand;
         {--fortify-confirm= : Whether Fortify has its "confirm" option "on" or "off", when its config can not tell}')]
 class ImportCommand extends Command
 {
+    /**
+     * Whether each user already had sign-in methods in Keyring when this run
+     * first came to them, keyed by morph class and key.
+     *
+     * @var array<string, bool>
+     */
+    protected array $inKeyring = [];
+
     public function handle(): int
     {
+        $this->inKeyring = [];
+
         if ($this->argument('source') !== 'fortify') {
             $this->components->error('Only "fortify" can be imported for now.');
 
@@ -126,9 +138,7 @@ class ImportCommand extends Command
      */
     protected function importTwoFactor(Model $user, array &$counts, array &$issues): void
     {
-        if ($this->imported($user, 'totp', 'fortify')) {
-            $counts['already_imported']++;
-
+        if ($this->alreadyInKeyring($user, $counts, $issues)) {
             return;
         }
 
@@ -247,7 +257,7 @@ class ImportCommand extends Command
             'factor' => 'totp',
             'name' => __('Authenticator app'),
             'secret' => $secret,
-            'is_default' => ! $this->hasDefault($user),
+            'is_default' => true,
             'confirmed_at' => $user->getAttribute('two_factor_confirmed_at') ?? now(),
             'meta' => ['imported_from' => 'fortify'],
         ]);
@@ -286,6 +296,10 @@ class ImportCommand extends Command
             return;
         }
 
+        if ($this->alreadyInKeyring($user, $counts, $issues)) {
+            return;
+        }
+
         $credential = is_string($passkey->credential) ? json_decode($passkey->credential, true) : (array) $passkey->credential;
 
         if (! is_array($credential) || $credential === []) {
@@ -314,18 +328,31 @@ class ImportCommand extends Command
         ]);
     }
 
-    protected function hasDefault(Model $user): bool
+    /**
+     * Whether the user had sign-in methods in Keyring before this run, other
+     * than a failed import's stand-in. Once they have, what they have is
+     * theirs: importing again would bring back a factor they removed, or a
+     * second set of recovery codes, including ones already spent.
+     *
+     * @param  array<string, int>  $counts
+     * @param  array{skipped: list<string>, failed: list<string>}  $issues
+     */
+    protected function alreadyInKeyring(Model $user, array &$counts, array &$issues): bool
     {
-        return Keyring::authenticatorModel()::query()->ownedBy($user)->where('is_default', true)->exists();
-    }
+        $authenticators = fn () => Keyring::authenticatorModel()::query()->ownedBy($user)->whereNull('meta->import_failed_from');
 
-    protected function imported(Model $user, string $factor, string $source): bool
-    {
-        return Keyring::authenticatorModel()::query()
-            ->ownedBy($user)
-            ->where('factor', $factor)
-            ->where('meta->imported_from', $source)
-            ->exists();
+        if (! ($this->inKeyring[$user->getMorphClass().':'.$user->getKey()] ??= $authenticators()->exists())) {
+            return false;
+        }
+
+        if ($authenticators()->whereNotNull('meta->imported_from')->exists()) {
+            $counts['already_imported']++;
+        } else {
+            $issues['skipped'][] = "user {$user->getKey()}: they already have sign-in methods in Keyring, so Fortify's are left out";
+            $issues['skipped'] = array_values(array_unique($issues['skipped']));
+        }
+
+        return true;
     }
 
     /**
