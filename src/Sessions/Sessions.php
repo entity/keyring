@@ -12,6 +12,7 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
 
@@ -139,9 +140,13 @@ class Sessions
         }
     }
 
-    protected function distrustDevices(Authenticatable $user, ?string $except): void
+    /**
+     * Stop trusting the user's devices, or all but one. Does nothing when
+     * devices are off, so a security change can't fail on tables never used.
+     */
+    public function distrustDevices(Authenticatable $user, ?string $except = null): void
     {
-        if ($user instanceof Model) {
+        if ($user instanceof Model && Features::enabled(Features::devices())) {
             Keyring::deviceModel()::query()
                 ->ownedBy($user)
                 ->whereNotNull('trusted_until')

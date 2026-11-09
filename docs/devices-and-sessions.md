@@ -49,11 +49,11 @@ With `Features::devices()` on, on every sign in Keyring looks for its device coo
 
 Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The user agent is never a factor. It's only a weak risk signal: `SessionFingerprintChanged` notices when a session's browser or platform changes.
 
-A browser shared by several accounts has one cookie and a device for each account that signed in on it.
+A browser shared by several accounts has one cookie and a device for each account that signed in on it. Keyring only reuses a cookie that another account already has a device for. Anything else the browser sends is ignored and replaced with a new random token. Keyring can't tell which browser holds a cookie, so a value planted from another account's device is reused too, and the device counts as recognised, until a login on it proves a second factor. Every login that verifies two categories gives the browser a new cookie, so the previous one stops working.
 
 ### Trusted Devices
 
-When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` with the verification marks the device trusted for that long (30 days by default).
+When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device trusted for that long (30 days by default), counted from the moment it's granted. It only counts when that login verified two categories, such as a password and a code, and, with `Features::emailVerification()` on, the email address is verified. Sending it with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
 
 Trust on its own changes nothing. It's for your [policy](policies.md#deciding-per-user-and-attempt) to use:
 
@@ -63,7 +63,7 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->device()?->isTru
     : Requirement::aal2()->ifEnrolled());
 ```
 
-Revoking a device stops trusting it. Signing out everywhere else, including after a password change, stops trusting every other device. A password reset, a reverted email change and a critical risk on a signed-in session sign out everywhere, so they stop trusting every device. A critical risk at login refuses the attempt and leaves the owner's sessions and trusted devices alone.
+Revoking a device stops trusting it. Signing out everywhere else stops trusting every other device. Every device stops being trusted when the password changes or is reset, when an authenticator is removed or a one-per-user factor is replaced (new recovery codes don't count), when an email change is applied or reverted, when a [risk lock](risk.md#responding-to-risk) is placed, and after a critical risk on a signed-in session. A critical risk at login refuses the attempt and leaves the owner's sessions and trusted devices alone.
 
 ### New Device Sign Ins
 

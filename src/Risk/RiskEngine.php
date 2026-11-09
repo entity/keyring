@@ -112,6 +112,7 @@ class RiskEngine
         }
 
         if ($action->lockSeconds !== null) {
+            $this->container->make(Sessions::class)->distrustDevices($user);
             $this->container->make(RiskLocks::class)->lock($user, $action->lockSeconds);
         }
 

@@ -164,7 +164,7 @@ Post the proof to `POST /login/challenge/{factor}`:
 | `code` | `totp`, `email-code`, `recovery` and most custom factors. |
 | `credential` | `passkey`, `security-key`: the browser's WebAuthn response, as an object or a JSON string. |
 | `authenticator` | Optional. The authenticator ID. Defaults to the one the page showed, or the only one of that factor. |
-| `trust` | Optional boolean. Trust this device for `devices.trust_for`. |
+| `trust` | Optional boolean. Trust this device for `devices.trust_for`, once this login has verified two categories. |
 
 For WebAuthn, the browser may answer with any of the user's keys of that factor, not just the one shown, and Keyring accepts it.
 

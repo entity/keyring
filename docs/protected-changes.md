@@ -110,7 +110,7 @@ All of these emails are sent after the response (with Laravel's `defer()`), so h
 
 The new address must always confirm. The current address must confirm too, unless this session proved a possession factor that the user already had **before** this session signed in. A factor added during the session doesn't count, so a stolen session can't add one, use it, and skip the check.
 
-The change applies once every required confirmation is in. When it applies, Keyring checks the address is still the one the change was requested from, and that no one else has taken the new one in the meantime. If either has changed, the pending change is cancelled. Applying also sets `email_verified_at`, when the model has that attribute loaded.
+The change applies once every required confirmation is in. When it applies, Keyring checks the address is still the one the change was requested from, and that no one else has taken the new one in the meantime. If either has changed, the pending change is cancelled. Applying also sets `email_verified_at`, when the model has that attribute loaded, and stops trusting the user's devices.
 
 ### The Emailed Links
 
@@ -176,7 +176,7 @@ Keyring itself reads `sign_out_others`, an optional boolean that defaults to `tr
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
-Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, cancels any pending email change and stops trusting the user's devices, including this one. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Password Rules
 

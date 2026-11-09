@@ -14,6 +14,7 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use Keyring\Sessions\Sessions;
 use Keyring\Support\RowLock;
 
 /**
@@ -24,6 +25,7 @@ class AuthenticatorChanges
 {
     public function __construct(
         protected KeyringManager $keyring,
+        protected Sessions $sessions,
     ) {}
 
     /**
@@ -42,7 +44,12 @@ class AuthenticatorChanges
 
         $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
             if (! $factor->multiple()) {
-                $keyring->of($factor->key())->each->delete();
+                $replaced = $keyring->of($factor->key())->each->delete();
+
+                // New recovery codes are upkeep, not a change of sign-in method.
+                if (! $isRecovery && $replaced->isNotEmpty()) {
+                    $this->sessions->distrustDevices($user);
+                }
             }
 
             $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
@@ -120,6 +127,7 @@ class AuthenticatorChanges
             }
 
             collect([$authenticator, ...$cascade])->each->delete();
+            $this->sessions->distrustDevices($user);
 
             return $authenticator;
         });

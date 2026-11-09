@@ -103,7 +103,7 @@ Build an action with one of the static constructors and chain extras:
 | `Action::reauthenticate()` | Nothing. | Sign the session out. |
 | `Action::deny()` | Refuse the sign in with the usual "these credentials don't match" error. | Sign the session out. |
 | `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::revokeAll()`). |
-| `->lockFor('1h')` | Refuse sign ins for that long. | The same, from now. |
+| `->lockFor('1h')` | Refuse sign ins for that long and stop trusting the user's devices. | The same, from now. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 
 Locks are kept in the cache store named in `risk.store`. While locked, every sign in fails with the usual generic error. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
