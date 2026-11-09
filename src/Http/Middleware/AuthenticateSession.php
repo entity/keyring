@@ -175,7 +175,7 @@ class AuthenticateSession
 
         $response = $this->wantsJson($request)
             ? new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401)
-            : redirect()->route('login')->with('status', 'signed-out');
+            : to_route('login')->with('status', 'signed-out');
 
         // As on sign out: nothing the session cached stays in the browser.
         $response->headers->set('Clear-Site-Data', '"cache", "storage"');

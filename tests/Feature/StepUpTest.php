@@ -1,6 +1,6 @@
 <?php
 
-use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
@@ -211,7 +211,7 @@ it('does not send a form post to another site after confirming', function () {
     signIn();
     $this->travel(16)->minutes();
 
-    $this->withoutMiddleware(ValidateCsrfToken::class)
+    $this->withoutMiddleware(PreventRequestForgery::class)
         ->post('/account', [], ['Referer' => 'https://evil.example/phish'])
         ->assertRedirect(route('keyring.confirm.challenge'));
 

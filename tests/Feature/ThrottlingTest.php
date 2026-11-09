@@ -63,7 +63,7 @@ it('counts password guesses at login and when confirming together', function () 
     $this->actingAs($user)->get(route('keyring.confirm.challenge'));
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
         ->assertSessionHasErrors('password');
-    expect(session(\Keyring\Sessions\SessionAssurance::KEY))->toBeNull();
+    expect(session(SessionAssurance::KEY))->toBeNull();
 });
 
 it('does not reset the per-ip counter when the attacker signs in to their own account', function () {

@@ -28,7 +28,6 @@ use Keyring\Rules\UnreservedAddress;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
     Notification::fake();
