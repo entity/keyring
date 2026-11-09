@@ -4,9 +4,10 @@ Keyring is an authentication backend for Laravel. It handles sign in, registrati
 
 ## Getting Started
 
+- [Quick Start](quick-start.md): from installing to a working sign in, the pages to build and your settings page.
 - [Installation](installation.md): requirements, installing, the files Keyring publishes.
 - [Configuration](configuration.md): every option in `config/keyring.php` and the `Keyring` facade.
-- [Upgrading From Fortify](upgrading-from-fortify.md): importing existing two factor data and mapping Fortify concepts.
+- [Upgrading From Fortify](upgrading-from-fortify.md): importing existing two factor data, mapping Fortify concepts and replacing Fortify in a starter kit.
 
 ## Signing In
 
@@ -23,6 +24,7 @@ Keyring is an authentication backend for Laravel. It handles sign in, registrati
 - [Protected Changes](protected-changes.md): changing the email address and password.
 - [Risk](risk.md): risk signals and what to do about them.
 - [Security Log & Emails](security-log-and-emails.md): the activity log, "was this you?" alerts and security emails.
+- [Events](events.md): every event Keyring dispatches and what it carries.
 - [Security](security.md): what Keyring guarantees, and its known limitations.
 
 ## Building Your App

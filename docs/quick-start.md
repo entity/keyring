@@ -2,6 +2,7 @@
 
 - [Installing](#installing)
 - [Your Pages](#your-pages)
+- [Your Settings Page](#your-settings-page)
 - [Testing](#testing)
 - [Adding Features](#adding-features)
 - [Adding Sign-In Methods](#adding-sign-in-methods)
@@ -44,15 +45,18 @@ Without the trait, signing in throws a `Keyring\Exceptions\MissingTrait` excepti
 
 Keyring is headless, like Fortify: it handles the requests, and you build the pages. With Inertia, it renders `auth/{page}` components. Without it, it renders Blade views named `auth.{page}`. A missing view throws an error that names the file to create and the data it receives. So does a missing Inertia component, when Inertia's `pages.ensure_pages_exist` option is on.
 
-To start, you need:
+Keyring renders nine pages. You only need the ones for what you've turned on:
 
 | Page | When |
 |---|---|
 | `login` | Always. |
 | `challenge` | When you add a second sign-in method. It asks for the next factor. |
-| `confirm` | When you use step-up. It's the challenge page for confirming. |
+| `confirm` | When you use step-up, which the routes for adding sign-in methods do. It's the challenge page for confirming, and can render the same component. |
 | `register` | With `Features::registration()`. It posts `name`, `email`, `password` and `password_confirmation` to `/register`. |
 | `forgot-password`, `reset-password` | With `Features::resetPasswords()`. |
+| `verify-email` | With `Features::emailVerification()`. It asks the user to click the link they were sent, with a button to send another. |
+| `email-change` | With `Features::emailChanges()`. The emailed confirm and undo links land here, on a page with one button. |
+| `device-report` | With `Features::devices()`. The "this wasn't me" link lands here, on a page with one button. |
 
 A login page posts `email`, `password` and, optionally, `remember` to `/login`:
 
@@ -68,6 +72,73 @@ A login page posts `email`, `password` and, optionally, `remember` to `/login`:
 ```
 
 Users land on `home` from `config/keyring.php` once they're in, `/dashboard` unless you change it. Every page and its data is listed in [Pages](sign-in-flow.md#pages). The [example app](https://github.com/entity/keyring-example) has all of them in React.
+
+## Your Settings Page
+
+The page where users manage their sign-in methods is yours too, at whatever URL you like. Keyring has no route that renders it. Your controller reads what to show, and the page calls Keyring's routes to change it:
+
+```php
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Keyring\Contracts\Enrollable;
+use Keyring\Contracts\Factor;
+use Keyring\Devices\DeviceManager;
+use Keyring\Facades\Keyring;
+use Keyring\Models\Authenticator;
+
+class SecurityController
+{
+    public function edit(Request $request, DeviceManager $devices)
+    {
+        $user = $request->user();
+
+        return Inertia::render('settings/security', [
+            'authenticators' => $user->keyring->all()
+                ->reject(fn (Authenticator $authenticator) => $authenticator->isVirtual())
+                ->map(fn (Authenticator $authenticator) => [
+                    ...$authenticator->factor()->present($authenticator),
+                    'isDefault' => $authenticator->is_default,
+                    'lastUsedAt' => $authenticator->last_used_at?->toIso8601String(),
+                ])
+                ->values(),
+            'enrollable' => Keyring::registered()
+                ->filter(fn (Factor $factor) => $factor instanceof Enrollable)
+                ->keys(),
+            'devices' => $devices->list($request, $user),
+            'activity' => Keyring::activity($user, 15)->map(fn ($event) => [
+                'type' => $event->type,
+                'factor' => $event->factor,
+                'ip' => $event->ip,
+                'at' => $event->created_at->toIso8601String(),
+            ]),
+        ]);
+    }
+}
+```
+
+| Prop | What it holds |
+|---|---|
+| `authenticators` | What the user has set up. `present()` gives each one's `factor`, `id` and `name`, plus `hint` (a masked address) for email codes and `remaining` for recovery codes. The password is a virtual authenticator with no row of its own, so it's left out. |
+| `enrollable` | The keys of the factors a user can add, such as `totp` and `passkey`, for your "add" buttons. |
+| `devices` | Where the user is signed in, with `Features::devices()`. The same list as [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
+| `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, with `Features::securityLog()`. |
+
+From there the page uses Keyring's routes: [`/user/authenticators`](authenticators.md#routes) to add, rename and remove sign-in methods, [`/user/devices`](devices-and-sessions.md#routes) to sign devices out, [`PUT /user/password`](protected-changes.md#changing-the-password) and [`POST /user/email`](protected-changes.md#changing-the-email-address). The [browser package](frontend.md#managing-authenticators) wraps the authenticator routes, including the passkey ceremony.
+
+Those routes need a [fresh verification](step-up.md#fresh-verification), 15 minutes by default. Put the same middleware on the page, after `auth`, so users confirm once when they open it rather than halfway through adding a passkey:
+
+```php
+Route::get('/settings/security', [SecurityController::class, 'edit'])
+    ->middleware(['auth', 'verified', 'keyring.fresh:15m']);
+```
+
+A user who leaves the page open longer than that gets a `423` from the next JSON call, with a `redirect` to the confirm page:
+
+1. Catch the `423` and send the browser to `redirect`.
+2. The user confirms on your `confirm` page.
+3. Keyring sends them back to the page they were on, and they try again.
+
+[Handling Step-Up in JavaScript](frontend.md#handling-step-up-in-javascript) has the code for the first step.
 
 ## Testing
 

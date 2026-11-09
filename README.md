@@ -41,12 +41,13 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model:
+`keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model. Users who register themselves must verify their address before adding a sign-in method, so implement `MustVerifyEmail` too:
 
 ```php
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Keyring\Concerns\HasKeyring;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasKeyring;
 }
@@ -78,10 +79,17 @@ npm install @entity/keyring
 - [Protected Changes](docs/protected-changes.md)
 - [Risk](docs/risk.md)
 - [Security Log & Emails](docs/security-log-and-emails.md)
+- [Events](docs/events.md)
 - [Frontend](docs/frontend.md)
 - [Example app](https://github.com/entity/keyring-example): every page, in React with the Laravel starter kit
 - [Testing](docs/testing.md)
 - [Security](docs/security.md)
+
+The [changelog](CHANGELOG.md) lists what each release changes, and the [upgrade guide](UPGRADE.md) covers anything you need to do when updating.
+
+## Security Vulnerabilities
+
+Please don't open a public issue for a security problem. See the [security policy](SECURITY.md) for how to report one.
 
 ## Contributing
 
