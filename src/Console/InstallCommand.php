@@ -7,17 +7,55 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\ServiceProvider;
+use Keyring\Features;
 use Symfony\Component\Console\Attribute\AsCommand;
 
+use function Laravel\Prompts\confirm;
+use function Laravel\Prompts\multiselect;
+
 #[AsCommand(name: 'keyring:install')]
-#[Description('Install Keyring: config, migrations, a service provider and your actions')]
+#[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
+        {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
+        {--feature=* : A feature to turn on, e.g. registration (defaults to registration and reset-passwords)}
+        {--emails : Send the security emails NIST asks for}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
 {
+    /**
+     * Sign-in methods besides the password, and the lines they add to the
+     * provider's Keyring::factors() call.
+     */
+    protected const array FACTORS = [
+        'totp' => ['Authenticator app, with recovery codes', ['Totp::class,', 'RecoveryCodes::class,']],
+        'passkeys' => ['Passkeys', ['WebAuthn::passkeys(),']],
+        'security-keys' => ['Security keys, as a second factor', ['WebAuthn::securityKeys(),']],
+        'email-codes' => ['Email codes, as a second factor (below NIST AAL2)', ['EmailCode::asSecondFactor(),']],
+    ];
+
+    /**
+     * The action each feature needs from the app.
+     */
+    protected const array ACTIONS = [
+        'registration' => 'CreateNewUser',
+        'reset-passwords' => 'ResetUserPassword',
+        'update-passwords' => 'UpdateUserPassword',
+        'email-changes' => 'ValidateEmailChange',
+    ];
+
+    protected const string STUBS = __DIR__.'/../../stubs';
+
     public function handle(Filesystem $files): int
     {
-        $this->callSilently('vendor:publish', ['--tag' => 'keyring-config', '--force' => $this->option('force')]);
+        $factors = $this->factors();
+        $features = $this->features($factors);
+        $emails = $this->option('emails') || ($this->input->isInteractive() && confirm(
+            label: 'Send the security emails NIST asks for?',
+            default: $factors !== [],
+            hint: 'Password changed, sign-in method added or removed, recovery code used.',
+        ));
+
+        $this->write($files, config_path('keyring.php'), $this->config($files, $features, $emails));
 
         // Publishing again would add the migrations twice, under new timestamps.
         if ($files->glob(database_path('migrations/*_create_keyring_authenticators_table.php')) === []) {
@@ -25,8 +63,12 @@ class InstallCommand extends Command
         }
 
         // The provider and actions are your code from here on.
-        foreach ($files->allFiles(__DIR__.'/../../stubs/app') as $file) {
-            $this->copy($files, $file->getPathname(), app_path($file->getRelativePathname()));
+        $this->write($files, app_path('Providers/KeyringServiceProvider.php'), $this->provider($files, $factors, $features));
+
+        $actions = array_values(array_intersect_key(self::ACTIONS, array_flip($features)));
+
+        foreach ($actions === [] ? [] : [...$actions, 'PasswordValidationRules'] as $action) {
+            $this->write($files, app_path("Actions/Keyring/{$action}.php"), $files->get(self::STUBS."/app/Actions/Keyring/{$action}.php"));
         }
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
@@ -35,17 +77,134 @@ class InstallCommand extends Command
         $this->components->bulletList([
             'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
             'Run <comment>php artisan migrate</comment>',
-            'Build the <comment>auth/*</comment> pages Keyring renders, see the "Pages" docs',
-            'Already using Fortify? Run <comment>php artisan keyring:import fortify</comment>',
+            'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
+            'Add features later in <comment>config/keyring.php</comment>, and sign-in methods in your KeyringServiceProvider',
         ]);
 
         return self::SUCCESS;
     }
 
     /**
-     * Copy a stub into the app, leaving anything already there unless --force.
+     * @return list<string>
      */
-    protected function copy(Filesystem $files, string $from, string $to): void
+    protected function factors(): array
+    {
+        $chosen = $this->option('factor');
+
+        if ($chosen === [] && $this->input->isInteractive()) {
+            $chosen = multiselect(
+                label: 'Which sign-in methods besides the password?',
+                options: array_map(fn (array $factor) => $factor[0], self::FACTORS),
+                hint: 'You can add more later in app/Providers/KeyringServiceProvider.php.',
+            );
+        }
+
+        return array_values(array_intersect(array_keys(self::FACTORS), $chosen));
+    }
+
+    /**
+     * @param  list<string>  $factors
+     * @return list<string>
+     */
+    protected function features(array $factors): array
+    {
+        $chosen = $this->option('feature');
+
+        if ($chosen === []) {
+            $chosen = $this->input->isInteractive() ? multiselect(
+                label: 'Which features?',
+                options: [
+                    Features::registration() => 'Registration',
+                    Features::resetPasswords() => 'Password resets',
+                    Features::emailVerification() => 'Email verification',
+                    Features::updatePasswords() => 'Changing the password',
+                    Features::manageAuthenticators() => 'Managing sign-in methods (needed to set any up)',
+                    Features::devices() => 'Devices: "trust this device" and where you\'re signed in',
+                    Features::emailChanges() => 'Email changes, confirmed and undoable',
+                    Features::securityLog() => 'Security log and "was this you?" alerts',
+                ],
+                default: [Features::registration(), Features::resetPasswords(), ...$factors === [] ? [] : [Features::manageAuthenticators()]],
+                hint: 'Signing in and out, challenges and step-up are always on.',
+            ) : [Features::registration(), Features::resetPasswords()];
+        }
+
+        // Users can't set up the sign-in methods without it.
+        if ($factors !== [] && ! in_array(Features::manageAuthenticators(), $chosen, true)) {
+            $chosen[] = Features::manageAuthenticators();
+            $this->components->info('Turned on managing sign-in methods, so users can set up the ones you picked.');
+        }
+
+        return array_values(array_intersect(Features::all(), $chosen));
+    }
+
+    /**
+     * The short config, with the features left out commented, so they're
+     * there to turn on later.
+     *
+     * @param  list<string>  $features
+     */
+    protected function config(Filesystem $files, array $features, bool $emails): string
+    {
+        $config = $files->get(self::STUBS.'/config/keyring.php');
+
+        foreach (Features::all() as $feature) {
+            if (! in_array($feature, $features, true)) {
+                $method = lcfirst(str_replace(' ', '', ucwords(str_replace('-', ' ', $feature))));
+                $config = str_replace("        Features::{$method}(),", "        // Features::{$method}(),", $config);
+            }
+        }
+
+        return $emails ? $config : (string) preg_replace("/'notifications' => \\[.*?\\],/s", "'notifications' => [],", $config);
+    }
+
+    /**
+     * The provider with only the chosen sign-in methods and needed actions.
+     *
+     * @param  list<string>  $factors
+     * @param  list<string>  $features
+     */
+    protected function provider(Filesystem $files, array $factors, array $features): string
+    {
+        $remove = [];
+
+        foreach (self::FACTORS as $key => [, $lines]) {
+            if (! in_array($key, $factors, true)) {
+                array_push($remove, ...$lines);
+            }
+        }
+
+        foreach (self::ACTIONS as $feature => $action) {
+            if (! in_array($feature, $features, true)) {
+                $remove[] = "({$action}::class);";
+            }
+        }
+
+        $lines = array_filter(
+            explode("\n", $files->get(self::STUBS.'/app/Providers/KeyringServiceProvider.php')),
+            fn (string $line) => ! str_contains($line, 'Keyring::require(') || $factors !== [],
+        );
+        $lines = array_filter($lines, fn (string $line) => array_all($remove, fn (string $needle) => ! str_ends_with(trim($line), $needle)));
+
+        return $this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines)));
+    }
+
+    /**
+     * Comments whose code was removed, and the blank line before them.
+     */
+    protected function withoutOrphanedComments(string $code): string
+    {
+        return (string) preg_replace('/\n\n(?: +\/\/[^\n]*\n)+(?=\n| *})/', "\n", $code);
+    }
+
+    protected function withoutUnusedImports(string $code): string
+    {
+        return (string) preg_replace_callback('/^use [\w\\\\]+\\\\(\w+);\n/m', fn (array $import) => preg_match_all('/\b'.$import[1].'\b/', $code) > 1 ? $import[0] : '', $code);
+    }
+
+    /**
+     * Write a file the app owns, leaving anything already there unless --force.
+     */
+    protected function write(Filesystem $files, string $to, string $contents): void
     {
         if ($files->exists($to) && ! $this->option('force')) {
             $this->components->warn("Skipped {$to}, it already exists.");
@@ -54,6 +213,6 @@ class InstallCommand extends Command
         }
 
         $files->ensureDirectoryExists(dirname($to));
-        $files->copy($from, $to);
+        $files->put($to, $contents);
     }
 }
