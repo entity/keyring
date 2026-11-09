@@ -66,7 +66,7 @@ Route::middleware('auth:'.$guard)->group(function () {
                 Route::post('/{factor}', [AuthenticatorController::class, 'store'])->block()->name('store');
                 Route::post('/{factor}/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:keyring')->block()->name('confirm');
                 Route::patch('/{authenticator}', [AuthenticatorController::class, 'update'])->name('update');
-                Route::delete('/{authenticator}', [AuthenticatorController::class, 'destroy'])->name('destroy');
+                Route::delete('/{authenticator}', [AuthenticatorController::class, 'destroy'])->middleware('throttle:keyring')->name('destroy');
             });
         }
 
