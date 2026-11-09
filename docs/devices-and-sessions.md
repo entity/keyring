@@ -239,7 +239,7 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 | `forUser($user)` | The user's sessions that haven't expired or been revoked, most recent first. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |
-| `revokeAll($user, $except = null)` | Revokes every session of the user but one, cycles the remember token and stops trusting the other devices. Returns how many. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. `Sessions::revokeAll()` calls it, then also changes the remember token and stops trusting the other devices, so call that one from your own code. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A store that expires records itself can return `0`. |
 
@@ -291,7 +291,7 @@ A level lapses on its own clock without ending the session: after its `idle` wit
 
 `php artisan keyring:prune` deletes what Keyring no longer needs:
 
-- devices revoked more than 30 days ago,
+- devices revoked more than 30 days ago, or not seen for a year,
 - email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago, since they hold both addresses,
 - security log entries older than `security_log.keep_for`,
 - registered sessions that have expired or been revoked, through the registry's `prune()`. The cache driver's records expire on their own.
