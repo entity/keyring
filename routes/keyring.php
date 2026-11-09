@@ -44,6 +44,7 @@ Route::middleware('guest:'.$guard)->group(function () {
     // Sign in with another primary factor, like a passkey: /login/passkey
     Route::get('/login/{factor}/options', [AuthenticatedSessionController::class, 'options'])
         ->where('factor', '(?!challenge$)[a-z0-9-]+')
+        ->middleware('throttle:keyring-login-options')
         ->name('keyring.login.options');
     Route::post('/login/{factor}', [AuthenticatedSessionController::class, 'store'])
         ->where('factor', '(?!challenge$)[a-z0-9-]+')

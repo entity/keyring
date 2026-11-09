@@ -263,6 +263,8 @@ use Illuminate\Support\Facades\RateLimiter;
 RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
 ```
 
+`GET /login/{factor}/options` uses its own limiter, `keyring-login-options`, which allows 60 requests a minute per IP address. Login pages fetch the options on every load for passkey autofill, and when the limit is hit autofill stops offering passkeys until the next minute. Define the same limiter to change it.
+
 ## Messages and Translations
 
 Keyring's text lives in three translation files under the `keyring::` namespace:

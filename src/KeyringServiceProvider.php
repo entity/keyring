@@ -192,12 +192,18 @@ class KeyringServiceProvider extends ServiceProvider
     }
 
     /**
-     * The limit on Keyring's form routes (registration, resets, enrollment).
-     * Define your own "keyring" limiter to change it.
+     * The limit on Keyring's form routes (registration, resets, enrollment),
+     * and on usernameless login options. Define your own "keyring" or
+     * "keyring-login-options" limiter to change them.
      */
     protected function configureRateLimiting(): void
     {
         RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip()));
+
+        // The login page asks for these on every load, for passkey autofill,
+        // and an office shares one address, so six a minute would be too few.
+        // One a second still limits how many challenges a script can make.
+        RateLimiter::for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
     }
 
     /**
