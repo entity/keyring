@@ -178,8 +178,11 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 'email_changes' => [
     'expire' => '24h',
     'revertable_for' => '7d',
+    'sign_out_others' => true,
 ],
 ```
+
+`sign_out_others` ends the account's other sessions when an email change applies.
 
 `Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds `email`. List any others in `protected`. See [Protected Changes](protected-changes.md).
 

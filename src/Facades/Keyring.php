@@ -19,6 +19,7 @@ use Keyring\KeyringManager;
  * @method static void routes()
  * @method static \Keyring\KeyringManager pipeline(\Closure $callback)
  * @method static array steps()
+ * @method static array dangerouslyChangedSteps()
  * @method static \Keyring\Risk\RiskEngine risk(array|null $signals = null)
  * @method static \Keyring\KeyringManager notify(array|null $types = null)
  * @method static bool notifies(string $type)

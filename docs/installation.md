@@ -93,7 +93,7 @@ The trait does three things:
 
 - It adds `$user->keyring`, `$user->authenticators()` and `$user->devices()`.
 - Once Keyring handles changing them (`Features::updatePasswords()` and `Features::emailChanges()`), it stops the `password` and `email` attributes from changing outside Keyring's own flows. See [Protected Changes](protected-changes.md).
-- When the user is deleted, it revokes their sessions and deletes their authenticators, devices and pending changes. With soft deletes, the sessions are revoked straight away and the rest waits for a force delete, so a restored user keeps their sign-in methods.
+- When the user is deleted, it revokes their sessions and ends their reset links, and deletes their authenticators, devices and pending changes. With soft deletes, the sessions and reset links go straight away and the rest waits for a force delete, so a restored user keeps their sign-in methods.
 
 The published `CreateNewUser` action passes the plain password to `User::create()`, so it relies on the `hashed` cast shown above. The password actions hash it themselves.
 

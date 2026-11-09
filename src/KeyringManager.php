@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -41,6 +42,7 @@ use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
 use Keyring\Testing\KeyringFake;
+use LogicException;
 
 class KeyringManager
 {
@@ -237,7 +239,15 @@ class KeyringManager
      */
     public function pipeline(Closure $callback): static
     {
+        $known = $this->customisedSteps()->dangerouslyChanged();
+
         $this->pipelineCallbacks[] = $callback;
+
+        // Run it now, so a refused change stops the app at boot rather than
+        // at the first sign in.
+        foreach (array_diff($this->customisedSteps()->dangerouslyChanged(), $known) as $step) {
+            Log::warning("Keyring's [{$step}] pipeline step was dangerously removed or replaced, so the security check it performs is off.");
+        }
 
         return $this;
     }
@@ -247,13 +257,28 @@ class KeyringManager
      */
     public function steps(): array
     {
+        return $this->customisedSteps()->all();
+    }
+
+    /**
+     * The steps taken out with dangerouslyReplace() or dangerouslyRemove().
+     *
+     * @return list<class-string>
+     */
+    public function dangerouslyChangedSteps(): array
+    {
+        return $this->customisedSteps()->dangerouslyChanged();
+    }
+
+    protected function customisedSteps(): Steps
+    {
         $steps = Steps::defaults();
 
         foreach ($this->pipelineCallbacks as $callback) {
             $steps = $callback($steps) ?? $steps;
         }
 
-        return $steps->all();
+        return $steps;
     }
 
     /**
@@ -299,6 +324,10 @@ class KeyringManager
      */
     public function fake(): KeyringFake
     {
+        if (app()->environment('production')) {
+            throw new LogicException('Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
+        }
+
         $this->container->singletonIf(KeyringFake::class);
 
         return $this->container->make(KeyringFake::class);

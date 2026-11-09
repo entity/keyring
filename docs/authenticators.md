@@ -104,11 +104,11 @@ The user's first saved authenticator becomes their default (never recovery codes
 
 ## Recovery Codes
 
-The first time a user adds an extra factor and has no recovery codes, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered.
+The first time a user adds an extra factor and has no recovery codes, or has used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered.
 
-To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set.
+To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored.
 
-Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count, so you can suggest new codes when they run low. Users with no codes left keep the (empty) set until they make a new one or it's removed along with their last factor.
+Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count, so you can suggest new codes when they run low. Users with no codes left keep the (empty) set until they make a new one, add another factor (which replaces it with a new set) or it's removed along with their last factor. An empty set is never offered as a way in.
 
 ## Renaming and Choosing the Default
 

@@ -73,7 +73,7 @@ class EmailChanges
 
         $tokens = ['confirm' => Str::random(48), 'current' => Str::random(48), 'revert' => Str::random(48)];
 
-        $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($request);
+        $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($user, $request);
 
         $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
             $this->cancel($user);
@@ -139,6 +139,8 @@ class EmailChanges
         $change = $change->fresh();
 
         if ($result === EmailConfirmation::Applied && ($user = $change?->user())) {
+            $this->endOtherSessions($user);
+
             EmailChanged::dispatch($user, $change);
         }
 
@@ -222,9 +224,10 @@ class EmailChanges
      * Skip the current-address confirmation only when this session proved a
      * second factor that existed before it signed in. Factors added during
      * the session don't count, or a stolen session could add one, verify it,
-     * and skip the check.
+     * and skip the check. Only this account's own factors count: a switched
+     * or impersonated session may hold someone else's verifications.
      */
-    protected function sessionProvedEstablishedSecondFactor(Request $request): bool
+    protected function sessionProvedEstablishedSecondFactor(Authenticatable&Model $user, Request $request): bool
     {
         $signedInAt = $this->sessions->current($request)?->authenticatedAt;
 
@@ -238,9 +241,37 @@ class EmailChanges
             ->map(fn (Verification $verification) => $verification->authenticator);
 
         return $ids->isNotEmpty() && $this->keyring->authenticatorModel()::query()
+            ->ownedBy($user)
             ->whereKey($ids->all())
             ->where('created_at', '<', Carbon::createFromTimestamp($signedInAt))
             ->exists();
+    }
+
+    /**
+     * Whoever else was signed in shouldn't keep the account once the address
+     * has moved: other sessions end, unless the app opted out. The browser
+     * that confirmed keeps its own, under a new ID, only if it's the account's.
+     */
+    protected function endOtherSessions(Authenticatable&Model $user): void
+    {
+        // The current request, not one captured at boot (Octane).
+        $request = request();
+        $here = $request->hasSession() && $this->signedInAs($user);
+
+        if (config('keyring.email_changes.sign_out_others', true)) {
+            $this->sessions->revokeAll($user, except: $here ? $this->sessions->current($request)?->id : null);
+        }
+
+        if ($here) {
+            $request->session()->regenerate(true);
+        }
+    }
+
+    protected function signedInAs(Authenticatable&Model $user): bool
+    {
+        $found = $this->keyring->guard()->user();
+
+        return $found instanceof Model && $found->is($user);
     }
 
     /**

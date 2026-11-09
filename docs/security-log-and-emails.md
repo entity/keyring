@@ -49,7 +49,8 @@ Without the feature, nothing is logged. "Was this you?" alerts and the `Repeated
 | `sessions_revoked` | "Sign out everywhere else". | `count` |
 | `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user` or `risk` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |
-| `password_changed`, `password_reset` | | |
+| `password_changed` | | |
+| `password_reset` | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |
 | `protection_bypassed` | `Keyring::withoutProtection()` was used. Linked to the signed-in user who did it. | `reason` |
 | `clone_suspected` | A passkey or security key's counter went backwards. | `name` |
 | `risk_denied`, `risk_reauthenticate`, `risk_step_up`, `risk_revoked_sessions`, `risk_notified` | A risk action did something. | `checkpoint`, `score`, `reasons` |
@@ -148,6 +149,8 @@ Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless yo
 | `recovery_code_used` | A recovery code was used. Says how many are left. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. Lists the reasons. |
 | `clone_suspected` | A passkey or security key looked cloned. |
+| `email_changed` | An email change applied. Sent to both the old and the new address. |
+| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. |
 
 To send your own instead, listen for the matching [events](sign-in-flow.md#events) and leave the type off.
 
@@ -158,6 +161,8 @@ All the wording for Keyring's emails lives in `lang/en/notifications.php`. Secur
 ```bash
 php artisan vendor:publish --tag=keyring-lang
 ```
+
+Anything a user or client can influence, such as an authenticator name, a device or a location, can't add links, images or other formatting to an email: it shows as plain text. So the `intro` of a security notice and its detail lines are always plain text, even if you add Markdown to them. `footer` has no such values and is still Markdown.
 
 ### Slack, SMS and Other Channels
 
@@ -180,10 +185,13 @@ class SecurityNotice extends KeyringSecurityNotice
     {
         $content = $this->content();
 
-        return new SlackMessage()->text($content['subject'].': '.$content['intro']);
+        // Slack reads <...> as a link, and an authenticator's name is whatever the user typed.
+        return new SlackMessage()->text(htmlspecialchars($content['subject'].': '.$content['intro'], ENT_NOQUOTES));
     }
 }
 ```
+
+`content()` is plain text that can include what users and clients sent, on one line and capped in length, so escape it for the channel you send it to. To change the email, start from `parent::toMail($notifiable)`, which is already escaped. If you build your own `MailMessage` from `content()`, pass each line through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown.
 
 Slack needs Laravel's `laravel/slack-notification-channel` package; see [Laravel's notification docs](https://laravel.com/docs/notifications#slack-notifications) for it and the other channels. Then register the class in your `KeyringServiceProvider`:
 
@@ -192,6 +200,8 @@ Keyring::securityNoticesUsing(\App\Notifications\SecurityNotice::class);
 ```
 
 `toArray()` is already there, so adding `database` or `broadcast` to `via()` works without more code. Keep the parent's constructor, since Keyring passes its arguments by name.
+
+The copies of `email_changed` and `email_change_reverted` sent to an address that isn't the account's current one have no user to pass to your class, so they're always Keyring's own `SecurityNotice`, by mail.
 
 ### Emails Keyring Always Sends
 

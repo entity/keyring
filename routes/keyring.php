@@ -63,7 +63,7 @@ Route::middleware('auth:'.$guard)->group(function () {
     Route::middleware(config('keyring.manage_middleware'))->group(function () {
         if (Features::enabled(Features::manageAuthenticators())) {
             Route::prefix('/user/authenticators')->name('keyring.authenticators.')->group(function () {
-                Route::post('/{factor}', [AuthenticatorController::class, 'store'])->name('store');
+                Route::post('/{factor}', [AuthenticatorController::class, 'store'])->block()->name('store');
                 Route::post('/{factor}/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:keyring')->block()->name('confirm');
                 Route::patch('/{authenticator}', [AuthenticatorController::class, 'update'])->name('update');
                 Route::delete('/{authenticator}', [AuthenticatorController::class, 'destroy'])->name('destroy');

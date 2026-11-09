@@ -15,6 +15,7 @@
 - [Signing Out](#signing-out)
 - [The Verification Pipeline](#the-verification-pipeline)
     - [Customising the Steps](#customising-the-steps)
+    - [Mandatory Steps](#mandatory-steps)
     - [Writing a Step](#writing-a-step)
 - [Responses](#responses)
     - [Status Responses](#status-responses)
@@ -85,6 +86,17 @@ Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
 ```
 
 Whether a lookup cares about case also depends on your database: MySQL's default collations ignore it, while PostgreSQL and SQLite don't.
+
+Failed attempts count against what was typed, because Keyring checks the limits before it looks the user up. A password reset clears the limits of the `username` attribute and the user's ID, but it can't tell what else your finder accepts. Pass your other identifiers in a `PasswordReset` listener, or a lock on one stays until it expires, up to 30 days at the consecutive cap, while the user can still sign in with the `username` attribute:
+
+```php
+use Keyring\Events\PasswordReset;
+use Keyring\Pipeline\Steps\EnsureNotThrottled;
+
+Event::listen(function (PasswordReset $event) {
+    EnsureNotThrottled::clearAccount($event->user, $event->user->username);
+});
+```
 
 `findUsersUsing()` only finds the user: Keyring still checks the password, and answers a `null` the same way as a wrong password, in the same time. It answers the same way for a user that Keyring's guard wouldn't load back through its provider, like one of another model. The username field's validation still applies; change it with a [pipeline step](#writing-a-step) if you need to.
 
@@ -168,7 +180,7 @@ Post the proof to `POST /login/challenge/{factor}`:
 
 For WebAuthn, the browser may answer with any of the user's keys of that factor, not just the one shown, and Keyring accepts it.
 
-Wrong proofs fail with `keyring::keyring.invalid` on the factor's field (`password`, `code` or `credential`). A wrong code keeps its guess count, so reloading doesn't reset it.
+Wrong proofs fail with `keyring::keyring.invalid` on the factor's field (`password`, `code` or `credential`). A wrong code keeps its guess count, so neither reloading nor sending a new code resets it. Once a pending attempt reaches a factor's limit (five guesses by default), nothing can finish it: verifying fails with `keyring::keyring.too_many_codes`, and opening the challenge page or sending a code ends the attempt and sends the user back to the start (`/login`, or `/confirm` for a step-up) with that message. The account's limits keep counting these failures.
 
 ### Sending Codes
 
@@ -231,6 +243,7 @@ Every verification, at login or step-up, goes through one pipeline of steps:
 | `EnsureNotThrottled` | Checks the factor's rate limits, counts the attempt, and locks out repeated failures. See [Rate Limiting](security.md#rate-limiting). |
 | `VerifyFactor` | Validates the request, identifies the user for primary factors, and checks the proof inside the timebox. Stops the pipeline on failure. |
 | `ResolveDevice` | Notes the device this attempt comes from, and the `trust` checkbox. |
+| `EnsureNotRiskLocked` | Refuses a user under a [risk lock](risk.md#actions) with the usual generic error. Skipped for step-up. |
 | `AssessRisk` | Runs the [risk signals](risk.md) once per login and acts on them. Skipped for step-up. |
 | `DetermineRequirement` | Asks the policy what's needed. |
 | `CompleteAttempt` | Signs the user in, or confirms them, when the requirement is met. Otherwise regenerates the session ID and saves the attempt for the challenge page. |
@@ -252,7 +265,22 @@ Keyring::pipeline(fn (Steps $steps) => $steps
     ->replace(AssessRisk::class, MyRiskStep::class));
 ```
 
-`Steps` has `before()`, `after()`, `replace()` and `remove()`. `before()` and `after()` take any number of steps. Each throws an `InvalidArgumentException` if the step you name isn't in the pipeline. You can call `Keyring::pipeline()` more than once; the callbacks run in order.
+`Steps` has `before()`, `after()`, `replace()` and `remove()`. `before()` and `after()` take any number of steps. Each throws an `InvalidArgumentException` if the step you name isn't in the pipeline. You can call `Keyring::pipeline()` more than once; the callbacks run in order, and each runs as soon as you call it, so a mistake shows up at boot.
+
+### Mandatory Steps
+
+`EnsureNotThrottled`, `VerifyFactor`, `EnsureNotRiskLocked`, `DetermineRequirement` and `CompleteAttempt` enforce Keyring's guarantees, so `replace()` and `remove()` throw an `InvalidArgumentException` if you name one of them. `ResolveDevice` and `AssessRisk` are yours to replace or remove.
+
+If you really mean to take a mandatory step out, say so:
+
+```php
+Keyring::pipeline(fn (Steps $steps) => $steps
+    ->dangerouslyReplace(EnsureNotThrottled::class, MyRateLimiter::class));
+```
+
+`dangerouslyReplace()` and `dangerouslyRemove()` log a warning when `Keyring::pipeline()` is called, and the [conformance suite](testing.md#the-conformance-suite) fails until you acknowledge the step. Whatever that step checked is then up to you.
+
+Before signing anyone in, `CompleteAttempt` also confirms that this request was throttled, verified and checked for a risk lock, and that the requirement is met. If one of those didn't happen, it logs an error and refuses with the usual generic error. It doesn't ask this of a step you took out with `dangerouslyReplace()` or `dangerouslyRemove()`, but the requirement must always be met.
 
 ### Writing a Step
 

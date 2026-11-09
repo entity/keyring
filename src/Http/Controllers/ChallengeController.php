@@ -40,10 +40,14 @@ class ChallengeController
     {
         $purpose = $this->purpose($request);
         $attempt = $this->attempts->current($purpose)
-            ?? ($purpose === Purpose::Confirm ? $this->stepUp->begin($request, Requirement::aal1()) : null);
+            ?? ($purpose === Purpose::Confirm ? $this->stepUp->begin($request, Requirement::aal1()->withoutRecoveryCodes()) : null);
 
         if ($attempt === null) {
             return $this->expired($purpose);
+        }
+
+        if ($attempt->exhausted) {
+            return $this->startOver($purpose);
         }
 
         $options = $attempt->options();
@@ -94,6 +98,10 @@ class ChallengeController
             return $this->expired($purpose);
         }
 
+        if ($attempt->exhausted) {
+            return $this->startOver($purpose);
+        }
+
         $factor = $this->keyring->factor($factor);
         abort_unless($factor instanceof SendsCodes, 404);
 
@@ -120,7 +128,10 @@ class ChallengeController
         }
 
         $factor = $this->keyring->factor($factor);
-        $authenticator = $this->authenticatorFor($request, $attempt, $factor->key());
+
+        // Out of guesses, nothing can finish this attempt. Failing it here
+        // instead of refusing keeps the account's counters counting.
+        $authenticator = $attempt->exhausted ? null : $this->authenticatorFor($request, $attempt, $factor->key());
 
         return $this->verifyAndRespond(new Context($request, $purpose, $factor, $attempt, $authenticator));
     }
@@ -167,6 +178,17 @@ class ChallengeController
     protected function purpose(Request $request): Purpose
     {
         return Purpose::from(Str::between((string) $request->route()?->getName(), 'keyring.', '.'));
+    }
+
+    /**
+     * A code was guessed too many times, so drop the attempt: the only way on
+     * is to start signing in again.
+     */
+    protected function startOver(Purpose $purpose): RedirectResponse
+    {
+        $this->attempts->forget($purpose);
+
+        return $this->expired($purpose, __('keyring::keyring.too_many_codes'));
     }
 
     protected function expired(Purpose $purpose, ?string $message = null): RedirectResponse

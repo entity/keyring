@@ -42,6 +42,26 @@ it('only accepts a code for the authenticator it was sent to', function () {
     $this->assertGuest();
 });
 
+it('counts wrong guesses across every authenticator of a code factor', function () {
+    config(['keyring.limits.per_account' => 100]);
+    $first = Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'sms', 'name' => 'Phone A', 'secret' => '+447700900001', 'is_default' => true]);
+    $second = Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'sms', 'name' => 'Phone B', 'secret' => '+447700900002']);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.send', 'sms'), ['authenticator' => $first->id]);
+
+    foreach (range(1, 4) as $guess) {
+        $this->post(route('keyring.login.verify', 'sms'), ['authenticator' => $first->id, 'code' => '00000000']);
+    }
+
+    $this->post(route('keyring.login.send', 'sms'), ['authenticator' => $second->id]);
+    $this->post(route('keyring.login.verify', 'sms'), ['authenticator' => $second->id, 'code' => '00000000']);
+
+    $this->post(route('keyring.login.verify', 'sms'), ['authenticator' => $second->id, 'code' => SmsCode::$sent['+447700900002']])
+        ->assertSessionHasErrors(['code' => __('keyring::keyring.too_many_codes')]);
+    $this->assertGuest();
+});
+
 it('keeps a single email code method, since every copy would go to the same address', function () {
     Notification::fake();
     Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'email-code', 'name' => 'Email']);

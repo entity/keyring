@@ -11,6 +11,8 @@ use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\Totp;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Notifications\SecurityNotice;
@@ -74,6 +76,86 @@ it('regenerates recovery codes, replacing the old ones', function () {
     expect($recovery)->toHaveCount(1)
         ->and($codes)->toHaveCount(8)
         ->and($recovery->first()->factor()->present($recovery->first())['remaining'])->toBe(8);
+});
+
+it('refuses recovery codes for a user with no second factor to back up', function () {
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['authenticator' => 'back up another second factor']);
+
+    expect($this->user->keyring->refresh()->all()->pluck('factor')->all())->toBe(['password']);
+});
+
+it('refuses to finish enrolling recovery codes once the second factor is gone', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+
+    $totp->delete();
+
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('authenticator');
+
+    expect($this->user->keyring->refresh()->of('recovery'))->toBeEmpty();
+});
+
+it('enrolls recovery codes when there is a real second factor', function () {
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk()->json('enrollment.codes');
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+    expect($codes)->toHaveCount(8)
+        ->and($this->user->keyring->refresh()->of('recovery'))->toHaveCount(1);
+});
+
+it('refuses to replace a used-up set with no second factor beside it', function () {
+    Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();
+
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('authenticator');
+});
+
+it('issues new recovery codes when a factor is added and the old set has run out', function () {
+    Event::fake([RecoveryCodesGenerated::class]);
+    $old = Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+    $sets = $this->user->keyring->refresh()->of('recovery');
+    expect($response->json('recoveryCodes'))->toHaveCount(8)
+        ->and($sets)->toHaveCount(1)
+        ->and($sets->first()->id)->not->toBe($old->id)
+        ->and($sets->first()->factor()->present($sets->first())['remaining'])->toBe(8);
+
+    Event::assertDispatched(RecoveryCodesGenerated::class);
+});
+
+it('does not touch a set that still has codes when a factor is added', function () {
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $set = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
+        ->assertOk()
+        ->assertJsonMissingPath('recoveryCodes');
+
+    expect($this->user->keyring->refresh()->of('recovery')->pluck('id')->all())->toBe([$set->id]);
+});
+
+it('adds no recovery codes when that factor is not registered', function () {
+    Keyring::factors([Password::class, Totp::class]);
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
+        ->assertOk()
+        ->assertJsonMissingPath('recoveryCodes');
 });
 
 it('renames and picks the default', function () {
@@ -175,6 +257,30 @@ it('tells the user when a sign-in method is added', function () {
 
     Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'authenticator_added');
 });
+
+it('shows a name someone typed as plain text in the email, never as a link', function (string $name, string $html, string $text) {
+    Notification::fake();
+    Keyring::notify();
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => $name])->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+    $notice = Notification::sent($this->user, SecurityNotice::class)->firstWhere('type', 'authenticator_added');
+    $mail = renderedMail($notice->toMail($this->user));
+
+    expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
+        ->toContain($html)
+        ->and($mail['text'])->toContain($text);
+})->with([
+    'a link' => ['[Not you? Remove it here](https://evil.example/x)', '[Not you? Remove it here](https://evil.example/x)', '[Not you? Remove it here](https://evil.example/x)'],
+    'an image' => ['![x](https://evil.example/p.png)', '![x](https://evil.example/p.png)', '![x](https://evil.example/p.png)'],
+    'an autolink' => ['<https://evil.example/y>', '&lt;https://evil.example/y&gt;', '<https://evil.example/y>'],
+    'an html tag' => ['<a href="https://evil.example/z">Hi</a>', '&lt;a href="https://evil.example/z"&gt;Hi&lt;/a&gt;', '<a href="https://evil.example/z">Hi</a>'],
+    'emphasis and code' => ['**bold** _em_ `code`', '**bold** _em_ `code`', '**bold** _em_ `code`'],
+    'a new line' => ["key\n\n# Heading", 'key # Heading', 'key # Heading'],
+    'a legitimate name with punctuation' => ["Robert's [work] key", "Robert's [work] key", "Robert's [work] key"],
+    'an ampersand' => ['R&D key', 'R&amp;D key', 'R&D key'],
+]);
 
 it('skips the notice for a model that can\'t be notified, instead of failing', function () {
     $account = UnnotifiableAccount::query()->findOrFail($this->user->getKey());
