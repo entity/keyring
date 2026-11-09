@@ -47,15 +47,13 @@ return [
     | Security Emails
     |--------------------------------------------------------------------------
     |
-    | The notices Keyring sends users about their account. NIST SP 800-63B
-    | asks for password_changed, authenticator_added, authenticator_removed
-    | and recovery_code_used. The others: new_device, second_factor_failed,
-    | suspicious_activity, clone_suspected, email_changed and
-    | email_change_reverted.
+    | The emails Keyring sends users about their account. The others you can
+    | add: new_device, second_factor_failed, suspicious_activity,
+    | clone_suspected, email_changed and email_change_reverted.
     |
     */
 
-    'notifications' => [
+    'security_notices' => [
         'password_changed',
         'authenticator_added',
         'authenticator_removed',

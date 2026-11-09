@@ -18,7 +18,7 @@ use function Laravel\Prompts\multiselect;
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
         {--feature=* : A feature to turn on, e.g. registration (defaults to registration and reset-passwords)}
-        {--emails : Send the security emails NIST asks for (the default with a second sign-in method)}
+        {--emails : Email users when their password or sign-in methods change (the default with a second sign-in method)}
         {--no-emails : Send no security emails}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
@@ -32,7 +32,7 @@ class InstallCommand extends Command
         'totp' => ['Authenticator app', 'Totp::class,'],
         'passkeys' => ['Passkeys', 'WebAuthn::passkeys(),'],
         'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
-        'email-codes' => ['Email codes, as a second factor (below NIST AAL2)', 'EmailCode::asSecondFactor(),'],
+        'email-codes' => ['Email codes, as a second factor (the weakest option)', 'EmailCode::asSecondFactor(),'],
     ];
 
     protected const string STUBS = __DIR__.'/../../stubs';
@@ -56,7 +56,7 @@ class InstallCommand extends Command
             $this->option('emails') => true,
             $this->option('no-emails') => false,
             $this->input->isInteractive() => confirm(
-                label: 'Send the security emails NIST asks for?',
+                label: 'Email users when their password or sign-in methods change?',
                 default: $factors !== [],
                 hint: 'Password changed, sign-in method added or removed, recovery code used.',
             ),
@@ -170,7 +170,7 @@ class InstallCommand extends Command
             }
         }
 
-        return $emails ? $config : (string) preg_replace("/'notifications' => \\[.*?\\],/s", "'notifications' => [],", $config);
+        return $emails ? $config : (string) preg_replace("/'security_notices' => \\[.*?\\],/s", "'security_notices' => [],", $config);
     }
 
     /**

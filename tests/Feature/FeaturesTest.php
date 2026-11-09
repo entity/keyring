@@ -84,6 +84,6 @@ it('starts with the password, registration, password resets and no emails', func
 
     expect(new FactorRegistry(app())->all()->keys()->all())->toBe(['password'])
         ->and($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
-        ->and($config['notifications'])->toBe([])
+        ->and($config['security_notices'])->toBe([])
         ->and($config['protected'])->toBe([]);
 });

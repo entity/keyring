@@ -74,7 +74,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | The relying party ID defaults to your APP_URL host, and the allowed
-    | origins to your APP_URL. Timeout is in milliseconds.
+    | origins to your APP_URL. The timeout is how long the browser waits.
     |
     */
 
@@ -84,21 +84,22 @@ return [
             'name' => env('KEYRING_WEBAUTHN_RP_NAME'),
         ],
         'origins' => [],
-        'timeout' => 60_000,
+        'timeout' => '60s',
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Managing Authenticators
+    | Account Changes
     |--------------------------------------------------------------------------
     |
-    | Extra middleware for adding, changing and removing authenticators (on
-    | top of being signed in to Keyring's guard). Changing how someone signs
-    | in needs a recent verification (OWASP).
+    | Extra middleware for the routes that change how someone signs in: their
+    | authenticators, devices, password and email address (on top of being
+    | signed in to Keyring's guard). By default they need a recent
+    | verification.
     |
     */
 
-    'manage_middleware' => ['keyring.fresh:15m'],
+    'changes_middleware' => ['keyring.fresh:15m'],
 
     /*
     |--------------------------------------------------------------------------
@@ -142,7 +143,7 @@ return [
     | session ("idle" null leaves inactivity to Laravel's session lifetime).
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
-    | again. The defaults are NIST SP 800-63B's reauthentication limits.
+    | again.
     |
     */
 
@@ -170,12 +171,15 @@ return [
     | added with Features::updatePasswords(), the email with
     | Features::emailChanges(). List any others here.
     |
+    | An email change can be confirmed from its emailed link for
+    | "confirmable_for", and undone from the old address for "revertable_for".
+    |
     */
 
     'protected' => [],
 
     'email_changes' => [
-        'expire' => '24h',
+        'confirmable_for' => '24h',
         'revertable_for' => '7d',
         'sign_out_others' => true,
     ],
@@ -185,10 +189,10 @@ return [
     | Passwords
     |--------------------------------------------------------------------------
     |
-    | OWASP: at least 8 characters with MFA, 15 without, allow at least 64,
-    | any characters, no composition rules, and block breached passwords.
-    | Bcrypt silently ignores anything past 72 bytes, so with bcrypt longer
-    | passwords are rejected rather than truncated.
+    | At least 8 characters with a second factor and 15 without, any
+    | characters, and no composition rules. Bcrypt silently ignores anything
+    | past 72 bytes, so with bcrypt longer passwords are rejected rather than
+    | truncated.
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
@@ -229,11 +233,11 @@ return [
     |
     | With Features::securityLog(), sign ins, failures, lockouts, changes and
     | automatic actions are logged to keyring_events. Prune with
-    | `php artisan model:prune`.
+    | `php artisan keyring:prune`.
     |
     */
 
-    'events' => [
+    'security_log' => [
         'keep_for' => '180d',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
@@ -245,16 +249,16 @@ return [
     | Security Emails
     |--------------------------------------------------------------------------
     |
-    | Which security notices Keyring sends to the user. NIST SP 800-63B asks
-    | for password_changed, authenticator_added, authenticator_removed and
-    | recovery_code_used. The others: new_device, second_factor_failed,
+    | The emails Keyring sends users about their account, none by default:
+    | password_changed, authenticator_added, authenticator_removed,
+    | recovery_code_used, new_device, second_factor_failed,
     | suspicious_activity, clone_suspected, email_changed and
     | email_change_reverted. Keyring::sendSecurityNotices() with no types
     | sends them all.
     |
     */
 
-    'notifications' => [],
+    'security_notices' => [],
 
     /*
     |--------------------------------------------------------------------------
@@ -266,19 +270,21 @@ return [
     |
     */
 
-    'pending_login_ttl' => '10m',
+    'pending_logins' => [
+        'keep_for' => '10m',
+    ],
 
     /*
     |--------------------------------------------------------------------------
     | Timebox
     |--------------------------------------------------------------------------
     |
-    | Every factor verification runs for at least this long (microseconds),
-    | so response timing doesn't reveal whether an account exists.
+    | Every failed factor verification takes at least this long, so response
+    | timing doesn't reveal whether an account exists.
     |
     */
 
-    'timebox' => 250_000,
+    'timebox' => '250ms',
 
     /*
     |--------------------------------------------------------------------------
@@ -287,9 +293,8 @@ return [
     |
     | Default attempts per minute, per account and per IP address, and the
     | failures in a row an account's factor allows however slowly they come
-    | (NIST SP 800-63B caps them at 100; null for no cap). At that cap the
-    | factor is refused for up to 30 days, or for a password until a reset.
-    | Factors may declare their own limits.
+    | (null for no cap). At that cap the factor is refused for up to 30 days,
+    | or for a password until a reset. Factors may declare their own limits.
     |
     */
 

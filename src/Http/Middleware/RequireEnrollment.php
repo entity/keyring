@@ -14,7 +14,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Users must have set up what a level needs before going further, e.g.
  * keyring.enrolled (AAL2) on the whole app: they sign in with what they have,
- * then add a second factor (OWASP ASVS 6.3.3). Recovery codes and email codes
+ * then add a second factor. Recovery codes and email codes
  * don't count. Users who haven't are sent to keyring.enrollment_url. Guests
  * are let through, so it can sit in the web group and leave them to auth.
  */

@@ -30,6 +30,23 @@ final class Duration
     }
 
     /**
+     * Parse "250ms", "30s" or "2m" into milliseconds. A bare number is
+     * refused: read as the wrong unit it would be a thousand times out.
+     */
+    public static function milliseconds(string|int $duration): int
+    {
+        if (is_int($duration) || ctype_digit(trim($duration))) {
+            throw new InvalidArgumentException("Duration [{$duration}] needs a unit, such as 250ms or 60s.");
+        }
+
+        if (preg_match('/^(\d+)\s*ms$/i', trim($duration), $matches)) {
+            return (int) $matches[1];
+        }
+
+        return self::seconds($duration) * 1000;
+    }
+
+    /**
      * The moment the duration from now ends.
      */
     public static function fromNow(string|int $duration): CarbonInterface

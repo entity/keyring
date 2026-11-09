@@ -11,11 +11,10 @@ use Keyring\Models\Authenticator;
 use Keyring\Notifications\VerificationCode;
 
 /**
- * A code emailed to the user's current address. Opt-in only: NIST SP 800-63B
- * rules out email for authentication codes, and whoever controls the inbox
- * can reset the password too, so for a user whose only second factor it is,
- * the inbox is the whole account. Register EmailCode::asSecondFactor() to
- * accept that.
+ * A code emailed to the user's current address. Opt-in only: whoever controls
+ * the inbox can reset the password too, so for a user whose only second
+ * factor it is, the inbox is the whole account. Register
+ * EmailCode::asSecondFactor() to accept that.
  */
 class EmailCode extends CodeFactor
 {
@@ -23,15 +22,14 @@ class EmailCode extends CodeFactor
     {
         if (! $acceptRisk) {
             throw new InvalidArgumentException(
-                'Email codes don\'t meet NIST SP 800-63B as a second factor: email isn\'t an accepted channel, '
-                .'and whoever controls the inbox can also reset the password. Register EmailCode::asSecondFactor() to accept them anyway.',
+                'Email codes are a weak second factor: whoever controls the inbox can also reset the password. '
+                .'Register EmailCode::asSecondFactor() to accept them anyway.',
             );
         }
     }
 
     /**
-     * Accept email codes as a second factor, knowing they fall short of NIST
-     * AAL2.
+     * Accept email codes as a second factor, knowing they fall short of AAL2.
      */
     public static function asSecondFactor(): static
     {

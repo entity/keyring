@@ -55,7 +55,7 @@ describe('keyring:install', function () {
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
         expect($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
-            ->and($config['notifications'])->toBe([])
+            ->and($config['security_notices'])->toBe([])
             ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
             ->and($provider)->toContain('Password::class,')
             ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
@@ -80,8 +80,8 @@ describe('keyring:install', function () {
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
         expect($config['features'])->toBe([Features::updatePasswords(), Features::manageAuthenticators(), Features::devices()])
-            // With a second sign-in method, the NIST emails come too.
-            ->and($config['notifications'])->toContain('recovery_code_used')
+            // With a second sign-in method, the security emails come too.
+            ->and($config['security_notices'])->toContain('recovery_code_used')
             ->and($provider)->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
             ->not->toContain('securityKeys')->not->toContain('EmailCode');
 
@@ -115,14 +115,14 @@ describe('keyring:install', function () {
     it('can leave out the security emails', function () {
         $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-emails' => true, '--no-interaction' => true])->assertSuccessful();
 
-        expect((require config_path('keyring.php'))['notifications'])->toBe([]);
+        expect((require config_path('keyring.php'))['security_notices'])->toBe([]);
     });
 
     it('asks which sign-in methods and features to set up', function () {
         $this->artisan('keyring:install')
-            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (below NIST AAL2)'])
+            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (the weakest option)'])
             ->expectsQuestion('Which features?', [Features::resetPasswords(), Features::manageAuthenticators()])
-            ->expectsConfirmation('Send the security emails NIST asks for?', 'yes')
+            ->expectsConfirmation('Email users when their password or sign-in methods change?', 'yes')
             ->assertSuccessful();
 
         expect((require config_path('keyring.php'))['features'])->toBe([Features::resetPasswords(), Features::manageAuthenticators()])

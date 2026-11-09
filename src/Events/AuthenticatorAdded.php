@@ -8,7 +8,7 @@ use Illuminate\Queue\SerializesModels;
 use Keyring\Models\Authenticator;
 
 /**
- * The user added an authenticator. Worth telling them by email (OWASP).
+ * The user added an authenticator. Worth telling them by email.
  */
 class AuthenticatorAdded
 {

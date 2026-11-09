@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Auth pages and responses should never be cached (OWASP).
+ * Auth pages and responses should never be cached.
  */
 class PreventCaching
 {

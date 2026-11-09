@@ -184,5 +184,5 @@ Keyring's other form routes (registration, password resets, email changes, enrol
 - **Recovery codes can't be viewed again.** They're stored hashed. Users generate a new set instead.
 - **Recovery codes come automatically** with a user's first extra factor.
 - **Login errors are the same for unknown accounts and wrong passwords**, on the username field.
-- **The two factor challenge has its own state.** It's a pending attempt in the session, not `login.id`, and it expires after `pending_login_ttl`.
+- **The two factor challenge has its own state.** It's a pending attempt in the session, not `login.id`, and it expires after `pending_logins.keep_for`.
 - **Passwords follow OWASP's length rules**: 15 characters without a second factor, 8 with one, and breached passwords are refused. See [Password Rules](protected-changes.md#password-rules).

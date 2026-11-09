@@ -9,7 +9,7 @@ use Keyring\Enums\Category;
  * What a user must prove before an attempt is complete.
  *
  * "Factors" counts distinct categories, so a password plus a PIN is still one
- * factor (OWASP: two factors of the same type are not MFA).
+ * factor: two of the same kind aren't multi-factor.
  */
 final readonly class Requirement
 {
@@ -41,7 +41,7 @@ final readonly class Requirement
     }
 
     /**
-     * NIST AAL3: two factors, one of them a phishing-resistant key that can't
+     * AAL3: two factors, one of them a phishing-resistant key that can't
      * leave its device. A synced passkey reaches AAL2, not AAL3.
      */
     public static function aal3(): self
@@ -95,9 +95,9 @@ final readonly class Requirement
 
     /**
      * Users who have a phishing-resistant factor (a passkey or security key)
-     * must use one. "Try another way" won't offer weaker fallbacks (OWASP),
-     * except recovery codes: single use, and the way back in when the key is
-     * lost. Pass `except: []` to refuse those too.
+     * must use one. "Try another way" won't offer weaker fallbacks, except
+     * recovery codes: single use, and the way back in when the key is lost.
+     * Pass `except: []` to refuse those too.
      *
      * @param  list<string>  $except
      */

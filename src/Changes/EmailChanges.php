@@ -32,7 +32,7 @@ use Keyring\Support\RowLock;
 use function Illuminate\Support\defer;
 
 /**
- * Changing the email address the OWASP way:
+ * Changing the email address:
  *
  *  1. The user re-verifies (handled by middleware) and asks for a new address.
  *  2. The new address gets a confirmation link. The current address gets a
@@ -88,7 +88,7 @@ class EmailChanges
                 'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
                 'revert_token' => PendingChange::hashToken($tokens['revert']),
                 'signed_in_at' => $signedInAt,
-                'expires_at' => Duration::fromNow(config('keyring.email_changes.expire', '24h')),
+                'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for', '24h')),
             ]);
             $change->authenticatable()->associate($user);
             $change->save();

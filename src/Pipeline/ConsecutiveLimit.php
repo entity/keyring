@@ -5,9 +5,9 @@ namespace Keyring\Pipeline;
 use Illuminate\Cache\RateLimiting\Limit;
 
 /**
- * Failures in a row on one account's factor, however slowly they come (NIST
- * SP 800-63B caps them at 100). Only a success clears them, or for a factor
- * that can start a sign in, a password reset. At the cap the factor is
+ * Failures in a row on one account's factor, however slowly they come, 100
+ * by default. Only a success clears them, or for a factor that can start a
+ * sign in, a password reset. At the cap the factor is
  * refused for that account. A browser the account has signed in from before
  * keeps a count of its own, so someone guessing elsewhere can't use it up.
  */

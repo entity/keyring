@@ -11,7 +11,7 @@ use Keyring\Support\Duration;
 
 /**
  * The email address changed recently. Recovery details that just changed
- * shouldn't be trusted on their own (OWASP).
+ * shouldn't be trusted on their own.
  */
 class RecentlyChangedRecovery implements Signal
 {

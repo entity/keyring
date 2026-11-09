@@ -11,7 +11,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 - **Passkeys and security keys work as either factor:** one WebAuthn driver with two profiles. Inherence only counts when the key actually verified the user.
 - **Devices and sessions:** new-device events, "this wasn't me" links, a sessions list, and "sign out everywhere else". It works with **any session driver** (database, cache, file, cookie).
 - **Step-up:** `keyring:aal2` and `keyring.fresh:15m` middleware. A passkey or code counts, not just the password, and users with a second factor must use it.
-- **Protected account changes:** once Keyring handles them, `email` and `password` can only change through its flows (OWASP). Email changes are confirmed from both addresses and can be reverted.
+- **Protected account changes:** once Keyring handles them, `email` and `password` can only change through its flows. Email changes are confirmed from both addresses and can be reverted.
 - **Risk signals:** new device, new country, impossible travel, a session cookie showing up in another browser, repeated failures. Each level maps to an action.
 - **A security log and security emails.**
 - **Headless:** like Fortify, Keyring renders your pages with props and answers JSON, with swappable responses and published actions. A browser package handles WebAuthn and the challenge page for Vue and React.

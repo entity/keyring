@@ -45,7 +45,7 @@ It counts everything proved so far this session, so it only asks for what's miss
 
 A level doesn't last the whole session. It lapses after its idle and overall limits (an hour without a request, or 24 hours, at AAL2 by default, as NIST SP 800-63B asks), and the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts). A [risk response](risk.md#checkpoints) can also clear it.
 
-Users who don't have the authenticators to reach the level can't be helped by confirming. They're sent to your [`enrollment_url`](configuration.md#managing-authenticators) with the `enroll-first` status, the same as the [`keyring.enrolled`](policies.md#requiring-a-second-factor) middleware does. JSON requests get a `403` with that status and the URL. Without an `enrollment_url`, they get a plain `403`.
+Users who don't have the authenticators to reach the level can't be helped by confirming. They're sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) with the `enroll-first` status, the same as the [`keyring.enrolled`](policies.md#requiring-a-second-factor) middleware does. JSON requests get a `403` with that status and the URL. Without an `enrollment_url`, they get a plain `403`.
 
 To check the session's level in your own code, ask `Keyring\Sessions\SessionAssurance`:
 
@@ -67,7 +67,7 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is fresh for step-up too.
 
-Keyring uses `keyring.fresh:15m` on its own sensitive routes, through the `manage_middleware` config option (applied on top of `auth:{guard}`): managing authenticators and devices, changing the password, and starting an email change.
+Keyring uses `keyring.fresh:15m` on its own sensitive routes, through the `changes_middleware` config option (applied on top of `auth:{guard}`): managing authenticators and devices, changing the password, and starting an email change.
 
 ## The Confirm Flow
 
@@ -95,7 +95,7 @@ When the user has verified enough, Keyring:
 
 For a `GET` request, the intended URL is the page that needed step-up. For other methods, Laravel uses the previous URL instead, so the user comes back to the page with the form rather than to a URL they can't `GET`.
 
-The confirm attempt expires after `pending_login_ttl`, like a login attempt.
+The confirm attempt expires after `pending_logins.keep_for`, like a login attempt.
 
 ## JSON Requests
 

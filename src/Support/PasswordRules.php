@@ -11,8 +11,8 @@ use Illuminate\Validation\Rules\Password;
 use Keyring\Facades\Keyring;
 
 /**
- * Password rules following OWASP: length over complexity, no composition
- * rules, breached passwords blocked, and no silent truncation.
+ * Password rules: length over complexity, no composition rules, breached
+ * passwords blocked, and no silent truncation.
  */
 final class PasswordRules
 {
@@ -54,8 +54,8 @@ final class PasswordRules
 
     /**
      * The breached-password check needs Have I Been Pwned, and lets
-     * passwords through when it can't be reached. These are refused anyway
-     * (OWASP ASVS: at least the 3,000 most common).
+     * passwords through when it can't be reached. The most common ones are
+     * refused anyway.
      */
     private static function notCommon(): Closure
     {
@@ -69,7 +69,7 @@ final class PasswordRules
     }
 
     /**
-     * Not the app's name, or the user's name or email username (OWASP ASVS).
+     * Not the app's name, or the user's name or email username.
      * Words shorter than four characters don't count.
      *
      * @param  list<mixed>  $context

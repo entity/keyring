@@ -18,7 +18,7 @@ use Keyring\Support\KeyedHash;
 
 /**
  * Base for factors that send a one-time code (email, SMS, ...). Handles the
- * OWASP rules once: random codes, short expiry, single use, limited guesses,
+ * rules once: random codes, short expiry, single use, limited guesses,
  * resend replaces the old code, stored hashed, never logged.
  *
  * A new factor only needs key(), deliver() and defaultName().

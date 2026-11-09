@@ -39,7 +39,7 @@ interface Factor
 
     /**
      * Whether the secret can't leave the device it's on, e.g. a security key
-     * or a passkey that isn't synced. NIST only accepts these at AAL3.
+     * or a passkey that isn't synced. Only these reach AAL3.
      */
     public function deviceBound(Authenticator $authenticator): bool;
 

@@ -13,6 +13,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
 use Keyring\Pipeline\Context;
+use Keyring\Support\Duration;
 use Keyring\Testing\KeyringFake;
 
 /**
@@ -57,7 +58,7 @@ class VerifyFactor
             if ($context->verification !== null) {
                 $timebox->returnEarly();
             }
-        }, config('keyring.timebox'));
+        }, Duration::milliseconds(config('keyring.timebox')) * 1000);
 
         if ($context->verification === null) {
             FactorFailed::dispatch($context->attempt, $context->authenticator, $context->factor->key(), $context->request);

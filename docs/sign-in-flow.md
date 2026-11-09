@@ -30,7 +30,7 @@ Signing in is a short state machine:
 2. Keyring asks the [policy](policies.md) what they need. If that's met, they're signed in.
 3. Otherwise Keyring regenerates the session ID, saves a pending **attempt** in the session and sends them to the challenge page, which asks for the next factor. They repeat until the requirement is met.
 
-The pending attempt is encrypted JSON in the session. It lasts `pending_login_ttl` (10 minutes by default), and ends early if the user's password changes meanwhile, so a reset also stops someone who already got past the old password, or if `keyring.guard` is no longer the guard it started under. After that, the user is sent back to the login page with `keyring::keyring.expired`.
+The pending attempt is encrypted JSON in the session. It lasts `pending_logins.keep_for` (10 minutes by default), and ends early if the user's password changes meanwhile, so a reset also stops someone who already got past the old password, or if `keyring.guard` is no longer the guard it started under. After that, the user is sent back to the login page with `keyring::keyring.expired`.
 
 [Step-up](step-up.md) uses the same challenge page and the same pipeline, with the purpose `confirm` instead of `login`.
 

@@ -36,14 +36,14 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 
 | Method | URI | Name | Middleware |
 |---|---|---|---|
-| `POST` | `/user/email` | `keyring.email.store` | `auth`, `manage_middleware`, limited |
+| `POST` | `/user/email` | `keyring.email.store` | `auth`, `changes_middleware`, limited |
 | `GET` | `/user/email` | `keyring.email.show` | `auth` |
 | `DELETE` | `/user/email` | `keyring.email.destroy` | `auth` |
 | `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | limited |
 | `POST` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm.store` | limited |
 | `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited |
 | `POST` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert.store` | limited |
-| `PUT` | `/user/password` | `user-password.update` | `auth`, `manage_middleware`, limited |
+| `PUT` | `/user/password` | `user-password.update` | `auth`, `changes_middleware`, limited |
 | `GET` | `/forgot-password` | `password.request` | guest |
 | `POST` | `/forgot-password` | `password.email` | guest, limited |
 | `GET` | `/reset-password/{token}` | `password.reset` | guest |
@@ -89,7 +89,7 @@ Every use dispatches `Keyring\Events\ProtectionBypassed` with the reason, and lo
 
 ## Changing the Email Address
 
-Whoever controls the address can reset the password, so this flow's safeguards aren't options: the new address always confirms, the old one can always revert for a while, and the old address stays reserved meanwhile. You choose the timings (`email_changes.expire` and `email_changes.revertable_for`), the validation (your `ValidateEmailChange` action), the emails and the pages.
+Whoever controls the address can reset the password, so this flow's safeguards aren't options: the new address always confirms, the old one can always revert for a while, and the old address stays reserved meanwhile. You choose the timings (`email_changes.confirmable_for` and `email_changes.revertable_for`), the validation (your `ValidateEmailChange` action), the emails and the pages.
 
 ### Requesting a Change
 
@@ -98,7 +98,7 @@ Whoever controls the address can reset the password, so this flow's safeguards a
 Keyring then:
 
 1. cancels any change the user already had waiting,
-2. stores a pending change with hashed, single-use tokens, valid for `email_changes.expire` (24 hours by default),
+2. stores a pending change with hashed, single-use tokens, valid for `email_changes.confirmable_for` (24 hours by default),
 3. emails the **new** address a link to confirm,
 4. emails the **current** address a notice with a link to revert, and a link to confirm too when it's needed (see below).
 

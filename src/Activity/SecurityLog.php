@@ -81,7 +81,7 @@ class SecurityLog
     {
         return $this->safely(function () use ($user) {
             $alerts = $this->query($user)
-                ->whereIn('type', config('keyring.events.alerts'))
+                ->whereIn('type', config('keyring.security_log.alerts'))
                 ->whereNull('seen_at')
                 ->latest('created_at')
                 ->get();
