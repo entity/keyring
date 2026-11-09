@@ -16,8 +16,8 @@ use LogicException;
 /**
  * What always happens around a new password, whatever the app's action does
  * to validate and save it. Whoever knew the old one shouldn't keep what they
- * did with it: pending email changes are cancelled, and other sessions are
- * signed out.
+ * did with it: pending email changes are cancelled, outstanding reset links
+ * stop working, and other sessions are signed out.
  */
 class PasswordChanges
 {
@@ -26,6 +26,7 @@ class PasswordChanges
         protected Sessions $sessions,
         protected EmailChanges $emailChanges,
         protected RiskLocks $locks,
+        protected ResetTokens $resetTokens,
     ) {}
 
     /**
@@ -81,5 +82,6 @@ class PasswordChanges
         }
 
         $this->emailChanges->cancel($user);
+        $this->resetTokens->forget($user);
     }
 }
