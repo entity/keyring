@@ -329,9 +329,7 @@ class KeyringManager
      */
     public function fake(): KeyringFake
     {
-        if (app()->isProduction()) {
-            throw new LogicException('Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
-        }
+        throw_if(app()->isProduction(), LogicException::class, 'Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
 
         $this->container->singletonIf(KeyringFake::class);
 

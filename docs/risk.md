@@ -121,7 +121,7 @@ When a request-time action does something without signing the session out (a ste
 
 ## Configuring Signals
 
-`Keyring::risk()->signals([...])` replaces the signal list. To keep the defaults and add to them, use `push()`:
+`Keyring::risk()->signals([...])` replaces the signal list. To keep the ones already on and add to them, use `push()`:
 
 ```php
 use Keyring\Risk\Signals\BreachedPassword;

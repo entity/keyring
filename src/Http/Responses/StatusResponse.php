@@ -3,6 +3,7 @@
 namespace Keyring\Http\Responses;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Arr;
 use Keyring\Contracts\Responses\StatusResponse as StatusResponseContract;
 use Keyring\Facades\Keyring;
 
@@ -24,12 +25,12 @@ class StatusResponse implements StatusResponseContract
     public function toResponse($request)
     {
         if ($this->wantsJson($request)) {
-            return new JsonResponse(array_filter([
+            return new JsonResponse(Arr::whereNotNull([
                 'status' => $this->status,
                 'message' => Keyring::statusMessage($this->status),
                 'redirect' => $this->redirect,
                 ...$this->data,
-            ], fn (mixed $value) => $value !== null));
+            ]));
         }
 
         // Extra data goes under keyring.result: flashing "keyring" itself would

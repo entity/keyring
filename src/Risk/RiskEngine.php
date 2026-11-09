@@ -50,7 +50,7 @@ class RiskEngine
     }
 
     /**
-     * Add signals to the defaults.
+     * Add signals to the ones already on.
      *
      * @param  class-string<Signal>|Signal  ...$signals
      */
