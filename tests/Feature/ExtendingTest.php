@@ -5,9 +5,11 @@ use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
@@ -18,13 +20,29 @@ use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\KeyringServiceProvider;
+use Keyring\Login\Attempt;
+use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Pipeline\Context;
+use Keyring\Pipeline\Outcome;
+use Keyring\Pipeline\Steps;
+use Keyring\Pipeline\Steps\AssessRisk;
+use Keyring\Pipeline\Steps\CompleteAttempt;
+use Keyring\Pipeline\Steps\DetermineRequirement;
+use Keyring\Pipeline\Steps\EnsureNotRiskLocked;
+use Keyring\Pipeline\Steps\EnsureNotThrottled;
+use Keyring\Pipeline\Steps\ResolveDevice;
+use Keyring\Pipeline\Steps\VerifyFactor;
+use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Support\PasswordRules;
 
@@ -173,6 +191,130 @@ it('uses the app\'s own pending change and security event models', function () {
     expect(app(EmailChanges::class)->pending($this->user))->toBeInstanceOf(AppPendingChange::class)
         ->and(Keyring::activity($this->user)->first())->toBeInstanceOf(AppSecurityEvent::class);
 });
+
+dataset('mandatory steps', [
+    EnsureNotThrottled::class,
+    VerifyFactor::class,
+    EnsureNotRiskLocked::class,
+    DetermineRequirement::class,
+    CompleteAttempt::class,
+]);
+
+it('refuses to remove a mandatory pipeline step', function (string $step) {
+    expect(fn () => Keyring::pipeline(fn (Steps $steps) => $steps->remove($step)))
+        ->toThrow(InvalidArgumentException::class, "[{$step}] is mandatory");
+})->with('mandatory steps');
+
+it('refuses to replace a mandatory pipeline step', function (string $step) {
+    expect(fn () => Keyring::pipeline(fn (Steps $steps) => $steps->replace($step, NotesItRan::class)))
+        ->toThrow(InvalidArgumentException::class, "[{$step}] is mandatory");
+})->with('mandatory steps');
+
+it('does not let a pipeline callback build a list of its own', function () {
+    expect(fn () => Keyring::pipeline(fn () => new Steps([CompleteAttempt::class])))->toThrow(Error::class);
+});
+
+it('still names a step that is not in the pipeline', function () {
+    expect(fn () => Keyring::pipeline(fn (Steps $steps) => $steps->remove(NotesItRan::class)))
+        ->toThrow(InvalidArgumentException::class, 'is not in the pipeline');
+});
+
+it('lets apps add steps around the mandatory ones and replace the others', function () {
+    Log::spy();
+
+    Keyring::pipeline(fn (Steps $steps) => $steps
+        ->before(EnsureNotThrottled::class, NotesItRan::class)
+        ->after(ResolveDevice::class, AlsoNotesItRan::class)
+        ->replace(AssessRisk::class, ReplacesRisk::class));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+
+    expect(config('test.ran'))->toBe([NotesItRan::class, AlsoNotesItRan::class, ReplacesRisk::class])
+        ->and(Keyring::steps())->not->toContain(AssessRisk::class)
+        ->and(Keyring::dangerouslyChangedSteps())->toBe([]);
+
+    Log::shouldNotHaveReceived('warning');
+});
+
+it('keeps refusing a risk locked user when the risk step is swapped out', function (Closure $customise) {
+    Keyring::pipeline($customise);
+    app(RiskLocks::class)->lock($this->user, 60);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertSessionHasErrors('email');
+
+    $this->assertGuest();
+})->with([
+    'replaced' => fn (Steps $steps) => $steps->replace(AssessRisk::class, NotesItRan::class),
+    'removed' => fn (Steps $steps) => $steps->remove(AssessRisk::class),
+]);
+
+it('lets an app dangerously remove a mandatory step, and logs a warning', function () {
+    Log::spy();
+    config(['keyring.limits.per_account' => 3, 'keyring.limits.per_ip' => 100]);
+
+    Keyring::pipeline(fn (Steps $steps) => $steps->dangerouslyRemove(EnsureNotThrottled::class));
+
+    foreach (range(1, 5) as $attempt) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => "wrong{$attempt}"]);
+    }
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+
+    expect(Keyring::dangerouslyChangedSteps())->toBe([EnsureNotThrottled::class]);
+
+    Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, EnsureNotThrottled::class));
+});
+
+it('lets an app dangerously replace a mandatory step, and logs a warning', function () {
+    Log::spy();
+
+    Keyring::pipeline(fn (Steps $steps) => $steps->dangerouslyReplace(EnsureNotThrottled::class, NotesItRan::class));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+
+    expect(config('test.ran'))->toBe([NotesItRan::class]);
+
+    Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, EnsureNotThrottled::class));
+});
+
+it('refuses to sign in when a check did not run for this request', function (Closure $skip) {
+    Log::spy();
+
+    $verification = new Verification('password', null, [Category::Knowledge], at: now()->getTimestamp());
+    $attempt = Attempt::start(Purpose::Login, $this->user, requirement: Requirement::aal1());
+    $attempt->record($verification);
+
+    $context = new Context(Request::create('/login', 'POST'), Purpose::Login, Keyring::factor('password'), $attempt);
+    $context->verification = $verification;
+    $context->throttleChecked = true;
+    $context->riskLockChecked = true;
+    $skip($context);
+
+    app(CompleteAttempt::class)->handle($context, fn (Context $context) => $context);
+
+    expect($context->outcome)->toBe(Outcome::Failed);
+    $this->assertGuest();
+
+    Log::shouldHaveReceived('error')->once();
+})->with([
+    'throttling' => fn (Context $context) => $context->throttleChecked = false,
+    'the risk lock' => fn (Context $context) => $context->riskLockChecked = false,
+    'verification' => fn (Context $context) => $context->verification = null,
+]);
+
+class NotesItRan
+{
+    public function handle(Context $context, Closure $next): Context
+    {
+        config()->push('test.ran', static::class);
+
+        return $next($context);
+    }
+}
+
+class AlsoNotesItRan extends NotesItRan {}
+
+class ReplacesRisk extends NotesItRan {}
 
 class AppPendingChange extends PendingChange {}
 

@@ -3,7 +3,9 @@
 namespace Keyring\Pipeline\Steps;
 
 use Closure;
+use Illuminate\Support\Facades\Log;
 use Keyring\Enums\Purpose;
+use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\SignIn;
 use Keyring\Pipeline\Context;
@@ -18,6 +20,7 @@ class CompleteAttempt
     public function __construct(
         protected AttemptStore $attempts,
         protected SignIn $signIn,
+        protected KeyringManager $keyring,
     ) {}
 
     public function handle(Context $context, Closure $next): Context
@@ -35,6 +38,14 @@ class CompleteAttempt
             return $next($context);
         }
 
+        $skipped = $this->skippedChecks($context);
+
+        if ($skipped !== []) {
+            Log::error('Keyring refused to complete a verification because these steps did not run before it: '.implode(', ', $skipped));
+
+            return $context->fail();
+        }
+
         $this->attempts->forget($attempt->purpose);
 
         $attempt->purpose === Purpose::Login
@@ -44,5 +55,21 @@ class CompleteAttempt
         $context->outcome = Outcome::Complete;
 
         return $next($context);
+    }
+
+    /**
+     * The final gate: however the steps were arranged, these must have run
+     * for this request. A step taken out with dangerouslyReplace() or
+     * dangerouslyRemove() has given up its check.
+     *
+     * @return list<string>
+     */
+    protected function skippedChecks(Context $context): array
+    {
+        return array_values(array_diff(array_keys(array_filter([
+            EnsureNotThrottled::class => ! $context->throttleChecked,
+            VerifyFactor::class => $context->verification === null,
+            EnsureNotRiskLocked::class => ! $context->riskLockChecked,
+        ])), $this->keyring->dangerouslyChangedSteps()));
     }
 }

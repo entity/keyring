@@ -218,6 +218,9 @@ The suite checks that:
 - protected attributes can't change outside Keyring's flows,
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
-- signing out revokes the registered session.
+- signing out revokes the registered session,
+- no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
+
+If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
 
 `KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

@@ -15,6 +15,7 @@
 - [Signing Out](#signing-out)
 - [The Verification Pipeline](#the-verification-pipeline)
     - [Customising the Steps](#customising-the-steps)
+    - [Mandatory Steps](#mandatory-steps)
     - [Writing a Step](#writing-a-step)
 - [Responses](#responses)
     - [Status Responses](#status-responses)
@@ -231,6 +232,7 @@ Every verification, at login or step-up, goes through one pipeline of steps:
 | `EnsureNotThrottled` | Checks the factor's rate limits, counts the attempt, and locks out repeated failures. See [Rate Limiting](security.md#rate-limiting). |
 | `VerifyFactor` | Validates the request, identifies the user for primary factors, and checks the proof inside the timebox. Stops the pipeline on failure. |
 | `ResolveDevice` | Notes the device this attempt comes from, and the `trust` checkbox. |
+| `EnsureNotRiskLocked` | Refuses a user under a [risk lock](risk.md#actions) with the usual generic error. Skipped for step-up. |
 | `AssessRisk` | Runs the [risk signals](risk.md) once per login and acts on them. Skipped for step-up. |
 | `DetermineRequirement` | Asks the policy what's needed. |
 | `CompleteAttempt` | Signs the user in, or confirms them, when the requirement is met. Otherwise regenerates the session ID and saves the attempt for the challenge page. |
@@ -252,7 +254,22 @@ Keyring::pipeline(fn (Steps $steps) => $steps
     ->replace(AssessRisk::class, MyRiskStep::class));
 ```
 
-`Steps` has `before()`, `after()`, `replace()` and `remove()`. `before()` and `after()` take any number of steps. Each throws an `InvalidArgumentException` if the step you name isn't in the pipeline. You can call `Keyring::pipeline()` more than once; the callbacks run in order.
+`Steps` has `before()`, `after()`, `replace()` and `remove()`. `before()` and `after()` take any number of steps. Each throws an `InvalidArgumentException` if the step you name isn't in the pipeline. You can call `Keyring::pipeline()` more than once; the callbacks run in order, and each runs as soon as you call it, so a mistake shows up at boot.
+
+### Mandatory Steps
+
+`EnsureNotThrottled`, `VerifyFactor`, `EnsureNotRiskLocked`, `DetermineRequirement` and `CompleteAttempt` enforce Keyring's guarantees, so `replace()` and `remove()` throw an `InvalidArgumentException` if you name one of them. `ResolveDevice` and `AssessRisk` are yours to replace or remove.
+
+If you really mean to take a mandatory step out, say so:
+
+```php
+Keyring::pipeline(fn (Steps $steps) => $steps
+    ->dangerouslyReplace(EnsureNotThrottled::class, MyRateLimiter::class));
+```
+
+`dangerouslyReplace()` and `dangerouslyRemove()` log a warning when `Keyring::pipeline()` is called, and the [conformance suite](testing.md#the-conformance-suite) fails until you acknowledge the step. Whatever that step checked is then up to you.
+
+Before signing anyone in, `CompleteAttempt` also confirms that this request was throttled, verified and checked for a risk lock, and that the requirement is met. If one of those didn't happen, it logs an error and refuses with the usual generic error. It doesn't ask this of a step you took out with `dangerouslyReplace()` or `dangerouslyRemove()`, but the requirement must always be met.
 
 ### Writing a Step
 
