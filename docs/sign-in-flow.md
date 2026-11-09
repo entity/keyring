@@ -190,7 +190,7 @@ Factors that send codes only send when asked:
 POST /login/challenge/email-code/send
 ```
 
-Viewing or prefetching the page never sends anything. Each pending attempt can send three codes per 10 minutes; a fourth gets a `429` with Laravel's `auth.throttle` message on `code`. A new code replaces the previous one, and a code only verifies the authenticator it was sent to. The response is a [status response](#status-responses) with `code-sent`.
+Viewing or prefetching the page never sends anything. Each account can be sent three codes per factor every 10 minutes, counted across sign ins, step-ups and enrollments, so starting again doesn't buy more; a fourth gets a `429` with Laravel's `auth.throttle` message on `code`. A new code replaces the previous one, and a code only verifies the authenticator it was sent to. The response is a [status response](#status-responses) with `code-sent`.
 
 ## Finishing the Login
 
