@@ -300,6 +300,7 @@ import { json } from '@entity/keyring'
 const { devices } = await json('GET', '/user/devices')
 await json('DELETE', '/user/devices')        // sign out everywhere else
 const { pending } = await json('GET', '/user/email')
+await json('PUT', '/user/password', { current_password, password, password_confirmation })
 ```
 
 On a non-2xx response it throws a `KeyringRequestError` with `status`, `message`, `errors` (Laravel's validation errors) and `data` (the whole body).

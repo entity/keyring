@@ -16,10 +16,12 @@ use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
-use Inertia\Inertia;
+use Inertia\ComponentNotFoundException;
+use Inertia\ResponseFactory;
 use InvalidArgumentException;
 use Keyring\Activity\SecurityLog;
 use Keyring\Changes\ProtectedAttributes;
+use Keyring\Concerns\HasKeyring;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\ResetsUserPasswords;
@@ -27,6 +29,7 @@ use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Category;
 use Keyring\Exceptions\MissingPage;
+use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Middleware\PreventCaching;
@@ -77,6 +80,9 @@ class KeyringManager
 
     /** @var list<string>|null Security notices to send, null for the config value. */
     protected ?array $securityNotices = null;
+
+    /** @var array<class-string, bool> Whether each user model has the HasKeyring trait. */
+    protected array $usesKeyring = [];
 
     public function __construct(
         protected Container $container,
@@ -209,13 +215,17 @@ class KeyringManager
             return $component($props);
         }
 
-        if (class_exists(Inertia::class)) {
-            return Inertia::render($component, $props);
+        if (class_exists(ResponseFactory::class)) {
+            try {
+                return resolve(ResponseFactory::class)->render($component, $props);
+            } catch (ComponentNotFoundException) {
+                throw MissingPage::forInertia($name, $component, array_keys($props));
+            }
         }
 
         $view = str_replace('/', '.', $component);
 
-        throw_unless(view()->exists($view), MissingPage::for($name, $view, array_keys($props)));
+        throw_unless(view()->exists($view), MissingPage::forBlade($name, $view, array_keys($props)));
 
         return view($view, $props);
     }
@@ -465,6 +475,8 @@ class KeyringManager
      */
     public function for(Authenticatable&Model $user): UserKeyring
     {
+        throw_unless($this->usesKeyring[$user::class] ??= in_array(HasKeyring::class, class_uses_recursive($user), true), MissingTrait::on($user::class));
+
         return $this->container->make(UserKeyring::class, ['user' => $user]);
     }
 

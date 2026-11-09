@@ -180,7 +180,7 @@ Post the proof to `POST /login/challenge/{factor}`:
 
 For WebAuthn, the browser may answer with any of the user's keys of that factor, not just the one shown, and Keyring accepts it.
 
-Wrong proofs fail with `keyring::keyring.invalid` on the factor's field (`password`, `code` or `credential`). A wrong code keeps its guess count, so neither reloading nor sending a new code resets it. Once a pending attempt reaches a factor's limit (five guesses by default), nothing can finish it: verifying fails with `keyring::keyring.too_many_codes`, and opening the challenge page or sending a code ends the attempt and sends the user back to the start (`/login`, or `/confirm` for a step-up) with that message. The account's limits keep counting these failures.
+Wrong proofs fail with `keyring::keyring.invalid` on the factor's field (`password`, `code` or `credential`). A wrong code keeps its guess count, so neither reloading nor sending a new code resets it. Once a pending attempt reaches a factor's limit (five guesses by default), nothing can finish it: verifying fails with `keyring::keyring.too_many_codes`, and opening the challenge page or sending a code ends the attempt and sends the user back to the start (`/login`, or `/confirm` for a step-up) with that message. So does an attempt that timed out, with `keyring::keyring.expired`. On `/login` the message is on the username field. On `/confirm` it's on the field of the factor the page asks for next, such as `password` or `code`. The account's limits keep counting these failures.
 
 ### Sending Codes
 
@@ -428,6 +428,8 @@ Keyring renders these pages:
 | `device-report` | `device` (a description) and `url` (where its button posts). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 
 With Inertia installed, each renders the component `auth/{name}`, such as `auth/login`. Without Inertia, Keyring renders the Blade view `auth.{name}`, such as `resources/views/auth/login.blade.php`, with the props as view data. Keyring doesn't ship Blade views, so you write them. Until you do, the page throws a `Keyring\Exceptions\MissingPage` exception naming the view to create and the data it receives.
+
+Inertia only notices a missing component in the browser, unless you turn on `pages.ensure_pages_exist` in `config/inertia.php`. With it on, Keyring throws the same exception, naming the component.
 
 Change the component for a page with `Keyring::page()`:
 

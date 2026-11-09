@@ -92,18 +92,27 @@ class VerifyFactor
      */
     protected function fakeDecision(Context $context): ?bool
     {
+        return $this->fake()?->decision($context->factor->key());
+    }
+
+    protected function fake(): ?KeyringFake
+    {
         return $this->container->bound(KeyringFake::class) && ! app()->isProduction()
-            ? $this->container->make(KeyringFake::class)->decision($context->factor->key())
+            ? $this->container->make(KeyringFake::class)
             : null;
     }
 
     protected function check(Context $context): ?Verification
     {
-        return match ($this->fakeDecision($context)) {
+        $verification = match ($this->fakeDecision($context)) {
             null => $context->factor->verify($context->attempt, $context->authenticator, $context->request),
             true => Verification::of($context->authenticator),
             false => null,
         };
+
+        $this->fake()?->record($context->factor->key(), $verification !== null);
+
+        return $verification;
     }
 
     /**

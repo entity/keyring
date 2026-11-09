@@ -173,10 +173,20 @@ However a change is cancelled, the old address's "this wasn't me" link keeps wor
 
 | Field | |
 |---|---|
-| `current_password` | Required when the user has a password. |
+| `current_password` | Required when the user has a password. Checked with the `Keyring\Rules\CurrentPassword` rule. |
 | `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
 
-Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`. It also replaces a `current_password` too long for the stored hash (over 72 bytes for bcrypt) with a random value before your action sees it, so it fails like any wrong password.
+Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`.
+
+`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one. Use it wherever your own code asks for the current password:
+
+```php
+use Keyring\Rules\CurrentPassword;
+
+$request->validate(['current_password' => ['required', 'string', new CurrentPassword($request->user())]]);
+```
+
+For an action that still uses Laravel's rule, Keyring replaces an over-long `current_password` with a random value before the action sees it.
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 

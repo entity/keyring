@@ -66,7 +66,7 @@ it('drops a confirmation that started under another guard', function () {
     $this->actingAs($this->user, 'web')
         ->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])
         ->assertRedirect(route('keyring.confirm.challenge'))
-        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+        ->assertSessionHasErrors(['password' => __('keyring::keyring.expired')]);
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     expect($totp->fresh()->last_used_at)->toBeNull();
@@ -339,4 +339,28 @@ describe('levels lapsing, as nist sp 800-63b asks', function () {
 
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
     });
+});
+
+it('reports an expired confirmation on the field the confirm page asks for next', function () {
+    $this->user->forceFill(['password' => null])->saveQuietly();
+    Authenticator::factory()->totp()->default()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user)
+        ->post(route('keyring.confirm.verify', 'totp'), ['code' => '000000'])
+        ->assertRedirect(route('keyring.confirm.challenge'))
+        ->assertSessionHasErrors(['code' => __('keyring::keyring.expired')]);
+
+    $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'totp');
+});
+
+it('sends a user with nothing to confirm with to set something up, not round in a loop', function () {
+    $this->user->forceFill(['password' => null])->saveQuietly();
+
+    $this->actingAs($this->user)->get(route('keyring.confirm.challenge'))->assertForbidden();
+
+    config(['keyring.enrollment_url' => '/settings/security']);
+
+    $this->get(route('keyring.confirm.challenge'))
+        ->assertRedirect('/settings/security')
+        ->assertSessionHas('status', 'enroll-first');
 });

@@ -11,6 +11,7 @@ use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Testing\KeyringFake;
+use PHPUnit\Framework\ExpectationFailedException;
 
 beforeEach(function () {
     Keyring::factors([Password::class, Totp::class, WebAuthn::securityKeys(), RecoveryCodes::class]);
@@ -135,4 +136,44 @@ it('can refuse recovery codes under no downgrade as well', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
     expect($this->inertia()->get(route('keyring.login.challenge'))->json('props.alternatives'))->toBe([]);
+});
+
+it('asserts which factors were checked and how they went', function () {
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $fake = Keyring::fake()->fail('totp');
+
+    $fake->assertNothingChecked();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong']);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => '123456']);
+
+    $fake->assertFailed('password', 1)
+        ->assertVerified('password')
+        ->assertFailed('totp')
+        ->assertNotChecked('recovery');
+
+    expect(fn () => $fake->assertVerified('totp'))->toThrow(ExpectationFailedException::class, 'The [totp] factor never verified.')
+        ->and(fn () => $fake->assertNotChecked('totp'))->toThrow(ExpectationFailedException::class);
+});
+
+it('acts as a session verified with real authenticators', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user)->verifiedWith($totp)->freshAt(now()->subMinutes(5))->get('/');
+
+    $verifications = app(SessionAssurance::class)->all();
+
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+        ->and(collect($verifications)->pluck('authenticator')->all())->toBe([null, $totp->id])
+        ->and(collect($verifications)->pluck('at')->unique()->all())->toBe([now()->subMinutes(5)->getTimestamp()]);
+});
+
+it('gives the code an authenticator app would show', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => $this->totpCode($totp)])->assertRedirect('/dashboard');
+
+    expect($this->totpCode($totp->secret))->toBe($this->totpCode($totp));
 });

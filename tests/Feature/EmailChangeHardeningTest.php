@@ -267,6 +267,16 @@ it('waives the current address confirmation for a second factor that predates th
     expect(PendingChange::query()->latest('id')->first()->current_token)->toBeNull();
 });
 
+it('waives it in a test acting as a session verified with that second factor', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+
+    $this->actingAs($this->user)->verifiedWith($totp)->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+    expect(PendingChange::query()->latest('id')->first()->current_token)->toBeNull();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->postJson(route('keyring.email.store'), ['email' => 'newer@example.com'])->assertOk();
+    expect(PendingChange::query()->latest('id')->first()->current_token)->not->toBeNull();
+});
+
 it('keeps the revert link working after signing out everywhere else cancels the change', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com'])->assertOk();
