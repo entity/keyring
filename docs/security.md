@@ -86,7 +86,7 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 - Devices are recognised by a random, httpOnly cookie, stored as a hash. A device is never a factor, only an input to your policy and risk signals.
 - Signing out everywhere also stops trusting the other devices and cancels pending email changes, so whoever had the account can't skip the second factor on a device they trusted or finish a change they started.
 - A device is only trusted after a login that verified two categories, never after the password alone. A login that verifies two categories, and any grant of trust, gives the browser a new cookie, so neither can rest on a cookie planted in the browser before the user signed in.
-- Every device stops being trusted when the password changes, an authenticator is removed, an email change is applied or a risk lock is placed.
+- Every device stops being trusted when the password changes, an authenticator is removed, an email change is applied or a signed-in request places a risk lock. A lock placed by a login attempt doesn't, as above.
 
 ### Account Changes
 

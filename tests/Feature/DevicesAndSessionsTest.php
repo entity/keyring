@@ -608,24 +608,23 @@ describe('ending trust', function () {
         expectNoTrustedDevices();
     });
 
-    it('stops trusting every device when the account is locked', function () {
-        Keyring::risk([new class implements Signal
-        {
-            public function assess(Assessment $assessment): Finding
-            {
-                return new Finding('always', 40, 'Always risky.');
-            }
+    it('stops trusting every device when a signed-in request locks the account', function () {
+        Keyring::risk([riskySignal(Checkpoint::Request)])->respond(fn () => Action::allow()->lockFor('1h'));
 
-            public function checkpoints(): array
-            {
-                return [Checkpoint::Login];
-            }
-        }])->respond(fn () => Action::deny()->lockFor('1h'));
+        $this->get('/home')->assertOk();
+
+        expect(app(RiskLocks::class)->locked($this->user))->toBeTrue();
+        expectNoTrustedDevices();
+    });
+
+    it('keeps trusting devices when a login attempt locks the account', function () {
+        Keyring::risk([riskySignal(Checkpoint::Login)])->respond(fn () => Action::deny()->lockFor('1h'));
 
         $this->post('/logout');
         login()->assertSessionHasErrors('email');
 
-        expectNoTrustedDevices();
+        expect(app(RiskLocks::class)->locked($this->user))->toBeTrue()
+            ->and(Device::query()->whereNotNull('trusted_until')->exists())->toBeTrue();
     });
 });
 
@@ -648,3 +647,21 @@ it('never queries the devices table when devices are off', function () {
     expect($queries)->not->toBeEmpty()
         ->and(array_filter($queries, fn (string $sql) => str_contains($sql, 'keyring_devices')))->toBe([]);
 });
+
+function riskySignal(Checkpoint $checkpoint): Signal
+{
+    return new class($checkpoint) implements Signal
+    {
+        public function __construct(protected Checkpoint $checkpoint) {}
+
+        public function assess(Assessment $assessment): Finding
+        {
+            return new Finding('always', 40, 'Always risky.');
+        }
+
+        public function checkpoints(): array
+        {
+            return [$this->checkpoint];
+        }
+    };
+}
