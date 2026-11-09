@@ -27,6 +27,7 @@ final readonly class Requirement
         public bool $noDowngrade = false,
         public array $downgradeExceptions = [],
         public array $phishingResistanceExceptions = [],
+        public bool $acceptsRecoveryCodes = true,
     ) {}
 
     public static function aal1(): self
@@ -118,6 +119,18 @@ final readonly class Requirement
             'requiresPhishingResistance' => true,
             'phishingResistanceExceptions' => $this->downgradeExceptions,
         ]);
+    }
+
+    /**
+     * Refuse recovery codes, for a confirm that doesn't know what the user
+     * was doing: a code spent on it might not get them there.
+     *
+     * @internal
+     */
+    #[\NoDiscard]
+    public function withoutRecoveryCodes(): static
+    {
+        return clone ($this, ['acceptsRecoveryCodes' => false]);
     }
 
     /**
@@ -222,11 +235,12 @@ final readonly class Requirement
                 $this->requiresPhishingResistance => $this->phishingResistanceExceptions,
                 default => $other->phishingResistanceExceptions,
             },
+            'acceptsRecoveryCodes' => $this->acceptsRecoveryCodes && $other->acceptsRecoveryCodes,
         ]);
     }
 
     /**
-     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>}
+     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool}
      */
     public function toArray(): array
     {
@@ -239,11 +253,12 @@ final readonly class Requirement
             'no_downgrade' => $this->noDowngrade,
             'downgrade_exceptions' => $this->downgradeExceptions,
             'phishing_resistance_exceptions' => $this->phishingResistanceExceptions,
+            'accepts_recovery_codes' => $this->acceptsRecoveryCodes,
         ];
     }
 
     /**
-     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>}  $data
+     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -256,6 +271,7 @@ final readonly class Requirement
             noDowngrade: $data['no_downgrade'] ?? false,
             downgradeExceptions: $data['downgrade_exceptions'] ?? [],
             phishingResistanceExceptions: $data['phishing_resistance_exceptions'] ?? [],
+            acceptsRecoveryCodes: $data['accepts_recovery_codes'] ?? true,
         );
     }
 
@@ -290,6 +306,6 @@ final readonly class Requirement
     private function hasPhishingResistant(array $verifications): bool
     {
         return array_any($verifications, fn (Verification $verification) => $verification->phishingResistant
-            || in_array($verification->factor, $this->phishingResistanceExceptions, true));
+            || ($verification->categories !== [] && in_array($verification->factor, $this->phishingResistanceExceptions, true)));
     }
 }

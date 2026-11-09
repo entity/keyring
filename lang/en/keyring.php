@@ -5,6 +5,7 @@ return [
     'expired' => 'Your sign in timed out. Please start again.',
     'confirm' => 'Please confirm it\'s you to continue.',
     'last_factor' => 'You need to keep at least one way to sign in that meets your account\'s security requirements.',
+    'recovery_needs_second_factor' => 'Recovery codes back up another second factor. Add one first, like an authenticator app or a passkey.',
     'password_common' => 'That password is too common. Choose another.',
     'password_context' => 'Your password can\'t contain your name, your email address or the name of this site.',
     'password_to_remove_last_factor' => 'Enter your password to remove your last second factor.',

@@ -2,6 +2,10 @@
 
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\WebAuthn;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\Staff;
@@ -168,6 +172,78 @@ it('lets the password through step-up when the only other factor is a used-up se
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'password');
+});
+
+it('finishes a step-up with the last recovery code and the password', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $recovery = Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($this->user, 'authenticatable')->create();
+
+    signIn();
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+    $this->travel(16)->minutes();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaaa-11111'])
+        ->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'password');
+    $this->flushHeaders();
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+
+    $this->get('/account')->assertOk();
+    expect(Keyring::factor('recovery')->present($recovery->fresh())['remaining'])->toBe(0);
+});
+
+it('does not spend a recovery code on a step-up it could never finish', function () {
+    Keyring::factors([Password::class, WebAuthn::passkeys(), RecoveryCodes::class]);
+    $this->user->forceFill(['password' => null])->saveQuietly();
+    Authenticator::factory()->passkey()->default()->for($this->user, 'authenticatable')->create();
+    $recovery = Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->freshAt(now()->subHour());
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->inertia()->get(route('keyring.confirm.challenge'))
+        ->assertJsonPath('props.factor', 'passkey')
+        ->assertJsonPath('props.alternatives', []);
+    $this->flushHeaders();
+
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertSessionHasErrors('code');
+
+    expect(Keyring::factor('recovery')->present($recovery->fresh())['remaining'])->toBe(1);
+});
+
+it('does not spend a recovery code on the confirm that replaces a timed-out one', function () {
+    $totp = Authenticator::factory()->totp()->default()->for($this->user, 'authenticatable')->create();
+    $recovery = Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($this->user, 'authenticatable')->create();
+
+    signIn();
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+    $this->travel(16)->minutes();
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+    // The attempt times out while the user hunts for their paper codes.
+    $this->travel(11)->minutes();
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaaa-11111'])
+        ->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->inertia()->get(route('keyring.confirm.challenge'))
+        ->assertJsonPath('props.factor', 'totp')
+        ->assertJsonCount(1, 'props.alternatives')
+        ->assertJsonPath('props.alternatives.0.factor', 'password');
+    $this->flushHeaders();
+
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertSessionHasErrors('code');
+    expect(Keyring::factor('recovery')->present($recovery->fresh())['remaining'])->toBe(1);
+
+    // The real step-up still takes the code, so the user can finish with it.
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+
+    $this->get('/account')->assertOk();
+    expect(Keyring::factor('recovery')->present($recovery->fresh())['remaining'])->toBe(0);
 });
 
 describe('levels lapsing, as nist sp 800-63b asks', function () {
