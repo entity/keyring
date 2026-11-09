@@ -172,7 +172,7 @@ A password reset or a password change cancels any pending change, since whoever 
 | `current_password` | Required when the user has a password. |
 | `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
 
-Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`.
+Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`. It also replaces a `current_password` too long for the stored hash (over 72 bytes for bcrypt) with a random value before your action sees it, so it fails like any wrong password.
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 

@@ -91,6 +91,21 @@ final class PasswordRules
     }
 
     /**
+     * What to check against a stored hash. Bcrypt only uses the first 72
+     * bytes and stops at a NUL byte, so an input like that would pass on the
+     * start of it alone. No bcrypt password can hold either. It's swapped for a
+     * random value: a wrong password in every way (same error, same time
+     * hashing, same throttling), and the input never reaches the hasher.
+     * This goes by the hash, not the default driver: bcrypt hashes outlive a
+     * move to argon2, which takes any length. Bcrypt hashes from other systems
+     * ($2a$, $2b$) truncate too and password_get_info() doesn't know them.
+     */
+    public static function forVerifying(#[\SensitiveParameter] string $password, ?string $hash): string
+    {
+        return str_starts_with((string) $hash, '$2') && (strlen($password) > 72 || str_contains($password, "\0")) ? Str::random(32) : $password;
+    }
+
+    /**
      * Bcrypt only uses the first 72 bytes. Refuse longer passwords instead of
      * silently ignoring the end of them.
      */

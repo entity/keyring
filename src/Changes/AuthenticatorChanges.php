@@ -14,6 +14,7 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use Keyring\Support\PasswordRules;
 use Keyring\Support\RowLock;
 
 /**
@@ -143,7 +144,7 @@ class AuthenticatorChanges
             return;
         }
 
-        if ($password === null || ! $this->keyring->provider()->validateCredentials($user, ['password' => $password])) {
+        if ($password === null || ! $this->keyring->provider()->validateCredentials($user, ['password' => PasswordRules::forVerifying($password, $user->getAuthPassword())])) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
         }
 
