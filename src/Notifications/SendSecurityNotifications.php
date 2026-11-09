@@ -11,11 +11,11 @@ use Keyring\Events;
 use Keyring\Facades\Keyring;
 
 /**
- * Sends the security emails the app has opted into with Keyring::notify().
+ * Sends the security emails the app has opted into with Keyring::sendSecurityNotices().
  */
 class SendSecurityNotifications
 {
-    /** Every type Keyring::notify() accepts. */
+    /** Every type Keyring::sendSecurityNotices() accepts. */
     public const array TYPES = [
         'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
         'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
@@ -121,7 +121,7 @@ class SendSecurityNotifications
         // A model without Notifiable (say, staff that sign in through
         // another guard) has nowhere to send it, so it's skipped rather than
         // failing the request or the queued job.
-        if (! Keyring::notifies($type) || ! method_exists($user, 'routeNotificationFor')) {
+        if (! Keyring::sendsSecurityNotice($type) || ! method_exists($user, 'routeNotificationFor')) {
             return;
         }
 

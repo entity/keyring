@@ -19,6 +19,10 @@ final readonly class Enrollment
         public int $expiresAt,
     ) {}
 
+    /**
+     * @param  array<string, mixed>  $props
+     * @param  array<string, mixed>  $state
+     */
     public static function make(string $factor, array $props = [], array $state = []): self
     {
         return new self($factor, $props, $state, now()->addMinutes(15)->getTimestamp());

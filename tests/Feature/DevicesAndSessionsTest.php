@@ -609,7 +609,7 @@ describe('ending trust', function () {
     });
 
     it('stops trusting every device when a signed-in request locks the account', function () {
-        Keyring::risk([riskySignal(Checkpoint::Request)])->respond(fn () => Action::allow()->lockFor('1h'));
+        Keyring::risk()->signals([riskySignal(Checkpoint::Request)])->respond(fn () => Action::allow()->lockFor('1h'));
 
         $this->get('/home')->assertOk();
 
@@ -618,7 +618,7 @@ describe('ending trust', function () {
     });
 
     it('keeps trusting devices when a login attempt locks the account', function () {
-        Keyring::risk([riskySignal(Checkpoint::Login)])->respond(fn () => Action::deny()->lockFor('1h'));
+        Keyring::risk()->signals([riskySignal(Checkpoint::Login)])->respond(fn () => Action::deny()->lockFor('1h'));
 
         $this->post('/logout');
         login()->assertSessionHasErrors('email');

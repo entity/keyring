@@ -30,12 +30,18 @@ final readonly class RegisteredSession
         return $this->revokedAt === null && $this->expiresAt > $now;
     }
 
+    /**
+     * @param  array<string, mixed>  $changes
+     */
     #[\NoDiscard]
     public function with(array $changes): self
     {
         return clone ($this, $changes);
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     public function toArray(): array
     {
         return [
@@ -70,6 +76,9 @@ final readonly class RegisteredSession
         return $columns;
     }
 
+    /**
+     * @param  array<string, mixed>  $data
+     */
     public static function fromArray(array $data): self
     {
         return new self(

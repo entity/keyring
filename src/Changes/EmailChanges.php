@@ -49,6 +49,7 @@ class EmailChanges
 {
     public function __construct(
         protected KeyringManager $keyring,
+        protected ProtectedAttributes $protection,
         protected Sessions $sessions,
         protected SessionAssurance $assurance,
         protected ReservedAddresses $reserved,
@@ -168,7 +169,7 @@ class EmailChanges
             $user = $change->user();
 
             if ($user !== null && $this->movedAddress($user, $change)) {
-                $this->keyring->changing(fn () => $user->forceFill([$change->attribute => $change->previous_value])->save());
+                $this->protection->changing(fn () => $user->forceFill([$change->attribute => $change->previous_value])->save());
             }
 
             $change->forceFill(['reverted_at' => now()])->save();
@@ -309,7 +310,7 @@ class EmailChanges
                 return false;
             }
 
-            $this->keyring->changing(fn () => $user->forceFill([
+            $this->protection->changing(fn () => $user->forceFill([
                 $change->attribute => $change->value,
                 ...(array_key_exists('email_verified_at', $user->getAttributes()) ? ['email_verified_at' => now()] : []),
             ])->save());

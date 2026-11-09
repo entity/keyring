@@ -20,6 +20,9 @@ class EmailChangeNotice extends Notification
         #[\SensitiveParameter] public readonly ?string $confirmToken = null,
     ) {}
 
+    /**
+     * @return list<string>
+     */
     public function via(object $notifiable): array
     {
         return ['mail'];

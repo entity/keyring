@@ -22,7 +22,7 @@ Risk is off until you pick signals in your `KeyringServiceProvider`:
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 
-Keyring::risk([NewDevice::class, SessionFingerprintChanged::class]);
+Keyring::risk()->signals([NewDevice::class, SessionFingerprintChanged::class]);
 ```
 
 Once signals are picked, Keyring responds to them as shown below unless you set your own responses. Without a [locator](devices-and-sessions.md#locations), the location signals never fire. The device signals need [`Features::devices()`](devices-and-sessions.md), and `RepeatedFactorFailures` needs [`Features::securityLog()`](security-log-and-emails.md).
@@ -79,7 +79,7 @@ use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 
-Keyring::risk([NewDevice::class, NewCountry::class, ImpossibleTravel::class, SessionFingerprintChanged::class])
+Keyring::risk()->signals([NewDevice::class, NewCountry::class, ImpossibleTravel::class, SessionFingerprintChanged::class])
     ->respond(fn (Risk $risk, Checkpoint $at) => match ($risk->level) {
         Level::Low => Action::allow(),
         Level::Medium => Action::stepUp(),
@@ -88,7 +88,7 @@ Keyring::risk([NewDevice::class, NewCountry::class, ImpossibleTravel::class, Ses
     });
 ```
 
-The responder gets the `Risk` and where it was assessed, so you can act differently at login and mid-session. `Keyring::risk()` with no arguments keeps the current signals, so you can call `->respond()` alone.
+The responder gets the `Risk` and where it was assessed, so you can act differently at login and mid-session. To keep the current signals and only change the response, call `Keyring::risk()->respond()` alone.
 
 `Risk` has `score`, `level`, `findings` (a list of `Keyring\Risk\Finding` with `signal`, `score` and `reason`), `has($signal)`, `reasons()` and `isElevated()` (anything above low).
 
@@ -119,7 +119,7 @@ When a request-time action does something without signing the session out (a ste
 
 ## Configuring Signals
 
-`Keyring::risk([...])` replaces the signal list. To keep the defaults and add to them, use `push()`:
+`Keyring::risk()->signals([...])` replaces the signal list. To keep the defaults and add to them, use `push()`:
 
 ```php
 use Keyring\Risk\Signals\BreachedPassword;
@@ -134,7 +134,7 @@ use Keyring\Risk\Signals\BreachedPassword;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 
-Keyring::risk([
+Keyring::risk()->signals([
     new NewDevice(score: 20),
     app()->make(RepeatedFactorFailures::class, ['threshold' => 3, 'within' => '1h']),
     BreachedPassword::class,

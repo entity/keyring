@@ -128,16 +128,16 @@ Keyring can tell users about security events. It sends none until you list them 
 Or turn them all on in `KeyringServiceProvider`:
 
 ```php
-Keyring::notify();
+Keyring::sendSecurityNotices();
 ```
 
 Or pick the ones you want:
 
 ```php
-Keyring::notify(['new_device', 'second_factor_failed']);
+Keyring::sendSecurityNotices(['new_device', 'second_factor_failed']);
 ```
 
-An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `notifications` config option. `Keyring::notify()` takes precedence over it.
+An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `notifications` config option. `Keyring::sendSecurityNotices()` takes precedence over it.
 
 Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless you [choose other channels](#slack-sms-and-other-channels), and queued once any open database transaction commits. Each one includes when it happened, the device and the IP address of the request that caused it.
 
@@ -209,7 +209,7 @@ The copies of `email_changed` and `email_change_reverted` sent to an address tha
 
 ### Emails Keyring Always Sends
 
-Some emails are part of a flow rather than a notice, so `Keyring::notify()` doesn't control them. They prove the person controls an inbox, so they're always email:
+Some emails are part of a flow rather than a notice, so `Keyring::sendSecurityNotices()` doesn't control them. They prove the person controls an inbox, so they're always email:
 
 | Notification | Sent to |
 |---|---|

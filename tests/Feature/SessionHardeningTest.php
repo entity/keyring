@@ -195,7 +195,7 @@ it('cancels a pending email change when signing out everywhere else, and from re
 });
 
 it('does not let anonymous wrong passwords raise the owner\'s risk', function () {
-    Keyring::risk([RepeatedFactorFailures::class])->respond(fn ($risk) => $risk->has('repeated_failures') ? Action::deny() : Action::allow());
+    Keyring::risk()->signals([RepeatedFactorFailures::class])->respond(fn ($risk) => $risk->has('repeated_failures') ? Action::deny() : Action::allow());
     config(['keyring.limits.per_account' => 100]);
 
     foreach (range(1, 6) as $guess) {
@@ -210,7 +210,7 @@ it('does not let anonymous wrong passwords raise the owner\'s risk', function ()
 });
 
 it('still counts failed second factors after a correct password', function () {
-    Keyring::risk([RepeatedFactorFailures::class])->respond(fn ($risk) => $risk->has('repeated_failures') ? Action::deny() : Action::allow());
+    Keyring::risk()->signals([RepeatedFactorFailures::class])->respond(fn ($risk) => $risk->has('repeated_failures') ? Action::deny() : Action::allow());
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     config(['keyring.limits.per_account' => 100]);
 
@@ -247,7 +247,7 @@ it('keeps a revoked session revoked after the cache is cleared', function () {
 
 it('does not undo a revocation that lands while a request is being assessed', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);
-    Keyring::risk([new RevokesDuringAssessment]);
+    Keyring::risk()->signals([new RevokesDuringAssessment]);
     signInWith();
 
     $this->withHeader('User-Agent', CHROME)->get('/home');
@@ -257,7 +257,7 @@ it('does not undo a revocation that lands while a request is being assessed', fu
 })->with('drivers');
 
 it('applies lockFor from the request checkpoint too', function () {
-    Keyring::risk([SessionFingerprintChanged::class])
+    Keyring::risk()->signals([SessionFingerprintChanged::class])
         ->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->revokeAllSessions()->lockFor('1h') : Action::allow());
 
     signInWith();
@@ -268,7 +268,7 @@ it('applies lockFor from the request checkpoint too', function () {
 });
 
 it('asks again for laravel password confirmation after a mid-session step-up', function () {
-    Keyring::risk([SessionFingerprintChanged::class]);
+    Keyring::risk()->signals([SessionFingerprintChanged::class]);
     Route::middleware(['web', 'auth'])->get('/password-confirm', fn () => 'confirm')->name('password.confirm');
     Route::middleware(['web', 'auth', 'password.confirm'])->get('/billing', fn () => 'billing');
 

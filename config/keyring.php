@@ -209,10 +209,10 @@ return [
     | Risk
     |--------------------------------------------------------------------------
     |
-    | Signal scores add up (0-100) into a level. Configure signals and what to
-    | do at each level with Keyring::risk([...])->respond(fn ...). By default:
-    | medium asks for another factor, high also notifies, critical refuses the
-    | sign in and signs out every session.
+    | Signal scores add up (0-100) into a level. Pick signals and what to do at
+    | each level with Keyring::risk()->signals([...])->respond(fn ...). By
+    | default: medium asks for another factor, high also notifies, critical
+    | refuses the sign in and signs out every session.
     |
     */
 
@@ -249,7 +249,8 @@ return [
     | for password_changed, authenticator_added, authenticator_removed and
     | recovery_code_used. The others: new_device, second_factor_failed,
     | suspicious_activity, clone_suspected, email_changed and
-    | email_change_reverted. Keyring::notify() with no types sends them all.
+    | email_change_reverted. Keyring::sendSecurityNotices() with no types
+    | sends them all.
     |
     */
 

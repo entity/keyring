@@ -103,8 +103,8 @@ it('lets apps swap a notification through the container', function () {
 });
 
 it('refuses security email types it does not know', function () {
-    expect(fn () => Keyring::notify(['new_device', 'new_devise']))
-        ->toThrow(InvalidArgumentException::class, 'Unknown security email types: new_devise.');
+    expect(fn () => Keyring::sendSecurityNotices(['new_device', 'new_devise']))
+        ->toThrow(InvalidArgumentException::class, 'Unknown security notice types: new_devise.');
 });
 
 class CustomConfirmEmailChange extends ConfirmEmailChange

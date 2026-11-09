@@ -4,6 +4,7 @@ namespace Keyring\Concerns;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Changes\ReservedAddresses;
 use Keyring\Changes\ResetTokens;
 use Keyring\Facades\Keyring;
@@ -27,7 +28,7 @@ trait HasKeyring
     {
         static::creating(fn (self $user) => app(ReservedAddresses::class)->guard($user));
         static::updating(function (self $user) {
-            Keyring::guardProtectedAttributes($user);
+            app(ProtectedAttributes::class)->guard($user);
             app(ReservedAddresses::class)->guard($user);
         });
 
@@ -76,6 +77,8 @@ trait HasKeyring
 
     /**
      * Everything the user can sign in with.
+     *
+     * @return Attribute<UserKeyring, never>
      */
     protected function keyring(): Attribute
     {

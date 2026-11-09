@@ -11,6 +11,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Factor as FactorContract;
 use Keyring\Devices\DeviceManager;
+use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
@@ -144,6 +145,8 @@ abstract class Factor implements FactorContract
 
     /**
      * Record a successful verification of the given authenticator.
+     *
+     * @param  list<Category>|null  $categories
      */
     protected function verified(Authenticator $authenticator, ?array $categories = null, ?bool $phishingResistant = null, ?bool $deviceBound = null): Verification
     {

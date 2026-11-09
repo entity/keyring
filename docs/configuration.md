@@ -231,7 +231,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 'notifications' => [],
 ```
 
-The security notices to send, none by default. `keyring:install` offers the four NIST SP 800-63B asks for: `password_changed`, `authenticator_added`, `authenticator_removed` and `recovery_code_used`. `Keyring::notify()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
+The security notices to send, none by default. `keyring:install` offers the four NIST SP 800-63B asks for: `password_changed`, `authenticator_added`, `authenticator_removed` and `recovery_code_used`. `Keyring::sendSecurityNotices()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
 
 ## Pending Logins, Timebox and Rate Limits
 
@@ -293,8 +293,8 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::pipeline($callback)` | Changes the verification steps. See [The Pipeline](sign-in-flow.md#the-verification-pipeline). |
 | `Keyring::respondWith($contract, $implementation)` | Swaps a response. See [Responses](sign-in-flow.md#responses). |
 | `Keyring::page($name, $component)` | Changes the component a page renders. See [Pages](sign-in-flow.md#pages). |
-| `Keyring::risk([...])->respond(...)` | Configures risk signals and actions. `Keyring::risk()->push(...)` adds signals to the defaults. See [Risk](risk.md). |
-| `Keyring::notify([...])` | Turns security notices on. Unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
+| `Keyring::risk()->signals([...])->respond(...)` | Configures risk signals and actions. `Keyring::risk()->push(...)` adds signals to the defaults. See [Risk](risk.md). |
+| `Keyring::sendSecurityNotices([...])` | Turns security notices on. Unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
 | `Keyring::createUsersUsing($action)` | Sets the registration action. |
 | `Keyring::resetUserPasswordsUsing($action)` | Sets the password reset action. See [Resetting the Password](protected-changes.md#resetting-the-password). |
 | `Keyring::updateUserPasswordsUsing($action)` | Sets the password change action. See [Changing the Password](protected-changes.md#changing-the-password). |
@@ -308,6 +308,8 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::findUsersUsing($callback)` | Finds the user for a password sign in your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::normalizeUsernamesUsing($callback)` | Normalises usernames your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::signInAfterRegistering($when)` | Whether registering signs the user in. See [Registration](sign-in-flow.md#registration). |
+| `Keyring::findUser($request)` | The user a password sign in is for, for a primary factor of your own. |
+| `Keyring::signsInAfterRegistering($user, $request)` | Whether registering signs this user in, for a registration flow of your own. |
 | `Keyring::withoutProtection($callback, reason: ...)` | Changes protected attributes outside Keyring's flows. See [Protected Changes](protected-changes.md#bypassing-protection). |
 | `Keyring::activity($user, $limit = 25)` | Recent security log entries. |
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |

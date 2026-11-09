@@ -5,7 +5,6 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
@@ -170,11 +169,11 @@ class ChallengeController
     }
 
     /**
-     * The purpose comes from the route name: keyring.{purpose}.challenge.
+     * The same controller serves keyring.login.* and keyring.confirm.*.
      */
     protected function purpose(Request $request): Purpose
     {
-        return Purpose::from(Str::between((string) $request->route()?->getName(), 'keyring.', '.'));
+        return $request->routeIs('keyring.login.*') ? Purpose::Login : Purpose::Confirm;
     }
 
     /**

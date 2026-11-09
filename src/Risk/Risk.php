@@ -39,11 +39,17 @@ final readonly class Risk
         return $this->level !== Level::Low;
     }
 
+    /**
+     * @return list<array{signal: string, score: int, reason: string}>
+     */
     public function toArray(): array
     {
         return array_map(fn (Finding $finding) => $finding->toArray(), $this->findings);
     }
 
+    /**
+     * @param  list<array{signal: string, score: int, reason: string}>  $data
+     */
     public static function fromArray(array $data): self
     {
         return new self(array_map(Finding::fromArray(...), $data));
