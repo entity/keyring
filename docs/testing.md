@@ -37,7 +37,7 @@ abstract class TestCase extends BaseTestCase
 
 ## Acting at an Assurance Level
 
-`InteractsWithKeyring` adds two methods for signed-in tests:
+`InteractsWithKeyring` adds two methods for signed-in tests, and one for reading errors:
 
 ```php
 use Keyring\Enums\Assurance;
@@ -51,6 +51,14 @@ $this->actingAs($user)->freshAt(now()->subHour())->deleteJson('/account')->asser
 - `freshAt($time)` pretends those verifications happened at that time, for [`keyring.fresh`](step-up.md#fresh-verification). Without it, they happen now.
 
 You can chain both, in either order. The level defaults to AAL1, so `freshAt()` alone gives a password verification at that time.
+
+`sessionErrors()` returns the validation errors the last request flashed, as a `MessageBag`. Use it rather than `session('errors')`, which is a plain array right after a request when the session is serialized as JSON, the default in new Laravel apps:
+
+```php
+$this->post('/login', ['email' => $user->email, 'password' => 'wrong']);
+
+expect($this->sessionErrors()->first('email'))->toBe(__('auth.failed'));
+```
 
 The `423` only comes back for JSON requests. A plain `delete()` that needs step-up is redirected to the confirm page instead:
 

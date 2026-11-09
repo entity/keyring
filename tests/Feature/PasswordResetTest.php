@@ -12,9 +12,11 @@ beforeEach(function () {
 });
 
 it('answers a bad token the same way whether or not the account exists or has mfa', function () {
-    $errors = collect(['plain@example.com', 'mfa@example.com', 'nobody@example.com'])->map(fn (string $email) => $this
-        ->post(route('password.update'), ['token' => 'bogus', 'email' => $email, 'password' => 'tenchars12', 'password_confirmation' => 'tenchars12'])
-        ->getSession()->get('errors')->getBag('default')->toArray());
+    $errors = collect(['plain@example.com', 'mfa@example.com', 'nobody@example.com'])->map(function (string $email) {
+        $this->post(route('password.update'), ['token' => 'bogus', 'email' => $email, 'password' => 'tenchars12', 'password_confirmation' => 'tenchars12']);
+
+        return $this->sessionErrors()->toArray();
+    });
 
     expect($errors->unique()->count())->toBe(1)
         ->and($errors->first())->toHaveKey('email')->not->toHaveKey('password');

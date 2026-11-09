@@ -66,10 +66,10 @@ trait KeyringConformance
         $field = Keyring::username();
 
         $this->post(route('login.store'), [$field => $user->getAttribute($field), 'password' => 'definitely-wrong']);
-        $wrong = session('errors')?->first($field);
+        $wrong = $this->sessionErrors()->first($field);
 
         $this->post(route('login.store'), [$field => 'nobody-'.uniqid().'@example.com', 'password' => 'definitely-wrong']);
-        $unknown = session('errors')?->first($field);
+        $unknown = $this->sessionErrors()->first($field);
 
         $this->assertNotNull($wrong);
         $this->assertSame($wrong, $unknown, 'Login errors must not reveal which accounts exist.');

@@ -182,7 +182,7 @@ it('still counts failed second factors after a correct password', function () {
     signInWith();
 
     $this->assertGuest();
-    expect(session('errors')->first('email'))->toBe(__('auth.failed'));
+    expect($this->sessionErrors()->first('email'))->toBe(__('auth.failed'));
 });
 
 it('signs out a session whose registry record expired instead of registering it again', function () {
