@@ -250,8 +250,7 @@ it('asks the current address to confirm when the second factor was only just add
     $this->travel(16)->minutes();
     $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertStatus(423);
     $this->get(route('keyring.confirm.challenge'));
-    $engine = app(Google2FA::class);
-    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => $engine->oathTotp($secret, $engine->getTimestamp() + 1)]);
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($secret)]);
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
 
     $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();

@@ -348,11 +348,14 @@ describe('failures in a row, however slowly they come', function () {
         $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     });
 
-    function guessTotp(string $code): void
+    /**
+     * A wrong code, or with none, the right one once it's later.
+     */
+    function guessTotp(?string $code = null): void
     {
         test()->travel(3)->minutes();
         test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
-        test()->post(route('keyring.login.verify', 'totp'), ['code' => $code]);
+        test()->post(route('keyring.login.verify', 'totp'), ['code' => $code ?? totpCode(test()->totp->secret)]);
     }
 
     it('refuses the factor at the cap, even with the right code', function () {
@@ -360,7 +363,7 @@ describe('failures in a row, however slowly they come', function () {
         guessTotp('000000');
         guessTotp('000000');
 
-        guessTotp(totpCode($this->totp->secret));
+        guessTotp();
 
         $this->assertGuest();
     });
@@ -368,13 +371,13 @@ describe('failures in a row, however slowly they come', function () {
     it('starts the count again after a success', function () {
         guessTotp('000000');
         guessTotp('000000');
-        guessTotp(totpCode($this->totp->secret));
+        guessTotp();
         $this->assertAuthenticatedAs($this->user);
         $this->post('/logout');
 
         guessTotp('000000');
         guessTotp('000000');
-        guessTotp(totpCode($this->totp->secret, 1));
+        guessTotp();
 
         $this->assertAuthenticatedAs($this->user);
     });
@@ -422,13 +425,13 @@ describe('failures in a row, however slowly they come', function () {
         guessTotp('000000');
         guessTotp('000000');
         guessTotp('000000');
-        guessTotp(totpCode($this->totp->secret));
+        guessTotp();
         $this->assertGuest();
 
         $this->withCookie('keyring_device', $device);
         guessTotp('000000');
         guessTotp('000000');
-        guessTotp(totpCode($this->totp->secret, 1));
+        guessTotp();
 
         $this->assertAuthenticatedAs($this->user);
     });

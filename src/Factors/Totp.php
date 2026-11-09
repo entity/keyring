@@ -64,6 +64,7 @@ class Totp extends Factor implements Enrollable
             $code,
             (int) $authenticator->meta('last_timestep', 0),
             $this->window,
+            static::timestep(),
         );
 
         $used = $timestep !== false && $this->consume($authenticator, function (Authenticator $locked) use ($timestep) {
@@ -98,7 +99,7 @@ class Totp extends Factor implements Enrollable
     {
         $code = $this->normalizeCode((string) $request->input('code'));
         $timestep = ctype_digit($code)
-            ? $this->engine->verifyKeyNewer($enrollment->state('secret'), $code, 0, $this->window)
+            ? $this->engine->verifyKeyNewer($enrollment->state('secret'), $code, 0, $this->window, static::timestep())
             : false;
 
         if ($timestep === false) {
@@ -122,5 +123,14 @@ class Totp extends Factor implements Enrollable
     public function engine(): Google2FA
     {
         return $this->engine;
+    }
+
+    /**
+     * The current 30 second step, on Laravel's clock rather than the system
+     * one, so tests can travel through time.
+     */
+    public static function timestep(int $offset = 0): int
+    {
+        return intdiv(now()->getTimestamp(), 30) + $offset;
     }
 }

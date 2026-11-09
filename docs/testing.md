@@ -161,6 +161,8 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->post(route('keyring.login.verify', 'totp'), ['code' => $this->totpCode($totp)]);
 ```
 
+Each code works once, as in real life, so enrolling an app and then signing in with it in the same 30 seconds fails. Keyring keeps TOTP time on Laravel's clock, so `$this->travel(30)->seconds()` moves on to the next code, or pass a later step: `$this->totpCode($totp, step: 1)`.
+
 The `passkey()` and `securityKey()` states have no real public key, so they only verify with `Keyring::fake()`. For real WebAuthn responses, enroll a virtual authenticator instead.
 
 ## Virtual Authenticators
