@@ -2,11 +2,15 @@
 
 namespace Keyring\Console;
 
+use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
+use Keyring\Concerns\HasKeyring;
+use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Symfony\Component\Console\Attribute\AsCommand;
 
@@ -17,7 +21,7 @@ use function Laravel\Prompts\multiselect;
 #[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
-        {--feature=* : A feature to turn on, e.g. registration (defaults to registration and reset-passwords)}
+        {--feature=* : A feature to turn on, replacing the defaults (registration and reset-passwords): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
         {--emails : Email users when their password or sign-in methods change (the default with a second sign-in method)}
         {--no-emails : Send no security emails}
         {--force : Overwrite files that already exist}')]
@@ -39,31 +43,29 @@ class InstallCommand extends Command
 
     public function handle(Filesystem $files): int
     {
-        $unknown = [
-            ...array_diff($this->option('factor'), array_keys(self::FACTORS)),
-            ...array_diff($this->option('feature'), Features::all()),
-        ];
+        $unknown = array_filter([
+            '--factor' => [array_diff($this->option('factor'), array_keys(self::FACTORS)), array_keys(self::FACTORS)],
+            '--feature' => [array_diff($this->option('feature'), Features::all()), Features::all()],
+        ], fn (array $option) => $option[0] !== []);
+
+        foreach ($unknown as $option => [$values, $known]) {
+            $this->components->error("Unknown {$option}: ".implode(', ', $values).'. Pick from: '.implode(', ', $known).'.');
+        }
 
         if ($unknown !== []) {
-            $this->components->error('Unknown: '.implode(', ', $unknown).'. Sign-in methods: '.implode(', ', array_keys(self::FACTORS)).'. Features: '.implode(', ', Features::all()).'.');
-
             return self::FAILURE;
         }
 
         $factors = $this->factors();
-        $features = $this->features($factors);
-        $emails = match (true) {
-            $this->option('emails') => true,
-            $this->option('no-emails') => false,
-            $this->input->isInteractive() => confirm(
-                label: 'Email users when their password or sign-in methods change?',
-                default: $factors !== [],
-                hint: 'Password changed, sign-in method added or removed, recovery code used.',
-            ),
-            default => $factors !== [],
-        };
 
-        $this->write($files, config_path('keyring.php'), $this->config($files, $features, $emails));
+        // An existing config is the app's, so there's nothing to ask about it.
+        if ($files->exists(config_path('keyring.php')) && ! $this->option('force')) {
+            $this->components->warn('Skipped '.config_path('keyring.php').', it already exists.');
+            $features = config('keyring.features', []);
+        } else {
+            $features = $this->features($factors);
+            $files->put(config_path('keyring.php'), $this->config($files, $features, $this->emails($factors)));
+        }
 
         // Publishing again would add the migrations twice, under new timestamps.
         if ($files->glob(database_path('migrations/*_create_keyring_authenticators_table.php')) === []) {
@@ -82,14 +84,43 @@ class InstallCommand extends Command
 
         $this->components->info('Keyring installed.');
         $this->components->bulletList(array_filter([
-            'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
+            $this->userModelHasKeyring() ? null : 'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
             in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
-            'Run <comment>php artisan migrate</comment>',
+            $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
             'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
             'Add features later in <comment>config/keyring.php</comment>, and sign-in methods in your KeyringServiceProvider',
         ]));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  list<string>  $factors
+     */
+    protected function emails(array $factors): bool
+    {
+        return match (true) {
+            $this->option('emails') => true,
+            $this->option('no-emails') => false,
+            $this->input->isInteractive() => confirm(
+                label: 'Email users when their password or sign-in methods change?',
+                default: $factors !== [],
+                hint: 'Password changed, sign-in method added or removed, recovery code used.',
+            ),
+            default => $factors !== [],
+        };
+    }
+
+    protected function userModelHasKeyring(): bool
+    {
+        $provider = Keyring::provider();
+
+        return $provider instanceof EloquentUserProvider && in_array(HasKeyring::class, class_uses_recursive($provider->getModel()), true);
+    }
+
+    protected function migrated(): bool
+    {
+        return rescue(fn () => Schema::hasTable('keyring_authenticators'), false, report: false);
     }
 
     /**
@@ -132,6 +163,7 @@ class InstallCommand extends Command
                     Features::securityLog() => 'Security log and "was this you?" alerts',
                 ],
                 default: [Features::registration(), Features::resetPasswords(), ...$factors === [] ? [] : [Features::manageAuthenticators()]],
+                scroll: 8,
                 hint: 'Signing in and out, challenges and step-up are always on.',
             ) : [Features::registration(), Features::resetPasswords()];
         }

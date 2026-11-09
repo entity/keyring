@@ -106,7 +106,8 @@ describe('keyring:install', function () {
 
     it('refuses sign-in methods and features it doesn\'t know, before writing anything', function () {
         $this->artisan('keyring:install', ['--factor' => ['totpp'], '--feature' => ['devicez'], '--no-interaction' => true])
-            ->expectsOutputToContain('Unknown: totpp, devicez')
+            ->expectsOutputToContain('Unknown --factor: totpp')
+            ->expectsOutputToContain('Unknown --feature: devicez')
             ->assertFailed();
 
         expect(file_exists(config_path('keyring.php')))->toBeFalse();
@@ -133,7 +134,12 @@ describe('keyring:install', function () {
         $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
         file_put_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php', '<?php // mine');
 
-        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
+        $this->artisan('keyring:install', ['--factor' => ['passkeys'], '--no-interaction' => true])
+            ->expectsOutputToContain('keyring.php, it already exists')
+            ->doesntExpectOutputToContain('Turned on')
+            ->doesntExpectOutputToContain('HasKeyring')
+            ->doesntExpectOutputToContain('php artisan migrate')
+            ->assertSuccessful();
 
         expect(glob(database_path('migrations/*_create_keyring_authenticators_table.php')))->toHaveCount(1)
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBe('<?php // mine');

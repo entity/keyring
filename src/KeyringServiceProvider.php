@@ -25,6 +25,7 @@ use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Exceptions\MissingAction;
+use Keyring\Exceptions\UnknownFeature;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
@@ -95,6 +96,11 @@ class KeyringServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // A misspelt feature would otherwise just be off.
+        if (($unknown = array_values(array_diff(config('keyring.features', []), Features::all()))) !== []) {
+            throw UnknownFeature::in($unknown);
+        }
+
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'keyring');
 
         $this->registerMiddleware();

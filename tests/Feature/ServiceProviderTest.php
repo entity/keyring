@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\ServiceProvider;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
+use Keyring\Exceptions\UnknownFeature;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Totp;
 use Keyring\Features;
@@ -27,7 +28,7 @@ it('limits routes that check a secret outside the sign in limits', function (str
     expect(Route::getRoutes()->getByName($name)->gatherMiddleware())->toContain('throttle:keyring');
 })->with([
     'register.store', 'password.email', 'password.update', 'user-password.update',
-    'keyring.authenticators.confirm', 'keyring.email.store', 'keyring.email.revert.store',
+    'keyring.authenticators.confirm', 'keyring.authenticators.destroy', 'keyring.email.store', 'keyring.email.revert.store',
 ]);
 
 it('registers custom factors with extend, under the key they report', function () {
@@ -68,3 +69,9 @@ it('merges the app\'s config over its defaults key by key, but replaces lists wh
         ->and(config('keyring.features'))->toBe([Features::devices()])
         ->and(config('keyring.limits.per_ip'))->toBe(20);
 });
+
+it('refuses a feature it doesn\'t know, rather than leaving it off', function () {
+    config(['keyring.features' => [Features::registration(), 'device']]);
+
+    new KeyringServiceProvider($this->app)->boot();
+})->throws(UnknownFeature::class, 'Unknown Keyring features in config/keyring.php: [device]');
