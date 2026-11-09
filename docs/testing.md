@@ -161,7 +161,7 @@ The constructor options:
 
 | Option | Default | |
 |---|---|---|
-| `origin` | `http://localhost` | The origin it claims to be on. Match your test `APP_URL`. |
+| `origin` | Your `APP_URL`'s origin | The origin it claims to be on. By default, the first origin Keyring accepts. |
 | `userVerification` | `true` | Whether it reports verifying the user. Use `false` for a basic security key. |
 | `aaguid` | 16 zero bytes | The AAGUID it reports, as raw bytes. |
 | `algorithm` | `ES256` | `ES256` or `EdDSA`. |

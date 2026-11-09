@@ -324,3 +324,13 @@ it('lets a passkey satisfy a phishing resistant policy', function () {
     $this->post(route('keyring.login.verify', 'passkey'), ['credential' => $key->assert($response->json('props.challenge.options'))])
         ->assertRedirect('/dashboard');
 });
+
+it('answers from the app\'s own origin by default, port and all', function () {
+    config(['app.url' => 'http://localhost:8765']);
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+});
