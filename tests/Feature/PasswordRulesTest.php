@@ -41,7 +41,10 @@ it('checks the breach list in production only, unless told otherwise', function 
     expect($breachCheck())->toBeFalse();
 
     app()->detectEnvironment(fn () => 'production');
-    expect($breachCheck())->toBeTrue();
+    $inProduction = $breachCheck();
+    // Back before teardown, which would ask to confirm migrating in production.
+    app()->detectEnvironment(fn () => 'testing');
+    expect($inProduction)->toBeTrue();
 
     config(['keyring.passwords.uncompromised' => false]);
     expect($breachCheck())->toBeFalse();
