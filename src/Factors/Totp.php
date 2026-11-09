@@ -56,11 +56,11 @@ class Totp extends Factor implements Enrollable
         $timestep = $authenticator->secret === null ? false : $this->check($authenticator->secret, $request, (int) $authenticator->meta('last_timestep', 0));
 
         $used = $timestep !== false && $this->consume($authenticator, function (Authenticator $locked) use ($timestep) {
-            if ((int) $timestep <= (int) $locked->meta('last_timestep', 0)) {
+            if ($timestep <= (int) $locked->meta('last_timestep', 0)) {
                 return false;
             }
 
-            $locked->withMeta('last_timestep', (int) $timestep);
+            $locked->withMeta('last_timestep', $timestep);
 
             return true;
         });
@@ -92,7 +92,7 @@ class Totp extends Factor implements Enrollable
         return $this->makeAuthenticator([
             'name' => $this->nameFrom($request, $enrollment->state('name')),
             'secret' => $enrollment->state('secret'),
-            'meta' => ['last_timestep' => (int) $timestep],
+            'meta' => ['last_timestep' => $timestep],
         ]);
     }
 
