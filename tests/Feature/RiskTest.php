@@ -105,6 +105,9 @@ it('does not ask for more on a familiar device and country', function () {
     $cookie = signInAs()->getCookie('keyring_device')->getValue();
     $this->post('/logout');
 
+    // Each enough on its own to ask for the second factor, had it fired.
+    Keyring::risk([new NewDevice(score: 30), NewCountry::class]);
+
     signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
 });
 
@@ -331,4 +334,13 @@ class DatabaseSecurityNotice extends SecurityNotice
 it('runs no signals until the app picks some', function () {
     expect(new RiskEngine(app())->signalsFor(Checkpoint::Login))->toBe([])
         ->and(new RiskEngine(app())->signalsFor(Checkpoint::Request))->toBe([]);
+});
+
+it('doesn\'t call every browser new when devices are off', function () {
+    // Scored to refuse the sign in if it fired.
+    Keyring::risk([new NewDevice(score: 90)]);
+    config(['keyring.features' => []]);
+
+    signInAs()->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
 });

@@ -3,6 +3,7 @@
 namespace Keyring\Risk\Signals;
 
 use Keyring\Contracts\Signal;
+use Keyring\Features;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
@@ -15,7 +16,8 @@ class NewDevice implements Signal
 
     public function assess(Assessment $assessment): ?Finding
     {
-        return $assessment->attempt?->isNewDevice()
+        // Without devices, every browser looks new.
+        return Features::enabled(Features::devices()) && $assessment->attempt?->isNewDevice()
             ? new Finding('new_device', $this->score, 'Signing in from a new device.')
             : null;
     }

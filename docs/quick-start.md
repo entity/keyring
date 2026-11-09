@@ -24,14 +24,15 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods you want besides the password, which features to turn on, and whether to send the security emails NIST asks for. With `--no-interaction` you get the password, registration and password resets. You can add the rest later.
+`keyring:install` asks which sign-in methods you want besides the password, which features to turn on, and whether to send the security emails NIST asks for. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. With `--no-interaction` you get the password, registration and password resets. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
 
-Add the trait to your user model, and keep Laravel's `hashed` cast on the password:
+Add the trait to your user model, and keep Laravel's `hashed` cast on the password. If users register themselves and can add sign-in methods, they must verify their address first, so implement `MustVerifyEmail` too (the installer turns on email verification for you):
 
 ```php
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Keyring\Concerns\HasKeyring;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasKeyring;
 }

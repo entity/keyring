@@ -55,10 +55,26 @@ class ImportCommand extends Command
         }
 
         $model = $provider->getModel();
+        $hasTwoFactor = Schema::hasColumn((new $model)->getTable(), 'two_factor_secret')
+            && $model::query()->withoutGlobalScopes()->whereNotNull('two_factor_secret')->exists();
+        $hasPasskeys = Schema::hasTable('passkeys') && DB::table('passkeys')->exists();
+
+        // Users with authenticators for a factor that isn't registered can't sign in.
+        $missing = array_values(array_filter(
+            [...$hasTwoFactor ? ['totp', 'recovery'] : [], ...$hasPasskeys ? ['passkey'] : []],
+            fn (string $factor) => ! Keyring::hasFactor($factor),
+        ));
+
+        if ($missing !== []) {
+            $this->components->error('Register '.implode(', ', $missing).' in Keyring::factors() first. Users with authenticators for a factor Keyring doesn\'t have can\'t sign in.');
+
+            return self::FAILURE;
+        }
+
         $counts = ['totp' => 0, 'recovery' => 0, 'passkey' => 0, 'already_imported' => 0];
         $issues = ['skipped' => [], 'failed' => []];
 
-        if (Schema::hasColumn((new $model)->getTable(), 'two_factor_secret')) {
+        if ($hasTwoFactor) {
             // Without global scopes: a soft deleted user can be restored later.
             $model::query()->withoutGlobalScopes()->whereNotNull('two_factor_secret')
                 ->chunkById(200, function ($users) use (&$counts, &$issues) {
@@ -68,7 +84,7 @@ class ImportCommand extends Command
                 });
         }
 
-        if (Schema::hasTable('passkeys')) {
+        if ($hasPasskeys) {
             DB::table('passkeys')->orderBy('id')->chunk(200, function ($passkeys) use ($model, &$counts, &$issues) {
                 foreach ($passkeys as $passkey) {
                     $this->importPasskey($model, $passkey, $counts, $issues);

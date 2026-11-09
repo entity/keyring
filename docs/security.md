@@ -68,7 +68,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - With `ifEnrolled()`, a policy the user can't fully meet still asks for the strongest version they can give, so a user with a second factor never signs in with one factor.
 - Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification of everything signing in would ask for (NIST SP 800-63B's rule for binding authenticators). Users with a possession factor always use one, so a stolen session plus one phished factor isn't enough.
 - The fresh window is fixed from the moment of verification and doesn't slide with activity.
-- Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset.
+- Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset. With registration on, a user model that can't verify its email can't add sign-in methods at all.
 - Users can't remove authenticators below what they need to sign in, even with several removals at once.
 
 ### Sessions and Devices
@@ -84,7 +84,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ### Account Changes
 
-- `email` and `password` can only change through Keyring's flows. Bypassing that needs `Keyring::withoutProtection()`, which is announced and logged.
+- With `Features::updatePasswords()` and `Features::emailChanges()` on, `password` and `email` can only change through Keyring's flows. Bypassing that needs `Keyring::withoutProtection()`, which is announced and logged. Without them, your app changes those attributes itself.
 - An email change needs a fresh verification, confirmation from the new address, and confirmation from the current address unless the session proved a second factor that existed before it signed in.
 - An email change never reveals whether the new address has an account, in its answer or its timing: its emails, like the reset email, are sent after the response.
 - An email change only applies if the address is still the one it was requested from.
@@ -94,7 +94,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes and lift risk locks.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
-- New passwords follow OWASP's length rules, are checked against breach lists, and are refused rather than silently cut short by bcrypt.
+- New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
 
 ### Links and Headers
 
@@ -114,7 +114,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ## Known Limitations
 
-- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked for browsers it hasn't signed in from before. With `Features::devices()` on, known devices keep working. A password reset always does.
+- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked by guessing faster than the per-minute limit. With `Features::devices()` on, browsers the owner has signed in from before keep their own limit and keep working. Without devices, the lock reaches every browser while the guessing goes on. A password reset clears the in-a-row count, but not the per-minute lock.
 - **No attestation.** Any WebAuthn authenticator is accepted, and AAGUIDs aren't verified, so you can't restrict which key models users register. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.

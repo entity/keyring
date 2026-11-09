@@ -23,9 +23,41 @@ class UserKeyring
     /** @var Collection<int, Authenticator>|null */
     protected ?Collection $authenticators = null;
 
+    /** @var Collection<int, Authenticator>|null */
+    protected ?Collection $stored = null;
+
     public function __construct(
         public readonly Authenticatable&Model $user,
     ) {}
+
+    /**
+     * The keys of factors the user has authenticators for that aren't
+     * registered. Keyring can't check those, so it won't sign the user in
+     * without them.
+     *
+     * @return list<string>
+     */
+    public function unregistered(): array
+    {
+        return $this->stored()
+            ->pluck('factor')
+            ->unique()
+            ->reject(fn (string $factor) => Keyring::hasFactor($factor))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return Collection<int, Authenticator>
+     */
+    protected function stored(): Collection
+    {
+        return $this->stored ??= Keyring::authenticatorModel()::query()
+            ->ownedBy($this->user)
+            ->confirmed()
+            ->get()
+            ->each(fn (Authenticator $authenticator) => $authenticator->setRelation('authenticatable', $this->user));
+    }
 
     /**
      * Every confirmed authenticator, defaults first, then by factor priority.
@@ -136,6 +168,7 @@ class UserKeyring
     public function refresh(): static
     {
         $this->authenticators = null;
+        $this->stored = null;
 
         return $this;
     }
@@ -145,14 +178,8 @@ class UserKeyring
      */
     protected function load(): Collection
     {
-        $stored = Keyring::authenticatorModel()::query()
-            ->ownedBy($this->user)
-            ->confirmed()
-            ->get()
-            ->each(fn (Authenticator $authenticator) => $authenticator->setRelation('authenticatable', $this->user));
-
         return Keyring::registered()
-            ->flatMap(fn (Factor $factor) => $factor->authenticators($this->user, $stored))
+            ->flatMap(fn (Factor $factor) => $factor->authenticators($this->user, $this->stored()))
             ->sortBy([
                 fn (Authenticator $a, Authenticator $b) => $b->is_default <=> $a->is_default,
                 fn (Authenticator $a, Authenticator $b) => $b->factor()->priority() <=> $a->factor()->priority(),

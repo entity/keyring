@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -9,6 +10,7 @@ use Keyring\Enums\Category;
 use Keyring\Events\Authenticated;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\RecoveryCodeUsed;
+use Keyring\Exceptions\UnregisteredFactor;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -398,4 +400,30 @@ it('normalises usernames the app\'s way', function () {
     taylor();
 
     $this->post('/login', ['email' => ' Taylor ', 'password' => 'password'])->assertRedirect('/dashboard');
+});
+
+describe('authenticators for a factor that isn\'t registered', function () {
+    beforeEach(function () {
+        Exceptions::fake();
+        $this->user = taylor();
+        totpFor($this->user);
+        Keyring::factors([Password::class]);
+    });
+
+    it('refuses the sign in rather than skip them, and says why in the log', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertSessionHasErrors(['email' => __('keyring::keyring.unavailable')]);
+
+        $this->assertGuest();
+        expect(session()->has('keyring.attempt.login'))->toBeFalse();
+        Exceptions::assertReported(fn (UnregisteredFactor $e) => str_contains($e->getMessage(), '[totp]'));
+    });
+
+    it('refuses step-up too', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subDay());
+        $this->get(route('keyring.confirm.challenge', 'password'));
+
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+            ->assertSessionHasErrors(['password' => __('keyring::keyring.unavailable')]);
+    });
 });

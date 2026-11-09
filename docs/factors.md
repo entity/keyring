@@ -62,7 +62,7 @@ Keyring::extend('sms', fn ($app) => $app->make(SmsCode::class));
 
 The factor is registered under the first argument, and its `key()` must return the same value, or Keyring throws an `InvalidArgumentException` when it resolves the factors.
 
-Removing a factor from the list doesn't delete anyone's authenticators. Keyring ignores rows whose factor isn't registered: they stop counting towards the policy and aren't offered at sign in. Code that calls `$authenticator->factor()` on such a row throws `Keyring\Exceptions\UnknownFactor`, so delete or migrate those rows if you drop a factor for good. `UnknownFactor` is an HTTP exception, so an unregistered factor key in a URL gives a `404`.
+Removing a factor from the list doesn't delete anyone's authenticators. A user who still has authenticators for a factor that isn't registered can't sign in or step up: Keyring can't check those, and skipping them would let the password alone through. They see `keyring::keyring.unavailable`, and Keyring reports a `Keyring\Exceptions\UnregisteredFactor` naming the factor, so register it again or delete those rows. Code that calls `$authenticator->factor()` on such a row throws `Keyring\Exceptions\UnknownFactor`, so delete or migrate those rows if you drop a factor for good. `UnknownFactor` is an HTTP exception, so an unregistered factor key in a URL gives a `404`.
 
 ## Built-in Factors
 

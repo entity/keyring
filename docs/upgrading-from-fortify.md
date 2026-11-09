@@ -29,6 +29,8 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
    php artisan migrate
    ```
 
+   When `keyring:install` asks, pick the sign-in methods your users already have: the authenticator app if you use Fortify's two factor, and passkeys if you use `laravel/passkeys`. Also turn on registration, password resets, email verification and password changes if you used those Fortify features. Keyring refuses to sign in a user with authenticators for a method it doesn't have registered, and `keyring:import` won't import into one.
+
 2. Add `Keyring\Concerns\HasKeyring` to your user model. You can leave Fortify's `TwoFactorAuthenticatable` trait in place until the import is done.
 
 3. Import existing two factor data and passkeys. Try a dry run first:
