@@ -103,11 +103,13 @@ A code:
 
 - is only sent when the user asks (see [Sending Codes](sign-in-flow.md#sending-codes)), never just by opening the challenge page,
 - expires after 10 minutes,
-- allows five wrong guesses, then stops working,
+- allows five wrong guesses per sign in, across every code sent for it,
 - is replaced by any newer code,
 - is stored as a keyed hash, never in plain text.
 
-Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Email codes are only as strong as the inbox, so they aren't phishing resistant.
+Sending a new code doesn't reset the wrong guess count. Once the limit is reached the attempt is over, and the user has to start signing in again.
+
+Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until the enrollment's 15 minutes run out. Email codes are only as strong as the inbox, so they aren't phishing resistant.
 
 ### Recovery Codes
 
@@ -185,7 +187,7 @@ You can override these properties:
 |---|---|---|
 | `$length` | `8` | Digits per code. |
 | `$ttl` | `600` | Seconds a code stays valid. |
-| `$maxGuesses` | `5` | Wrong guesses allowed per code. |
+| `$maxGuesses` | `5` | Wrong guesses allowed per sign in or enrollment, however many codes it sends. |
 
 Code factors count as possession and have priority 30. Override `categories()`, `priority()` or `present()` to change that.
 

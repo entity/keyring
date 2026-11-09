@@ -3,6 +3,7 @@
 return [
     'invalid' => 'That didn\'t work. Check it and try again.',
     'expired' => 'Your sign in timed out. Please start again.',
+    'too_many_codes' => 'Too many wrong codes. Please start again.',
     'confirm' => 'Please confirm it\'s you to continue.',
     'last_factor' => 'You need to keep at least one way to sign in that meets your account\'s security requirements.',
     'password_common' => 'That password is too common. Choose another.',
@@ -10,6 +11,7 @@ return [
     'password_to_remove_last_factor' => 'Enter your password to remove your last second factor.',
     'password_too_short_alone' => 'Without a second factor your password needs at least :min characters. Change it first, then remove this.',
     'enrollment_expired' => 'Setting this up took too long. Please start again.',
+    'enrollment_too_many_codes' => 'Too many wrong codes. Please try again in 15 minutes.',
     'verify_email_first' => 'Please verify your email address before adding a sign-in method.',
     'device_name' => ':browser on :platform',
     'unknown_device' => 'Unknown device',

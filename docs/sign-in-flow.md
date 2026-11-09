@@ -168,7 +168,7 @@ Post the proof to `POST /login/challenge/{factor}`:
 
 For WebAuthn, the browser may answer with any of the user's keys of that factor, not just the one shown, and Keyring accepts it.
 
-Wrong proofs fail with `keyring::keyring.invalid` on the factor's field (`password`, `code` or `credential`). A wrong code keeps its guess count, so reloading doesn't reset it.
+Wrong proofs fail with `keyring::keyring.invalid` on the factor's field (`password`, `code` or `credential`). A wrong code keeps its guess count, so neither reloading nor sending a new code resets it. Once a pending attempt reaches a factor's limit (five guesses by default), nothing can finish it: verifying fails with `keyring::keyring.too_many_codes`, and opening the challenge page or sending a code ends the attempt and sends the user back to the start (`/login`, or `/confirm` for a step-up) with that message. The account's limits keep counting these failures.
 
 ### Sending Codes
 
