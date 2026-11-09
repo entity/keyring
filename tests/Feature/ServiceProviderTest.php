@@ -3,6 +3,8 @@
 use Illuminate\Support\Facades\Route;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
+use Keyring\KeyringServiceProvider;
 use Keyring\Factors\Totp;
 
 it('lets apps register the routes themselves, e.g. under a prefix', function () {
@@ -38,4 +40,17 @@ it('says which blade view a page needs and what it receives', function () {
         ->toContain('resources/views/auth/login.blade.php')
         ->toContain('$canResetPassword, $status')
         ->toContain("Keyring::page('login', ...)");
+});
+
+it('merges the app\'s config over its defaults key by key, but replaces lists whole', function () {
+    config(['keyring' => ['sessions' => ['absolute' => '7d', 'levels' => ['aal2' => ['idle' => '30m']]], 'features' => [Features::devices()]]]);
+
+    new KeyringServiceProvider($this->app)->register();
+
+    expect(config('keyring.sessions.absolute'))->toBe('7d')
+        ->and(config('keyring.sessions.middleware'))->toBeTrue()
+        ->and(config('keyring.sessions.levels.aal2'))->toBe(['idle' => '30m', 'absolute' => '24h'])
+        ->and(config('keyring.sessions.levels.aal3'))->toBe(['idle' => '15m', 'absolute' => '12h'])
+        ->and(config('keyring.features'))->toBe([Features::devices()])
+        ->and(config('keyring.limits.per_ip'))->toBe(20);
 });
