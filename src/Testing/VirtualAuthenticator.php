@@ -8,6 +8,7 @@ use CBOR\MapObject;
 use CBOR\NegativeIntegerObject;
 use CBOR\TextStringObject;
 use CBOR\UnsignedIntegerObject;
+use Keyring\WebAuthn\Ceremonies;
 use OpenSSLAsymmetricKey;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 
@@ -31,7 +32,8 @@ class VirtualAuthenticator
     protected ?string $userHandle = null;
 
     public function __construct(
-        public string $origin = 'http://localhost',
+        // Where it claims to be. Null: the first origin Keyring accepts, from APP_URL.
+        public ?string $origin = null,
         public bool $userVerification = true,
         public string $aaguid = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
         public string $algorithm = 'ES256',
@@ -126,7 +128,7 @@ class VirtualAuthenticator
         return json_encode([
             'type' => $type,
             'challenge' => $challenge,
-            'origin' => $origin ?? $this->origin,
+            'origin' => $origin ?? $this->origin ?? app(Ceremonies::class)->origins()[0] ?? 'http://localhost',
             'crossOrigin' => false,
         ], JSON_UNESCAPED_SLASHES);
     }
