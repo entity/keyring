@@ -33,7 +33,6 @@ abstract class TestCase extends Orchestra
 
         $app['config']->set('database.default', getenv('DB_CONNECTION') ?: 'testing');
         $app['config']->set('auth.providers.users.model', User::class);
-        $app['config']->set('keyring.passwords.uncompromised', false);
         // What a new Laravel app uses, so nothing relies on PHP serialization.
         $app['config']->set('session.serialization', 'json');
     }

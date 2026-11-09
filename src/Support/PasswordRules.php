@@ -39,7 +39,7 @@ final class PasswordRules
         $rule = Password::min(config($hasMfa ? 'keyring.passwords.min_with_mfa' : 'keyring.passwords.min_without_mfa'))
             ->max(config('keyring.passwords.max'));
 
-        if (config('keyring.passwords.uncompromised')) {
+        if (config('keyring.passwords.uncompromised') ?? app()->isProduction()) {
             $rule->uncompromised();
         }
 

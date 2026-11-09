@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rules\Password;
 use Keyring\Models\Authenticator;
 use Keyring\Support\PasswordRules;
 
@@ -9,9 +10,7 @@ function passes(string $password, mixed ...$arguments): bool
     return Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for(...$arguments)])->passes();
 }
 
-it('refuses the most common passwords even when the breach check can\'t run', function () {
-    config(['keyring.passwords.uncompromised' => false]);
-
+it('refuses the most common passwords even when the breach check doesn\'t run', function () {
     // With a second factor the minimum is 8, where most common passwords are.
     $user = taylor();
     Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
@@ -34,4 +33,16 @@ it('refuses passwords containing the user\'s name, their email username or the s
 it('checks the words it\'s given before there\'s a user, ignoring short ones', function () {
     expect(passes('jordan rivers long phrase', context: ['Jordan Rivers', 'jr@example.com']))->toBeFalse()
         ->and(passes('a long passphrase with jr in it', context: ['Jo', 'jr@example.com']))->toBeTrue();
+});
+
+it('checks the breach list in production only, unless told otherwise', function () {
+    $breachCheck = fn () => collect(PasswordRules::for())->contains(fn (mixed $rule) => $rule instanceof Password && (fn () => $this->uncompromised)->call($rule));
+
+    expect($breachCheck())->toBeFalse();
+
+    app()->detectEnvironment(fn () => 'production');
+    expect($breachCheck())->toBeTrue();
+
+    config(['keyring.passwords.uncompromised' => false]);
+    expect($breachCheck())->toBeFalse();
 });

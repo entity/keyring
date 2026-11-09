@@ -176,14 +176,14 @@ See [Protected Changes](protected-changes.md).
     'min_with_mfa' => 8,
     'min_without_mfa' => 15,
     'max' => 128,
-    'uncompromised' => true,
+    'uncompromised' => null,
     'broker' => null,
 ],
 ```
 
 See [Password Rules](protected-changes.md#password-rules). `broker` is the password broker used for resets; `null` is your default broker.
 
-`uncompromised` checks new passwords against a public breach list over the network. You'll usually turn it off in your test environment.
+`uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
 
 ## Risk
 
