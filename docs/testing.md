@@ -22,16 +22,10 @@ use Keyring\Testing\InteractsWithKeyring;
 abstract class TestCase extends BaseTestCase
 {
     use InteractsWithKeyring;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // Don't check new passwords against the breach list over the network.
-        config(['keyring.passwords.uncompromised' => false]);
-    }
 }
 ```
+
+New passwords are only checked against Have I Been Pwned in production, so tests make no network calls. See [Passwords](configuration.md#passwords).
 
 `InteractsWithKeyring` also swaps in an instant timebox for every test that uses it, so failed factor checks don't wait the usual 250ms. Tests without the trait wait the full `timebox` on every failed verification.
 

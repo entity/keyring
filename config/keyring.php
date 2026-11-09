@@ -181,13 +181,17 @@ return [
     | Bcrypt silently ignores anything past 72 bytes, so with bcrypt longer
     | passwords are rejected rather than truncated.
     |
+    | "uncompromised" checks new passwords against Have I Been Pwned over the
+    | network. Null runs it in production only, so local and test runs make
+    | no network calls.
+    |
     */
 
     'passwords' => [
         'min_with_mfa' => 8,
         'min_without_mfa' => 15,
         'max' => 128,
-        'uncompromised' => true,
+        'uncompromised' => null,
         'broker' => null,
     ],
 
