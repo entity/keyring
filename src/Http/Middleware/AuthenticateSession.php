@@ -3,10 +3,13 @@
 namespace Keyring\Http\Middleware;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
+use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\SessionEnded;
 use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
@@ -14,6 +17,7 @@ use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\RiskEngine;
+use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
@@ -34,6 +38,7 @@ class AuthenticateSession
         protected SessionAssurance $assurance,
         protected DeviceManager $devices,
         protected RiskEngine $risk,
+        protected RiskLocks $locks,
         protected SignIn $signIn,
     ) {}
 
@@ -56,9 +61,13 @@ class AuthenticateSession
                 return $this->signOut($request, 'revoked');
             }
 
-            // Signed in some other way (e.g. a "remember me" cookie): register it.
-            $this->sessions->start($request, $user, $this->devices->find($request, $user), $this->assurance->level());
-            $this->assurance->touch();
+            // A "remember me" cookie signs in with nothing proved, so a risk
+            // lock refuses it like any other sign in.
+            if ($guard->viaRemember() && $this->locks->locked($user)) {
+                return $this->signOut($request, 'risk');
+            }
+
+            $this->register($request, $user, $guard->viaRemember());
 
             return $next($request);
         }
@@ -90,6 +99,25 @@ class AuthenticateSession
         }
 
         return $next($request);
+    }
+
+    /**
+     * Register a session that started some other way. A "remember me" cookie
+     * is recorded like a sign in, so one turning up in a browser the account
+     * hasn't used is announced as a new device.
+     */
+    protected function register(Request $request, Authenticatable&Model $user, bool $remembered): void
+    {
+        [$device, $new] = $remembered
+            ? $this->devices->signIn($request, $user)
+            : [$this->devices->find($request, $user), false];
+
+        $this->sessions->start($request, $user, $device, $this->assurance->level());
+        $this->assurance->touch();
+
+        if ($new) {
+            NewDeviceSignedIn::dispatch($user, $device);
+        }
     }
 
     /**

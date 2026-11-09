@@ -171,6 +171,24 @@ it('removes sign-in methods added since the change when it is reverted', functio
     Event::assertDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->authenticator->is($planted));
 });
 
+it('removes sign-in methods added earlier in the session that asked for the change', function () {
+    $before = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($before->secret)]);
+
+    $this->travel(1)->minutes();
+    $planted = Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+    $this->travel(1)->minutes();
+    $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com'])->assertOk();
+    $change = PendingChange::sole();
+
+    app(EmailChanges::class)->revert($change, tokensFor('attacker@example.com', 'taylor@example.com')['revert']);
+
+    expect(Authenticator::find($planted->id))->toBeNull()
+        ->and(Authenticator::find($before->id))->not->toBeNull();
+});
+
 it('cancels pending email changes when the password is reset', function () {
     $change = requestChange($this->user, 'attacker@example.com');
     $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
@@ -269,13 +287,40 @@ it('keeps the revert link working after signing out everywhere else cancels the 
         ->and($this->user->fresh()->email)->toBe('taylor@example.com');
 });
 
-it('does not revert a change its owner cancelled', function () {
-    $change = requestChange($this->user, 'new@example.com');
-    $tokens = tokensFor('new@example.com', 'taylor@example.com');
+it('keeps the revert link working after the change is cancelled', function () {
+    $change = requestChange($this->user, 'attacker@example.com');
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+    $planted = Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
 
     $this->deleteJson(route('keyring.email.destroy'))->assertOk();
 
+    expect(confirmBoth($change->fresh(), $tokens))->toBe(EmailConfirmation::Invalid)
+        ->and(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeTrue()
+        ->and(Authenticator::find($planted->id))->toBeNull();
+});
+
+it('stops a cancelled change being reverted once it would have expired', function () {
+    $change = requestChange($this->user, 'attacker@example.com');
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+    $this->deleteJson(route('keyring.email.destroy'))->assertOk();
+
+    $this->travel(25)->hours();
+
     expect(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeFalse();
+});
+
+it('puts the address back from the link for an earlier change that a later one replaced', function () {
+    requestChange($this->user, 'first@example.com');
+    $first = tokensFor('first@example.com', 'taylor@example.com');
+    $earlier = PendingChange::sole();
+
+    $later = requestChange($this->user, 'attacker@example.com');
+    expect(confirmBoth($later, tokensFor('attacker@example.com', 'taylor@example.com')))->toBe(EmailConfirmation::Applied)
+        ->and($this->user->fresh()->email)->toBe('attacker@example.com');
+
+    expect(app(EmailChanges::class)->revert($earlier->fresh(), $first['revert']))->toBeTrue()
+        ->and($this->user->fresh()->email)->toBe('taylor@example.com')
+        ->and($later->fresh()->canRevert())->toBeFalse();
 });
 
 it('says a link was invalid when the token is wrong', function () {
@@ -325,8 +370,8 @@ describe('the address a change replaced', function () {
         $this->actingAs($other)->withAssurance(Assurance::AAL1)
             ->postJson(route('keyring.email.store'), ['email' => 'taylor@example.com'])->assertOk();
 
-        expect(PendingChange::query()->ownedBy($other)->exists())->toBeFalse();
         Notification::assertSentTo(new AnonymousNotifiable, EmailAddressInUse::class, fn ($n, $c, $to) => $to->routes['mail'] === 'taylor@example.com');
+        Notification::assertNotSentTo(new AnonymousNotifiable, ConfirmEmailChange::class, fn ($n, $c, $to) => $to->routes['mail'] === 'taylor@example.com');
     });
 
     it('cannot be given to another user however they are saved', function () {

@@ -143,7 +143,7 @@ These are part of the foundation. You don't need to set them up, but you can cha
 
 | What | Default | Change it with |
 |---|---|---|
-| Rate limits on signing in | 5 a minute per account, 20 per IP, and a factor refused after 100 failures in a row until a success or a password reset | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
+| Rate limits on signing in | 5 a minute per account, 20 per IP, and a factor refused after 100 failures in a row | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Failed checks take the same time | 250ms | `timebox` |
 | Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
 | A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and "remember me" lasts no longer | `sessions` in [Configuration](configuration.md#sessions) |

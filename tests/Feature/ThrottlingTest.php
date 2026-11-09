@@ -195,7 +195,24 @@ describe('failures in a row, however slowly they come', function () {
         $this->assertAuthenticatedAs($this->user);
     });
 
-    it('lets a password reset clear it', function () {
+    it('lets a password reset clear it for the password', function () {
+        foreach (range(1, 3) as $guess) {
+            $this->travel(3)->minutes();
+            $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+        }
+
+        $this->post(route('password.update'), [
+            'token' => PasswordBroker::broker()->createToken($this->user),
+            'email' => 'taylor@example.com',
+            'password' => 'a brand new passphrase',
+            'password_confirmation' => 'a brand new passphrase',
+        ])->assertRedirect(route('login'));
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])
+            ->assertRedirect(route('keyring.login.challenge'));
+    });
+
+    it('keeps a second factor refused through a password reset', function () {
         guessTotp('000000');
         guessTotp('000000');
         guessTotp('000000');
@@ -209,6 +226,25 @@ describe('failures in a row, however slowly they come', function () {
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase']);
         $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+
+        $this->assertGuest();
+    });
+
+    it('keeps a count of its own for a browser the account has signed in from', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->getCookie('keyring_device')->getValue();
+        $this->post('/logout');
+
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp(totpCode($this->totp->secret));
+        $this->assertGuest();
+
+        $this->withCookie('keyring_device', $device);
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp(totpCode($this->totp->secret, 1));
 
         $this->assertAuthenticatedAs($this->user);
     });

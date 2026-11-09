@@ -41,7 +41,7 @@ use function Illuminate\Support\defer;
  *  3. Once confirmed, the change applies, and can still be reverted from the
  *     old address for a while. Meanwhile nobody else can take the old
  *     address. Reverting signs everything out, closes any later changes, and
- *     removes sign-in methods added since the request.
+ *     removes sign-in methods added since the session that asked signed in.
  *
  * Nothing reveals whether the new address belongs to another account.
  */
@@ -54,6 +54,12 @@ class EmailChanges
         protected ReservedAddresses $reserved,
     ) {}
 
+    /**
+     * A taken address is asked for like any other, so nothing the account can
+     * see (the pending change, the notice to its current address) gives away
+     * that it's taken. Only the email to the new address differs, and with no
+     * confirmation link sent the change can never apply.
+     */
     public function request(Authenticatable&Model $user, string $email, Request $request): ?PendingChange
     {
         $email = $this->keyring->normalizeUsername($email);
@@ -63,19 +69,13 @@ class EmailChanges
             return null;
         }
 
-        if ($this->taken($user, $email)) {
-            // After the response, like the emails for a real change, so timing
-            // doesn't give away that the address is taken.
-            defer(fn () => Notification::route('mail', $email)->notify(app(EmailAddressInUse::class)));
-
-            return null;
-        }
-
+        $taken = $this->taken($user, $email);
         $tokens = ['confirm' => Str::random(48), 'current' => Str::random(48), 'revert' => Str::random(48)];
 
-        $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($user, $request);
+        $signedInAt = $this->signedInAt($request);
+        $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($user, $signedInAt);
 
-        $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent) {
+        $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent, $signedInAt) {
             $this->cancel($user);
 
             $model = $this->keyring->pendingChangeModel();
@@ -86,6 +86,7 @@ class EmailChanges
                 'confirm_token' => PendingChange::hashToken($tokens['confirm']),
                 'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
                 'revert_token' => PendingChange::hashToken($tokens['revert']),
+                'signed_in_at' => $signedInAt,
                 'expires_at' => Duration::fromNow(config('keyring.email_changes.expire', '24h')),
             ]);
             $change->authenticatable()->associate($user);
@@ -94,8 +95,11 @@ class EmailChanges
             return $change;
         });
 
-        defer(function () use ($change, $email, $current, $tokens, $needsCurrent) {
-            Notification::route('mail', $email)->notify(app(ConfirmEmailChange::class, ['change' => $change, 'token' => $tokens['confirm']]));
+        // After the response, so timing doesn't give away which case it was.
+        defer(function () use ($change, $email, $current, $tokens, $needsCurrent, $taken) {
+            Notification::route('mail', $email)->notify($taken
+                ? app(EmailAddressInUse::class)
+                : app(ConfirmEmailChange::class, ['change' => $change, 'token' => $tokens['confirm']]));
 
             Notification::route('mail', $current)->notify(app(EmailChangeNotice::class, [
                 'change' => $change,
@@ -149,8 +153,10 @@ class EmailChanges
 
     /**
      * "This wasn't me": put the address back, close every later change, remove
-     * sign-in methods added since the change was requested, and sign out
-     * everywhere. Returns whether the link was good.
+     * sign-in methods added since the session that asked for the change signed
+     * in, and sign out everywhere. The address goes back even when it was a
+     * later change that moved it, since the link for an earlier, cancelled
+     * one still works. Returns whether the link was good.
      */
     public function revert(PendingChange $change, string $token): bool
     {
@@ -161,7 +167,7 @@ class EmailChanges
 
             $user = $change->user();
 
-            if ($change->applied_at !== null && $user !== null) {
+            if ($user !== null && $this->movedAddress($user, $change)) {
                 $this->keyring->changing(fn () => $user->forceFill([$change->attribute => $change->previous_value])->save());
             }
 
@@ -169,7 +175,7 @@ class EmailChanges
 
             if ($user !== null) {
                 $this->closeLaterChanges($user, $change);
-                $this->removeAuthenticatorsAddedSince($user, $change->created_at);
+                $this->removeAuthenticatorsAddedSince($user, $change->signed_in_at ?? $change->created_at);
             }
 
             return true;
@@ -188,15 +194,16 @@ class EmailChanges
 
     /**
      * Cancel every change still waiting for confirmation, e.g. after the
-     * account was recovered with a password reset. Someone reacting to a
-     * takeover may also follow the emailed "this wasn't me" link afterwards,
-     * so $keepRevertLink leaves it working until the change would have expired.
+     * account was recovered with a password reset. The emailed "this wasn't
+     * me" link keeps working until the change would have expired: whoever
+     * asked for the change can cancel it too, and that mustn't take the
+     * owner's way to undo what they did.
      */
-    public function cancel(Authenticatable&Model $user, bool $keepRevertLink = false): void
+    public function cancel(Authenticatable&Model $user): void
     {
         $this->changesOf($user)->pending()->update([
             'cancelled_at' => now(),
-            ...($keepRevertLink ? ['revertable_until' => new Expression('expires_at')] : []),
+            'revertable_until' => new Expression('expires_at'),
         ]);
     }
 
@@ -227,10 +234,8 @@ class EmailChanges
      * and skip the check. Only this account's own factors count: a switched
      * or impersonated session may hold someone else's verifications.
      */
-    protected function sessionProvedEstablishedSecondFactor(Authenticatable&Model $user, Request $request): bool
+    protected function sessionProvedEstablishedSecondFactor(Authenticatable&Model $user, ?CarbonInterface $signedInAt): bool
     {
-        $signedInAt = $this->sessions->current($request)?->authenticatedAt;
-
         if ($signedInAt === null) {
             return false;
         }
@@ -243,8 +248,19 @@ class EmailChanges
         return $ids->isNotEmpty() && $this->keyring->authenticatorModel()::query()
             ->ownedBy($user)
             ->whereKey($ids->all())
-            ->where('created_at', '<', Carbon::createFromTimestamp($signedInAt))
+            ->where('created_at', '<', $signedInAt)
             ->exists();
+    }
+
+    /**
+     * When this session signed in, in the app's timezone like every stored
+     * time it's compared with.
+     */
+    protected function signedInAt(Request $request): ?CarbonInterface
+    {
+        $signedInAt = $this->sessions->current($request)?->authenticatedAt;
+
+        return $signedInAt === null ? null : now()->setTimestamp($signedInAt);
     }
 
     /**
@@ -263,7 +279,7 @@ class EmailChanges
         }
 
         if ($here) {
-            $request->session()->regenerate(true);
+            $this->sessions->rotate($request);
         }
     }
 
@@ -305,6 +321,19 @@ class EmailChanges
 
             return true;
         });
+    }
+
+    /**
+     * Whether this change, or one asked for after it, moved the address and
+     * hasn't been reverted.
+     */
+    protected function movedAddress(Authenticatable&Model $user, PendingChange $change): bool
+    {
+        return $this->changesOf($user)
+            ->where($change->getKeyName(), '>=', $change->getKey()) // ULIDs sort by creation
+            ->whereNotNull('applied_at')
+            ->whereNull('reverted_at')
+            ->exists();
     }
 
     /**

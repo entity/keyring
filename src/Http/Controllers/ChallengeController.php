@@ -2,7 +2,6 @@
 
 namespace Keyring\Http\Controllers;
 
-use Illuminate\Cache\RateLimiter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -89,7 +88,7 @@ class ChallengeController
      * Send a code for factors that need one. Separate from viewing the page,
      * so prefetching or reloading never sends anything.
      */
-    public function send(Request $request, RateLimiter $limiter, string $factor): mixed
+    public function send(Request $request, string $factor): mixed
     {
         $purpose = $this->purpose($request);
         $attempt = $this->attempts->current($purpose);
@@ -106,12 +105,10 @@ class ChallengeController
         abort_unless($factor instanceof SendsCodes, 404);
 
         $authenticator = $this->authenticatorFor($request, $attempt, $factor->key()) ?? abort(404);
-        $key = 'keyring-send:'.$attempt->id;
 
-        // Three codes per sign in attempt every ten minutes.
-        if (! $limiter->attempt($key, 3, fn () => $factor->send($attempt, $authenticator), 600)) {
-            throw Throttle::exception('code', $limiter->availableIn($key));
-        }
+        Throttle::sending($factor->key(), $attempt->userId);
+
+        $factor->send($attempt, $authenticator);
 
         $this->attempts->save($attempt);
 

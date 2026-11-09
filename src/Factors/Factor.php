@@ -61,9 +61,9 @@ abstract class Factor implements FactorContract
      * Requests that don't name an account (like a usernameless passkey) only
      * get the per-IP limit, so they can't fill one bucket every user shares.
      *
-     * A browser the account has signed in from before gets a bucket of its
-     * own (OWASP "device cookies"), so someone guessing elsewhere can't lock
-     * the owner out.
+     * A browser the account has signed in from before gets a bucket and an
+     * in-a-row count of its own (OWASP "device cookies"), so someone guessing
+     * elsewhere can't lock the owner out.
      */
     public function limits(Request $request, ?Attempt $attempt): array
     {
@@ -71,13 +71,12 @@ abstract class Factor implements FactorContract
             ? (string) $attempt->userId
             : $this->normalizeAccount((string) $request->input(Keyring::username()));
 
-        $bucket = static::accountBucket($this->key(), $account, $this->knownDevice($request, $attempt, $account));
-
+        $device = $this->knownDevice($request, $attempt, $account);
         $consecutive = config('keyring.limits.consecutive');
 
         return array_values(array_filter([
-            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($bucket),
-            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account),
+            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by(static::accountBucket($this->key(), $account, $device)),
+            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account, $device),
             SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
         ]));
     }

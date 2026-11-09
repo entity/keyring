@@ -39,7 +39,7 @@ class PasswordController
             signOutOthers: $request->boolean('sign_out_others', true),
         );
 
-        $request->session()->regenerate(true);
+        $sessions->rotate($request);
 
         return $this->status('password-updated');
     }

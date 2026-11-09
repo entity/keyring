@@ -14,8 +14,8 @@ use Keyring\Login\Verification;
  * Each level lapses on its own clock, as NIST SP 800-63B asks: it only counts
  * verifications made within its overall limit (sessions.levels.aal2.absolute,
  * 24 hours by default), and inactivity past its idle limit (an hour at AAL2)
- * lapses it until the user verifies again. The session itself stays signed
- * in at whatever level is left.
+ * lapses it until the user proves every factor for it again. The session
+ * itself stays signed in at whatever level is left.
  */
 class SessionAssurance
 {
@@ -24,8 +24,8 @@ class SessionAssurance
     /** When the session was last active, for the idle limits. */
     public const string ACTIVE = 'keyring.active_at';
 
-    /** The highest level inactivity left the session, until it verifies again. */
-    public const string CEILING = 'keyring.ceiling';
+    /** When inactivity last lapsed each level, keyed by the level's value. */
+    public const string LAPSED = 'keyring.lapsed_at';
 
     public function __construct(
         protected Session $session,
@@ -40,6 +40,7 @@ class SessionAssurance
     public function reset(array $verifications): void
     {
         $this->session->put(static::KEY, []);
+        $this->session->forget(static::LAPSED);
         $this->record($verifications);
     }
 
@@ -57,9 +58,6 @@ class SessionAssurance
         }
 
         $this->session->put(static::KEY, $stored);
-
-        // Verifying again resets both clocks.
-        $this->session->forget(static::CEILING);
         $this->session->put(static::ACTIVE, now()->getTimestamp());
     }
 
@@ -79,8 +77,14 @@ class SessionAssurance
                 return $idle !== null && $now - $active > $idle;
             });
 
+            // A lapsed level takes the ones above it along. What was verified
+            // before now stops counting toward them, so one factor proved
+            // afterwards can't bring back a level that needs two.
             if ($lapsed !== null) {
-                $this->session->put(static::CEILING, min($lapsed->value - 1, $this->session->get(static::CEILING, Assurance::AAL3->value)));
+                $this->session->put(static::LAPSED, array_replace(
+                    $this->session->get(static::LAPSED, []),
+                    array_fill_keys(range($lapsed->value, Assurance::AAL3->value), $now),
+                ));
             }
         }
 
@@ -129,18 +133,17 @@ class SessionAssurance
     }
 
     /**
-     * The verifications that still count toward a level: none once
-     * inactivity lapsed it, otherwise those within its overall limit.
+     * The verifications that still count toward a level: those within its
+     * overall limit, and made since inactivity last lapsed it.
      *
      * @return list<Verification>
      */
     public function countingToward(Assurance $level): array
     {
-        if ($level->value > $this->session->get(static::CEILING, Assurance::AAL3->value)) {
-            return [];
-        }
-
-        return $this->since(now()->getTimestamp() - $this->sessions->absolute($level));
+        return $this->since(max(
+            now()->getTimestamp() - $this->sessions->absolute($level),
+            $this->session->get(static::LAPSED, [])[$level->value] ?? 0,
+        ));
     }
 
     /**
@@ -149,6 +152,6 @@ class SessionAssurance
      */
     public function flush(): void
     {
-        $this->session->forget([static::KEY, static::CEILING, 'auth.password_confirmed_at']);
+        $this->session->forget([static::KEY, static::LAPSED, 'auth.password_confirmed_at']);
     }
 }

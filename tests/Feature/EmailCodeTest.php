@@ -303,6 +303,38 @@ it('limits how often codes are sent', function () {
     $this->post(route('keyring.login.send', 'email-code'))->assertSessionHasErrors('code');
 });
 
+it('does not send more codes for a new sign in', function () {
+    emailAuthenticator($this->user);
+
+    foreach (range(1, 3) as $send) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'email-code'))->assertSessionHasNoErrors();
+    }
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.send', 'email-code'))->assertSessionHasErrors('code');
+    Notification::assertSentToTimes($this->user, VerificationCode::class, 3);
+
+    $this->travel(11)->minutes();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.send', 'email-code'))->assertSessionHasNoErrors();
+});
+
+it('limits how often starting an enrollment sends a code', function () {
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    foreach (range(1, 3) as $send) {
+        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    }
+
+    $this->postJson(route('keyring.authenticators.store', 'email-code'))
+        ->assertTooManyRequests()
+        ->assertJsonValidationErrors('code');
+    Notification::assertSentToTimes($this->user, VerificationCode::class, 3);
+
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+});
+
 it('enrolls email codes by confirming a sent code', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 

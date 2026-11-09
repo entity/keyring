@@ -53,7 +53,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
 
 ### Beginning
 
-`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes. Starting again replaces it. The response's `enrollment` holds what to show the user:
+`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes. Starting again replaces it. Starting one for a factor that sends a code counts toward the account's [three codes per 10 minutes](sign-in-flow.md#sending-codes). The response's `enrollment` holds what to show the user:
 
 | Factor | Request fields | `enrollment` |
 |---|---|---|
