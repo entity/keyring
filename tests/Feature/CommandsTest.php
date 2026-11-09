@@ -20,6 +20,7 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
@@ -47,21 +48,65 @@ describe('keyring:install', function () {
         $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
     });
 
-    it('publishes a provider and the actions, and registers the provider', function () {
-        $this->artisan('keyring:install')->assertSuccessful();
+    it('installs the password, registration and password resets without asking', function () {
+        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
 
-        expect(file_exists($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBeTrue()
+        $config = require config_path('keyring.php');
+        $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+
+        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
+            ->and($config['notifications'])->toBe([])
+            ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
+            ->and($provider)->toContain('Password::class,')
+            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('Keyring::require(')
+            ->not->toContain('UpdateUserPassword')->not->toContain('ValidateEmailChange')
             ->and(array_map(basename(...), glob($this->sandbox.'/app/Actions/Keyring/*.php')))->toEqualCanonicalizing([
-                'CreateNewUser.php', 'PasswordValidationRules.php', 'ResetUserPassword.php', 'UpdateUserPassword.php', 'ValidateEmailChange.php',
+                'CreateNewUser.php', 'PasswordValidationRules.php', 'ResetUserPassword.php',
             ])
             ->and(file_get_contents($this->sandbox.'/bootstrap/providers.php'))->toContain('App\Providers\KeyringServiceProvider::class');
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+    });
+
+    it('adds the sign-in methods and features picked, and what they need', function () {
+        $this->artisan('keyring:install', [
+            '--factor' => ['totp', 'passkeys'],
+            '--feature' => [Features::updatePasswords(), Features::devices()],
+            '--emails' => true,
+            '--no-interaction' => true,
+        ])->expectsOutputToContain('Turned on managing sign-in methods')->assertSuccessful();
+
+        $config = require config_path('keyring.php');
+        $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+
+        expect($config['features'])->toBe([Features::updatePasswords(), Features::manageAuthenticators(), Features::devices()])
+            ->and($config['notifications'])->toContain('recovery_code_used')
+            ->and($provider)->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
+            ->not->toContain('securityKeys')->not->toContain('EmailCode')->not->toContain('CreateNewUser')
+            ->and(array_map(basename(...), glob($this->sandbox.'/app/Actions/Keyring/*.php')))->toEqualCanonicalizing([
+                'PasswordValidationRules.php', 'UpdateUserPassword.php',
+            ]);
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+        expectValidPhp(config_path('keyring.php'));
+    });
+
+    it('asks which sign-in methods and features to set up', function () {
+        $this->artisan('keyring:install')
+            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app, with recovery codes', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (below NIST AAL2)'])
+            ->expectsQuestion('Which features?', [Features::registration(), Features::manageAuthenticators()])
+            ->expectsConfirmation('Send the security emails NIST asks for?', 'yes')
+            ->assertSuccessful();
+
+        expect((require config_path('keyring.php'))['features'])->toBe([Features::registration(), Features::manageAuthenticators()])
+            ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('WebAuthn::passkeys(),')->not->toContain('Totp');
     });
 
     it('can run again without duplicating migrations or overwriting customised files', function () {
-        $this->artisan('keyring:install')->assertSuccessful();
+        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
         file_put_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php', '<?php // mine');
 
-        $this->artisan('keyring:install')->assertSuccessful();
+        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
 
         expect(glob(database_path('migrations/*_create_keyring_authenticators_table.php')))->toHaveCount(1)
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBe('<?php // mine');
@@ -351,11 +396,12 @@ it('describes the setup in artisan about', function () {
         ->assertSuccessful();
 });
 
-it('publishes a provider that boots and registers the actions', function () {
+it('publishes a provider that boots, with everything picked', function () {
+    // The stub as a whole; keyring:install removes what isn't picked.
     new KeyringServiceProvider($this->app)->boot();
 
     expect(app(UpdatesUserPasswords::class))->toBeInstanceOf(UpdateUserPassword::class)
         ->and(app(ResetsUserPasswords::class))->toBeInstanceOf(ResetUserPassword::class)
         ->and(app(ValidatesEmailChanges::class))->toBeInstanceOf(ValidateEmailChange::class)
-        ->and(Keyring::registered()->keys()->all())->toContain('passkey', 'security-key')->not->toContain('email-code');
+        ->and(Keyring::registered()->keys()->all())->toBe(['password', 'totp', 'recovery', 'passkey', 'security-key', 'email-code']);
 });

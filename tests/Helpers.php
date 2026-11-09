@@ -57,3 +57,10 @@ function withFeatures(array $features): void
     Keyring\Facades\Keyring::routes();
     app('router')->getRoutes()->refreshNameLookups();
 }
+
+function expectValidPhp(string $path): void
+{
+    exec(escapeshellarg(PHP_BINARY).' -l '.escapeshellarg($path).' 2>&1', $output, $status);
+
+    expect($status)->toBe(0, implode("\n", $output));
+}
