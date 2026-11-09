@@ -42,7 +42,7 @@ Keyring::factors([
 ]);
 ```
 
-Without `Keyring::factors()`, Keyring uses the password, passkeys, TOTP and recovery codes. NIST SP 800-63B asks for at least one phishing-resistant option, which passkeys are.
+Without `Keyring::factors()`, Keyring uses the password alone. `keyring:install` writes the list for the methods you pick. To let users set the others up, turn on [`Features::manageAuthenticators()`](authenticators.md). NIST SP 800-63B asks for at least one phishing-resistant option, which passkeys are.
 
 The list accepts class names (resolved from the container), instances, and closures that receive the container:
 
@@ -61,8 +61,6 @@ Keyring::extend('sms', fn ($app) => $app->make(SmsCode::class));
 ```
 
 The factor is registered under the first argument, and its `key()` must return the same value, or Keyring throws an `InvalidArgumentException` when it resolves the factors.
-
-If you never call `Keyring::factors()`, Keyring uses `Password`, `Totp` and `RecoveryCodes`.
 
 Removing a factor from the list doesn't delete anyone's authenticators. Keyring ignores rows whose factor isn't registered: they stop counting towards the policy and aren't offered at sign in. Code that calls `$authenticator->factor()` on such a row throws `Keyring\Exceptions\UnknownFactor`, so delete or migrate those rows if you drop a factor for good. `UnknownFactor` is an HTTP exception, so an unregistered factor key in a URL gives a `404`.
 

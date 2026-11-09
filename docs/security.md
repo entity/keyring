@@ -18,6 +18,8 @@ Keyring follows OWASP's authentication, session management and forgot password g
 
 The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration.
 
+Guarantees about a [feature](quick-start.md#adding-features), such as devices, email changes or the security log, apply once that feature is on.
+
 ## Guarantees
 
 ### Signing In
@@ -112,7 +114,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 
 ## Known Limitations
 
-- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked for browsers it hasn't signed in from before. Known devices keep working, and so does a password reset.
+- **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked for browsers it hasn't signed in from before. With `Features::devices()` on, known devices keep working. A password reset always does.
 - **No attestation.** Any WebAuthn authenticator is accepted, and AAGUIDs aren't verified, so you can't restrict which key models users register. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.

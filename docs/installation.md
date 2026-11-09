@@ -1,5 +1,7 @@
 # Installation
 
+The [Quick Start](quick-start.md) is the short version. This page has the details.
+
 - [Requirements](#requirements)
 - [Installing Keyring](#installing-keyring)
 - [What Gets Published](#what-gets-published)
@@ -28,6 +30,12 @@ php artisan migrate
 
 > Keyring has no tagged release yet. Until it does, add the repository to your `composer.json` and require `entity/keyring:@dev`.
 
+The command asks which sign-in methods you want besides the password, which [features](quick-start.md#adding-features) to turn on, and whether to send the security emails NIST asks for. It then publishes only what those need. Without prompts (`--no-interaction`, or in CI) you get the password, registration and password resets. You can also answer with options:
+
+```bash
+php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --emails
+```
+
 Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
 
 If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fortify.md) before migrating.
@@ -38,12 +46,12 @@ If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fort
 
 | File | What it is |
 |---|---|
-| `config/keyring.php` | The configuration file. |
-| `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. |
-| `app/Providers/KeyringServiceProvider.php` | Where you register factors and the policy. It's added to `bootstrap/providers.php` for you. |
-| `app/Actions/Keyring/*.php` | Your code for registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
+| `config/keyring.php` | A short config: the guard, username, home, your features and security emails. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
+| `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. They're all created, so turning a feature on later needs no new migration. Tables for features you don't use stay empty. |
+| `app/Providers/KeyringServiceProvider.php` | Where you register sign-in methods, the policy and your actions. It lists only what you picked, and it's added to `bootstrap/providers.php` for you. |
+| `app/Actions/Keyring/*.php` | Your code for the features that need it: registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
 
-You can publish the same files on their own with the `keyring-config`, `keyring-migrations` and `keyring-lang` tags:
+You can publish files on their own with the `keyring-config`, `keyring-migrations` and `keyring-lang` tags. `keyring-config` publishes the full config file, with every option and its default:
 
 ```bash
 php artisan vendor:publish --tag=keyring-lang
@@ -77,7 +85,7 @@ class User extends Authenticatable implements MustVerifyEmail
 The trait does three things:
 
 - It adds `$user->keyring`, `$user->authenticators()` and `$user->devices()`.
-- It stops the `email` and `password` attributes from changing outside Keyring's own flows. See [Protected Changes](protected-changes.md).
+- Once Keyring handles changing them (`Features::updatePasswords()` and `Features::emailChanges()`), it stops the `password` and `email` attributes from changing outside Keyring's own flows. See [Protected Changes](protected-changes.md).
 - When the user is deleted, it revokes their sessions and deletes their authenticators, devices and pending changes. With soft deletes, the sessions are revoked straight away and the rest waits for a force delete, so a restored user keeps their sign-in methods.
 
 The published `CreateNewUser` action passes the plain password to `User::create()`, so it relies on the `hashed` cast shown above. The password actions hash it themselves.
@@ -105,7 +113,8 @@ To change the prefix, domain or middleware, or to turn routes off, see [Configur
 ## After Installing
 
 - Set `APP_URL` to the address users actually visit. Keyring builds emailed links from it, and passkeys and security keys only work on that origin unless you configure others. See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
-- Open `app/Providers/KeyringServiceProvider.php` and choose your [factors](factors.md) and [policy](policies.md).
+- Build your [pages](quick-start.md#your-pages).
+- Add [features](quick-start.md#adding-features) and [sign-in methods](quick-start.md#adding-sign-in-methods) as you need them.
 - Schedule `keyring:prune`, which clears out old devices, finished email changes, old security log entries and ended sessions:
 
   ```php

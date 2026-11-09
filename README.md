@@ -2,16 +2,20 @@
 
 Factor-driven authentication for Laravel. It feels like Fortify, but it's built to be extended.
 
+It starts as small as Fortify: password sign-in, sign-out, and your own actions and pages. Then you add what your app needs, one feature or sign-in method at a time.
+
 Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and everything else gets bolted on. Keyring treats every way of signing in as a **factor** behind one contract. A user holds as many **authenticators** as they like, and one **policy** decides what they must prove.
 
 - **Many authenticators per user:** two authenticator apps, three security keys, a passkey. One is the default, and the user can "try another way".
 - **Factors are drivers:** password, TOTP, passkeys, security keys, email codes and recovery codes all share one contract. You can add SMS, push or anything else without new routes, controllers or tables.
 - **Passkeys and security keys work as either factor:** one WebAuthn driver with two profiles. Inherence only counts when the key actually verified the user.
-- **Devices and sessions are built in:** new-device events, "this wasn't me" links, a sessions list, and "sign out everywhere else". It works with **any session driver** (database, cache, file, cookie).
+- **Devices and sessions:** new-device events, "this wasn't me" links, a sessions list, and "sign out everywhere else". It works with **any session driver** (database, cache, file, cookie).
 - **Step-up:** `keyring:aal2` and `keyring.fresh:15m` middleware. A passkey or code counts, not just the password, and users with a second factor must use it.
-- **Protected account changes:** `email` and `password` can only change through Keyring's flows (OWASP). Email changes are confirmed from both addresses and can be reverted.
+- **Protected account changes:** once Keyring handles them, `email` and `password` can only change through its flows (OWASP). Email changes are confirmed from both addresses and can be reverted.
 - **Risk signals:** new device, new country, impossible travel, a session cookie showing up in another browser, repeated failures. Each level maps to an action.
-- **A security log and opt-in security emails.**
+- **A security log and security emails.**
+
+Each of these is opt-in. See [Adding Features](docs/quick-start.md#adding-features).
 - **Headless:** like Fortify, Keyring renders your pages with props and answers JSON, with swappable responses and published actions. A browser package handles WebAuthn and the challenge page for Vue and React.
 
 > Work in progress: not tagged or production-tested yet.
@@ -32,7 +36,7 @@ php artisan migrate
 
 > Keyring has no tagged release yet. Until it does, add the repository to your `composer.json` and require `entity/keyring:@dev`.
 
-Add the trait to your user model:
+`keyring:install` asks which sign-in methods and features you want, and publishes only what they need. Then add the trait to your user model:
 
 ```php
 use Keyring\Concerns\HasKeyring;
@@ -43,20 +47,7 @@ class User extends Authenticatable
 }
 ```
 
-Then choose your factors and policy in the published `app/Providers/KeyringServiceProvider.php`:
-
-```php
-Keyring::factors([
-    Password::class,
-    WebAuthn::passkeys(),
-    WebAuthn::securityKeys(),
-    Totp::class,
-    EmailCode::class,
-    RecoveryCodes::class,
-]);
-
-Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
-```
+The [Quick Start](docs/quick-start.md) covers the pages to build and how to add features later.
 
 Coming from Fortify? `php artisan keyring:import fortify` copies `two_factor_*` columns and the `laravel/passkeys` table into Keyring. Users keep their authenticator apps, recovery codes and passkeys.
 
@@ -68,6 +59,7 @@ npm install @entity/keyring
 
 ## Documentation
 
+- [Quick Start](docs/quick-start.md)
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)
 - [Upgrading From Fortify](docs/upgrading-from-fortify.md)

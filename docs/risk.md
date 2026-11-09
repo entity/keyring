@@ -16,7 +16,16 @@
 
 Risk signals look for things that make a sign in or session suspicious: a new device, a new country, a session cookie turning up in another browser. Each signal that fires adds a score. The scores add up (capped at 100) to a **level**, and you decide what to do at each level.
 
-Risk is on by default with the signals and responses below. Without a [locator](devices-and-sessions.md#locations), the location signals never fire.
+Risk is off until you pick signals in your `KeyringServiceProvider`:
+
+```php
+use Keyring\Risk\Signals\NewDevice;
+use Keyring\Risk\Signals\SessionFingerprintChanged;
+
+Keyring::risk([NewDevice::class, SessionFingerprintChanged::class]);
+```
+
+Once signals are picked, Keyring responds to them as shown below unless you set your own responses. Without a [locator](devices-and-sessions.md#locations), the location signals never fire. The device signals need [`Features::devices()`](devices-and-sessions.md), and `RepeatedFactorFailures` needs [`Features::securityLog()`](security-log-and-emails.md).
 
 ## Built-in Signals
 

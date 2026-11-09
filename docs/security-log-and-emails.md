@@ -19,15 +19,16 @@ Keyring records sign ins, failures, lockouts, changes and automatic actions in t
 
 The log never holds passwords, codes, tokens or session IDs.
 
+Turn it on with `Features::securityLog()`. Its options:
+
 ```php
 'events' => [
-    'enabled' => true,
     'keep_for' => '180d',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
 ],
 ```
 
-Set `enabled` to `false` to stop logging. "Was this you?" alerts and the `RepeatedFactorFailures` risk signal read from the log, so they stop working too.
+Without the feature, nothing is logged. "Was this you?" alerts and the `RepeatedFactorFailures` risk signal read from the log, so they need it too.
 
 ### Entry Types
 
@@ -113,7 +114,13 @@ public function share(Request $request): array
 
 ## Security Emails
 
-Keyring can tell users about security events. By default it sends the notices NIST SP 800-63B requires (`authenticator_added` and `recovery_code_used`) and the other account changes (`authenticator_removed` and `password_changed`). Set the `notifications` config option to `[]` to send your own instead, or turn them all on in `KeyringServiceProvider`:
+Keyring can tell users about security events. It sends none until you list them in the `notifications` config option. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on:
+
+```php
+'notifications' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
+```
+
+Or turn them all on in `KeyringServiceProvider`:
 
 ```php
 Keyring::notify();

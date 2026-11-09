@@ -23,8 +23,10 @@
 
 Keyring is configured in two places:
 
-- `config/keyring.php` holds values: timeouts, limits, route options.
+- `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
+
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features` and `notifications`. Every other option on this page keeps its default until you copy it into that file. Keyring merges the file over its defaults one top-level key at a time, so copy a whole option, such as all of `sessions`, not part of it. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
@@ -45,14 +47,23 @@ Options that take a duration accept a number of seconds or a string such as `"30
 ## Features
 
 ```php
+use Keyring\Features;
+
 'features' => [
-    'registration' => true,
-    'password_reset' => true,
-    'email_verification' => true,
+    Features::registration(),
+    Features::resetPasswords(),
+    // Features::emailVerification(),
+    // Features::updatePasswords(),
+    // Features::manageAuthenticators(),
+    // Features::devices(),
+    // Features::emailChanges(),
+    // Features::securityLog(),
 ],
 ```
 
-Set any of these to `false` to drop their routes. Sign in, challenges, step-up, managing authenticators, devices and protected changes are always on.
+Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration and password resets. What each feature adds is in [Adding Features](quick-start.md#adding-features).
+
+Check for a feature in your own code with `Features::enabled(Features::devices())`. `Features::all()` lists them all, which is handy in tests.
 
 ## Redirects
 
@@ -159,7 +170,7 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 ## Protected Attributes and Email Changes
 
 ```php
-'protected' => ['email', 'password'],
+'protected' => [],
 
 'email_changes' => [
     'expire' => '24h',
@@ -167,7 +178,7 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 ],
 ```
 
-See [Protected Changes](protected-changes.md).
+`Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds `email`. List any others in `protected`. See [Protected Changes](protected-changes.md).
 
 ## Passwords
 
@@ -201,21 +212,20 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 ```php
 'events' => [
-    'enabled' => true,
     'keep_for' => '180d',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
 ],
 ```
 
-`keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in. See [Security Log & Emails](security-log-and-emails.md). Turning the log off also turns off "was this you?" alerts and the `RepeatedFactorFailures` risk signal, since both read from it.
+`keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in. The log itself is turned on with `Features::securityLog()`. See [Security Log & Emails](security-log-and-emails.md). Without it, "was this you?" alerts and the `RepeatedFactorFailures` risk signal don't work, since both read from the log.
 
 ## Security Emails
 
 ```php
-'notifications' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
+'notifications' => [],
 ```
 
-The security notices to send: by default the ones NIST SP 800-63B requires and the other account changes. `[]` sends none. `Keyring::notify()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
+The security notices to send, none by default. `keyring:install` offers the four NIST SP 800-63B asks for: `password_changed`, `authenticator_added`, `authenticator_removed` and `recovery_code_used`. `Keyring::notify()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
 
 ## Pending Logins, Timebox and Rate Limits
 
