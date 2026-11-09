@@ -92,7 +92,10 @@ class SendSecurityNotifications
      */
     protected function send(Authenticatable $user, string $type, array $replace = [], ?string $actionUrl = null): void
     {
-        if (! Keyring::notifies($type)) {
+        // A model without Notifiable (say, staff that sign in through
+        // another guard) has nowhere to send it, so it's skipped rather than
+        // failing the request or the queued job.
+        if (! Keyring::notifies($type) || ! method_exists($user, 'routeNotificationFor')) {
             return;
         }
 

@@ -1,8 +1,11 @@
 <?php
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
+use Keyring\Concerns\HasKeyring;
 use Keyring\Enums\Assurance;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
@@ -172,3 +175,21 @@ it('tells the user when a sign-in method is added, by default', function () {
 
     Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'authenticator_added');
 });
+
+it('skips the notice for a model that can\'t be notified, instead of failing', function () {
+    $account = UnnotifiableAccount::query()->findOrFail($this->user->getKey());
+    $totp = Authenticator::factory()->totp()->for($account, 'authenticatable')->create();
+
+    AuthenticatorAdded::dispatch($account, $totp);
+
+    expect(Keyring::notifies('authenticator_added'))->toBeTrue();
+});
+
+/**
+ * Has a keyring but not Notifiable, like a second kind of account.
+ */
+#[Table(name: 'users')]
+class UnnotifiableAccount extends Authenticatable
+{
+    use HasKeyring;
+}
