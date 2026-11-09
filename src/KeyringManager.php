@@ -26,6 +26,7 @@ use Keyring\Contracts\Signal;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Category;
+use Keyring\Exceptions\MissingPage;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Middleware\PreventCaching;
@@ -203,11 +204,19 @@ class KeyringManager
     {
         $component = $this->pages[$name] ?? 'auth/'.$name;
 
-        return match (true) {
-            $component instanceof Closure => $component($props),
-            class_exists(Inertia::class) => Inertia::render($component, $props),
-            default => view(str_replace('/', '.', $component), $props),
-        };
+        if ($component instanceof Closure) {
+            return $component($props);
+        }
+
+        if (class_exists(Inertia::class)) {
+            return Inertia::render($component, $props);
+        }
+
+        $view = str_replace('/', '.', $component);
+
+        throw_unless(view()->exists($view), MissingPage::for($name, $view, array_keys($props)));
+
+        return view($view, $props);
     }
 
     /**

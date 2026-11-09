@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Keyring\Exceptions\MissingPage;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Totp;
 
@@ -30,4 +31,11 @@ it('registers custom factors with extend, under the key they report', function (
 
     Keyring::extend('sms', fn ($app) => $app->make(Totp::class));
     expect(fn () => Keyring::registered())->toThrow(InvalidArgumentException::class, 'Factor registered as [sms] reports the key [totp].');
+});
+
+it('says which blade view a page needs and what it receives', function () {
+    expect(MissingPage::for('login', 'auth.login', ['canResetPassword', 'status'])->getMessage())
+        ->toContain('resources/views/auth/login.blade.php')
+        ->toContain('$canResetPassword, $status')
+        ->toContain("Keyring::page('login', ...)");
 });
