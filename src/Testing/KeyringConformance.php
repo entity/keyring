@@ -71,7 +71,7 @@ trait KeyringConformance
         $this->post(route('login.store'), [$field => 'nobody-'.uniqid().'@example.com', 'password' => 'definitely-wrong']);
         $unknown = $this->sessionErrors()->first($field);
 
-        $this->assertNotNull($wrong);
+        $this->assertNotSame('', $wrong);
         $this->assertSame($wrong, $unknown, 'Login errors must not reveal which accounts exist.');
         $this->assertGuest();
     }

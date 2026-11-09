@@ -31,7 +31,9 @@ class StepUp
     {
         // Without the sign-in methods to meet it, confirming can't help, and
         // would only send the user round in a loop.
-        abort_unless($this->keyring->for($this->keyring->user())->canMeet($requirement), 403, __('keyring::keyring.needs_factor'));
+        if (! $this->keyring->for($this->keyring->user())->canMeet($requirement)) {
+            return $this->enrollFirst($request);
+        }
 
         $this->begin($request, $requirement, $proved);
 
@@ -45,6 +47,24 @@ class StepUp
         }
 
         return redirect()->guest($url);
+    }
+
+    /**
+     * Send a user who hasn't set up what's needed to keyring.enrollment_url,
+     * or answer 403 when there isn't one.
+     */
+    public function enrollFirst(Request $request): Response
+    {
+        $url = config('keyring.enrollment_url');
+        $message = $this->keyring->statusMessage('enroll-first');
+
+        if ($this->wantsJson($request)) {
+            return new JsonResponse(['status' => 'enroll-first', 'message' => $message, 'redirect' => $url], 403);
+        }
+
+        abort_if($url === null, 403, $message);
+
+        return redirect($url)->with('status', 'enroll-first');
     }
 
     /**
