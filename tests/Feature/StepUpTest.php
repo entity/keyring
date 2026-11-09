@@ -165,6 +165,20 @@ it('brings json callers back to the page they were on after confirming', functio
         ->assertRedirect('/settings');
 });
 
+it('does not send json callers to another site after confirming', function (string $referer) {
+    signIn();
+    $this->travel(16)->minutes();
+
+    $this->getJson('/account', ['Referer' => $referer])->assertStatus(423);
+
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+        ->assertRedirect(config('keyring.home'));
+})->with([
+    'another site' => 'https://evil.example/phish',
+    'a lookalike host' => 'http://localhost.evil.example/phish',
+    'userinfo before another host' => 'http://localhost@evil.example/phish',
+]);
+
 it('lets the password through step-up when the only other factor is a used-up set of recovery codes', function () {
     Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();
     signIn();
