@@ -10,7 +10,9 @@ use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Factors\RecoveryCodes;
+use Keyring\Features;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 
@@ -94,6 +96,9 @@ class AuthenticatorController
     protected function enrollable(Request $request, string $key): Enrollable
     {
         $user = $request->user();
+        $verifies = $user instanceof MustVerifyEmail && Features::enabled(Features::emailVerification());
+
+        throw_if(Features::enabled(Features::registration()) && ! $verifies, EmailVerificationRequired::forEnrollment($user::class));
 
         abort_if($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail(), 403, __('keyring::keyring.verify_email_first'));
 

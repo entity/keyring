@@ -11,6 +11,7 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Features;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
@@ -88,6 +89,8 @@ it('caps a passkey that syncs at aal2, as nist does', function () {
 it('will not sign in with a passkey that belongs to another model with the same id', function () {
     $user = $this->user;
     $key = new VirtualAuthenticator;
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     enroll('passkey', $key);
 
@@ -170,6 +173,8 @@ it('signs in the other model with its passkey when that model is behind keyring\
     Keyring::routes();
 
     $key = new VirtualAuthenticator;
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     enroll('passkey', $key);
 
@@ -185,6 +190,8 @@ it('keeps credential ids unique across models', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
     $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
