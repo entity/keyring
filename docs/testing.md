@@ -97,6 +97,8 @@ $this->post('/login', ['email' => $user->email, 'password' => 'password'])
 $this->post(route('keyring.login.verify', 'totp'))->assertRedirect('/dashboard');
 ```
 
+`Keyring::fake()` throws a `LogicException` when the app environment is `production`, and a `KeyringFake` you bind in the container yourself is ignored there. Other environments can use it, so a browser suite running against `local` or `staging` keeps working.
+
 ## Factories
 
 `Keyring\Models\Authenticator` has a factory. Attach authenticators to a user through the `authenticatable` relationship:
