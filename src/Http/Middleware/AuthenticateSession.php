@@ -154,7 +154,7 @@ class AuthenticateSession
      */
     protected function signOut(Request $request, string $reason): Response
     {
-        if ($user = $this->signIn->out($request)) {
+        if ($user = $this->signIn->out($request, onlyThisBrowser: true)) {
             SessionEnded::dispatch($user, $reason);
         }
 

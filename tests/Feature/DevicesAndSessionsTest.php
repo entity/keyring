@@ -196,6 +196,17 @@ it('enforces the absolute timeout', function () {
     $this->get('/home')->assertRedirect('/login');
 });
 
+it('leaves other remembered browsers signed in when a session times out', function () {
+    config(['keyring.sessions.idle' => '10m']);
+    test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+    $token = $this->user->fresh()->remember_token;
+
+    $this->travel(11)->minutes();
+    $this->get('/home')->assertRedirect('/login');
+
+    expect($this->user->fresh()->remember_token)->toBe($token);
+});
+
 it('keeps "remember me" no longer than a session lasts', function () {
     $response = test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
 

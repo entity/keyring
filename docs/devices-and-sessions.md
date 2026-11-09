@@ -195,7 +195,7 @@ app(Sessions::class)->rotate($request);
 
 `rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one.
 
-Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends.
+Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (an idle or absolute timeout, a risk response, or a revoked record) only forgets that browser's cookie, so other remembered browsers stay signed in.
 
 ## The Session Registry
 
@@ -282,7 +282,7 @@ A signed-out request is sent to the login page with the `signed-out` status, and
 ```
 
 - **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
-- **`absolute`** ends a session this long after sign in, however active it is. "Remember me" lasts no longer either, unless you set your guard's `remember` (in minutes) yourself.
+- **`absolute`** ends a session this long after sign in, however active it is. The "remember me" cookie lasts no longer either, unless you set your guard's `remember` (in minutes) yourself. A browser that comes back on that cookie starts a new session, whose own `absolute` counts from then.
 - **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
 
 A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.
