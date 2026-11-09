@@ -38,6 +38,7 @@ class PasswordChanges
     public function change(Authenticatable&Model $user, Closure $save, ?string $currentSession, bool $signOutOthers = true): void
     {
         $this->save($user, $save);
+        $this->sessions->distrustDevices($user);
 
         if ($signOutOthers) {
             $this->sessions->revokeAll($user, except: $currentSession);

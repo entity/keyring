@@ -319,6 +319,8 @@ class EmailChanges
                 'revertable_until' => Duration::fromNow(config('keyring.email_changes.revertable_for', '7d')),
             ])->save();
 
+            $this->sessions->distrustDevices($user);
+
             return true;
         });
     }

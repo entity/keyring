@@ -112,6 +112,12 @@ class RiskEngine
         }
 
         if ($action->lockSeconds !== null) {
+            // Like revoking sessions, a login attempt may not cost the owner
+            // their trusted devices: the lock already refuses every sign in.
+            if ($checkpoint !== Checkpoint::Login) {
+                $this->container->make(Sessions::class)->distrustDevices($user);
+            }
+
             $this->container->make(RiskLocks::class)->lock($user, $action->lockSeconds);
         }
 

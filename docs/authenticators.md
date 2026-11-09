@@ -127,6 +127,8 @@ The default authenticator is offered first when a second factor is needed. Recov
 
 Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes go with it. The policy is checked against what will actually be left.
 
+Removing an authenticator stops trusting all of the user's devices (see [Trusted Devices](devices-and-sessions.md#trusted-devices)).
+
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
 Removing the user's last second factor (the last one beyond recovery codes and email codes) also needs their current password in the request as `password`. Their password may have been as short as `min_with_mfa` while it had a second factor beside it, and on its own NIST SP 800-63B asks for `min_without_mfa`. Keyring only stores a hash, so it checks the length then: a missing or wrong password, or one that's too short, gets an error on `password` asking them to change it first.

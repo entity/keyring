@@ -58,7 +58,7 @@ class DeviceManager
      *
      * @return array{0: ?Device, 1: bool}
      */
-    public function signIn(Request $request, Authenticatable&Model $user, bool $trust = false): array
+    public function signIn(Request $request, Authenticatable&Model $user, bool $trust = false, bool $fullSignIn = false): array
     {
         if (! Features::enabled(Features::devices())) {
             return [null, false];
@@ -68,12 +68,7 @@ class DeviceManager
         $new = $device === null;
 
         if ($new) {
-            $token = $this->token($request) ?? Str::random(40);
-
-            // A revoked device starts over with a new token.
-            if ($this->query($user)->withToken($token)->exists()) {
-                $token = Str::random(40);
-            }
+            $token = $this->tokenForNewDevice($request, $user);
 
             $device = Keyring::deviceModel()::make(['token_hash' => Keyring::deviceModel()::hashToken($token), 'first_seen_at' => now()]);
             $device->authenticatable()->associate($user);
@@ -91,6 +86,10 @@ class DeviceManager
 
         if ($trust && ($for = config('keyring.devices.trust_for')) !== null) {
             $device->trusted_until = Duration::fromNow($for);
+        }
+
+        if ($trust || $fullSignIn) {
+            $this->rotateToken($request, $device);
         }
 
         $device->save();
@@ -151,6 +150,44 @@ class DeviceManager
     public function cookie(): string
     {
         return config('keyring.devices.cookie', 'keyring_device');
+    }
+
+    /**
+     * A new random token, unless another account already has a device with
+     * the one this browser sent: the cookie is shared by everyone signing in
+     * on the browser, so that one is kept. A value no account has is never
+     * stored. The server can't tell a shared cookie from one planted in this
+     * browser with a value another account holds, so a kept token only gets
+     * the device recognised until a login proves a second factor (rotateToken).
+     */
+    protected function tokenForNewDevice(Request $request, Authenticatable&Model $user): string
+    {
+        $token = $this->token($request);
+
+        // A revoked device starts over with a new token.
+        return $token !== null && $this->forBrowser($request)->isNotEmpty() && ! $this->query($user)->withToken($token)->exists()
+            ? $token
+            : Str::random(40);
+    }
+
+    /**
+     * Neither trust nor a proven second factor may rest on a token the browser
+     * could have been handed, so both issue a new one. Everyone signed in on
+     * this browser moves to it together, or the cookie would stop matching
+     * their devices.
+     */
+    protected function rotateToken(Request $request, Device $device): void
+    {
+        $token = Str::random(40);
+        $hash = Keyring::deviceModel()::hashToken($token);
+
+        if (($presented = $this->token($request)) !== null) {
+            Keyring::deviceModel()::query()->withToken($presented)->active()->update(['token_hash' => $hash]);
+        }
+
+        $device->token_hash = $hash;
+
+        $this->queueCookie($token);
     }
 
     protected function queueCookie(string $token): void

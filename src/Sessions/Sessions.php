@@ -161,7 +161,11 @@ class Sessions
         }
     }
 
-    protected function distrustDevices(Authenticatable $user, ?string $except): void
+    /**
+     * Stop trusting the user's devices, or all but one. Does nothing when
+     * devices are off, so a security change can't fail on tables never used.
+     */
+    public function distrustDevices(Authenticatable $user, ?string $except = null): void
     {
         if ($user instanceof Model && Features::enabled(Features::devices())) {
             Keyring::deviceModel()::query()

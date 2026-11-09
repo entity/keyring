@@ -3,6 +3,7 @@
 namespace Keyring\Login;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -12,6 +13,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Events\Authenticated;
 use Keyring\Events\Confirmed;
 use Keyring\Events\NewDeviceSignedIn;
+use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\SessionAssurance;
@@ -44,7 +46,7 @@ class SignIn
         $request->session()->regenerate(true);
         $this->assurance->reset($attempt->verifications);
 
-        [$device, $new] = $this->devices->signIn($request, $user, $attempt->trustDevice);
+        [$device, $new] = $this->devices->signIn($request, $user, $this->earnedTrust($attempt), Requirement::aal2()->isMetBy($attempt->verifications));
         $this->sessions->start($request, $user, $device, $this->assurance->level());
 
         Authenticated::dispatch($user, $attempt, $device);
@@ -60,6 +62,21 @@ class SignIn
         if ($new) {
             NewDeviceSignedIn::dispatch($user, $device);
         }
+    }
+
+    /**
+     * Whether this login may mark the device trusted: the user asked, and it
+     * verified two categories on an account whose email is proven. Otherwise
+     * a second factor enrolled later would be skipped on a device that never
+     * proved one.
+     */
+    protected function earnedTrust(Attempt $attempt): bool
+    {
+        $user = $attempt->user();
+
+        return $attempt->trustDevice
+            && Requirement::aal2()->isMetBy($attempt->verifications)
+            && (! Features::enabled(Features::emailVerification()) || ! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail());
     }
 
     public function confirm(Request $request, Attempt $attempt): void
