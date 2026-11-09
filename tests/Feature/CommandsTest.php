@@ -130,6 +130,17 @@ describe('keyring:import fortify', function () {
         Model::encryptUsing(null);
     });
 
+    it('refuses to import into factors that aren\'t registered', function () {
+        Keyring::factors([Password::class]);
+        DB::table('users')->update(['two_factor_secret' => encrypt('secret'), 'two_factor_confirmed_at' => now()]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain('Register totp, recovery in Keyring::factors() first')
+            ->assertFailed();
+
+        expect(Authenticator::count())->toBe(0);
+    });
+
     it('imports fortify two factor and recovery codes, once', function () {
         $secret = app(Google2FA::class)->generateSecretKey();
 
