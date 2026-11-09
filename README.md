@@ -63,6 +63,8 @@ For the frontend helpers:
 npm install @entity/keyring
 ```
 
+> It isn't on npm yet either. Until it is, build it from the Composer package: see [Frontend](docs/frontend.md#introduction).
+
 ## Documentation
 
 - [Quick Start](docs/quick-start.md)
