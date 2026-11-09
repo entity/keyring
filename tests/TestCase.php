@@ -10,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\KeyringServiceProvider;
 use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
@@ -33,6 +34,10 @@ abstract class TestCase extends Orchestra
 
         $app['config']->set('database.default', getenv('DB_CONNECTION') ?: 'testing');
         $app['config']->set('auth.providers.users.model', User::class);
+
+        // Every feature, so the suite covers them all. Tests of a feature
+        // being off turn it off themselves.
+        $app['config']->set('keyring.features', Features::all());
         // What a new Laravel app uses, so nothing relies on PHP serialization.
         $app['config']->set('session.serialization', 'json');
     }

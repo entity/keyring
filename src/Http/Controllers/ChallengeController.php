@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
+use Keyring\Features;
 use Keyring\Http\Controllers\Concerns\RespondsToVerification;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
@@ -75,7 +76,7 @@ class ChallengeController
                 ->map(fn (Authenticator $option) => $option->factor()->present($option))
                 ->values()
                 ->all(),
-            'canTrustDevice' => $purpose === Purpose::Login && config('keyring.devices.trust_for') !== null,
+            'canTrustDevice' => $purpose === Purpose::Login && Features::enabled(Features::devices()) && config('keyring.devices.trust_for') !== null,
             'expiresAt' => date(DATE_ATOM, $attempt->expiresAt),
         ]);
     }

@@ -1,12 +1,12 @@
 <?php
 
-use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Models\Device;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\User;
@@ -68,11 +68,7 @@ it('adds the verified flag to a home url that has a query of its own', function 
 });
 
 it('can turn registration off', function () {
-    config(['keyring.features.registration' => false]);
-
-    app('router')->setRoutes(new RouteCollection);
-    require __DIR__.'/../../routes/keyring.php';
-    app('router')->getRoutes()->refreshNameLookups();
+    withFeatures(array_values(array_diff(Features::all(), [Features::registration()])));
 
     expect(Route::has('register'))->toBeFalse()
         ->and(Route::has('login'))->toBeTrue();
