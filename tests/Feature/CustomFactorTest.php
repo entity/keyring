@@ -40,6 +40,10 @@ it('only accepts a code for the authenticator it was sent to', function () {
     $this->post(route('keyring.login.verify', 'sms'), ['authenticator' => $second->id, 'code' => SmsCode::$sent['+447700900001']])
         ->assertSessionHasErrors('code');
     $this->assertGuest();
+
+    // The code sent to the first phone still works there.
+    $this->post(route('keyring.login.verify', 'sms'), ['authenticator' => $first->id, 'code' => SmsCode::$sent['+447700900001']])
+        ->assertRedirect('/dashboard');
 });
 
 it('counts wrong guesses across every authenticator of a code factor', function () {
