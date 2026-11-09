@@ -48,7 +48,7 @@ final class UserAgent
      */
     public static function from(Request $request): ?string
     {
-        return Str::limit((string) $request->userAgent(), 500, '') ?: null;
+        return Str::limit(mb_scrub((string) $request->userAgent()), 500, '') ?: null;
     }
 
     public static function describe(?string $userAgent): ?string
