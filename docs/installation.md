@@ -28,7 +28,12 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-> Keyring has no tagged release yet. Until it does, add the repository to your `composer.json` and require `entity/keyring:@dev`.
+> Keyring has no tagged release yet. Until it does, install it from GitHub:
+>
+> ```bash
+> composer config repositories.keyring vcs https://github.com/entity/keyring
+> composer require entity/keyring:dev-main
+> ```
 
 The command asks which sign-in methods you want besides the password, which [features](quick-start.md#adding-features) to turn on, and whether to send the security emails NIST asks for. It then publishes only what those need. Without prompts (`--no-interaction`, or in CI) you get the password, registration and password resets. You can also answer with options:
 
@@ -46,7 +51,7 @@ If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fort
 
 | File | What it is |
 |---|---|
-| `config/keyring.php` | A short config: the guard, username, home, your features and security emails. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
+| `config/keyring.php` | A short config: the guard, username, home, your features, security emails and enrollment page. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
 | `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. They're all created, so turning a feature on later needs no new migration. Tables for features you don't use stay empty. |
 | `app/Providers/KeyringServiceProvider.php` | Where you register sign-in methods, the policy and your actions. It lists only what you picked, and it's added to `bootstrap/providers.php` for you. |
 | `app/Actions/Keyring/*.php` | Your code for the features that need it: registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
