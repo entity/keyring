@@ -3,6 +3,7 @@
 - [Introduction](#introduction)
 - [Setting Up](#setting-up)
 - [Acting at an Assurance Level](#acting-at-an-assurance-level)
+- [Acting With Real Authenticators](#acting-with-real-authenticators)
 - [Faking Factors](#faking-factors)
 - [Factories](#factories)
 - [Virtual Authenticators](#virtual-authenticators)
@@ -31,7 +32,7 @@ New passwords are only checked against Have I Been Pwned in production, so tests
 
 ## Acting at an Assurance Level
 
-`InteractsWithKeyring` adds two methods for signed-in tests, and one for reading errors:
+`InteractsWithKeyring` adds methods for signed-in tests, and one for reading errors:
 
 ```php
 use Keyring\Enums\Assurance;
@@ -70,7 +71,20 @@ $this->actingAs($user)->freshAt(now()->subHour())
     ->assertRedirect(route('keyring.confirm.challenge'));
 ```
 
-The pretend verifications aren't tied to real authenticators. Code that looks up the authenticator behind a verification, such as the [email change](protected-changes.md#confirming) check for an established second factor, won't find one.
+## Acting With Real Authenticators
+
+`withAssurance()` pretends, so its verifications aren't tied to any authenticator. Code that looks up the authenticator behind a verification, such as the [email change](protected-changes.md#confirming) check for an established second factor, won't find one. For that, say which of the user's authenticators the session verified:
+
+```php
+use Keyring\Models\Authenticator;
+
+// Added yesterday, so it's older than the session.
+$totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+
+$this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
+```
+
+`verifiedWith(...$authenticators)` pretends the session verified the password and each authenticator you pass. The level is whatever those reach (a password and an authenticator app is AAL2), so it replaces `withAssurance()`. `freshAt()` chains with it as before.
 
 ## Faking Factors
 
@@ -97,6 +111,25 @@ $this->post('/login', ['email' => $user->email, 'password' => 'password'])
 $this->post(route('keyring.login.verify', 'totp'))->assertRedirect('/dashboard');
 ```
 
+The fake also notes every factor check made once the account is known, faked or real, so a test can assert what a request asked for:
+
+```php
+$fake = Keyring::fake()->pass('totp');
+
+// ...
+
+$fake->assertVerified('totp');
+$fake->assertFailed('password', times: 2);
+$fake->assertNotChecked('recovery');
+```
+
+| Method | Asserts |
+|---|---|
+| `assertVerified($factor, $times = null)` | The factor was checked and verified, that many times if given. |
+| `assertFailed($factor, $times = null)` | The factor was checked and failed, that many times if given. |
+| `assertNotChecked($factor)` | The factor was never checked. |
+| `assertNothingChecked()` | No factor was checked. |
+
 `Keyring::fake()` throws a `LogicException` when the app environment is `production`, and a `KeyringFake` you bind in the container yourself is ignored there. Other environments can use it, so a browser suite running against `local` or `staging` keeps working.
 
 ## Factories
@@ -120,16 +153,12 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | `default()` | Marks it as the default. |
 | `unconfirmed()` | Not yet confirmed, so it doesn't count. |
 
-TOTP codes for a factory authenticator can be generated from its secret:
+`totpCode()`, from `InteractsWithKeyring`, gives the code an authenticator app would show right now. It takes a TOTP authenticator or a secret:
 
 ```php
-use PragmaRX\Google2FA\Google2FA;
-
 $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
 
-$this->post(route('keyring.login.verify', 'totp'), [
-    'code' => app(Google2FA::class)->getCurrentOtp($totp->secret),
-]);
+$this->post(route('keyring.login.verify', 'totp'), ['code' => $this->totpCode($totp)]);
 ```
 
 The `passkey()` and `securityKey()` states have no real public key, so they only verify with `Keyring::fake()`. For real WebAuthn responses, enroll a virtual authenticator instead.
