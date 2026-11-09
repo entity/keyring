@@ -19,9 +19,11 @@ class FailedResponse implements FailedResponseContract
     public function toResponse($request)
     {
         throw ValidationException::withMessages([
-            $this->context->errorKey() => $this->context->identifying
-                ? __('auth.failed')
-                : __('keyring::keyring.invalid'),
+            $this->context->errorKey() => match (true) {
+                $this->context->identifying => __('auth.failed'),
+                $this->context->attempt?->exhausted === true => __('keyring::keyring.too_many_codes'),
+                default => __('keyring::keyring.invalid'),
+            },
         ]);
     }
 }

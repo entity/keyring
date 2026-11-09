@@ -56,7 +56,7 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
-- Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses, and are replaced by any newer code. A sent code only verifies the authenticator it was sent to.
+- Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses per pending attempt, and are replaced by any newer code. A newer code doesn't reset the count, and at the limit the user has to start signing in again. A sent code only verifies the authenticator it was sent to.
 - WebAuthn challenges are random 32 byte values, kept on the server and dropped after one verification, so a response can't be replayed.
 
 ### Second Factors and Step-Up

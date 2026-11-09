@@ -5,6 +5,7 @@ namespace Keyring\Factors;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enrollment\Enrollment;
@@ -30,7 +31,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     /** Seconds a code stays valid. */
     protected int $ttl = 600;
 
-    /** Wrong guesses allowed per code. */
+    /** Wrong guesses allowed per sign in or enrollment, however many codes it sends. */
     protected int $maxGuesses = 5;
 
     /**
@@ -87,7 +88,13 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
             $issued = null;
         }
 
-        [$valid, $issued] = $this->check($issued, (string) $request->input('code'));
+        [$valid, $issued, $guesses] = $this->check($issued, (string) $request->input('code'), $attempt->state($this->key(), 'guesses', 0));
+
+        $attempt->put($this->key(), 'guesses', $guesses);
+
+        if ($guesses >= $this->maxGuesses) {
+            $attempt->exhausted = true;
+        }
 
         $issued === null
             ? $attempt->forget($this->key(), 'code')
@@ -98,6 +105,13 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment
     {
+        // Starting again keeps the count, or a new code would mean new guesses.
+        $guesses = app(EnrollmentStore::class)->get($this->key())?->state('guesses', 0) ?? 0;
+
+        if ($guesses >= $this->maxGuesses) {
+            throw $this->tooManyEnrollmentGuesses();
+        }
+
         $code = $this->generate();
         $authenticator = $this->newAuthenticator($user, $request);
 
@@ -108,6 +122,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
             'sent' => true,
         ], [
             'code' => $this->issue($code),
+            'guesses' => $guesses,
             'name' => $authenticator->name,
             'secret' => $authenticator->secret,
             'meta' => $authenticator->meta,
@@ -116,11 +131,15 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
-        [$valid, $issued] = $this->check($enrollment->state('code'), (string) $request->input('code'));
+        [$valid, $issued, $guesses] = $this->check($enrollment->state('code'), (string) $request->input('code'), $enrollment->state('guesses', 0));
 
         if (! $valid) {
             // Keep the guess count, or enrollment codes could be guessed forever.
-            app(EnrollmentStore::class)->put($enrollment->with('code', $issued));
+            app(EnrollmentStore::class)->put($enrollment->with('code', $issued)->with('guesses', $guesses));
+
+            if ($guesses >= $this->maxGuesses) {
+                throw $this->tooManyEnrollmentGuesses();
+            }
 
             return null;
         }
@@ -149,35 +168,42 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     }
 
     /**
-     * @return array{hash: string, expires_at: int, guesses: int, authenticator: ?string}
+     * @return array{hash: string, expires_at: int, authenticator: ?string}
      */
     protected function issue(string $code, ?Authenticator $authenticator = null): array
     {
         return [
             'hash' => $this->hash($code),
             'expires_at' => now()->addSeconds($this->ttl)->getTimestamp(),
-            'guesses' => 0,
             'authenticator' => $authenticator?->getKey(),
         ];
     }
 
     /**
-     * @param  array{hash: string, expires_at: int, guesses: int, authenticator?: ?string}|null  $issued
-     * @return array{0: bool, 1: array{hash: string, expires_at: int, guesses: int, authenticator?: ?string}|null}
+     * Guesses are counted apart from the code, because the count has to
+     * outlive it: a code can expire or be replaced, the count carries on.
+     *
+     * @param  array{hash: string, expires_at: int, authenticator?: ?string}|null  $issued
+     * @return array{0: bool, 1: array{hash: string, expires_at: int, authenticator?: ?string}|null, 2: int}
      */
-    protected function check(?array $issued, string $code): array
+    protected function check(?array $issued, string $code, int $guesses): array
     {
-        if ($issued === null || $issued['expires_at'] < now()->getTimestamp() || $issued['guesses'] >= $this->maxGuesses) {
-            return [false, null];
+        if ($issued === null || $issued['expires_at'] < now()->getTimestamp() || $guesses >= $this->maxGuesses) {
+            return [false, null, $guesses];
         }
 
         if (hash_equals($issued['hash'], $this->hash($this->normalizeCode($code)))) {
-            return [true, null];
+            return [true, null, $guesses];
         }
 
-        $issued['guesses']++;
+        $guesses++;
 
-        return [false, $issued['guesses'] >= $this->maxGuesses ? null : $issued];
+        return [false, $guesses >= $this->maxGuesses ? null : $issued, $guesses];
+    }
+
+    protected function tooManyEnrollmentGuesses(): ValidationException
+    {
+        return ValidationException::withMessages([$this->errorKey() => __('keyring::keyring.enrollment_too_many_codes')]);
     }
 
     protected function hash(string $code): string
