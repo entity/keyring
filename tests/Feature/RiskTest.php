@@ -296,18 +296,22 @@ it('logs security events and shows recent activity', function () {
         ->and($types->all())->toContain('signed_in', 'new_device');
 });
 
-it('asks "was this you?" after someone fails the second factor', function () {
+it('keeps "was this you?" for a browser the account has used before', function () {
+    $device = signInAs()->getCookie('keyring_device')->getValue();
+    $this->post('/logout');
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-    signInAs();
+    signInAs(CHROME);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
-
-    signInAs();
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertSessionHas('keyring.alerts', []);
+    $this->post('/logout');
+
+    signInAs(cookies: ['keyring_device' => $device]);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret, 1)])
         ->assertSessionHas('keyring.alerts', fn ($alerts) => $alerts[0]['type'] === 'second_factor_failed');
 
-    signInAs();
-    expect(session('keyring.alerts'))->toBeNull();
+    expect(app(SecurityLog::class)->pullAlerts($this->user))->toBeEmpty();
 });
 
 it('sends security emails only when asked to', function () {

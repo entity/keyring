@@ -52,7 +52,9 @@ class SignIn
         Authenticated::dispatch($user, $attempt, $device);
 
         // "Was this you?" for anything suspicious since they last signed in.
-        $request->session()->flash('keyring.alerts', $this->log->pullAlerts($user)->map(fn (SecurityEvent $event) => [
+        // A browser the account hasn't used before could be whoever caused
+        // them, so they wait for one it has.
+        $request->session()->flash('keyring.alerts', $new ? [] : $this->log->pullAlerts($user)->map(fn (SecurityEvent $event) => [
             'type' => $event->type,
             'factor' => $event->factor,
             'at' => $event->created_at->toIso8601String(),

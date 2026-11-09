@@ -92,7 +92,7 @@ See [Pruning](devices-and-sessions.md#pruning).
 
 ## "Was This You?" Alerts
 
-After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once.
+After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once. With `Features::devices()` on, a browser the account hasn't signed in on before gets none, since it could be whoever caused them; they wait for one it has.
 
 ```json
 [
