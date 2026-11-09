@@ -177,6 +177,7 @@ return [
     'email_changes' => [
         'expire' => '24h',
         'revertable_for' => '7d',
+        'sign_out_others' => true,
     ],
 
     /*
@@ -247,8 +248,8 @@ return [
     | Which security notices Keyring sends to the user. NIST SP 800-63B asks
     | for password_changed, authenticator_added, authenticator_removed and
     | recovery_code_used. The others: new_device, second_factor_failed,
-    | suspicious_activity, clone_suspected. Keyring::notify() with no types
-    | sends them all.
+    | suspicious_activity, clone_suspected, email_changed and
+    | email_change_reverted. Keyring::notify() with no types sends them all.
     |
     */
 

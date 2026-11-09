@@ -1,23 +1,31 @@
 <?php
 
 use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Keyring\Changes\EmailChanges;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Exceptions\ReservedAddressException;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Notifications\SecurityNotice;
 use Keyring\Rules\UnreservedAddress;
+use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -308,3 +316,216 @@ describe('the address a change replaced', function () {
         expect(taylor()->exists)->toBeTrue();
     });
 });
+
+/**
+ * A signed-in session on another device, as the registry holds it.
+ */
+function otherSession(User $user, string $id = 'other-session'): string
+{
+    $now = now()->getTimestamp();
+
+    app(SessionRegistry::class)->save(new RegisteredSession(
+        id: $id,
+        userId: (string) $user->getKey(),
+        guard: 'web',
+        deviceId: null,
+        assurance: Assurance::AAL1,
+        ip: '198.51.100.1',
+        userAgent: 'Other device',
+        authenticatedAt: $now,
+        lastActivityAt: $now,
+        expiresAt: $now + 86400,
+    ));
+
+    return $id;
+}
+
+describe('whose verification waives the current address', function () {
+    it('still asks the current address when the session verified someone else\'s factor', function () {
+        $admin = taylor(['email' => 'admin@example.com']);
+        $totp = Authenticator::factory()->totp()->for($admin, 'authenticatable')->create(['created_at' => now()->subDay()]);
+
+        $this->post('/login', ['email' => 'admin@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+        $this->travel(1)->minutes();
+
+        // An app's own "become this user", without clearing what the session proved.
+        Route::middleware(['web', 'auth'])->post('/impersonate/{id}', function (string $id) {
+            session()->forget(Sessions::KEY);
+            Auth::guard('web')->login(User::findOrFail($id));
+
+            return 'ok';
+        });
+        $this->post('/impersonate/'.$this->user->getKey())->assertOk();
+        $this->travel(1)->seconds();
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+
+        expect(PendingChange::query()->ownedBy($this->user)->sole()->current_token)->not->toBeNull();
+    });
+});
+
+describe('applying a change', function () {
+    it('ends the account\'s other sessions and keeps the one that confirmed', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+        $change = PendingChange::sole();
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        $current = app(Sessions::class)->current(request())->id;
+        $other = otherSession($this->user);
+
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]));
+
+        expect($this->user->fresh()->email)->toBe('new@example.com')
+            ->and(app(SessionRegistry::class)->find($other)->revokedAt)->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find($current)->revokedAt)->toBeNull();
+
+        $this->assertAuthenticatedAs($this->user->fresh());
+    });
+
+    it('gives the confirming browser a new session id', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+        $change = PendingChange::sole();
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $before = session()->getId();
+
+        $this->withCookie(config('session.cookie'), $before)
+            ->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]))->assertSessionHas('status', 'email-changed');
+
+        expect(session()->getId())->not->toBe($before)
+            ->and(session()->getId())->not->toBeEmpty();
+    });
+
+    it('signs out everywhere when confirmed by a browser that is not signed in as the account', function () {
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        $other = otherSession($this->user);
+
+        $this->flushSession();
+        Auth::guard('web')->logout();
+        Auth::forgetGuards();
+        $this->withSession([Sessions::KEY => $other]); // left behind, so only the guard says who this is
+
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]));
+
+        expect($this->user->fresh()->email)->toBe('new@example.com')
+            ->and(app(SessionRegistry::class)->find($other)->revokedAt)->not->toBeNull();
+    });
+
+    it('does not keep the session of a browser signed in as someone else', function () {
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        $other = otherSession($this->user);
+
+        $stranger = taylor(['email' => 'stranger@example.com']);
+        $this->flushSession();
+        Auth::guard('web')->logout();
+        Auth::forgetGuards();
+        $this->actingAs($stranger);
+
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $before = session()->getId();
+        $this->withCookie(config('session.cookie'), $before)->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]));
+
+        expect($this->user->fresh()->email)->toBe('new@example.com')
+            ->and(app(SessionRegistry::class)->find($other)->revokedAt)->not->toBeNull()
+            ->and(session()->getId())->toBe($before);
+    });
+
+    it('leaves other sessions alone when the app opts out', function () {
+        config(['keyring.email_changes.sign_out_others' => false]);
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        $other = otherSession($this->user);
+
+        confirmBoth($change, $tokens);
+
+        expect(app(SessionRegistry::class)->find($other)->revokedAt)->toBeNull();
+    });
+
+    it('does not touch device tables when devices are off', function () {
+        withFeatures([Features::emailChanges()]);
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        DB::enableQueryLog();
+
+        confirmBoth($change, $tokens);
+
+        expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $query) => str_contains($query, 'keyring_devices')))->toBeEmpty()
+            ->and($this->user->fresh()->email)->toBe('new@example.com');
+    });
+
+    it('tells both addresses when the app has opted in', function () {
+        Keyring::notify();
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+
+        confirmBoth($change, $tokens);
+
+        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_changed');
+        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com' && $notice->type === 'email_changed');
+    });
+
+    it('sends no notice unless the app opted in', function () {
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+
+        confirmBoth($change, $tokens);
+
+        Notification::assertNotSentTo($this->user, SecurityNotice::class);
+        Notification::assertNotSentTo(new AnonymousNotifiable, SecurityNotice::class);
+    });
+
+    it('tells both addresses when an applied change is reverted', function () {
+        Keyring::notify();
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+        confirmBoth($change, $tokens);
+
+        app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted');
+        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com' && $notice->type === 'email_change_reverted');
+    });
+
+    it('keeps an app\'s own via() away from an address that has no user', function () {
+        Keyring::notify();
+        Keyring::securityNoticesUsing(PerUserChannelsNotice::class);
+        $change = requestChange($this->user, 'new@example.com');
+        $tokens = tokensFor('new@example.com', 'taylor@example.com');
+
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]))->assertSessionHas('status', 'email-changed');
+        $this->post(route('keyring.email.revert.store', [$change->id, $tokens['revert']]))->assertSessionHas('status', 'email-change-reverted');
+
+        Notification::assertSentTo($this->user, PerUserChannelsNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_changed');
+        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com' && $notice->type === 'email_changed' && $channels === ['mail']);
+        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com' && $notice->type === 'email_change_reverted' && $channels === ['mail']);
+    });
+
+    it('does not mail the address that never confirmed when a pending change is reverted', function () {
+        Keyring::notify();
+        $change = requestChange($this->user, 'attacker@example.com');
+        $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+
+        app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted');
+        Notification::assertNotSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'attacker@example.com');
+    });
+});
+
+/**
+ * The per-user via() that docs/security-log-and-emails.md suggests.
+ */
+class PerUserChannelsNotice extends SecurityNotice
+{
+    public function via(object $notifiable): array
+    {
+        return $notifiable->slack_webhook ? ['mail', 'slack'] : ['mail'];
+    }
+}
