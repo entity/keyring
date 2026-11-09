@@ -8,11 +8,7 @@ use Illuminate\Contracts\Container\Container;
 use Keyring\Contracts\Signal;
 use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\ImpossibleTravel;
-use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
-use Keyring\Risk\Signals\RecentlyChangedRecovery;
-use Keyring\Risk\Signals\RepeatedFactorFailures;
-use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\Sessions;
 
 /**
@@ -23,15 +19,12 @@ use Keyring\Sessions\Sessions;
  */
 class RiskEngine
 {
-    /** @var list<class-string<Signal>|Signal> */
-    protected array $signals = [
-        NewDevice::class,
-        NewCountry::class,
-        ImpossibleTravel::class,
-        RepeatedFactorFailures::class,
-        RecentlyChangedRecovery::class,
-        SessionFingerprintChanged::class,
-    ];
+    /**
+     * None until the app picks some with Keyring::risk([...]).
+     *
+     * @var list<class-string<Signal>|Signal>
+     */
+    protected array $signals = [];
 
     /** @var (Closure(Risk, Checkpoint): Action)|null */
     protected ?Closure $responder = null;
