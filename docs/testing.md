@@ -180,7 +180,7 @@ The constructor options:
 
 ## The Conformance Suite
 
-`Keyring\Testing\KeyringConformance` is a set of tests that check your setup (policy, factors, swapped responses, pipeline changes) still keeps Keyring's guarantees. Add it to a test class and tell it how to make a user:
+`Keyring\Testing\KeyringConformance` is a set of tests that check your setup (policy, factors, swapped responses, pipeline changes) still keeps Keyring's guarantees. Checks for features that are off are skipped, with the reason, so a skipped check is something your setup doesn't use, not a pass. Add it to a test class and tell it how to make a user:
 
 ```php
 namespace Tests\Feature;
