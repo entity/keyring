@@ -37,6 +37,14 @@ try {
 
             return Keyring::factor('recovery')->verify($attempt, $authenticator, Request::create('/', 'POST', ['code' => $value])) !== null;
         })(),
+        'use-passkey' => (function () use ($id, $value) {
+            $authenticator = Authenticator::findOrFail($id);
+            ['options' => $options, 'credential' => $credential] = json_decode($value, true);
+            $attempt = Attempt::start(Purpose::Login, $authenticator->user());
+            $attempt->put('passkey', 'options', $options);
+
+            return Keyring::factor('passkey')->verify($attempt, $authenticator, Request::create('/', 'POST', ['credential' => $credential])) !== null;
+        })(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),
     };

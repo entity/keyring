@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -45,4 +47,29 @@ it('signs a soft deleted user out but keeps their sign-in methods', function () 
 
     $user->forceDelete();
     expect(Authenticator::count())->toBe(0);
+});
+
+it('ends the user\'s reset links with them, so whoever registers the address next can\'t be reset with one', function () {
+    $user = taylor();
+    $token = Password::broker()->createToken($user);
+
+    $user->delete();
+
+    $next = taylor(['password' => 'a different passphrase']);
+    expect(Password::broker()->tokenExists($next, $token))->toBeFalse();
+
+    $this->post(route('password.update'), ['token' => $token, 'email' => 'taylor@example.com', 'password' => 'attacker set passphrase', 'password_confirmation' => 'attacker set passphrase'])
+        ->assertSessionHasErrors('email');
+    expect(Hash::check('a different passphrase', $next->fresh()->password))->toBeTrue();
+});
+
+it('ends a soft deleted user\'s reset links, so a restore does not bring them back', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
+    $token = Password::broker()->createToken($user);
+
+    $user->delete();
+    $user->restore();
+
+    expect(Password::broker()->tokenExists($user->fresh(), $token))->toBeFalse();
 });

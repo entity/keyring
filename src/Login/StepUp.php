@@ -41,12 +41,26 @@ class StepUp
 
         if ($this->wantsJson($request)) {
             // Come back to the page that made the call once confirmed.
-            redirect()->setIntendedUrl(url()->previous());
+            redirect()->setIntendedUrl($this->previous($request));
 
             return new JsonResponse(['message' => __('keyring::keyring.confirm'), 'redirect' => $url], 423);
         }
 
         return redirect()->guest($url);
+    }
+
+    /**
+     * The page the call came from. The Referer header is the caller's to
+     * set, so a page on another site is swapped for home.
+     */
+    protected function previous(Request $request): string
+    {
+        $previous = url()->previous();
+        $root = $request->getSchemeAndHttpHost();
+
+        return $previous === $root || str_starts_with($previous, $root.'/')
+            ? $previous
+            : url(config('keyring.home'));
     }
 
     /**

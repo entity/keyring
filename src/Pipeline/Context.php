@@ -21,6 +21,12 @@ final class Context
 
     public int $retryAfter = 0;
 
+    /** Whether the rate limits were checked for this request. */
+    public bool $throttleChecked = false;
+
+    /** Whether the risk lock was checked for this request. */
+    public bool $riskLockChecked = false;
+
     /** Whether this request also identifies the user (a primary factor starting a login). */
     public readonly bool $identifying;
 

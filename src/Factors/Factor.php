@@ -61,9 +61,9 @@ abstract class Factor implements FactorContract
      * Requests that don't name an account (like a usernameless passkey) only
      * get the per-IP limit, so they can't fill one bucket every user shares.
      *
-     * A browser the account has signed in from before gets a bucket of its
-     * own (OWASP "device cookies"), so someone guessing elsewhere can't lock
-     * the owner out.
+     * A browser the account has signed in from before gets a bucket and an
+     * in-a-row count of its own (OWASP "device cookies"), so someone guessing
+     * elsewhere can't lock the owner out.
      */
     public function limits(Request $request, ?Attempt $attempt): array
     {
@@ -71,21 +71,20 @@ abstract class Factor implements FactorContract
             ? (string) $attempt->userId
             : $this->normalizeAccount((string) $request->input(Keyring::username()));
 
-        $bucket = $this->key().'|account|'.$account.$this->knownDevice($request, $attempt, $account);
-
+        $device = $this->knownDevice($request, $attempt, $account);
         $consecutive = config('keyring.limits.consecutive');
 
         return array_values(array_filter([
-            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($bucket),
-            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account),
+            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by(static::accountBucket($this->key(), $account, $device)),
+            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account, $device),
             SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
         ]));
     }
 
     /**
-     * "|device|{id}" when the request's device cookie belongs to the account.
+     * The device's ID when the request's device cookie belongs to the account.
      */
-    protected function knownDevice(Request $request, ?Attempt $attempt, string $account): string
+    protected function knownDevice(Request $request, ?Attempt $attempt, string $account): ?string
     {
         $device = $account === '' ? null : app(DeviceManager::class)->forBrowser($request)->first(function (Device $device) use ($attempt, $account) {
             $user = $device->user();
@@ -95,7 +94,15 @@ abstract class Factor implements FactorContract
                 : $this->normalizeAccount((string) $user->getAttribute(Keyring::username())));
         });
 
-        return $device === null ? '' : '|device|'.$device->id;
+        return $device?->id;
+    }
+
+    /**
+     * The key of an account's per-minute limit, or of a known device's.
+     */
+    public static function accountBucket(string $factor, string $account, ?string $device = null): string
+    {
+        return $factor.'|account|'.$account.($device === null ? '' : '|device|'.$device);
     }
 
     protected function normalizeAccount(string $account): string

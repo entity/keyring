@@ -6,12 +6,14 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Session\CookieSessionHandler;
 use Illuminate\Support\Str;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
 
@@ -79,6 +81,26 @@ class Sessions
     }
 
     /**
+     * Give the current session a new ID, so a copy of it made before now
+     * stops working. Regenerating destroys the old session on the server. A
+     * cookie session lives in the browser, where nothing can destroy a copy,
+     * so its registry record is swapped for a new one and the old one revoked.
+     */
+    public function rotate(Request $request): void
+    {
+        $session = $this->current($request);
+
+        if ($session !== null && $request->session()->getHandler() instanceof CookieSessionHandler) {
+            $this->registry->save($rotated = $session->with(['id' => Str::random(40)]));
+            $this->registry->revoke($session->id);
+
+            $request->session()->put(self::KEY, $rotated->id);
+        }
+
+        $request->session()->regenerate(true);
+    }
+
+    /**
      * Seconds of inactivity allowed before the session ends, or with a level,
      * before that level lapses. Null for no limit (Laravel's own session
      * lifetime still applies).
@@ -141,7 +163,7 @@ class Sessions
 
     protected function distrustDevices(Authenticatable $user, ?string $except): void
     {
-        if ($user instanceof Model) {
+        if ($user instanceof Model && Features::enabled(Features::devices())) {
             Keyring::deviceModel()::query()
                 ->ownedBy($user)
                 ->whereNotNull('trusted_until')
@@ -154,7 +176,7 @@ class Sessions
     {
         if ($user instanceof Model) {
             // Resolved here because EmailChanges needs this class.
-            app(EmailChanges::class)->cancel($user, keepRevertLink: true);
+            app(EmailChanges::class)->cancel($user);
         }
     }
 

@@ -183,15 +183,17 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 `DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which returns how many sessions it revoked, and regenerate the session yourself:
+`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which returns how many sessions it revoked, and `rotate()`, which gives the current session its new ID:
 
 ```php
 use Keyring\Sessions\Sessions;
 
 app(Sessions::class)->revokeAll($user, except: app(Sessions::class)->current($request)?->id);
 
-$request->session()->regenerate(true);
+app(Sessions::class)->rotate($request);
 ```
+
+`rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one.
 
 Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends.
 
@@ -258,7 +260,7 @@ It only checks routes it runs on. If signed-in sessions reach other groups, add 
 On each signed-in request it:
 
 - signs the user out if their registry record was revoked, has expired, belongs to someone else, or has been idle too long,
-- registers sessions that started some other way, such as a "remember me" cookie,
+- registers sessions that started some other way, such as a "remember me" cookie. A remembered browser is recorded like a sign in, so one the account hasn't used before is announced as a [new device](#new-device-sign-ins), and it's refused while the account is [risk locked](risk.md#actions),
 - runs the cheap [risk signals](risk.md#checkpoints),
 - updates the last activity time, at most once a minute.
 
@@ -283,7 +285,7 @@ A signed-out request is sent to the login page with the `signed-out` status, and
 - **`absolute`** ends a session this long after sign in, however active it is. "Remember me" lasts no longer either, unless you set your guard's `remember` (in minutes) yourself.
 - **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
 
-A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one. Verifying again resets both clocks.
+A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.
 
 ## Pruning
 

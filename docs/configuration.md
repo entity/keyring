@@ -26,7 +26,7 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `notifications` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges the file over its defaults one top-level key at a time, so copy a whole option, such as all of `sessions`, not part of it. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `notifications` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features` and `notifications`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
@@ -150,7 +150,10 @@ Where the `keyring.enrolled` middleware sends users who still need a second fact
     'store' => null,
     'idle' => null,
     'absolute' => '30d',
-    'levels' => [],
+    'levels' => [
+        'aal2' => ['idle' => '1h', 'absolute' => '24h'],
+        'aal3' => ['idle' => '15m', 'absolute' => '12h'],
+    ],
     'middleware' => true,
 ],
 ```
@@ -175,8 +178,11 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 'email_changes' => [
     'expire' => '24h',
     'revertable_for' => '7d',
+    'sign_out_others' => true,
 ],
 ```
+
+`sign_out_others` ends the account's other sessions when an email change applies.
 
 `Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds `email`. List any others in `protected`. See [Protected Changes](protected-changes.md).
 
@@ -245,7 +251,7 @@ The security notices to send, none by default. `keyring:install` offers the four
 
 `timebox` is the minimum time, in microseconds, that a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused until a password reset (`null` for no cap). See [Rate Limiting](security.md#rate-limiting).
+`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap). See [Rate Limiting](security.md#rate-limiting).
 
 Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
 
@@ -256,6 +262,8 @@ use Illuminate\Support\Facades\RateLimiter;
 
 RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
 ```
+
+`GET /login/{factor}/options` uses its own limiter, `keyring-login-options`, which allows 60 requests a minute per IP address. Login pages fetch the options on every load for passkey autofill, and when the limit is hit autofill stops offering passkeys until the next minute. Define the same limiter to change it.
 
 ## Messages and Translations
 

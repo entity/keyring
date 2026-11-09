@@ -5,10 +5,12 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Models\Device;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -90,3 +92,50 @@ it('can leave new users signed out, for everyone or per user', function (bool|Cl
     'never' => false,
     'not this user' => fn () => fn (User $user) => $user->email === 'someone-else@example.com',
 ]);
+
+describe('email verification', function () {
+    it('refuses to register a MustVerifyEmail user without the verification feature, before saving anything', function () {
+        config(['keyring.features' => [Features::registration()]]);
+
+        $this->withoutExceptionHandling();
+
+        expect(fn () => $this->post('/register', [
+            'name' => 'Taylor',
+            'email' => 'taylor@example.com',
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ]))->toThrow(EmailVerificationRequired::class, 'Features::emailVerification()');
+
+        expect(User::count())->toBe(0);
+    });
+
+    it('stops someone who registered an address they don\'t own from adding a sign-in method', function () {
+        $this->post('/register', [
+            'name' => 'Not Taylor',
+            'email' => 'taylor@example.com',
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ]);
+
+        // Signed in, but the address is unverified, so no passkey can be planted.
+        $this->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.authenticators.store', 'passkey'))
+            ->assertForbidden()
+            ->assertJsonPath('message', __('keyring::keyring.verify_email_first'));
+    });
+
+    it('refuses to let users add sign-in methods with registration on when they can\'t verify an address', function () {
+        config([
+            'auth.providers.staff' => ['driver' => 'eloquent', 'model' => Staff::class],
+            'auth.guards.staff' => ['driver' => 'session', 'provider' => 'staff'],
+            'keyring.guard' => 'staff',
+        ]);
+        // The routes read the guard when they're registered.
+        withFeatures(Features::all());
+
+        $this->withoutExceptionHandling()->actingAs(staff(), 'staff')->withAssurance(Assurance::AAL1);
+
+        expect(fn () => $this->postJson(route('keyring.authenticators.store', 'totp')))
+            ->toThrow(EmailVerificationRequired::class, 'implement MustVerifyEmail');
+    });
+});
