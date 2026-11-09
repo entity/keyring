@@ -21,6 +21,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
+use Keyring\KeyringServiceProvider;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\ConfirmEmailChange;
@@ -153,8 +154,11 @@ it('validates whether to sign out other sessions itself', function () {
 });
 
 it('says how to register an action the app has not registered', function () {
-    // A fresh app, without the registrations TestCase makes.
-    $this->refreshApplication();
+    // Forget the registration TestCase makes and let Keyring bind it again.
+    // A fresh app would swap the container and its database connection
+    // mid-test, which hangs on Postgres.
+    app()->offsetUnset(ResetsUserPasswords::class);
+    new KeyringServiceProvider(app())->register();
 
     expect(fn () => app(ResetsUserPasswords::class))->toThrow(MissingAction::class, 'Keyring::resetUserPasswordsUsing()');
 });
