@@ -260,7 +260,7 @@ It only checks routes it runs on. If signed-in sessions reach other groups, add 
 On each signed-in request it:
 
 - signs the user out if their registry record was revoked, has expired, belongs to someone else, or has been idle too long,
-- registers sessions that started some other way, such as a "remember me" cookie. A remembered browser is recorded like a sign in, so one the account hasn't used before is announced as a [new device](#new-device-sign-ins), and it's refused while the account is [risk locked](risk.md#actions),
+- registers sessions that started some other way, such as your own `Auth::login()` (on the response that signs in) or a "remember me" cookie. A remembered browser is recorded like a sign in, so one the account hasn't used before is announced as a [new device](#new-device-sign-ins), and it's refused while the account is [risk locked](risk.md#actions),
 - runs the cheap [risk signals](risk.md#checkpoints),
 - updates the last activity time, at most once a minute.
 

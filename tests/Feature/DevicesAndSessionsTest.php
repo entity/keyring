@@ -229,6 +229,16 @@ it('enforces the idle timeout', function () {
     expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'idle']);
 });
 
+it('registers a session the app signs in itself on the response that signs it in', function () {
+    Route::middleware('web')->post('/oauth/callback', fn () => tap('welcome', fn () => Auth::login($this->user)));
+
+    $this->post('/oauth/callback')->assertOk();
+
+    $id = session(Sessions::KEY);
+    expect($id)->not->toBeNull()
+        ->and(app(SessionRegistry::class)->find($id)->userId)->toBe((string) $this->user->id);
+});
+
 it('registers sessions that started some other way', function () {
     $this->actingAs($this->user)->get('/home')->assertOk();
 

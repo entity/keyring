@@ -46,8 +46,19 @@ class AuthenticateSession
     {
         $guard = $this->keyring->guard();
 
-        if (! $request->hasSession() || ! $guard->check()) {
+        if (! $request->hasSession()) {
             return $next($request);
+        }
+
+        // An app's own Auth::login() (Socialite, impersonation) is registered
+        // on the response that signs in, so every copy of that session's
+        // cookie can be revoked, on the cookie driver too.
+        if (! $guard->check()) {
+            return tap($next($request), function () use ($request, $guard) {
+                if ($guard->check() && ! $request->session()->has(Sessions::KEY)) {
+                    $this->register($request, $guard->user(), remembered: false);
+                }
+            });
         }
 
         $user = $guard->user();
