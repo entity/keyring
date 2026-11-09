@@ -151,11 +151,15 @@ class RecordSecurityEvents
         $this->log->record('password_reset', $event->user, meta: ['sign_in_locks_cleared' => true]);
     }
 
+    /**
+     * A bypass is never left unlogged: if the entry can't be written this
+     * throws, before the protected attributes are touched.
+     */
     public function protectionBypassed(Events\ProtectionBypassed $event): void
     {
         $actor = Keyring::guard()->user();
 
-        $this->log->record('protection_bypassed', $actor instanceof Authenticatable ? $actor : null, meta: ['reason' => $event->reason]);
+        $this->log->recordOrFail('protection_bypassed', $actor instanceof Authenticatable ? $actor : null, meta: ['reason' => $event->reason]);
     }
 
     public function cloneSuspected(Events\CloneSuspected $event): void

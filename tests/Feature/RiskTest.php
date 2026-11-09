@@ -486,6 +486,15 @@ it('keeps the caller\'s transaction usable when a security log write fails', fun
     expect($this->user->fresh()->name)->toBe('Still Taylor');
 });
 
+it('does not bypass protection when the bypass cannot be logged', function () {
+    Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+
+    expect(fn () => Keyring::withoutProtection(fn () => $this->user->update(['email' => 'admin-set@example.com']), reason: 'support ticket 42'))
+        ->toThrow(QueryException::class);
+
+    expect($this->user->fresh()->email)->toBe('taylor@example.com');
+});
+
 it('does not swallow a failure in something that decides the sign in', function () {
     Exceptions::fake();
     Keyring::risk([new class implements Signal

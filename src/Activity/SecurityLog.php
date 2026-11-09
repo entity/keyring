@@ -25,31 +25,40 @@ class SecurityLog
      */
     public function record(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = []): ?SecurityEvent
     {
+        return $this->safely(fn () => $this->recordOrFail($type, $user, $factor, $device, $meta), null);
+    }
+
+    /**
+     * Log an event that must not happen unlogged. A failed write is thrown,
+     * so whatever was about to happen doesn't.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    public function recordOrFail(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = []): ?SecurityEvent
+    {
         if (! Features::enabled(Features::securityLog())) {
             return null;
         }
 
         $model = Keyring::securityEventModel();
 
-        return $this->safely(function () use ($model, $type, $user, $factor, $device, $meta) {
-            $event = new $model([
-                'type' => $type,
-                'factor' => $factor,
-                'device_id' => $device,
-                'ip' => request()->ip(),
-                'user_agent' => UserAgent::from(request()),
-                'meta' => $meta === [] ? null : $meta,
-                'created_at' => now(),
-            ]);
+        $event = new $model([
+            'type' => $type,
+            'factor' => $factor,
+            'device_id' => $device,
+            'ip' => request()->ip(),
+            'user_agent' => UserAgent::from(request()),
+            'meta' => $meta === [] ? null : $meta,
+            'created_at' => now(),
+        ]);
 
-            if ($user instanceof Model) {
-                $event->authenticatable()->associate($user);
-            }
+        if ($user instanceof Model) {
+            $event->authenticatable()->associate($user);
+        }
 
-            $event->save();
+        $event->save();
 
-            return $event;
-        }, null);
+        return $event;
     }
 
     /**

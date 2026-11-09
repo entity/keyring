@@ -32,6 +32,8 @@ Without the feature, nothing is logged. "Was this you?" alerts and the `Repeated
 
 The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report()` and carries on, so the sign in, refusal or email goes ahead without it. If the log can't be read, there are no alerts and `RepeatedFactorFailures` finds nothing.
 
+The one exception is `protection_bypassed`. If that entry can't be written, [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection) throws before it runs your callback, so a bypass never happens unlogged.
+
 ### Entry Types
 
 | Type | When | `meta` |
