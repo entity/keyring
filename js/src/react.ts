@@ -1,12 +1,12 @@
 import { useForm } from '@inertiajs/react'
 import { useEffect, useRef, useState, type ComponentType } from 'react'
-import { challengeFields, errorMessage, keyPrompt, passkeyLogin, sendCode, switchTo, type PasskeyLoginOptions, type PasskeyLoginState } from './challenge.js'
+import { challengeFields, errorMessage, keyPrompt, passkeyLogin, sendCode, switchTo, type PasskeyLoginOptions, type PasskeyLoginState } from './inertia.js'
 import { routes } from './routes.js'
 import type { AuthenticatorSummary, ChallengeProps } from './types.js'
 import { supportsWebAuthn } from './webauthn.js'
 
 export * from './index.js'
-export * from './challenge.js'
+export * from './inertia.js'
 
 export type Challenge = ReturnType<typeof useChallenge>
 
