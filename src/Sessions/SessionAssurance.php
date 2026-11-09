@@ -4,6 +4,8 @@ namespace Keyring\Sessions;
 
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Purpose;
+use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
@@ -39,8 +41,7 @@ class SessionAssurance
      */
     public function reset(array $verifications): void
     {
-        $this->session->put(static::KEY, []);
-        $this->session->forget(static::LAPSED);
+        $this->flush();
         $this->record($verifications);
     }
 
@@ -147,11 +148,12 @@ class SessionAssurance
     }
 
     /**
-     * Forget everything proved this session, including the marker that keeps
-     * Laravel's own password.confirm middleware satisfied.
+     * Forget everything proved this session, including a confirmation in
+     * progress and the marker that keeps Laravel's own password.confirm
+     * middleware satisfied.
      */
     public function flush(): void
     {
-        $this->session->forget([static::KEY, static::LAPSED, 'auth.password_confirmed_at']);
+        $this->session->forget([static::KEY, static::LAPSED, AttemptStore::key(Purpose::Confirm), 'auth.password_confirmed_at']);
     }
 }

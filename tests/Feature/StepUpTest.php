@@ -2,10 +2,12 @@
 
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\WebAuthn;
+use Keyring\Login\AttemptStore;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\Staff;
@@ -70,6 +72,17 @@ it('drops a confirmation that started under another guard', function () {
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     expect($totp->fresh()->last_used_at)->toBeNull();
+});
+
+it('drops a confirmation that another user started in the same session', function () {
+    $attempts = app(AttemptStore::class);
+
+    $this->actingAs(taylor(['email' => 'abigail@example.com']));
+    $attempts->start(Purpose::Confirm, auth()->user());
+
+    $this->actingAs($this->user);
+
+    expect($attempts->current(Purpose::Confirm))->toBeNull();
 });
 
 it('needs a fresh verification after the window passes', function () {
