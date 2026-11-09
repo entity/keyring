@@ -4,6 +4,7 @@ namespace Keyring\Notifications;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
+use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
 use Keyring\Devices\UserAgent;
 use Keyring\Events;
@@ -18,6 +19,7 @@ class SendSecurityNotifications
     public const array TYPES = [
         'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
         'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
+        'email_changed', 'email_change_reverted',
     ];
 
     /**
@@ -35,6 +37,8 @@ class SendSecurityNotifications
             Events\RecoveryCodeUsed::class => 'recoveryCodeUsed',
             Events\RiskAssessed::class => 'riskAssessed',
             Events\CloneSuspected::class => 'cloneSuspected',
+            Events\EmailChanged::class => 'emailChanged',
+            Events\EmailChangeReverted::class => 'emailChangeReverted',
         ];
     }
 
@@ -88,9 +92,31 @@ class SendSecurityNotifications
     }
 
     /**
+     * The user now has the new address, and the old one gets its own copy.
+     */
+    public function emailChanged(Events\EmailChanged $event): void
+    {
+        $this->send($event->user, 'email_changed');
+        $this->send(Notification::route('mail', $event->change->previous_value), 'email_changed');
+    }
+
+    /**
+     * Only a change that applied ever gave the new address the account, so
+     * there's nothing to tell it otherwise.
+     */
+    public function emailChangeReverted(Events\EmailChangeReverted $event): void
+    {
+        $this->send($event->user, 'email_change_reverted');
+
+        if ($event->change->applied_at !== null) {
+            $this->send(Notification::route('mail', $event->change->value), 'email_change_reverted');
+        }
+    }
+
+    /**
      * @param  array<string, string|int>  $replace
      */
-    protected function send(Authenticatable $user, string $type, array $replace = [], ?string $actionUrl = null): void
+    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $replace = [], ?string $actionUrl = null): void
     {
         // A model without Notifiable (say, staff that sign in through
         // another guard) has nowhere to send it, so it's skipped rather than
@@ -102,7 +128,7 @@ class SendSecurityNotifications
         // The current request, not one captured at boot (Octane).
         $request = request();
 
-        Notification::send($user, app(SecurityNotice::class, [
+        $arguments = [
             'type' => $type,
             'details' => [
                 'when' => now()->toDayDateTimeString(),
@@ -111,6 +137,12 @@ class SendSecurityNotifications
             ],
             'replace' => $replace,
             'actionUrl' => $actionUrl,
-        ]));
+        ];
+
+        // An app's own class may read the user in via() or toMail(), and a
+        // bare address hasn't got one, so that copy is always ours, by mail.
+        Notification::send($user, $user instanceof AnonymousNotifiable
+            ? new SecurityNotice(...$arguments)
+            : app(SecurityNotice::class, $arguments));
     }
 }

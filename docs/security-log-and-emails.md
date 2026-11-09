@@ -149,6 +149,8 @@ Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless yo
 | `recovery_code_used` | A recovery code was used. Says how many are left. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. Lists the reasons. |
 | `clone_suspected` | A passkey or security key looked cloned. |
+| `email_changed` | An email change applied. Sent to both the old and the new address. |
+| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. |
 
 To send your own instead, listen for the matching [events](sign-in-flow.md#events) and leave the type off.
 
@@ -198,6 +200,8 @@ Keyring::securityNoticesUsing(\App\Notifications\SecurityNotice::class);
 ```
 
 `toArray()` is already there, so adding `database` or `broadcast` to `via()` works without more code. Keep the parent's constructor, since Keyring passes its arguments by name.
+
+The copies of `email_changed` and `email_change_reverted` sent to an address that isn't the account's current one have no user to pass to your class, so they're always Keyring's own `SecurityNotice`, by mail.
 
 ### Emails Keyring Always Sends
 
