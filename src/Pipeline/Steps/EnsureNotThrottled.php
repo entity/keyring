@@ -39,7 +39,8 @@ class EnsureNotThrottled
         }
 
         // Count the attempt before verifying it, so overlapping requests
-        // can't all slip under the limit while they're being checked.
+        // can't all slip under the limit while they're being checked. They're
+        // counted in order, so one refused by a limit never reaches the next.
         foreach (array_filter($limits, fn (Limit $limit) => ! $limit instanceof ConsecutiveLimit) as $limit) {
             if ($this->limiter->hit(static::key($limit), $limit->decaySeconds) > $limit->maxAttempts) {
                 return $this->lockout($context, $this->limiter->availableIn(static::key($limit)));
@@ -65,6 +66,9 @@ class EnsureNotThrottled
      * Once a key reaches its limit, lock it. Each lock lasts twice as long as
      * the last one (OWASP), up to a day. The lockout count resets a day after
      * the first lockout.
+     *
+     * A shared limit's lock stops growing at fifteen minutes, or everyone on
+     * that address would pay for one person's failures for a day.
      */
     protected function failed(Limit $limit): void
     {
@@ -83,8 +87,9 @@ class EnsureNotThrottled
         }
 
         $lockouts = $this->limiter->hit($key.':lockouts', 86400);
+        $longest = $limit instanceof SharedLimit ? SharedLimit::LONGEST_LOCK : 86400;
 
-        $this->limiter->hit($this->lock($limit), min(86400, $limit->decaySeconds * 2 ** ($lockouts - 1)));
+        $this->limiter->hit($this->lock($limit), min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
         $this->limiter->clear($key);
     }
 

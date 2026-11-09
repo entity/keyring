@@ -13,6 +13,7 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Features;
+use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
@@ -155,6 +156,174 @@ it('lets the owner sign in from a known device while someone else is locked out'
     $this->withCookie('keyring_device', $device)
         ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
         ->assertRedirect('/dashboard');
+});
+
+describe('a shared address', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_ip' => 3, 'keyring.limits.per_account' => 100]);
+    });
+
+    function fillAddress(): void
+    {
+        foreach (range(1, 3) as $guess) {
+            test()->post('/login', ['email' => "someone{$guess}@example.com", 'password' => 'nope']);
+        }
+    }
+
+    function deviceCookieFor(string $email): string
+    {
+        $device = test()->post('/login', ['email' => $email, 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        test()->post('/logout');
+        test()->flushSession();
+
+        return $device;
+    }
+
+    it('locks the address for longer each time one person reaches the limit', function () {
+        account('neighbour@example.com');
+
+        fillAddress();
+        $this->travel(61)->seconds();
+        fillAddress();
+        $this->travel(61)->seconds();
+
+        $this->post('/login', ['email' => 'neighbour@example.com', 'password' => 'password']);
+        expect($this->sessionErrors()->first('email'))->toContain('Too many');
+        $this->assertGuest();
+
+        $this->travel(60)->seconds();
+
+        $this->post('/login', ['email' => 'neighbour@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('never locks the address for more than fifteen minutes', function () {
+        account('neighbour@example.com');
+
+        foreach (range(1, 8) as $run) {
+            fillAddress();
+
+            $this->post('/login', ['email' => 'neighbour@example.com', 'password' => 'password']);
+            expect($this->sessionErrors()->first('email'))->toContain('Too many');
+            $this->assertGuest();
+
+            $this->travel(901)->seconds();
+        }
+
+        $this->post('/login', ['email' => 'neighbour@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('lets an account through on its own known device while the address is used up', function () {
+        account('taylor@example.com');
+        $device = deviceCookieFor('taylor@example.com');
+
+        fillAddress();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        expect($this->sessionErrors()->first('email'))->toContain('Too many');
+
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+    });
+
+    it('does not let a device cookie for one account past the limit for another', function () {
+        account('attacker@example.com');
+        account('victim@example.com');
+        $device = deviceCookieFor('attacker@example.com');
+
+        fillAddress();
+
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => 'victim@example.com', 'password' => 'password']);
+
+        expect($this->sessionErrors()->first('email'))->toContain('Too many');
+        $this->assertGuest();
+    });
+
+    it('gives every device cookie of an account one count per address, so stolen cookies share it', function () {
+        account('taylor@example.com');
+        $first = deviceCookieFor('taylor@example.com');
+        $second = deviceCookieFor('taylor@example.com');
+        expect($first)->not->toBe($second);
+
+        foreach ([$first, $first, $second] as $device) {
+            $this->withCookie('keyring_device', $device)
+                ->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])
+                ->assertSessionHasErrors(['email' => __('auth.failed')]);
+        }
+
+        $this->withCookie('keyring_device', $second)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        expect($this->sessionErrors()->first('email'))->toContain('Too many');
+        $this->assertGuest();
+
+        $this->travel(61)->seconds();
+
+        $this->withCookie('keyring_device', $first)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+    });
+
+    it('does not count an attempt the address refused against the account', function () {
+        config(['keyring.limits.per_account' => 2]);
+        account('neighbour@example.com');
+
+        fillAddress();
+        $this->travel(50)->seconds();
+
+        foreach (range(1, 3) as $retry) {
+            $this->post('/login', ['email' => 'neighbour@example.com', 'password' => 'password']);
+            expect($this->sessionErrors()->first('email'))->toContain('Too many');
+        }
+
+        // The address's minute is up, and the neighbour was never counted.
+        $this->travel(11)->seconds();
+
+        $this->post('/login', ['email' => 'neighbour@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('does not let a device cookie for a look-alike address past the limit', function () {
+        account('victim@exämple.com');
+        $device = deviceCookieFor('victim@exämple.com');
+
+        fillAddress();
+
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => 'victim@example.com', 'password' => 'password']);
+
+        expect($this->sessionErrors()->first('email'))->toContain('Too many');
+        $this->assertGuest();
+
+        // Its owner still gets through, however they type the address.
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => ' VICTIM@EXÄMPLE.COM ', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+    });
+
+    it('treats another model\'s device with the same id as unknown on the second factor', function () {
+        $user = account('taylor@example.com');
+        $device = Keyring::deviceModel()::make(['token_hash' => Keyring::deviceModel()::hashToken($token = str_repeat('a', 40)), 'first_seen_at' => now()]);
+        $device->authenticatable()->associate(staff());
+        $device->save();
+
+        $limits = Keyring::factor('totp')->limits(Request::create('/', 'POST', cookies: ['keyring_device' => $token]), Attempt::start(Purpose::Login, $user));
+
+        expect(collect($limits)->pluck('key')->implode(' '))->not->toContain('|device|');
+    });
+
+    it('treats a device cookie like any other browser when devices are off', function () {
+        account('taylor@example.com');
+        $device = deviceCookieFor('taylor@example.com');
+
+        withFeatures([]);
+        fillAddress();
+
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+        expect($this->sessionErrors()->first('email'))->toContain('Too many');
+        $this->assertGuest();
+    });
 });
 
 describe('failures in a row, however slowly they come', function () {
