@@ -41,7 +41,7 @@ In `Keyring\Risk\Signals`:
 | `SessionFingerprintChanged` | A signed-in session now comes from a different browser or platform than the one that signed in. IP changes alone don't count. | 60 | every request |
 | `BreachedPassword` | The password just used appears in a public breach list. Not on by default: it makes a network call at sign in. | 40 | login |
 
-`RepeatedFactorFailures` only counts failures after a correct password. Anyone can type a wrong password for a known email, so counting those would let a stranger raise the owner's risk. It reads the [security log](security-log-and-emails.md), so it does nothing when the log is off.
+`RepeatedFactorFailures` only counts failures after a correct password. Anyone can type a wrong password for a known email, so counting those would let a stranger raise the owner's risk. It reads the [security log](security-log-and-emails.md), so it does nothing when the log is off or can't be read.
 
 ## Levels
 
