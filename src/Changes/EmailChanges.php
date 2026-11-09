@@ -279,7 +279,7 @@ class EmailChanges
         }
 
         if ($here) {
-            $request->session()->regenerate(true);
+            $this->sessions->rotate($request);
         }
     }
 
