@@ -40,6 +40,8 @@ class EnsureNotThrottled
             }
         }
 
+        $context->throttleChecked = true;
+
         $context = $next($context);
 
         foreach ($limits as $limit) {

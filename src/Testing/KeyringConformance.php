@@ -46,6 +46,17 @@ trait KeyringConformance
         return 'password';
     }
 
+    /**
+     * Mandatory pipeline steps your app removes or replaces on purpose, with
+     * dangerouslyRemove() or dangerouslyReplace().
+     *
+     * @return list<class-string>
+     */
+    protected function keyringAcknowledgedDangerousSteps(): array
+    {
+        return [];
+    }
+
     public function test_keyring_signs_in_with_a_password_or_asks_for_more(): void
     {
         $user = $this->keyringUser();
@@ -60,6 +71,15 @@ trait KeyringConformance
         $this->assertTrue(
             Keyring::guard()->check() || str_contains((string) $response->headers->get('Location'), route('keyring.login.challenge')),
             'A correct password should either sign in or lead to the challenge page.',
+        );
+    }
+
+    public function test_keyring_keeps_its_mandatory_pipeline_steps(): void
+    {
+        $this->assertSame(
+            [],
+            array_values(array_diff(Keyring::dangerouslyChangedSteps(), $this->keyringAcknowledgedDangerousSteps())),
+            'Mandatory pipeline steps were removed or replaced. If you meant to, list them in keyringAcknowledgedDangerousSteps().',
         );
     }
 
