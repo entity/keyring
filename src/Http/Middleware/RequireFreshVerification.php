@@ -17,8 +17,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Requires the user to have verified within a window, e.g. keyring.fresh:15m,
  * as much as signing in would ask of them, as far as they can: both factors
- * for a user with two (NIST SP 800-63B: binding a new authenticator takes
- * authenticating at the account's level, or the new one's if that's lower).
+ * for a user with two, so adding a sign-in method takes proving the ones the
+ * account already has.
  * Users with a possession factor always use one. The window is fixed from the
  * moment of verification and doesn't slide with activity.
  */

@@ -38,8 +38,8 @@ With devices on, Keyring sets its cookie on sign in, offers "don't ask again on 
 | Method | URI | Name | Middleware | Does |
 |---|---|---|---|---|
 | `GET` | `/user/devices` | `keyring.devices.index` | `auth:{guard}` | Lists the user's devices as JSON. |
-| `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `manage_middleware` | Signs one device out. |
-| `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `manage_middleware` | Signs out every other session. |
+| `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
+| `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
 | `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
 | `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, `keyring` limiter | Signs the device out. |
 
@@ -293,7 +293,7 @@ A level lapses on its own clock without ending the session: after its `idle` wit
 
 - devices revoked more than 30 days ago,
 - email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago, since they hold both addresses,
-- security log entries older than `events.keep_for`,
+- security log entries older than `security_log.keep_for`,
 - registered sessions that have expired or been revoked, through the registry's `prune()`. The cache driver's records expire on their own.
 
 Schedule it daily:

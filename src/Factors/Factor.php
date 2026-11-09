@@ -63,7 +63,7 @@ abstract class Factor implements FactorContract
      * get the per-IP limit, so they can't fill one bucket every user shares.
      *
      * A browser the account has signed in from before gets a bucket and an
-     * in-a-row count of its own (OWASP "device cookies"), so someone guessing
+     * in-a-row count of its own, so someone guessing
      * elsewhere can't lock the owner out. Per IP it counts for that account
      * alone, so others on a shared address can't hold it up. That's per
      * account rather than per device so that several stolen cookies share

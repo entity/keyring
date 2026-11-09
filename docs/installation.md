@@ -35,7 +35,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-The command asks which sign-in methods you want besides the password, which [features](quick-start.md#adding-features) to turn on, and whether to send the security emails NIST asks for. Recovery codes come with any second sign-in method. Picking registration with a sign-in method also turns on email verification, since users who register themselves must prove their address before adding one. Without prompts (`--no-interaction`, or in CI) you get the password, registration and password resets, and the security emails whenever you pick a second sign-in method. You can also answer with options:
+The command asks which sign-in methods you want besides the password, which [features](quick-start.md#adding-features) to turn on, and whether to email users when their password or sign-in methods change. Recovery codes come with any second sign-in method. Picking registration with a sign-in method also turns on email verification, since users who register themselves must prove their address before adding one. Without prompts (`--no-interaction`, or in CI) you get the password, registration and password resets, and the security emails whenever you pick a second sign-in method. You can also answer with options:
 
 ```bash
 php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --emails

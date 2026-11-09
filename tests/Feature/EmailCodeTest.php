@@ -76,7 +76,7 @@ it('sends eight digit codes that expire', function () {
 });
 
 it('rejects an expired code', function () {
-    config(['keyring.pending_login_ttl' => 3600]);
+    config(['keyring.pending_logins.keep_for' => 3600]);
     emailAuthenticator($this->user);
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge'));
@@ -149,7 +149,7 @@ it('still signs in with a new code while guesses are left', function () {
 });
 
 it('does not give guesses back when a code expires', function () {
-    config(['keyring.limits.per_account' => 100, 'keyring.pending_login_ttl' => 3600]);
+    config(['keyring.limits.per_account' => 100, 'keyring.pending_logins.keep_for' => 3600]);
     emailAuthenticator($this->user);
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge'));

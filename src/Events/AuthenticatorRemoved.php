@@ -7,7 +7,7 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Keyring\Models\Authenticator;
 
 /**
- * The user removed an authenticator. Worth telling them by email (OWASP).
+ * The user removed an authenticator. Worth telling them by email.
  */
 class AuthenticatorRemoved
 {

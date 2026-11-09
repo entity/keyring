@@ -64,7 +64,7 @@ class EnsureNotThrottled
 
     /**
      * Once a key reaches its limit, lock it. Each lock lasts twice as long as
-     * the last one (OWASP), up to a day. The lockout count resets a day after
+     * the last one, up to a day. The lockout count resets a day after
      * the first lockout.
      *
      * A shared limit's lock stops growing at fifteen minutes, or everyone on

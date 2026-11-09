@@ -86,7 +86,7 @@ final class Attempt
             purpose: $purpose,
             guard: config('keyring.guard'),
             userId: $user->getAuthIdentifier(),
-            expiresAt: Duration::fromNow(config('keyring.pending_login_ttl'))->getTimestamp(),
+            expiresAt: Duration::fromNow(config('keyring.pending_logins.keep_for'))->getTimestamp(),
             remember: $remember,
             verifications: $verifications,
             requirement: $requirement,

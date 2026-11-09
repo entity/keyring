@@ -7,7 +7,7 @@
 - [Redirects](#redirects)
 - [Routes](#routes)
 - [WebAuthn](#webauthn)
-- [Managing Authenticators](#managing-authenticators)
+- [Account Changes and Enrollment](#account-changes-and-enrollment)
 - [Devices](#devices)
 - [Sessions](#sessions)
 - [Protected Attributes and Email Changes](#protected-attributes-and-email-changes)
@@ -26,11 +26,11 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `notifications` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features` and `notifications`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `security_notices` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features` and `notifications`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
-Options that take a duration accept a number of seconds or a string such as `"30s"`, `"15m"`, `"12h"` or `"7d"`. Anything else throws an `InvalidArgumentException`.
+Options that take a duration accept a number of seconds or a string such as `"30s"`, `"15m"`, `"12h"` or `"7d"`. Anything else throws an `InvalidArgumentException`. The two short ones, `timebox` and `webauthn.timeout`, also accept milliseconds (`"250ms"`) and always need a unit.
 
 ## Guard and Users
 
@@ -108,16 +108,16 @@ The browser package uses Keyring's default paths. If you change the prefix, tell
         'name' => env('KEYRING_WEBAUTHN_RP_NAME'),
     ],
     'origins' => [],
-    'timeout' => 60_000,
+    'timeout' => '60s',
 ],
 ```
 
-See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout` is in milliseconds.
+See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout` is a [duration](#durations).
 
-## Managing Authenticators
+## Account Changes and Enrollment
 
 ```php
-'manage_middleware' => ['keyring.fresh:15m'],
+'changes_middleware' => ['keyring.fresh:15m'],
 ```
 
 Extra middleware for adding, renaming and removing authenticators, revoking devices, changing the password and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default these routes need a verification in the last 15 minutes. See [Step-Up](step-up.md#fresh-verification).
@@ -176,13 +176,13 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 'protected' => [],
 
 'email_changes' => [
-    'expire' => '24h',
+    'confirmable_for' => '24h',
     'revertable_for' => '7d',
     'sign_out_others' => true,
 ],
 ```
 
-`sign_out_others` ends the account's other sessions when an email change applies.
+`confirmable_for` is how long the emailed confirmation link works, and `revertable_for` how long the old address can undo the change afterwards. `sign_out_others` ends the account's other sessions when an email change applies.
 
 `Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds `email`. List any others in `protected`. See [Protected Changes](protected-changes.md).
 
@@ -217,7 +217,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 ## Security Log
 
 ```php
-'events' => [
+'security_log' => [
     'keep_for' => '180d',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
 ],
@@ -228,7 +228,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 ## Security Emails
 
 ```php
-'notifications' => [],
+'security_notices' => [],
 ```
 
 The security notices to send, none by default. `keyring:install` offers the four NIST SP 800-63B asks for: `password_changed`, `authenticator_added`, `authenticator_removed` and `recovery_code_used`. `Keyring::sendSecurityNotices()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
@@ -236,9 +236,11 @@ The security notices to send, none by default. `keyring:install` offers the four
 ## Pending Logins, Timebox and Rate Limits
 
 ```php
-'pending_login_ttl' => '10m',
+'pending_logins' => [
+    'keep_for' => '10m',
+],
 
-'timebox' => 250_000,
+'timebox' => '250ms',
 
 'limits' => [
     'per_account' => 5,
@@ -247,9 +249,9 @@ The security notices to send, none by default. `keyring:install` offers the four
 ],
 ```
 
-`pending_login_ttl` is how long a half-finished login or confirmation stays valid, as a [duration](#durations). It's also the `expiresAt` shown on the challenge page.
+`pending_logins.keep_for` is how long a half-finished login or confirmation stays valid, as a [duration](#durations). It's also the `expiresAt` shown on the challenge page.
 
-`timebox` is the minimum time, in microseconds, that a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
+`timebox` is the minimum time a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
 
 `limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap). See [Rate Limiting](security.md#rate-limiting).
 

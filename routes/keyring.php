@@ -59,8 +59,8 @@ Route::middleware('auth:'.$guard)->group(function () {
         Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
     });
 
-    // Changing how someone signs in needs a recent verification (OWASP).
-    Route::middleware(config('keyring.manage_middleware'))->group(function () {
+    // Changing how someone signs in needs a recent verification.
+    Route::middleware(config('keyring.changes_middleware'))->group(function () {
         if (Features::enabled(Features::manageAuthenticators())) {
             Route::prefix('/user/authenticators')->name('keyring.authenticators.')->group(function () {
                 Route::post('/{factor}', [AuthenticatorController::class, 'store'])->block()->name('store');

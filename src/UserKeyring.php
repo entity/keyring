@@ -126,7 +126,7 @@ class UserKeyring
 
     /**
      * The keyring without recovery codes (a way back in, not a factor to
-     * rely on) or email codes (below NIST AAL2).
+     * rely on) or email codes (below AAL2).
      */
     public function withoutFallbacks(): static
     {

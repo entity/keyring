@@ -15,8 +15,8 @@ use Keyring\Exceptions\UnknownFactor;
 class FactorRegistry
 {
     /**
-     * Until the app chooses its own: NIST SP 800-63B asks for at least one
-     * phishing-resistant option, so passkeys are among them.
+     * Until the app chooses its own. Passkeys are among them, so there's a
+     * phishing-resistant option.
      *
      * @var list<class-string<Factor>|Factor|Closure(Container): Factor>
      */

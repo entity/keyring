@@ -42,7 +42,7 @@ abstract class TestCase extends Orchestra
         // Every feature, so the suite covers them all. Tests of a feature
         // being off turn it off themselves.
         $app['config']->set('keyring.features', Features::all());
-        $app['config']->set('keyring.notifications', ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used']);
+        $app['config']->set('keyring.security_notices', ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used']);
         // What a new Laravel app uses, so nothing relies on PHP serialization.
         $app['config']->set('session.serialization', 'json');
     }

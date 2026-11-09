@@ -10,6 +10,7 @@
     - [Account Changes](#account-changes)
     - [Links and Headers](#links-and-headers)
     - [Storage](#storage)
+- [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
 ## Introduction
@@ -26,9 +27,9 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 
 - A wrong password and an unknown account give the same error, on the same field, with the same status code.
 - A sign-in only succeeds for a user Keyring's guard would load back through its provider. A passkey that belongs to another model (say, staff when the guard signs in users) fails like an unknown one, even when the IDs match.
-- Every failed factor check takes at least `timebox` microseconds (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist.
+- Every failed factor check takes at least `timebox` (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist.
 - A password longer than its stored hash can check (72 bytes for bcrypt) fails like a wrong one, with the same error, timing and throttling, wherever Keyring checks a password: signing in, step-up, removing the last second factor and the current password on a change. The over-long value never reaches the hasher.
-- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_login_ttl`, as soon as the user's password changes, or when `keyring.guard` is no longer the guard they started under.
+- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_logins.keep_for`, as soon as the user's password changes, or when `keyring.guard` is no longer the guard they started under.
 - The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
@@ -117,6 +118,30 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
 - WebAuthn user handles are an HMAC of the user ID, never the ID or email.
 - The security log never holds passwords, codes, tokens or session IDs.
+
+## Standards
+
+Keyring's code and config say what each thing does. This is where the choices come from:
+
+| What Keyring does | From |
+|---|---|
+| Assurance levels, and what reaches AAL2 and AAL3 | NIST SP 800-63B |
+| Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours) | NIST SP 800-63B, reauthentication |
+| A cap of 100 failures in a row on an account's factor | NIST SP 800-63B, rate limiting |
+| Proving the account's factors again before adding a sign-in method | NIST SP 800-63B, binding an authenticator |
+| A phishing-resistant option among the default factors | NIST SP 800-63B |
+| Email codes being opt-in, and below AAL2 | NIST SP 800-63B, which rules out email for authentication codes |
+| The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
+| Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |
+| Refusing the most common passwords, and ones containing the app's or user's name | OWASP ASVS |
+| Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
+| Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
+| Locks that double each time, and a count of their own for browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |
+| Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last | OWASP's Authentication Cheat Sheet |
+| Password resets: the same answer for every address, links built from `APP_URL`, no automatic sign in, every session signed out | OWASP's Forgot Password Cheat Sheet |
+| Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
+| A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
+| Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
 
 ## Known Limitations
 

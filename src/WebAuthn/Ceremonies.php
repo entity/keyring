@@ -10,6 +10,7 @@ use Cose\Algorithm\Signature\RSA\RS256;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Facades\Keyring;
+use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
@@ -73,7 +74,7 @@ class Ceremonies
             // No attestation: any authenticator is accepted, like Fortify.
             attestation: PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
             excludeCredentials: $exclude,
-            timeout: config('keyring.webauthn.timeout'),
+            timeout: Duration::milliseconds(config('keyring.webauthn.timeout')),
         );
     }
 
@@ -87,7 +88,7 @@ class Ceremonies
             rpId: $this->relyingPartyId(),
             allowCredentials: $allow,
             userVerification: $userVerification,
-            timeout: config('keyring.webauthn.timeout'),
+            timeout: Duration::milliseconds(config('keyring.webauthn.timeout')),
         );
     }
 

@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\URL as Generator;
 
 /**
  * Links in emails are built from APP_URL, never from the request's Host
- * header, so a forged Host can't redirect reset links (OWASP). Signed links
+ * header, so a forged Host can't redirect reset links. Signed links
  * sign only the path and query, so routes check them with `signed:relative`.
  */
 final class Url

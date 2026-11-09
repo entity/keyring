@@ -11,7 +11,7 @@ use Keyring\Login\Verification;
  * What the signed-in user has proved during this session, and when. Used by
  * the assurance and freshness middleware.
  *
- * Each level lapses on its own clock, as NIST SP 800-63B asks: it only counts
+ * Each level lapses on its own clock: it only counts
  * verifications made within its overall limit (sessions.levels.aal2.absolute,
  * 24 hours by default), and inactivity past its idle limit (an hour at AAL2)
  * lapses it until the user proves every factor for it again. The session

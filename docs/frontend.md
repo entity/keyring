@@ -286,7 +286,7 @@ Route::get('/settings/security', SecuritySettingsController::class)
     ->middleware(['auth', 'keyring.fresh:15m']);
 ```
 
-Use a window no longer than the one in `manage_middleware`, so the page doesn't outlive the routes it calls.
+Use a window no longer than the one in `changes_middleware`, so the page doesn't outlive the routes it calls.
 
 The same applies to any of your own routes behind `keyring:aal2` or `keyring.fresh` that you call with `fetch` or `json()`.
 

@@ -141,9 +141,9 @@ class AuthenticatorChanges
 
     /**
      * The password may have been as short as min_with_mfa while it had a
-     * second factor beside it. On its own it needs min_without_mfa (NIST
-     * SP 800-63B), and only the user can say how long it is, so removing the
-     * last second factor takes it, typed again.
+     * second factor beside it. On its own it needs min_without_mfa, and only
+     * the user can say how long it is, so removing the last second factor
+     * takes it, typed again.
      *
      * @throws ValidationException
      */

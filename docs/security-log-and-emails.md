@@ -22,7 +22,7 @@ The log never holds passwords, codes, tokens or session IDs.
 Turn it on with `Features::securityLog()`. Its options:
 
 ```php
-'events' => [
+'security_log' => [
     'keep_for' => '180d',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
 ],
@@ -80,7 +80,7 @@ return Inertia::render('settings/security', [
 
 ### Pruning
 
-`SecurityEvent` is mass prunable: entries older than `events.keep_for` (180 days) are deleted by `keyring:prune`, along with Keyring's other old records. Schedule it daily:
+`SecurityEvent` is mass prunable: entries older than `security_log.keep_for` (180 days) are deleted by `keyring:prune`, along with Keyring's other old records. Schedule it daily:
 
 ```php
 use Illuminate\Support\Facades\Schedule;
@@ -100,7 +100,7 @@ After a successful sign in, Keyring flashes `keyring.alerts` to the session: a l
 ]
 ```
 
-The types that become alerts are listed in `events.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted` and `clone_suspected`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
+The types that become alerts are listed in `security_log.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted` and `clone_suspected`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
 
 To read them yourself, call `Keyring\Activity\SecurityLog::pullAlerts($user)`. It returns the unseen alert entries, newest first, and marks them seen, so each comes back once.
 
@@ -119,10 +119,10 @@ public function share(Request $request): array
 
 ## Security Emails
 
-Keyring can tell users about security events. It sends none until you list them in the `notifications` config option. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on:
+Keyring can tell users about security events. It sends none until you list them in the `security_notices` config option. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on:
 
 ```php
-'notifications' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
+'security_notices' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
 ```
 
 Or turn them all on in `KeyringServiceProvider`:
@@ -137,7 +137,7 @@ Or pick the ones you want:
 Keyring::sendSecurityNotices(['new_device', 'second_factor_failed']);
 ```
 
-An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `notifications` config option. `Keyring::sendSecurityNotices()` takes precedence over it.
+An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `security_notices` config option. `Keyring::sendSecurityNotices()` takes precedence over it.
 
 Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless you [choose other channels](#slack-sms-and-other-channels), and queued once any open database transaction commits. Each one includes when it happened, the device and the IP address of the request that caused it.
 
