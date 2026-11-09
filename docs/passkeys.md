@@ -101,7 +101,9 @@ Passkeys sign in on their own:
 
 The same options work for autofill, where the browser lists passkeys in the email field (give the field `autocomplete="username webauthn"`). The browser package's `usePasskeyLogin({ autofill: true })` starts that for you. See [Frontend](frontend.md#signing-in-with-a-passkey).
 
-These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket every user shares.
+A challenge works once, for this kind of sign in only: trying it spends it, even if the sign in fails, and it can't finish the second factor of a password login or a step-up. Those use the challenge their own page issued.
+
+These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket every user shares. Fetching the options has its own limit of 60 requests a minute per IP address, so a login page that reloads (and an office sharing one address) doesn't run out.
 
 Security keys can't do this. `/login/security-key` and `/login/security-key/options` return a `404`.
 

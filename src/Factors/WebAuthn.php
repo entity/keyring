@@ -9,6 +9,7 @@ use Keyring\Contracts\DiscoverableFactor;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enrollment\Enrollment;
+use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Enums\Category;
 use Keyring\Events\CloneSuspected;
 use Keyring\Facades\Keyring;
@@ -123,6 +124,10 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     public function identify(Request $request): ?Authenticator
     {
+        // Only this path may spend a usernameless challenge, and trying it
+        // spends it even when no key matches.
+        $request->attributes->set(static::LOGIN_OPTIONS, $request->session()->pull(static::LOGIN_OPTIONS.'.'.$this->key()));
+
         $id = $this->profile->primary ? $this->ceremonies()->credentialId($this->credential($request)) : null;
 
         if ($id === null) {
@@ -152,8 +157,11 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $options = $attempt->state($this->key(), 'options')
-            ?? $request->session()->pull(static::LOGIN_OPTIONS.'.'.$this->key());
+        // This attempt's own challenge, or the one identify() took. Spent here,
+        // so a failure can't be retried.
+        $options = $attempt->state($this->key(), 'options') ?? $request->attributes->get(static::LOGIN_OPTIONS);
+        $attempt->forget($this->key());
+
         $credential = $this->credential($request);
 
         // The browser may answer with any of the user's keys, not just the one shown.
@@ -166,29 +174,37 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             return null;
         }
 
+        $result = null;
+
         try {
-            $result = $this->ceremonies()->assert(
-                $credential,
-                $options,
-                $this->ceremonies()->fromJson($actual->public_key, CredentialRecord::class),
-            );
+            // Against the locked row, so parallel assertions can't both pass
+            // one stored count and a slower write can't lower it.
+            $this->consume($actual, function (Authenticator $locked) use (&$result, $credential, $options) {
+                $result = $this->ceremonies()->assert(
+                    $credential,
+                    $options,
+                    $this->ceremonies()->fromJson($locked->public_key, CredentialRecord::class),
+                );
+
+                if ($result === null) {
+                    return false;
+                }
+
+                // Whether the key may sync is reported again on every sign in.
+                $locked->withMeta('backup_eligible', $result['backupEligible'])->forceFill([
+                    'public_key' => $this->ceremonies()->toJson($result['record']),
+                    'sign_count' => $result['record']->counter,
+                ]);
+
+                return true;
+            });
         } catch (CounterException) {
             CloneSuspected::dispatch($actual);
-
-            $result = null;
         }
-
-        $attempt->forget($this->key());
 
         if ($result === null) {
             return null;
         }
-
-        // Whether the key may sync is reported again on every sign in.
-        $actual->withMeta('backup_eligible', $result['backupEligible'])->forceFill([
-            'public_key' => $this->ceremonies()->toJson($result['record']),
-            'sign_count' => $result['record']->counter,
-        ])->save();
 
         return $this->verified(
             $actual,
@@ -217,6 +233,9 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
+        // A registration challenge is single use too, whether or not this works.
+        app(EnrollmentStore::class)->forget($this->key());
+
         $record = $this->ceremonies()->register($this->credential($request), $enrollment->state('options'));
 
         if ($record === null) {

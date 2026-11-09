@@ -49,14 +49,15 @@ How they count:
 - A success clears the account's count. On the per-IP count, a success only takes back its own attempt. People signing in from one office address don't use up its limit, and an attacker can't reset the limit by signing in to an account of their own between guesses.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
 
-Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
+Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Usernameless passkey options have their own limiter, `keyring-login-options`, at 60 requests a minute per IP address, because the login page fetches them on every load for autofill. Apps can redefine either limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
 
 ### Single-Use Codes
 
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
 - Email codes are random, eight digits, expire after 10 minutes, allow five wrong guesses, and are replaced by any newer code. A sent code only verifies the authenticator it was sent to.
-- WebAuthn challenges are random 32 byte values, kept on the server and dropped after one verification, so a response can't be replayed.
+- WebAuthn challenges are random 32 byte values, kept on the server and dropped on the first verification, whether it succeeds or not, so a response can't be replayed. If a passkey verifies on the second-factor step and a later check such as a risk lock refuses the login, the challenge stays with that pending login until it expires. A challenge only completes the ceremony it was issued for: one from the usernameless login options can't finish a second factor or a step-up.
+- A passkey's signature counter is checked and saved under the same kind of row lock, so two assertions can't both pass against one stored count, and a slower request can't lower it.
 
 ### Second Factors and Step-Up
 

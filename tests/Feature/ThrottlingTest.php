@@ -208,3 +208,15 @@ describe('failures in a row, however slowly they come', function () {
         $this->assertAuthenticatedAs($this->user);
     });
 });
+
+it('allows a reloading login page its passkey options, and stops a flood of them per address', function () {
+    foreach (range(1, 60) as $reload) {
+        $this->getJson(route('keyring.login.options', 'passkey'))->assertOk();
+    }
+
+    $this->getJson(route('keyring.login.options', 'passkey'))->assertTooManyRequests();
+
+    $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])
+        ->getJson(route('keyring.login.options', 'passkey'))
+        ->assertOk();
+});
