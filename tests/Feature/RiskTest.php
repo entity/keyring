@@ -19,6 +19,7 @@ use Keyring\Risk\Action;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
+use Keyring\Risk\RiskEngine;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
@@ -71,6 +72,7 @@ function signInAs(string $agent = FIREFOX, string $password = 'password', array 
 }
 
 it('asks for another factor when risk is medium', function () {
+    Keyring::risk([NewDevice::class, NewCountry::class]);
     Keyring::require(Requirement::aal1());
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $this->locator->location = ['country' => 'GB'];
@@ -325,3 +327,8 @@ class DatabaseSecurityNotice extends SecurityNotice
         return ['database'];
     }
 }
+
+it('runs no signals until the app picks some', function () {
+    expect(new RiskEngine(app())->signalsFor(Checkpoint::Login))->toBe([])
+        ->and(new RiskEngine(app())->signalsFor(Checkpoint::Request))->toBe([]);
+});
