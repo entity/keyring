@@ -191,6 +191,18 @@ it('signs in with a recovery code once', function () {
     $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertSessionHasErrors('code');
 });
 
+it('signs in with the last recovery code', function () {
+    $user = taylor();
+    totpFor($user);
+    Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->get(route('keyring.login.challenge', ['recovery']));
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect('/dashboard');
+
+    $this->assertAuthenticatedAs($user);
+});
+
 it('locks out after too many failures', function () {
     config(['keyring.limits.per_account' => 2]);
     taylor();
