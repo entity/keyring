@@ -8,7 +8,7 @@ use Illuminate\Support\Timebox;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
-use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
@@ -24,6 +24,7 @@ class VerifyFactor
     public function __construct(
         protected Container $container,
         protected AttemptStore $attempts,
+        protected KeyringManager $keyring,
     ) {}
 
     public function handle(Context $context, Closure $next): Context
@@ -36,7 +37,7 @@ class VerifyFactor
             if ($context->identifying && $context->factor instanceof PrimaryFactor) {
                 $authenticator = $context->factor->identify($context->request);
 
-                $context->authenticator = $authenticator !== null && Keyring::belongsToGuard($authenticator->user()) ? $authenticator : null;
+                $context->authenticator = $authenticator !== null && $this->keyring->belongsToGuard($authenticator->user()) ? $authenticator : null;
 
                 if ($context->authenticator !== null) {
                     $context->attempt = Attempt::start(
