@@ -56,8 +56,8 @@ it('does not reset the per-ip counter when the attacker signs in to their own ac
         ->assertRedirect(route('keyring.login.challenge'));
     $this->post('/login', ['email' => 'v3@example.com', 'password' => 'nope']);
 
-    $error = $this->post('/login', ['email' => 'v4@example.com', 'password' => 'nope'])
-        ->getSession()->get('errors')->first('email');
+    $this->post('/login', ['email' => 'v4@example.com', 'password' => 'nope']);
+    $error = $this->sessionErrors()->first('email');
 
     expect($error)->toContain('Too many');
 });
@@ -69,8 +69,8 @@ it('counts spelling variants of the same address against one account limit', fun
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
 
-    $error = $this->post('/login', ['email' => ' TÂYLOR@example.com ', 'password' => 'nope'])
-        ->getSession()->get('errors')->first('email');
+    $this->post('/login', ['email' => ' TÂYLOR@example.com ', 'password' => 'nope']);
+    $error = $this->sessionErrors()->first('email');
 
     expect($error)->toContain('Too many');
 });
@@ -143,8 +143,8 @@ it('lets the owner sign in from a known device while someone else is locked out'
         $this->withUnencryptedCookies([])->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
     }
 
-    $error = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
-        ->getSession()->get('errors')->first('email');
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $error = $this->sessionErrors()->first('email');
     expect($error)->toContain('Too many');
 
     $this->withCookie('keyring_device', $device)

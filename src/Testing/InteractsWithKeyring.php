@@ -3,7 +3,9 @@
 namespace Keyring\Testing;
 
 use DateTimeInterface;
+use Illuminate\Support\MessageBag;
 use Illuminate\Support\Timebox;
+use Illuminate\Support\ViewErrorBag;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Login\Verification;
@@ -48,6 +50,22 @@ trait InteractsWithKeyring
         $this->keyringVerifiedAt = $at;
 
         return $this->withKeyringSession();
+    }
+
+    /**
+     * The validation errors the last request flashed. Laravel stores them as
+     * a plain array once it saves a JSON session (the default in new apps),
+     * so session('errors') isn't always a ViewErrorBag.
+     */
+    public function sessionErrors(string $bag = 'default'): MessageBag
+    {
+        $errors = session('errors');
+
+        if ($errors instanceof ViewErrorBag) {
+            return $errors->getBag($bag);
+        }
+
+        return new MessageBag(is_array($errors) ? $errors[$bag]['messages'] ?? [] : []);
     }
 
     protected function withKeyringSession(): static
