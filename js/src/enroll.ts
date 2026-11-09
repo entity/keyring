@@ -1,7 +1,7 @@
-import { json } from './http'
-import { routes } from './routes'
-import type { Enrollment } from './types'
-import { createCredential } from './webauthn'
+import { json } from './http.js'
+import { routes } from './routes.js'
+import type { Enrollment } from './types.js'
+import { createCredential } from './webauthn.js'
 
 /**
  * Whether an enrollment needs the browser's WebAuthn ceremony. Decided by

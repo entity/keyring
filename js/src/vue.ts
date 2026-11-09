@@ -1,12 +1,12 @@
 import { useForm } from '@inertiajs/vue3'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, type Component } from 'vue'
-import { challengeFields, errorMessage, keyPrompt, passkeyLogin, sendCode, switchTo, type PasskeyLoginOptions } from './challenge'
-import { routes } from './routes'
-import type { AuthenticatorSummary, ChallengeProps } from './types'
-import { supportsWebAuthn } from './webauthn'
+import { challengeFields, errorMessage, keyPrompt, passkeyLogin, sendCode, switchTo, type PasskeyLoginOptions } from './challenge.js'
+import { routes } from './routes.js'
+import type { AuthenticatorSummary, ChallengeProps } from './types.js'
+import { supportsWebAuthn } from './webauthn.js'
 
-export * from './index'
-export * from './challenge'
+export * from './index.js'
+export * from './challenge.js'
 
 export type Challenge = ReturnType<typeof useChallenge>
 
