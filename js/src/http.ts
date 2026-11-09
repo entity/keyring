@@ -2,7 +2,7 @@
  * Small JSON requests for the steps that aren't page visits (fetching
  * WebAuthn options, enrolling). Sends Laravel's XSRF cookie like Inertia does.
  */
-export async function json<T = any>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, body?: unknown): Promise<T> {
+export async function json<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, body?: unknown): Promise<T> {
   const token = xsrf()
 
   const response = await fetch(url, {

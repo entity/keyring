@@ -38,9 +38,11 @@ class User extends Authenticatable implements MustVerifyEmail
 }
 ```
 
+Without the trait, signing in throws a `Keyring\Exceptions\MissingTrait` exception naming the model, rather than working without the protection it adds.
+
 ## Your Pages
 
-Keyring is headless, like Fortify: it handles the requests, and you build the pages. With Inertia, it renders `auth/{page}` components. Without it, it renders Blade views named `auth.{page}`. A missing view throws an error that names the file to create and the data it receives.
+Keyring is headless, like Fortify: it handles the requests, and you build the pages. With Inertia, it renders `auth/{page}` components. Without it, it renders Blade views named `auth.{page}`. A missing view throws an error that names the file to create and the data it receives. So does a missing Inertia component, when Inertia's `pages.ensure_pages_exist` option is on.
 
 To start, you need:
 
@@ -69,7 +71,7 @@ Users land on `home` from `config/keyring.php` once they're in, `/dashboard` unl
 
 ## Testing
 
-Use `InteractsWithKeyring` in your base test case. It adds `withAssurance()`, `freshAt()` and `sessionErrors()`, and skips the timing delay on failed checks:
+Use `InteractsWithKeyring` in your base test case. It adds `withAssurance()`, `verifiedWith()`, `freshAt()`, `totpCode()` and `sessionErrors()`, and skips the timing delay on failed checks:
 
 ```php
 use Keyring\Testing\InteractsWithKeyring;

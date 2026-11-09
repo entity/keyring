@@ -24,8 +24,9 @@ class PasswordController
         // Keyring's own field; the rest of the request is the action's.
         $request->validate(['sign_out_others' => ['sometimes', 'boolean']]);
 
-        // The action checks this itself, usually with Laravel's current_password
-        // rule, which goes straight to the hasher.
+        // The action checks this itself. The published one uses Keyring's
+        // CurrentPassword rule; Laravel's current_password goes straight to
+        // the hasher, so this covers an action that still uses it.
         $input = $request->all();
 
         if (is_string($input['current_password'] ?? null)) {

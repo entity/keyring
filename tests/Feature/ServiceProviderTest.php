@@ -1,7 +1,10 @@
 <?php
 
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Route;
+use Inertia\ServiceProvider;
 use Keyring\Exceptions\MissingPage;
+use Keyring\Exceptions\MissingTrait;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Totp;
 use Keyring\Features;
@@ -36,11 +39,22 @@ it('registers custom factors with extend, under the key they report', function (
 });
 
 it('says which blade view a page needs and what it receives', function () {
-    expect(MissingPage::for('login', 'auth.login', ['canResetPassword', 'status'])->getMessage())
+    expect(MissingPage::forBlade('login', 'auth.login', ['canResetPassword', 'status'])->getMessage())
         ->toContain('resources/views/auth/login.blade.php')
         ->toContain('$canResetPassword, $status')
         ->toContain("Keyring::page('login', ...)");
 });
+
+it('says which inertia component a page needs when inertia checks that pages exist', function () {
+    $this->app->register(ServiceProvider::class);
+    config(['inertia.pages.ensure_pages_exist' => true]);
+
+    $this->withoutExceptionHandling()->inertia()->get('/login');
+})->throws(MissingPage::class, 'Create [auth/login] in your pages directory (it receives canResetPassword');
+
+it('says which trait a user model is missing', function () {
+    Keyring::for(new class extends User {});
+})->throws(MissingTrait::class, 'needs the [Keyring\\Concerns\\HasKeyring] trait');
 
 it('merges the app\'s config over its defaults key by key, but replaces lists whole', function () {
     config(['keyring' => ['sessions' => ['absolute' => '7d', 'levels' => ['aal2' => ['idle' => '30m']]], 'features' => [Features::devices()]]]);

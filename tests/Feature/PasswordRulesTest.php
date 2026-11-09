@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Enums\Assurance;
 use Keyring\Models\Authenticator;
+use Keyring\Rules\CurrentPassword;
 use Keyring\Support\PasswordRules;
 use Keyring\Tests\Fixtures\User;
 
@@ -192,6 +193,18 @@ describe('checking a password against its stored hash', function () {
 
         $change($this->exact)->assertOk();
         expect(Hash::check($new, $user->fresh()->password))->toBeTrue();
+    });
+
+    it('refuses an over-long password in the current password rule on its own', function () {
+        $checked = recordHashChecks();
+        $user = taylor(['password' => $this->exact]);
+
+        $errors = fn (mixed $current) => Validator::make(['current_password' => $current], ['current_password' => new CurrentPassword($user)])->errors()->all();
+
+        expect($errors($this->tooLong))->toBe($errors('wrong'))->toBe([__('validation.current_password')])
+            ->and($errors(['an', 'array']))->toBe([__('validation.current_password')])
+            ->and($errors($this->exact))->toBe([])
+            ->and($checked->getArrayCopy())->not->toContain($this->tooLong);
     });
 
     it('fails an over-long password when removing the last second factor, and takes the right one', function () {
