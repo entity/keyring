@@ -169,7 +169,7 @@ All Keyring events are in `Keyring\Events`. Laravel's `Login`, `Logout`, `Regist
 
 ### Rate Limiting
 
-Fortify uses two named rate limiters, `login` and `two-factor`. Keyring limits every factor per account and per IP inside the pipeline, with `keyring.limits` as the defaults, and locks out repeated failures for longer each time. See [Rate Limiting](security.md#rate-limiting). Remove your `RateLimiter::for('login', ...)` and `RateLimiter::for('two-factor', ...)` definitions.
+Fortify uses two named rate limiters, `login` and `two-factor`. Keyring limits every factor per account and per IP inside the pipeline, with `keyring.limits` as the defaults, and locks out an account's repeated failures for longer each time. See [Rate Limiting](security.md#rate-limiting). Remove your `RateLimiter::for('login', ...)` and `RateLimiter::for('two-factor', ...)` definitions.
 
 Keyring's other form routes (registration, password resets, email changes, enrollment) use one named limiter, `keyring`, 6 requests a minute by default. Define `RateLimiter::for('keyring', ...)` to change it.
 

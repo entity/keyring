@@ -24,10 +24,14 @@ class EnsureNotThrottled
     {
         $limits = $context->factor->limits($context->request, $context->attempt);
 
+        // Consecutive and shared limits have no lock of their own: they refuse
+        // at the cap. Checked before anything is counted, so an attempt the
+        // address refuses doesn't use up the account's budget.
         foreach ($limits as $limit) {
-            $key = $limit instanceof ConsecutiveLimit ? static::key($limit) : $this->lock($limit);
+            $atCap = $limit instanceof ConsecutiveLimit || $limit instanceof SharedLimit;
+            $key = $atCap ? static::key($limit) : $this->lock($limit);
 
-            if ($this->limiter->tooManyAttempts($key, $limit instanceof ConsecutiveLimit ? $limit->maxAttempts : 1)) {
+            if ($this->limiter->tooManyAttempts($key, $atCap ? $limit->maxAttempts : 1)) {
                 return $this->lockout($context, $this->limiter->availableIn($key));
             }
         }
@@ -57,6 +61,10 @@ class EnsureNotThrottled
      * Once a key reaches its limit, lock it. Each lock lasts twice as long as
      * the last one (OWASP), up to a day. The lockout count resets a day after
      * the first lockout.
+     *
+     * A shared limit is never locked, or everyone on that address would pay
+     * for one person's failures. Its window already refuses attempts over
+     * the limit until it ends.
      */
     protected function failed(Limit $limit): void
     {
@@ -70,7 +78,7 @@ class EnsureNotThrottled
             return;
         }
 
-        if ($this->limiter->attempts($key) < $limit->maxAttempts) {
+        if ($limit instanceof SharedLimit || $this->limiter->attempts($key) < $limit->maxAttempts) {
             return;
         }
 
