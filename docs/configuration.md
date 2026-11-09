@@ -87,7 +87,7 @@ Signed-out users are sent to the route named `login`.
 'middleware' => ['web'],
 ```
 
-Keyring registers its routes inside a group with this prefix, domain and middleware. It always adds a middleware that sends `Cache-Control: no-store, private` on every Keyring response.
+Keyring registers its routes inside a group with this prefix, domain and middleware. It always adds a middleware that sends `Cache-Control: no-store, private` and `Referrer-Policy: no-referrer` on every Keyring response.
 
 If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring::routes()` where you want them, for example inside your own group:
 

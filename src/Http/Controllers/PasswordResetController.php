@@ -6,7 +6,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\PasswordBroker;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\PasswordChanges;
@@ -14,7 +13,6 @@ use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Symfony\Component\HttpFoundation\Response;
 
 use function Illuminate\Support\defer;
 
@@ -51,16 +49,12 @@ class PasswordResetController
         return $this->status('reset-link-sent');
     }
 
-    public function edit(Request $request, string $token): Response
+    public function edit(Request $request, string $token): mixed
     {
-        $response = Router::toResponse($request, $this->keyring->render('reset-password', [
+        return $this->keyring->render('reset-password', [
             'token' => $token,
             'email' => (string) $request->query($this->keyring->username()),
-        ]));
-
-        $response->headers->set('Referrer-Policy', 'no-referrer');
-
-        return $response;
+        ]);
     }
 
     public function update(Request $request, ResetsUserPasswords $resetter): StatusResponse
