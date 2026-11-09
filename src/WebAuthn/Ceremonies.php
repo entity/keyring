@@ -91,6 +91,9 @@ class Ceremonies
         );
     }
 
+    /**
+     * @param  list<string>  $transports
+     */
     public function descriptor(string $credentialId, array $transports = []): PublicKeyCredentialDescriptor
     {
         return PublicKeyCredentialDescriptor::create(

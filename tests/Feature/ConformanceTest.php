@@ -39,6 +39,9 @@ class ConformanceTest extends TestCase
         return User::create(['name' => 'Taylor', 'email' => 'taylor-'.uniqid().'@example.com', 'password' => 'password', 'email_verified_at' => now()]);
     }
 
+    /**
+     * @return list<class-string>
+     */
     protected function keyringAcknowledgedDangerousSteps(): array
     {
         return $this->acknowledged;
