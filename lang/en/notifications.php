@@ -43,6 +43,15 @@ return [
         'intro' => '":name" answered with an out-of-date counter, which can mean it was copied. We refused the sign-in.',
     ],
 
+    'email_changed' => [
+        'subject' => 'Your email address was changed',
+        'intro' => 'The email address on your account was just changed. You now sign in and recover your account with the new address. To undo it, use the link in the email we sent to the old address when the change was requested.',
+    ],
+    'email_change_reverted' => [
+        'subject' => 'Your email address change was undone',
+        'intro' => 'A change to the email address on your account was just undone, and you were signed out everywhere.',
+    ],
+
     'verification_code' => [
         'subject' => 'Your verification code',
         'intro' => 'Your verification code is:',

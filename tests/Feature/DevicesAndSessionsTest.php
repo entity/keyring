@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -27,6 +28,7 @@ use Keyring\Risk\Action;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
+use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
@@ -220,6 +222,60 @@ it('registers sessions that started some other way', function () {
     $this->actingAs($this->user)->get('/home')->assertOk();
 
     expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
+});
+
+describe('coming back with a "remember me" cookie', function () {
+    beforeEach(function () {
+        $response = test()->withHeader('User-Agent', FIREFOX)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+
+        $this->device = deviceCookie($response);
+        $user = $this->user->fresh();
+        $recaller = [Auth::guard()->getRecallerName() => $user->id.'|'.$user->remember_token.'|'.$user->password];
+
+        // The session is gone and only the cookies are left.
+        $this->flushSession();
+        Auth::forgetGuards();
+
+        $this->comeBack = fn (array $cookies = []) => $this->withHeader('User-Agent', FIREFOX)
+            ->withCookies([...$recaller, ...$cookies])
+            ->get('/home');
+    });
+
+    it('registers the session on the device it was remembered on', function () {
+        Event::fake([NewDeviceSignedIn::class]);
+
+        ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
+
+        expect(Device::count())->toBe(1)
+            ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->deviceId)->toBe(Device::sole()->id);
+        Event::assertNotDispatched(NewDeviceSignedIn::class);
+    });
+
+    it('announces a browser the account has not used as a new device', function () {
+        Event::fake([NewDeviceSignedIn::class]);
+
+        ($this->comeBack)()->assertOk()->assertCookie('keyring_device');
+
+        expect(Device::count())->toBe(2);
+        Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
+    });
+
+    it('is refused while the account is risk locked', function () {
+        app(RiskLocks::class)->lock($this->user, 3600);
+
+        ($this->comeBack)(['keyring_device' => $this->device])->assertRedirect('/login');
+
+        $this->assertGuest();
+        expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'risk']);
+    });
+
+    it('leaves a session that is already signed in alone while the account is risk locked', function () {
+        ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
+        app(RiskLocks::class)->lock($this->user, 3600);
+
+        $this->withHeader('User-Agent', FIREFOX)->get('/home')->assertOk();
+    });
 });
 
 it('revokes the registered session on logout and clears site data', function () {

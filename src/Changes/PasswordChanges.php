@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
 use Keyring\KeyringManager;
-use Keyring\Pipeline\ConsecutiveLimit;
+use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use LogicException;
@@ -16,8 +16,8 @@ use LogicException;
 /**
  * What always happens around a new password, whatever the app's action does
  * to validate and save it. Whoever knew the old one shouldn't keep what they
- * did with it: pending email changes are cancelled, and other sessions are
- * signed out.
+ * did with it: pending email changes are cancelled, outstanding reset links
+ * stop working, and other sessions are signed out.
  */
 class PasswordChanges
 {
@@ -26,6 +26,7 @@ class PasswordChanges
         protected Sessions $sessions,
         protected EmailChanges $emailChanges,
         protected RiskLocks $locks,
+        protected ResetTokens $resetTokens,
     ) {}
 
     /**
@@ -48,8 +49,9 @@ class PasswordChanges
 
     /**
      * The user proved they own the address with a reset link, and $save set
-     * the new password. Every session is signed out, and risk locks are
-     * lifted so a lock can't keep the owner out for good.
+     * the new password. Every session is signed out, and risk locks and the
+     * account's throttle locks are lifted so a lock can't keep the owner out
+     * for good.
      *
      * @param  Closure(): void  $save
      */
@@ -58,7 +60,7 @@ class PasswordChanges
         $this->save($user, $save);
         $this->sessions->revokeAll($user);
         $this->locks->unlock($user);
-        ConsecutiveLimit::forget($user);
+        EnsureNotThrottled::clearAccount($user);
 
         PasswordReset::dispatch($user);
     }
@@ -81,5 +83,6 @@ class PasswordChanges
         }
 
         $this->emailChanges->cancel($user);
+        $this->resetTokens->forget($user);
     }
 }

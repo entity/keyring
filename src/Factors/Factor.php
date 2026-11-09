@@ -61,9 +61,15 @@ abstract class Factor implements FactorContract
      * Requests that don't name an account (like a usernameless passkey) only
      * get the per-IP limit, so they can't fill one bucket every user shares.
      *
-     * A browser the account has signed in from before gets a bucket of its
-     * own (OWASP "device cookies"), so someone guessing elsewhere can't lock
-     * the owner out.
+     * A browser the account has signed in from before gets a bucket and an
+     * in-a-row count of its own (OWASP "device cookies"), so someone guessing
+     * elsewhere can't lock the owner out. Per IP it counts for that account
+     * alone, so others on a shared address can't hold it up. That's per
+     * account rather than per device so that several stolen cookies share
+     * one count.
+     *
+     * The per-IP limit comes first, so an attempt the address refuses is
+     * never counted against the account.
      */
     public function limits(Request $request, ?Attempt $attempt): array
     {
@@ -71,31 +77,41 @@ abstract class Factor implements FactorContract
             ? (string) $attempt->userId
             : $this->normalizeAccount((string) $request->input(Keyring::username()));
 
-        $bucket = $this->key().'|account|'.$account.$this->knownDevice($request, $attempt, $account);
-
+        $device = $this->knownDevice($request, $attempt, $account);
         $consecutive = config('keyring.limits.consecutive');
 
         return array_values(array_filter([
-            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by($bucket),
-            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account),
-            SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip()),
+            SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($this->key().'|ip|'.$request->ip().($device === null ? '' : '|account|'.$account)),
+            $account === '' ? null : Limit::perMinute(config('keyring.limits.per_account'))->by(static::accountBucket($this->key(), $account, $device)),
+            $account === '' || $consecutive === null ? null : ConsecutiveLimit::of($consecutive, $this->key(), $account, $device),
         ]));
     }
 
     /**
-     * "|device|{id}" when the request's device cookie belongs to the account.
+     * The device's ID when the request's device cookie belongs to the account.
+     * Compares the user or the normalised username, not the transliterated
+     * rate limit key, or a cookie for victim@exämple.com would count as one
+     * for victim@example.com.
      */
-    protected function knownDevice(Request $request, ?Attempt $attempt, string $account): string
+    protected function knownDevice(Request $request, ?Attempt $attempt, string $account): ?string
     {
-        $device = $account === '' ? null : app(DeviceManager::class)->forBrowser($request)->first(function (Device $device) use ($attempt, $account) {
+        $device = $account === '' ? null : app(DeviceManager::class)->forBrowser($request)->first(function (Device $device) use ($request, $attempt) {
             $user = $device->user();
 
-            return $user !== null && $account === ($attempt !== null
-                ? (string) $user->getAuthIdentifier()
-                : $this->normalizeAccount((string) $user->getAttribute(Keyring::username())));
+            return $user !== null && ($attempt !== null
+                ? $user->is($attempt->user())
+                : Keyring::normalizeUsername((string) $request->input(Keyring::username())) === Keyring::normalizeUsername((string) $user->getAttribute(Keyring::username())));
         });
 
-        return $device === null ? '' : '|device|'.$device->id;
+        return $device?->id;
+    }
+
+    /**
+     * The key of an account's per-minute limit, or of a known device's.
+     */
+    public static function accountBucket(string $factor, string $account, ?string $device = null): string
+    {
+        return $factor.'|account|'.$account.($device === null ? '' : '|device|'.$device);
     }
 
     protected function normalizeAccount(string $account): string

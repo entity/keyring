@@ -50,6 +50,9 @@ final class Attempt
     /** Whether risk asked for an extra factor. */
     public bool $stepUp = false;
 
+    /** Whether a code ran out of guesses, so the user has to start again. */
+    public bool $exhausted = false;
+
     /**
      * @param  list<Verification>  $verifications
      * @param  array<string, array<string, mixed>>  $state
@@ -204,6 +207,7 @@ final class Attempt
             'device' => ['id' => $this->deviceId, 'resolved' => $this->deviceResolved, 'trust' => $this->trustDevice],
             'risk' => $this->risk?->toArray(),
             'step_up' => $this->stepUp,
+            'exhausted' => $this->exhausted,
         ];
     }
 
@@ -230,6 +234,7 @@ final class Attempt
         $attempt->trustDevice = $data['device']['trust'] ?? false;
         $attempt->risk = isset($data['risk']) ? Risk::fromArray($data['risk']) : null;
         $attempt->stepUp = $data['step_up'] ?? false;
+        $attempt->exhausted = $data['exhausted'] ?? false;
 
         return $attempt;
     }

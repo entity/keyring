@@ -17,7 +17,7 @@
 
 Keyring covers what Fortify does (login, registration, password reset, email verification, password confirmation, two factor authentication) and replaces it. Fortify keeps two factor state in three columns on `users`, which gives one authenticator app per user. Keyring keeps every sign-in method in its own table, so users can have several.
 
-Your users keep their passwords, authenticator apps, recovery codes and `laravel/passkeys` passkeys.
+Your users keep their passwords, authenticator apps, recovery codes and `laravel/passkeys` passkeys. The exception is a password over 72 bytes on a bcrypt hash: bcrypt only ever stored its first 72 bytes, and Keyring refuses longer input rather than comparing a truncated value, so those users need to reset their password.
 
 ## Steps
 
@@ -28,6 +28,8 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
    php artisan keyring:install
    php artisan migrate
    ```
+
+   When `keyring:install` asks, pick the sign-in methods your users already have: the authenticator app if you use Fortify's two factor, and passkeys if you use `laravel/passkeys`. Also turn on registration, password resets, email verification and password changes if you used those Fortify features. Keyring refuses to sign in a user with authenticators for a method it doesn't have registered, and `keyring:import` won't import into one.
 
 2. Add `Keyring\Concerns\HasKeyring` to your user model. You can leave Fortify's `TwoFactorAuthenticatable` trait in place until the import is done.
 
@@ -169,7 +171,7 @@ All Keyring events are in `Keyring\Events`. Laravel's `Login`, `Logout`, `Regist
 
 ### Rate Limiting
 
-Fortify uses two named rate limiters, `login` and `two-factor`. Keyring limits every factor per account and per IP inside the pipeline, with `keyring.limits` as the defaults, and locks out repeated failures for longer each time. See [Rate Limiting](security.md#rate-limiting). Remove your `RateLimiter::for('login', ...)` and `RateLimiter::for('two-factor', ...)` definitions.
+Fortify uses two named rate limiters, `login` and `two-factor`. Keyring limits every factor per account and per IP inside the pipeline, with `keyring.limits` as the defaults, and locks out an account's repeated failures for longer each time. See [Rate Limiting](security.md#rate-limiting). Remove your `RateLimiter::for('login', ...)` and `RateLimiter::for('two-factor', ...)` definitions.
 
 Keyring's other form routes (registration, password resets, email changes, enrollment) use one named limiter, `keyring`, 6 requests a minute by default. Define `RateLimiter::for('keyring', ...)` to change it.
 

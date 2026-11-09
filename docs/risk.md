@@ -106,7 +106,7 @@ Build an action with one of the static constructors and chain extras:
 | `->lockFor('1h')` | Refuse sign ins for that long and stop trusting the user's devices. | The same, from now. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 
-Locks are kept in the cache store named in `risk.store`. While locked, every sign in fails with the usual generic error. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
+Locks are kept in the cache store named in `risk.store`. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
 
 ## Checkpoints
 

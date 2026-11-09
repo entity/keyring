@@ -5,6 +5,7 @@ namespace Keyring\Notifications;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use Keyring\Models\PendingChange;
+use Keyring\Support\MailText;
 use Keyring\Support\Url;
 
 /**
@@ -28,7 +29,7 @@ class EmailChangeNotice extends Notification
     {
         $message = new MailMessage()
             ->subject(__('keyring::notifications.email_change_notice.subject'))
-            ->line(__('keyring::notifications.email_change_notice.intro', ['email' => $this->masked()]));
+            ->line(MailText::plain(__('keyring::notifications.email_change_notice.intro', ['email' => $this->masked()])));
 
         if ($this->confirmToken !== null) {
             $message->line(__('keyring::notifications.email_change_notice.confirm'))

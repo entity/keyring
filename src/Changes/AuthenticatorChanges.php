@@ -15,6 +15,7 @@ use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\PasswordRules;
 use Keyring\Support\RowLock;
 
 /**
@@ -31,8 +32,8 @@ class AuthenticatorChanges
     /**
      * Save a newly confirmed authenticator. A factor that allows one per user
      * replaces the old one, the first sign-in method becomes the default, and
-     * the first extra factor comes with recovery codes, whose plain codes are
-     * returned to show once.
+     * the first extra factor comes with recovery codes (as does one added
+     * once they've run out), whose plain codes are returned to show once.
      *
      * @return list<string>|null
      */
@@ -40,7 +41,7 @@ class AuthenticatorChanges
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
-        $recovery = ! $isRecovery && $keyring->of(RecoveryCodes::KEY)->isEmpty() ? $this->recoveryCodes() : null;
+        $recovery = ! $isRecovery && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
         $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
             if (! $factor->multiple()) {
@@ -55,6 +56,7 @@ class AuthenticatorChanges
             $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
 
             if ($recovery !== null) {
+                $keyring->of(RecoveryCodes::KEY)->each->delete();
                 $this->save($user, $recovery['authenticator']);
             }
         });
@@ -112,7 +114,7 @@ class AuthenticatorChanges
             // Recovery codes are only useful while there's a second factor to
             // recover, so they go too when this was the last one. The policy
             // is checked against what will actually be left.
-            $onlyRecoveryLeft = $remaining->all()->every(fn (Authenticator $other) => $other->isVirtual() || $other->factor === RecoveryCodes::KEY);
+            $onlyRecoveryLeft = ! $remaining->hasFactorToRecover();
             $cascade = $onlyRecoveryLeft ? $remaining->of(RecoveryCodes::KEY)->all() : [];
             $left = $remaining->without(...$cascade);
 
@@ -151,7 +153,7 @@ class AuthenticatorChanges
             return;
         }
 
-        if ($password === null || ! $this->keyring->provider()->validateCredentials($user, ['password' => $password])) {
+        if ($password === null || ! $this->keyring->provider()->validateCredentials($user, ['password' => PasswordRules::forVerifying($password, $user->getAuthPassword())])) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
         }
 

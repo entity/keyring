@@ -15,6 +15,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\PasswordRules;
 
 /**
  * The user's password, kept in the users table so password resets and
@@ -68,7 +69,7 @@ class Password extends Factor implements PrimaryFactor
 
         if ($user === null || blank($user->getAuthPassword())) {
             // Spend the same time hashing as a real check would.
-            Hash::check($request->string('password'), self::$dummyHash ??= Hash::make(Str::random(32)));
+            Hash::check(Str::random(32), self::$dummyHash ??= Hash::make(Str::random(32)));
 
             return null;
         }
@@ -78,8 +79,8 @@ class Password extends Factor implements PrimaryFactor
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $credentials = ['password' => (string) $request->input('password')];
         $user = $authenticator->user();
+        $credentials = ['password' => PasswordRules::forVerifying((string) $request->input('password'), $user->getAuthPassword())];
 
         if (! $this->provider()->validateCredentials($user, $credentials)) {
             return null;

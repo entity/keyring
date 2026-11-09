@@ -86,11 +86,12 @@ class VerifyFactor
     }
 
     /**
-     * What Keyring::fake() decided for this factor, if it's faked.
+     * What Keyring::fake() decided for this factor, if it's faked. Production
+     * always checks for real, even if something bound the fake by hand.
      */
     protected function fakeDecision(Context $context): ?bool
     {
-        return $this->container->bound(KeyringFake::class)
+        return $this->container->bound(KeyringFake::class) && ! app()->environment('production')
             ? $this->container->make(KeyringFake::class)->decision($context->factor->key())
             : null;
     }

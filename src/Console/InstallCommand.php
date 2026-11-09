@@ -18,42 +18,50 @@ use function Laravel\Prompts\multiselect;
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
         {--feature=* : A feature to turn on, e.g. registration (defaults to registration and reset-passwords)}
-        {--emails : Send the security emails NIST asks for}
+        {--emails : Send the security emails NIST asks for (the default with a second sign-in method)}
+        {--no-emails : Send no security emails}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
 {
     /**
-     * Sign-in methods besides the password, and the lines they add to the
-     * provider's Keyring::factors() call.
+     * Sign-in methods besides the password, and the line each adds to the
+     * provider's Keyring::factors() call. Recovery codes come with any of
+     * them, so losing the only one isn't the end of the account.
      */
     protected const array FACTORS = [
-        'totp' => ['Authenticator app, with recovery codes', ['Totp::class,', 'RecoveryCodes::class,']],
-        'passkeys' => ['Passkeys', ['WebAuthn::passkeys(),']],
-        'security-keys' => ['Security keys, as a second factor', ['WebAuthn::securityKeys(),']],
-        'email-codes' => ['Email codes, as a second factor (below NIST AAL2)', ['EmailCode::asSecondFactor(),']],
-    ];
-
-    /**
-     * The action each feature needs from the app.
-     */
-    protected const array ACTIONS = [
-        'registration' => 'CreateNewUser',
-        'reset-passwords' => 'ResetUserPassword',
-        'update-passwords' => 'UpdateUserPassword',
-        'email-changes' => 'ValidateEmailChange',
+        'totp' => ['Authenticator app', 'Totp::class,'],
+        'passkeys' => ['Passkeys', 'WebAuthn::passkeys(),'],
+        'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
+        'email-codes' => ['Email codes, as a second factor (below NIST AAL2)', 'EmailCode::asSecondFactor(),'],
     ];
 
     protected const string STUBS = __DIR__.'/../../stubs';
 
     public function handle(Filesystem $files): int
     {
+        $unknown = [
+            ...array_diff($this->option('factor'), array_keys(self::FACTORS)),
+            ...array_diff($this->option('feature'), Features::all()),
+        ];
+
+        if ($unknown !== []) {
+            $this->components->error('Unknown: '.implode(', ', $unknown).'. Sign-in methods: '.implode(', ', array_keys(self::FACTORS)).'. Features: '.implode(', ', Features::all()).'.');
+
+            return self::FAILURE;
+        }
+
         $factors = $this->factors();
         $features = $this->features($factors);
-        $emails = $this->option('emails') || ($this->input->isInteractive() && confirm(
-            label: 'Send the security emails NIST asks for?',
-            default: $factors !== [],
-            hint: 'Password changed, sign-in method added or removed, recovery code used.',
-        ));
+        $emails = match (true) {
+            $this->option('emails') => true,
+            $this->option('no-emails') => false,
+            $this->input->isInteractive() => confirm(
+                label: 'Send the security emails NIST asks for?',
+                default: $factors !== [],
+                hint: 'Password changed, sign-in method added or removed, recovery code used.',
+            ),
+            default => $factors !== [],
+        };
 
         $this->write($files, config_path('keyring.php'), $this->config($files, $features, $emails));
 
@@ -62,24 +70,24 @@ class InstallCommand extends Command
             $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations']);
         }
 
-        // The provider and actions are your code from here on.
-        $this->write($files, app_path('Providers/KeyringServiceProvider.php'), $this->provider($files, $factors, $features));
+        // The provider and actions are your code from here on. Every action is
+        // published and registered, so turning a feature on later just works.
+        $this->write($files, app_path('Providers/KeyringServiceProvider.php'), $this->provider($files, $factors));
 
-        $actions = array_values(array_intersect_key(self::ACTIONS, array_flip($features)));
-
-        foreach ($actions === [] ? [] : [...$actions, 'PasswordValidationRules'] as $action) {
-            $this->write($files, app_path("Actions/Keyring/{$action}.php"), $files->get(self::STUBS."/app/Actions/Keyring/{$action}.php"));
+        foreach ($files->files(self::STUBS.'/app/Actions/Keyring') as $action) {
+            $this->write($files, app_path('Actions/Keyring/'.$action->getFilename()), $action->getContents());
         }
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
 
         $this->components->info('Keyring installed.');
-        $this->components->bulletList([
+        $this->components->bulletList(array_filter([
             'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
+            in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
             'Run <comment>php artisan migrate</comment>',
             'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
             'Add features later in <comment>config/keyring.php</comment>, and sign-in methods in your KeyringServiceProvider',
-        ]);
+        ]));
 
         return self::SUCCESS;
     }
@@ -134,6 +142,14 @@ class InstallCommand extends Command
             $this->components->info('Turned on managing sign-in methods, so users can set up the ones you picked.');
         }
 
+        // Anyone can register someone else's address, so they must prove it
+        // before adding a sign-in method that would outlive a password reset.
+        if (array_all([Features::registration(), Features::manageAuthenticators()], fn (string $feature) => in_array($feature, $chosen, true))
+            && ! in_array(Features::emailVerification(), $chosen, true)) {
+            $chosen[] = Features::emailVerification();
+            $this->components->info('Turned on email verification, so users prove their address before adding a sign-in method.');
+        }
+
         return array_values(array_intersect(Features::all(), $chosen));
     }
 
@@ -158,24 +174,17 @@ class InstallCommand extends Command
     }
 
     /**
-     * The provider with only the chosen sign-in methods and needed actions.
+     * The provider with only the chosen sign-in methods.
      *
      * @param  list<string>  $factors
-     * @param  list<string>  $features
      */
-    protected function provider(Filesystem $files, array $factors, array $features): string
+    protected function provider(Filesystem $files, array $factors): string
     {
-        $remove = [];
+        $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
 
-        foreach (self::FACTORS as $key => [, $lines]) {
+        foreach (self::FACTORS as $key => [, $line]) {
             if (! in_array($key, $factors, true)) {
-                array_push($remove, ...$lines);
-            }
-        }
-
-        foreach (self::ACTIONS as $feature => $action) {
-            if (! in_array($feature, $features, true)) {
-                $remove[] = "({$action}::class);";
+                $remove[] = $line;
             }
         }
 

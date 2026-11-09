@@ -8,6 +8,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Console\AboutCommand;
@@ -69,7 +70,7 @@ class KeyringServiceProvider extends ServiceProvider
 
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../config/keyring.php', 'keyring');
+        $this->mergeConfig();
 
         $this->app->singleton(KeyringManager::class);
         $this->app->singleton(FactorRegistry::class);
@@ -126,6 +127,40 @@ class KeyringServiceProvider extends ServiceProvider
         }
     }
 
+    /**
+     * The app's config over Keyring's defaults, key by key, so an app that
+     * copies part of an option (one of the session timeouts) keeps the rest.
+     * Laravel's mergeConfigFrom() only goes one level deep. Lists, like the
+     * features, are replaced whole.
+     */
+    protected function mergeConfig(): void
+    {
+        if ($this->app instanceof CachesConfiguration && $this->app->configurationIsCached()) {
+            return;
+        }
+
+        $config = $this->app->make('config');
+        $config->set('keyring', self::merge(require __DIR__.'/../config/keyring.php', $config->get('keyring', [])));
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $defaults
+     * @param  array<array-key, mixed>  $overrides
+     * @return array<array-key, mixed>
+     */
+    protected static function merge(array $defaults, array $overrides): array
+    {
+        foreach ($overrides as $key => $value) {
+            $default = $defaults[$key] ?? null;
+
+            $defaults[$key] = is_array($value) && is_array($default) && ! array_is_list($value) && ! array_is_list($default)
+                ? self::merge($default, $value)
+                : $value;
+        }
+
+        return $defaults;
+    }
+
     protected function registerListeners(): void
     {
         Event::subscribe(RecordSecurityEvents::class);
@@ -157,12 +192,18 @@ class KeyringServiceProvider extends ServiceProvider
     }
 
     /**
-     * The limit on Keyring's form routes (registration, resets, enrollment).
-     * Define your own "keyring" limiter to change it.
+     * The limit on Keyring's form routes (registration, resets, enrollment),
+     * and on usernameless login options. Define your own "keyring" or
+     * "keyring-login-options" limiter to change them.
      */
     protected function configureRateLimiting(): void
     {
         RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip()));
+
+        // The login page asks for these on every load, for passkey autofill,
+        // and an office shares one address, so six a minute would be too few.
+        // One a second still limits how many challenges a script can make.
+        RateLimiter::for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
     }
 
     /**

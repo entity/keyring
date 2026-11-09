@@ -177,6 +177,7 @@ return [
     'email_changes' => [
         'expire' => '24h',
         'revertable_for' => '7d',
+        'sign_out_others' => true,
     ],
 
     /*
@@ -247,8 +248,8 @@ return [
     | Which security notices Keyring sends to the user. NIST SP 800-63B asks
     | for password_changed, authenticator_added, authenticator_removed and
     | recovery_code_used. The others: new_device, second_factor_failed,
-    | suspicious_activity, clone_suspected. Keyring::notify() with no types
-    | sends them all.
+    | suspicious_activity, clone_suspected, email_changed and
+    | email_change_reverted. Keyring::notify() with no types sends them all.
     |
     */
 
@@ -286,8 +287,8 @@ return [
     | Default attempts per minute, per account and per IP address, and the
     | failures in a row an account's factor allows however slowly they come
     | (NIST SP 800-63B caps them at 100; null for no cap). At that cap the
-    | factor is refused until a password reset. Factors may declare their own
-    | limits.
+    | factor is refused for up to 30 days, or for a password until a reset.
+    | Factors may declare their own limits.
     |
     */
 
