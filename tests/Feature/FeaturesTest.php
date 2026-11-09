@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Keyring\Exceptions\ProtectedAttributeException;
+use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
 use Keyring\Features;
@@ -76,4 +77,13 @@ it('only offers to trust the device when devices are on', function () {
     $this->post(route('login.store'), ['email' => $this->user->email, 'password' => 'password']);
 
     $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.canTrustDevice', false);
+});
+
+it('starts with the password, registration, password resets and no emails', function () {
+    $config = require __DIR__.'/../../config/keyring.php';
+
+    expect(new FactorRegistry(app())->all()->keys()->all())->toBe(['password'])
+        ->and($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
+        ->and($config['notifications'])->toBe([])
+        ->and($config['protected'])->toBe([]);
 });
