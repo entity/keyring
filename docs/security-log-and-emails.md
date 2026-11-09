@@ -49,7 +49,8 @@ Without the feature, nothing is logged. "Was this you?" alerts and the `Repeated
 | `sessions_revoked` | "Sign out everywhere else". | `count` |
 | `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user` or `risk` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |
-| `password_changed`, `password_reset` | | |
+| `password_changed` | | |
+| `password_reset` | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |
 | `protection_bypassed` | `Keyring::withoutProtection()` was used. Linked to the signed-in user who did it. | `reason` |
 | `clone_suspected` | A passkey or security key's counter went backwards. | `name` |
 | `risk_denied`, `risk_reauthenticate`, `risk_step_up`, `risk_revoked_sessions`, `risk_notified` | A risk action did something. | `checkpoint`, `score`, `reasons` |

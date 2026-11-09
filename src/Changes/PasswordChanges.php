@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
 use Keyring\KeyringManager;
-use Keyring\Pipeline\ConsecutiveLimit;
+use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use LogicException;
@@ -47,8 +47,9 @@ class PasswordChanges
 
     /**
      * The user proved they own the address with a reset link, and $save set
-     * the new password. Every session is signed out, and risk locks are
-     * lifted so a lock can't keep the owner out for good.
+     * the new password. Every session is signed out, and risk locks and the
+     * account's throttle locks are lifted so a lock can't keep the owner out
+     * for good.
      *
      * @param  Closure(): void  $save
      */
@@ -57,7 +58,7 @@ class PasswordChanges
         $this->save($user, $save);
         $this->sessions->revokeAll($user);
         $this->locks->unlock($user);
-        ConsecutiveLimit::forget($user);
+        EnsureNotThrottled::clearAccount($user);
 
         PasswordReset::dispatch($user);
     }
