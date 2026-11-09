@@ -55,8 +55,8 @@ class AuthenticateSession
         // cookie can be revoked, on the cookie driver too.
         if (! $guard->check()) {
             return tap($next($request), function () use ($request, $guard) {
-                if ($guard->check() && ! $request->session()->has(Sessions::KEY)) {
-                    $this->register($request, $guard->user(), remembered: false);
+                if (($user = $guard->user()) !== null && ! $request->session()->has(Sessions::KEY)) {
+                    $this->register($request, $user, remembered: false);
                 }
             });
         }
