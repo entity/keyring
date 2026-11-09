@@ -58,10 +58,11 @@ describe('keyring:install', function () {
             ->and($config['notifications'])->toBe([])
             ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
             ->and($provider)->toContain('Password::class,')
-            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('Keyring::require(')
-            ->not->toContain('UpdateUserPassword')->not->toContain('ValidateEmailChange')
+            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
+            // Every action, so turning a feature on later works.
+            ->toContain('Keyring::updateUserPasswordsUsing(UpdateUserPassword::class);')
             ->and(array_map(basename(...), glob($this->sandbox.'/app/Actions/Keyring/*.php')))->toEqualCanonicalizing([
-                'CreateNewUser.php', 'PasswordValidationRules.php', 'ResetUserPassword.php',
+                'CreateNewUser.php', 'PasswordValidationRules.php', 'ResetUserPassword.php', 'UpdateUserPassword.php', 'ValidateEmailChange.php',
             ])
             ->and(file_get_contents($this->sandbox.'/bootstrap/providers.php'))->toContain('App\Providers\KeyringServiceProvider::class');
 
@@ -72,7 +73,6 @@ describe('keyring:install', function () {
         $this->artisan('keyring:install', [
             '--factor' => ['totp', 'passkeys'],
             '--feature' => [Features::updatePasswords(), Features::devices()],
-            '--emails' => true,
             '--no-interaction' => true,
         ])->expectsOutputToContain('Turned on managing sign-in methods')->assertSuccessful();
 
@@ -80,25 +80,52 @@ describe('keyring:install', function () {
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
         expect($config['features'])->toBe([Features::updatePasswords(), Features::manageAuthenticators(), Features::devices()])
+            // With a second sign-in method, the NIST emails come too.
             ->and($config['notifications'])->toContain('recovery_code_used')
             ->and($provider)->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
-            ->not->toContain('securityKeys')->not->toContain('EmailCode')->not->toContain('CreateNewUser')
-            ->and(array_map(basename(...), glob($this->sandbox.'/app/Actions/Keyring/*.php')))->toEqualCanonicalizing([
-                'PasswordValidationRules.php', 'UpdateUserPassword.php',
-            ]);
+            ->not->toContain('securityKeys')->not->toContain('EmailCode');
 
         expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
         expectValidPhp(config_path('keyring.php'));
     });
 
+    it('adds recovery codes to any second sign-in method, so losing it isn\'t the end of the account', function (string $factor) {
+        $this->artisan('keyring:install', ['--factor' => [$factor], '--no-interaction' => true])->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('RecoveryCodes::class,');
+    })->with(['passkeys', 'security-keys', 'email-codes']);
+
+    it('turns on email verification when registered users can add sign-in methods', function () {
+        $this->artisan('keyring:install', ['--factor' => ['passkeys'], '--feature' => [Features::registration()], '--no-interaction' => true])
+            ->expectsOutputToContain('Turned on email verification')
+            ->expectsOutputToContain('MustVerifyEmail')
+            ->assertSuccessful();
+
+        expect((require config_path('keyring.php'))['features'])->toContain(Features::emailVerification());
+    });
+
+    it('refuses sign-in methods and features it doesn\'t know, before writing anything', function () {
+        $this->artisan('keyring:install', ['--factor' => ['totpp'], '--feature' => ['devicez'], '--no-interaction' => true])
+            ->expectsOutputToContain('Unknown: totpp, devicez')
+            ->assertFailed();
+
+        expect(file_exists(config_path('keyring.php')))->toBeFalse();
+    });
+
+    it('can leave out the security emails', function () {
+        $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-emails' => true, '--no-interaction' => true])->assertSuccessful();
+
+        expect((require config_path('keyring.php'))['notifications'])->toBe([]);
+    });
+
     it('asks which sign-in methods and features to set up', function () {
         $this->artisan('keyring:install')
-            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app, with recovery codes', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (below NIST AAL2)'])
-            ->expectsQuestion('Which features?', [Features::registration(), Features::manageAuthenticators()])
+            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (below NIST AAL2)'])
+            ->expectsQuestion('Which features?', [Features::resetPasswords(), Features::manageAuthenticators()])
             ->expectsConfirmation('Send the security emails NIST asks for?', 'yes')
             ->assertSuccessful();
 
-        expect((require config_path('keyring.php'))['features'])->toBe([Features::registration(), Features::manageAuthenticators()])
+        expect((require config_path('keyring.php'))['features'])->toBe([Features::resetPasswords(), Features::manageAuthenticators()])
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('WebAuthn::passkeys(),')->not->toContain('Totp');
     });
 
