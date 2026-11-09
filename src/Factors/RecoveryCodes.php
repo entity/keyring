@@ -74,7 +74,8 @@ class RecoveryCodes extends Factor implements Enrollable
 
         RecoveryCodeUsed::dispatch($authenticator, count($this->hashes($authenticator)));
 
-        return $this->verified($authenticator);
+        // The code just used proves possession, even when it was the last.
+        return $this->verified($authenticator, [Category::Possession]);
     }
 
     public function present(Authenticator $authenticator): array
