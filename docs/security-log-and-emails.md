@@ -154,7 +154,7 @@ Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless yo
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. Lists the reasons. |
 | `clone_suspected` | A passkey or security key looked cloned. |
 | `email_changed` | An email change applied. Sent to both the old and the new address. |
-| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. |
+| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied, without the device and IP that undid it. |
 
 To send your own instead, listen for the matching [events](sign-in-flow.md#events) and leave the type off.
 

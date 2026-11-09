@@ -589,8 +589,10 @@ describe('applying a change', function () {
 
         app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
 
-        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted');
-        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com' && $notice->type === 'email_change_reverted');
+        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted' && isset($notice->details['ip']));
+        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com'
+            && $notice->type === 'email_change_reverted'
+            && array_keys($notice->details) === ['when']);
     });
 
     it('keeps an app\'s own via() away from an address that has no user', function () {
