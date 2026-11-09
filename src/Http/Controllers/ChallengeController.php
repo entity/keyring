@@ -38,14 +38,14 @@ class ChallengeController
     {
         $purpose = $this->purpose($request);
         $attempt = $this->attempts->current($purpose)
-            ?? ($purpose === Purpose::Confirm ? $this->stepUp->begin($request, Requirement::aal1()->withoutRecoveryCodes()) : null);
+            ?? ($purpose === Purpose::Confirm ? $this->confirming($request) : null);
 
         if ($attempt === null) {
-            return $this->expired($purpose);
+            return $this->expired($request, $purpose);
         }
 
         if ($attempt->exhausted) {
-            return $this->startOver($purpose);
+            return $this->startOver($request, $purpose);
         }
 
         $options = $attempt->options();
@@ -53,7 +53,10 @@ class ChallengeController
         if ($options->isEmpty()) {
             $this->attempts->forget($purpose);
 
-            return $this->expired($purpose, __('keyring::keyring.unavailable'));
+            // With nothing to confirm with, coming back here would only loop.
+            return $purpose === Purpose::Confirm
+                ? $this->stepUp->enrollFirst($request)
+                : $this->expired($request, $purpose, __('keyring::keyring.unavailable'));
         }
 
         $authenticator = $this->choose($attempt, $options, $factor, $request->query('authenticator'));
@@ -93,11 +96,11 @@ class ChallengeController
         $attempt = $this->attempts->current($purpose);
 
         if ($attempt === null) {
-            return $this->expired($purpose);
+            return $this->expired($request, $purpose);
         }
 
         if ($attempt->exhausted) {
-            return $this->startOver($purpose);
+            return $this->startOver($request, $purpose);
         }
 
         $factor = $this->keyring->factor($factor);
@@ -120,7 +123,7 @@ class ChallengeController
         $attempt = $this->attempts->current($purpose);
 
         if ($attempt === null) {
-            return $this->expired($purpose);
+            return $this->expired($request, $purpose);
         }
 
         $factor = $this->keyring->factor($factor);
@@ -178,18 +181,40 @@ class ChallengeController
 
     /**
      * A code was guessed too many times, so drop the attempt: the only way on
-     * is to start signing in again.
+     * is to start again.
      */
-    protected function startOver(Purpose $purpose): RedirectResponse
+    protected function startOver(Request $request, Purpose $purpose): RedirectResponse
     {
         $this->attempts->forget($purpose);
 
-        return $this->expired($purpose, __('keyring::keyring.too_many_codes'));
+        return $this->expired($request, $purpose, __('keyring::keyring.too_many_codes'));
     }
 
-    protected function expired(Purpose $purpose, ?string $message = null): RedirectResponse
+    /**
+     * Back to the start, with the reason on a field that page has: the
+     * username on the login page, and whatever the confirm page asks for next.
+     */
+    protected function expired(Request $request, Purpose $purpose, ?string $message = null): RedirectResponse
     {
-        return to_route($purpose === Purpose::Login ? 'login' : 'keyring.confirm.challenge')
-            ->withErrors([$this->keyring->username() => $message ?? __('keyring::keyring.expired')]);
+        $message ??= __('keyring::keyring.expired');
+
+        if ($purpose === Purpose::Login) {
+            return to_route('login')->withErrors([$this->keyring->username() => $message]);
+        }
+
+        $attempt = $this->confirming($request);
+        $next = $this->choose($attempt, $attempt->options(), null, null);
+
+        return to_route('keyring.confirm.challenge')
+            ->withErrors([$next?->factor()->errorKey() ?? $this->keyring->username() => $message]);
+    }
+
+    /**
+     * The confirm attempt in progress, or a new one for visiting the confirm
+     * page without being sent there.
+     */
+    protected function confirming(Request $request): Attempt
+    {
+        return $this->stepUp->begin($request, Requirement::aal1()->withoutRecoveryCodes());
     }
 }

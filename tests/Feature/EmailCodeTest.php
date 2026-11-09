@@ -268,7 +268,7 @@ it('restarts a step-up when its code runs out of guesses', function () {
 
     $this->inertia()->get(route('keyring.confirm.challenge', 'email-code'))
         ->assertRedirect(route('keyring.confirm.challenge'))
-        ->assertSessionHasErrors(['email' => __('keyring::keyring.too_many_codes')]);
+        ->assertSessionHasErrors(['password' => __('keyring::keyring.too_many_codes')]);
 
     Notification::fake();
     $this->inertia()->get(route('keyring.confirm.challenge', 'email-code'))->assertOk();
