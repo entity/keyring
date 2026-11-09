@@ -1,14 +1,20 @@
 <?php
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
+use Keyring\Activity\SecurityLog;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
+use Keyring\Devices\UserAgent;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
@@ -23,6 +29,7 @@ use Keyring\Risk\RiskEngine;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
+use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
@@ -33,9 +40,11 @@ class FakeLocator implements LocatesIps
 {
     public ?array $location = null;
 
+    public ?Throwable $failure = null;
+
     public function locate(Request $request): ?array
     {
-        return $this->location;
+        return $this->failure === null ? $this->location : throw $this->failure;
     }
 }
 
@@ -319,6 +328,115 @@ it('tells the user when someone gets their password but not the second factor', 
 
     Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'second_factor_failed');
 });
+
+it('signs in without a location when the locator throws, and reports it once', function () {
+    Exceptions::fake();
+    $this->locator->failure = new RuntimeException('GeoIP database missing');
+
+    signInAs()->assertRedirect('/dashboard');
+
+    $this->assertAuthenticatedAs($this->user);
+    expect($this->user->devices()->sole()->location)->toBeNull();
+    Exceptions::assertReportedCount(1);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'GeoIP database missing');
+});
+
+it('signs in without a location when the locator returns one that can\'t be stored', function (array $location) {
+    $this->locator->location = $location;
+
+    signInAs()->assertRedirect('/dashboard');
+
+    expect($this->user->devices()->sole()->location)->toBeNull();
+})->with([
+    'infinite coordinate' => [['latitude' => INF]],
+    'broken text' => [['city' => "Amst\xFFerdam"]],
+]);
+
+it('stores a user agent with broken bytes as valid text', function () {
+    $userAgent = UserAgent::from(Request::create('/', server: ['HTTP_USER_AGENT' => "Firefox\xFF"]));
+
+    expect(mb_check_encoding($userAgent, 'UTF-8'))->toBeTrue();
+});
+
+it('signs in and still sends the new device email when the security log is down', function () {
+    Exceptions::fake();
+    Keyring::notify();
+    Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+
+    signInAs()->assertRedirect('/dashboard');
+
+    $this->get('/home')->assertOk();
+    Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'new_device');
+    Exceptions::assertReported(QueryException::class);
+});
+
+it('still refuses a wrong password when the security log is down', function () {
+    Exceptions::fake();
+    Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+
+    signInAs(password: 'wrong')->assertSessionHasErrors('email');
+
+    $this->assertGuest();
+    Exceptions::assertReported(QueryException::class);
+});
+
+it('still refuses a sign in the risk engine denies when the security log is down', function () {
+    Exceptions::fake();
+    Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+    Keyring::risk([new AlwaysRisky]);
+
+    signInAs()->assertSessionHasErrors('email');
+
+    $this->assertGuest();
+    Exceptions::assertReported(QueryException::class);
+});
+
+it('finds nothing in a security log it cannot read', function () {
+    Exceptions::fake();
+    Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+
+    $finding = app(RepeatedFactorFailures::class)->assess(new Assessment(Checkpoint::Login, request(), $this->user));
+
+    expect($finding)->toBeNull();
+    Exceptions::assertReported(QueryException::class);
+});
+
+it('keeps the caller\'s transaction usable when a security log write fails', function () {
+    Exceptions::fake();
+    Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+
+    DB::transaction(function () {
+        expect(app(SecurityLog::class)->record('signed_in', $this->user))->toBeNull();
+
+        $this->user->update(['name' => 'Still Taylor']);
+    });
+
+    expect($this->user->fresh()->name)->toBe('Still Taylor');
+});
+
+it('does not swallow a failure in something that decides the sign in', function () {
+    Exceptions::fake();
+    Keyring::risk([new class implements Signal
+    {
+        public function assess(Assessment $assessment): ?Finding
+        {
+            throw new RuntimeException('Signal broke');
+        }
+
+        public function checkpoints(): array
+        {
+            return [Checkpoint::Login];
+        }
+    }]);
+
+    signInAs()->assertServerError();
+
+    $this->assertGuest();
+});
+
+// Every query fails, as if the table were gone, without DDL that MySQL would commit.
+#[Table('keyring_events_unavailable')]
+class UnavailableSecurityEvent extends SecurityEvent {}
 
 class DatabaseSecurityNotice extends SecurityNotice
 {

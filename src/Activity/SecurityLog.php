@@ -2,6 +2,7 @@
 
 namespace Keyring\Activity;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -29,23 +30,26 @@ class SecurityLog
         }
 
         $model = Keyring::securityEventModel();
-        $event = new $model([
-            'type' => $type,
-            'factor' => $factor,
-            'device_id' => $device,
-            'ip' => request()->ip(),
-            'user_agent' => UserAgent::from(request()),
-            'meta' => $meta === [] ? null : $meta,
-            'created_at' => now(),
-        ]);
 
-        if ($user instanceof Model) {
-            $event->authenticatable()->associate($user);
-        }
+        return $this->safely(function () use ($model, $type, $user, $factor, $device, $meta) {
+            $event = new $model([
+                'type' => $type,
+                'factor' => $factor,
+                'device_id' => $device,
+                'ip' => request()->ip(),
+                'user_agent' => UserAgent::from(request()),
+                'meta' => $meta === [] ? null : $meta,
+                'created_at' => now(),
+            ]);
 
-        $event->save();
+            if ($user instanceof Model) {
+                $event->authenticatable()->associate($user);
+            }
 
-        return $event;
+            $event->save();
+
+            return $event;
+        }, null);
     }
 
     /**
@@ -65,17 +69,19 @@ class SecurityLog
      */
     public function pullAlerts(Authenticatable&Model $user): Collection
     {
-        $alerts = $this->query($user)
-            ->whereIn('type', config('keyring.events.alerts'))
-            ->whereNull('seen_at')
-            ->latest('created_at')
-            ->get();
+        return $this->safely(function () use ($user) {
+            $alerts = $this->query($user)
+                ->whereIn('type', config('keyring.events.alerts'))
+                ->whereNull('seen_at')
+                ->latest('created_at')
+                ->get();
 
-        if ($alerts->isNotEmpty()) {
-            Keyring::securityEventModel()::query()->whereKey($alerts->modelKeys())->update(['seen_at' => now()]);
-        }
+            if ($alerts->isNotEmpty()) {
+                Keyring::securityEventModel()::query()->whereKey($alerts->modelKeys())->update(['seen_at' => now()]);
+            }
 
-        return $alerts;
+            return $alerts;
+        }, new Collection);
     }
 
     /**
@@ -83,10 +89,27 @@ class SecurityLog
      */
     public function count(Authenticatable&Model $user, string $type, int $withinSeconds): int
     {
-        return $this->query($user)
+        return $this->safely(fn () => $this->query($user)
             ->where('type', $type)
             ->where('created_at', '>=', now()->subSeconds($withinSeconds))
-            ->count();
+            ->count(), 0);
+    }
+
+    /**
+     * The log only observes sign ins, so a failure here is reported and goes
+     * no further. The savepoint stops a failed query from aborting the
+     * caller's transaction on Postgres.
+     *
+     * @template TResult
+     * @template TFallback
+     *
+     * @param  Closure(): TResult  $callback
+     * @param  TFallback  $fallback
+     * @return TResult|TFallback
+     */
+    protected function safely(Closure $callback, mixed $fallback): mixed
+    {
+        return rescue(fn () => Keyring::securityEventModel()::query()->getConnection()->transaction($callback), $fallback);
     }
 
     /**

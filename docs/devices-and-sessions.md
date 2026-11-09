@@ -116,6 +116,8 @@ The array may contain `country`, `region`, `city`, `latitude` and `longitude`. I
 
 Keyring asks the locator at most once per request, however many signals and steps need the location. Read it the same way in your own code with `Keyring\Devices\Location::of($request)`.
 
+If the locator throws (say its database file is missing), the location is unknown for that request and the exception goes to `report()`. Sign in carries on and the location risk signals stay quiet.
+
 `Keyring\Devices\HeaderLocator` reads the location headers a proxy or CDN adds. By default it reads Cloudflare's: `CF-IPCountry`, `CF-Region`, `CF-IPCity`, `CF-IPLatitude` and `CF-IPLongitude`. For another proxy, set `devices.locator` to `HeaderLocator::class` and bind it with your own map of location fields to header names:
 
 ```php

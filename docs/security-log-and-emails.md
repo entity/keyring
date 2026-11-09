@@ -30,6 +30,8 @@ Turn it on with `Features::securityLog()`. Its options:
 
 Without the feature, nothing is logged. "Was this you?" alerts and the `RepeatedFactorFailures` risk signal read from the log, so they need it too.
 
+The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report()` and carries on, so the sign in, refusal or email goes ahead without it. If the log can't be read, there are no alerts and `RepeatedFactorFailures` finds nothing.
+
 ### Entry Types
 
 | Type | When | `meta` |
