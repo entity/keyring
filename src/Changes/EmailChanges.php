@@ -79,8 +79,7 @@ class EmailChanges
         $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent, $signedInAt) {
             $this->cancel($user);
 
-            $model = $this->keyring->pendingChangeModel();
-            $change = new $model([
+            $change = $this->keyring->pendingChangeModel()::make([
                 'attribute' => $this->attribute(),
                 'value' => $email,
                 'previous_value' => $current,
@@ -90,10 +89,8 @@ class EmailChanges
                 'signed_in_at' => $signedInAt,
                 'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for')),
             ]);
-            $change->authenticatable()->associate($user);
-            $change->save();
 
-            return $change;
+            return tap($change->authenticatable()->associate($user))->save();
         });
 
         // After the response, so timing doesn't give away which case it was.

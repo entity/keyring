@@ -32,7 +32,7 @@ class EmailChangeNotice extends Notification
     {
         $message = new MailMessage()
             ->subject(__('keyring::notifications.email_change_notice.subject'))
-            ->line(MailText::plain(__('keyring::notifications.email_change_notice.intro', ['email' => $this->masked()])));
+            ->line(MailText::plain(__('keyring::notifications.email_change_notice.intro', ['email' => MailText::maskAddress($this->change->value)])));
 
         if ($this->confirmToken !== null) {
             $message->line(__('keyring::notifications.email_change_notice.confirm'))
@@ -42,12 +42,5 @@ class EmailChangeNotice extends Notification
         return $message
             ->line(__('keyring::notifications.email_change_notice.revert'))
             ->line(Url::route('keyring.email.revert', ['change' => $this->change->id, 'token' => $this->revertToken]));
-    }
-
-    protected function masked(): string
-    {
-        [$local, $domain] = array_pad(explode('@', $this->change->value, 2), 2, '');
-
-        return mb_substr($local, 0, 1).'•••@'.$domain;
     }
 }

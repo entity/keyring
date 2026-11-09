@@ -21,4 +21,15 @@ final class MailText
             Str::squish(mb_scrub($text)),
         ));
     }
+
+    /**
+     * An address with all but the first letter of its name hidden, to hint
+     * at it without giving it away: t•••@example.com.
+     */
+    public static function maskAddress(string $email): string
+    {
+        [$name, $domain] = array_pad(explode('@', $email, 2), 2, '');
+
+        return mb_substr($name, 0, 1).'•••@'.$domain;
+    }
 }

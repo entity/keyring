@@ -188,9 +188,7 @@ abstract class Factor implements FactorContract
      */
     protected function makeAuthenticator(array $attributes): Authenticator
     {
-        $model = Keyring::authenticatorModel();
-
-        return new $model(['factor' => $this->key(), ...$attributes]);
+        return Keyring::authenticatorModel()::make(['factor' => $this->key(), ...$attributes]);
     }
 
     /**
