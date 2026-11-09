@@ -2,6 +2,7 @@
 
 - [Introduction](#introduction)
 - [Steps](#steps)
+- [Replacing Fortify in a Starter Kit](#replacing-fortify-in-a-starter-kit)
 - [Importing Two Factor Data](#importing-two-factor-data)
 - [How Fortify Concepts Map](#how-fortify-concepts-map)
     - [Configuration](#configuration)
@@ -55,6 +56,42 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
        $table->dropColumn(['two_factor_secret', 'two_factor_recovery_codes', 'two_factor_confirmed_at']);
    });
    ```
+
+## Replacing Fortify in a Starter Kit
+
+Laravel's starter kits come with Fortify already wired in, so a new app is an upgrade too, just one with no users to import. Follow the [steps](#steps) and skip the import. This is what they come to in a kit. The file names are from the React starter kit, which the [example app](https://github.com/entity/keyring-example) started from. Other kits and versions differ in places, so treat it as a checklist:
+
+**Remove**
+
+| File | Why |
+|---|---|
+| `app/Providers/FortifyServiceProvider.php`, and its line in `bootstrap/providers.php` | `keyring:install` adds `KeyringServiceProvider` in its place. |
+| `config/fortify.php` | `config/keyring.php` replaces it. |
+| `app/Actions/Fortify/` and `app/Concerns/PasswordValidationRules.php` | The published `app/Actions/Keyring/` actions replace them, with their own password rules. |
+| `app/Http/Requests/Settings/PasswordUpdateRequest.php` and `TwoFactorAuthenticationRequest.php` | Keyring's routes validate these. |
+| `app/Http/Requests/Settings/ProfileDeleteRequest.php` | It asked for the current password. `keyring.fresh` on the route asks for more. |
+| The `add_two_factor_columns_to_users_table` and `create_passkeys_table` migrations | Only in an app with no users. With users, keep them until the import is done, then [drop the columns](#steps). |
+| The two factor and passkey components, and the `auth/two-factor-challenge` and `auth/confirm-password` pages | Your `challenge` and `confirm` pages and your settings page replace them. |
+
+**Change**
+
+| File | What |
+|---|---|
+| `app/Models/User.php` | Swap `TwoFactorAuthenticatable`, `PasskeyAuthenticatable` and the `PasskeyUser` interface for `HasKeyring`. Take the `two_factor_*` attributes out of the hidden list and the casts. |
+| `database/factories/UserFactory.php` | Take out the `two_factor_*` attributes and the `withTwoFactor()` state. Tests use [Keyring's factories](testing.md#factories) instead. |
+| `routes/settings.php` | Remove the `PUT settings/password` route: Keyring's `PUT /user/password` has the same name, `user-password.update`. Replace the `RequirePassword` middleware on the security page with `keyring.fresh:15m`, and put it on the delete account route too. |
+| The profile controller and its form request | With `Features::emailChanges()`, validate and save only the name. The email goes through [`POST /user/email`](protected-changes.md#changing-the-email-address). |
+| The security settings controller | Pass the page what [Your Settings Page](quick-start.md#your-settings-page) lists. Its password form posts to Keyring's route. |
+| `app/Http/Middleware/HandleInertiaRequests.php` | Share `status` and `keyring.alerts`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
+| `auth/login` | Swap the kit's passkey button for [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey), or take it out. |
+| `auth/register` and `auth/reset-password` | They no longer receive a `passwordRules` prop, so make it optional or drop it. |
+| The kit's auth tests | They assert Fortify's routes and columns, so rewrite the two factor, passkey and password confirmation ones. See [Testing](testing.md). |
+
+The kit's pages already have the names Keyring renders, and their forms post the same fields to routes with the same names. For step-up, either add an `auth/confirm` page or reuse the challenge page:
+
+```php
+Keyring::page('confirm', 'auth/challenge');
+```
 
 ## Importing Two Factor Data
 
@@ -167,7 +204,7 @@ Keyring adds `ChallengeResponse`, for when another factor is needed. Fortify's `
 | `ValidTwoFactorAuthenticationCodeProvided` | `FactorVerified` |
 | `TwoFactorAuthenticationFailed` | `FactorFailed` |
 
-All Keyring events are in `Keyring\Events`. Laravel's `Login`, `Logout`, `Registered` and `Verified` events still fire, and like Fortify, Keyring also dispatches Laravel's `Failed`, `Lockout` and `PasswordReset`, so existing listeners for those keep working.
+All Keyring events are in `Keyring\Events`, and [Events](events.md) lists every one. Laravel's `Login`, `Logout`, `Registered` and `Verified` events still fire, and like Fortify, Keyring also dispatches Laravel's `Failed`, `Lockout` and `PasswordReset`, so existing listeners for those keep working.
 
 ### Rate Limiting
 

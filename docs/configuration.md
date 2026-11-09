@@ -317,3 +317,18 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |
 | `Keyring::user()` | The user signed in to Keyring's guard. Throws an `AuthenticationException` when there isn't one. |
 | `Keyring::fake()` | Passes or fails factors in tests. See [Testing](testing.md). |
+
+It also answers questions about your setup, for your own controllers, factors and steps:
+
+| Method | Returns |
+|---|---|
+| `Keyring::registered()` | The registered factors, keyed by their key. |
+| `Keyring::factor($key)` | One registered factor. `Keyring::hasFactor($key)` says whether there is one. |
+| `Keyring::guard()` | Keyring's guard. `Keyring::provider()` is its user provider. |
+| `Keyring::username()` | The username field, `email` by default. |
+| `Keyring::normalizeUsername($username)` | A username as Keyring stores and looks it up. See [Finding the User](sign-in-flow.md#finding-the-user). |
+| `Keyring::requirementFor($user, $attempt)` | What this user must prove to finish the attempt. See [Checking Requirements in Code](policies.md#checking-requirements-in-code). |
+| `Keyring::statusMessage($status)` | The translated message for a status slug, or `null`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
+| `Keyring::render($name, $props)` | Renders one of Keyring's [pages](sign-in-flow.md#pages), as Inertia or Blade, for a route of your own. |
+| `Keyring::sendsSecurityNotice($type)` | Whether a [security notice](security-log-and-emails.md#security-emails) type is on. |
+| `Keyring::protectedAttributes()` | The attributes that only change through Keyring's flows. See [Protected Attributes](protected-changes.md#protected-attributes). |

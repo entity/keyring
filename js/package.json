@@ -3,6 +3,20 @@
   "version": "0.1.0",
   "description": "Browser helpers for Keyring: WebAuthn ceremonies and Inertia bindings for Vue and React.",
   "license": "MIT",
+  "keywords": [
+    "laravel",
+    "authentication",
+    "webauthn",
+    "passkeys",
+    "inertia"
+  ],
+  "homepage": "https://github.com/entity/keyring/blob/main/docs/frontend.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/entity/keyring.git",
+    "directory": "js"
+  },
+  "bugs": "https://github.com/entity/keyring/issues",
   "type": "module",
   "sideEffects": false,
   "files": [

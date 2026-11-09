@@ -52,7 +52,7 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, limited |
 | `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
-`auth` here is `auth:{guard}`, Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute by default. The password reset routes exist only with the `password_reset` feature, and the verification routes only with `email_verification`.
+`auth` here is `auth:{guard}`, Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute by default. The email routes exist only with `Features::emailChanges()`, the password route with `Features::updatePasswords()`, the reset routes with `Features::resetPasswords()`, and the verification routes with `Features::emailVerification()`.
 
 ## Protected Attributes
 
