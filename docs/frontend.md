@@ -24,7 +24,14 @@ Keyring is headless, like Fortify. It renders [pages](sign-in-flow.md#pages) wit
 npm install @entity/keyring
 ```
 
-It has three entry points:
+> `@entity/keyring` isn't on npm yet. Until the first release, build it from the Composer package and install it from there:
+>
+> ```bash
+> (cd vendor/entity/keyring/js && npm install && npm run build)
+> npm install ./vendor/entity/keyring/js
+> ```
+
+It's plain ES modules, so it works with any bundler. The main entry point has no dependencies, so a Blade app without a bundler can copy its `dist` folder into `public/` and import it from a `<script type="module">`. It has four entry points:
 
 | Import | Contains |
 |---|---|

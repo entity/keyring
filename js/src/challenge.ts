@@ -1,8 +1,8 @@
 import { router } from '@inertiajs/core'
-import { json } from './http'
-import { routes } from './routes'
-import type { AuthenticatorSummary, ChallengeProps } from './types'
-import { getCredential, supportsAutofill } from './webauthn'
+import { json } from './http.js'
+import { routes } from './routes.js'
+import type { AuthenticatorSummary, ChallengeProps } from './types.js'
+import { getCredential, supportsAutofill } from './webauthn.js'
 
 /**
  * The framework-free half of the challenge page and passkey sign in. The

@@ -1,4 +1,4 @@
-import type { Purpose } from './routes'
+import type { Purpose } from './routes.js'
 
 export interface AuthenticatorSummary {
   factor: string
