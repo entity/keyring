@@ -61,7 +61,7 @@ class InstallCommand extends Command
         // An existing config is the app's, so there's nothing to ask about it.
         if ($files->exists(config_path('keyring.php')) && ! $this->option('force')) {
             $this->components->warn('Skipped '.config_path('keyring.php').', it already exists.');
-            $features = config('keyring.features', []);
+            $features = config('keyring.features');
         } else {
             $features = $this->features($factors);
             $files->put(config_path('keyring.php'), $this->config($files, $features, $this->emails($factors)));

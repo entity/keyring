@@ -88,7 +88,7 @@ class EmailChanges
                 'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
                 'revert_token' => PendingChange::hashToken($tokens['revert']),
                 'signed_in_at' => $signedInAt,
-                'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for', '24h')),
+                'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for')),
             ]);
             $change->authenticatable()->associate($user);
             $change->save();
@@ -275,7 +275,7 @@ class EmailChanges
         $request = request();
         $here = $request->hasSession() && $this->signedInAs($user);
 
-        if (config('keyring.email_changes.sign_out_others', true)) {
+        if (config('keyring.email_changes.sign_out_others')) {
             $this->sessions->revokeAll($user, except: $here ? $this->sessions->current($request)?->id : null);
         }
 
@@ -317,7 +317,7 @@ class EmailChanges
 
             $change->forceFill([
                 'applied_at' => now(),
-                'revertable_until' => Duration::fromNow(config('keyring.email_changes.revertable_for', '7d')),
+                'revertable_until' => Duration::fromNow(config('keyring.email_changes.revertable_for')),
             ])->save();
 
             $this->sessions->distrustDevices($user);

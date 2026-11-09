@@ -23,7 +23,7 @@ class RecentlyChangedRecovery implements Signal
     public function assess(Assessment $assessment): ?Finding
     {
         $changed = $this->changes->lastChangedAt($assessment->user);
-        $window = Duration::seconds(config('keyring.risk.recent_change', '7d'));
+        $window = Duration::seconds(config('keyring.risk.recent_change'));
 
         return $changed !== null && $changed->getTimestamp() >= now()->getTimestamp() - $window
             ? new Finding('recent_recovery_change', $this->score, 'The email address changed recently.')

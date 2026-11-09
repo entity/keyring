@@ -321,7 +321,7 @@ class KeyringManager
 
     public function sendsSecurityNotice(string $type): bool
     {
-        return in_array($type, $this->securityNotices ?? config('keyring.security_notices', []), true);
+        return in_array($type, $this->securityNotices ?? config('keyring.security_notices'), true);
     }
 
     /**

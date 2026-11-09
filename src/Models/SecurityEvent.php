@@ -48,6 +48,6 @@ class SecurityEvent extends Model
      */
     public function prunable(): Builder
     {
-        return static::query()->where('created_at', '<', Duration::ago(config('keyring.security_log.keep_for', '180d')));
+        return static::query()->where('created_at', '<', Duration::ago(config('keyring.security_log.keep_for')));
     }
 }

@@ -149,7 +149,7 @@ class DeviceManager
 
     public function cookie(): string
     {
-        return config('keyring.devices.cookie', 'keyring_device');
+        return config('keyring.devices.cookie');
     }
 
     /**

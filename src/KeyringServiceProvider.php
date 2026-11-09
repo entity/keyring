@@ -97,7 +97,7 @@ class KeyringServiceProvider extends ServiceProvider
     public function boot(): void
     {
         // A misspelt feature would otherwise just be off.
-        if (($unknown = array_values(array_diff(config('keyring.features', []), Features::all()))) !== []) {
+        if (($unknown = array_values(array_diff(config('keyring.features'), Features::all()))) !== []) {
             throw UnknownFeature::in($unknown);
         }
 
@@ -248,7 +248,7 @@ class KeyringServiceProvider extends ServiceProvider
         AboutCommand::add('Keyring', fn () => [
             'Guard' => config('keyring.guard'),
             'Factors' => $this->app->make(KeyringManager::class)->registered()->keys()->implode(', '),
-            'Features' => implode(', ', config('keyring.features', [])) ?: 'none',
+            'Features' => implode(', ', config('keyring.features')) ?: 'none',
             'Session registry' => config('keyring.sessions.driver'),
         ]);
     }

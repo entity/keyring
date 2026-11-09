@@ -12,9 +12,9 @@ enum Level: int
     public static function forScore(int $score): self
     {
         return match (true) {
-            $score >= config('keyring.risk.levels.critical', 90) => self::Critical,
-            $score >= config('keyring.risk.levels.high', 60) => self::High,
-            $score >= config('keyring.risk.levels.medium', 30) => self::Medium,
+            $score >= config('keyring.risk.levels.critical') => self::Critical,
+            $score >= config('keyring.risk.levels.high') => self::High,
+            $score >= config('keyring.risk.levels.medium') => self::Medium,
             default => self::Low,
         };
     }
