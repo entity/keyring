@@ -302,6 +302,36 @@ it('still accepts a recovery code when the policy is out of reach', function () 
     $this->assertAuthenticatedAs($user);
 });
 
+it('does not offer a used-up recovery set under no downgrade', function () {
+    Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
+    Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
+    $user = taylor();
+    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes([])->for($user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->inertia()->get(route('keyring.login.challenge'))
+        ->assertJsonPath('props.factor', 'security-key')
+        ->assertJsonPath('props.alternatives', []);
+});
+
+it('does not offer a used-up recovery set under a one-factor no downgrade', function () {
+    Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
+    Keyring::require(Requirement::aal1()->noDowngrade());
+    $user = taylor();
+    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes([])->for($user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $this->inertia()->get(route('keyring.login.challenge'))
+        ->assertJsonPath('props.factor', 'security-key')
+        ->assertJsonPath('props.alternatives', []);
+});
+
 it('keeps no-downgrade when the rest of the policy is out of reach', function () {
     Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
     Keyring::require(Requirement::factors(3)->ifEnrolled()->noDowngrade());
