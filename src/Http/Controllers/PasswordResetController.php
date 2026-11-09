@@ -21,8 +21,8 @@ use function Illuminate\Support\defer;
 /**
  * Forgotten passwords, the OWASP way: the same answer for every address,
  * links built from APP_URL, no referrer leaks, no automatic sign in, and
- * every session signed out afterwards. A reset also lifts risk locks, so
- * a lock can't keep the owner out for good.
+ * every session signed out afterwards. A reset also lifts risk and throttle
+ * locks, so a lock can't keep the owner out for good.
  */
 class PasswordResetController
 {

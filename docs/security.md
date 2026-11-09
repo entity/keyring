@@ -39,7 +39,7 @@ Every factor has its own limits, checked in the pipeline before the proof is loo
 
 - **Per account**: `limits.per_account` attempts a minute (5). Before the user is identified, the account is the typed username, lowercased and transliterated, so spelling variants of one address share a limit. After that, it's the user's ID. A browser the account has signed in from before (it carries the account's device cookie) counts in a bucket of its own, so someone guessing from elsewhere can't lock the owner out (OWASP's "device cookies").
 - **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address.
-- **In a row**: `limits.consecutive` failures (100, as NIST SP 800-63B caps them) on one account's factor, however slowly they come and from any browser. Only a success clears the count. At the cap that factor is refused for the account until a password reset, though the user can still sign in with another factor; `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop.
+- **In a row**: `limits.consecutive` failures (100, as NIST SP 800-63B caps them) on one account's factor, however slowly they come and from any browser. Only a success or a password reset clears the count. At the cap that factor is refused for the account until a password reset, though the user can still sign in with another factor; `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop.
 
 How they count:
 
@@ -47,9 +47,10 @@ How they count:
 - Routes that spend session state (sign in, challenge pages and verifications, enrollment) take Laravel's session lock (`->block()`), so parallel requests in one session can't reuse an email code's guesses or a WebAuthn challenge. Your cache store must support locks, as the database, Redis, file and array stores do.
 - When failures reach a limit, that key is locked. Each lock lasts twice as long as the one before (one minute, then two, then four...), up to a day. The count of lockouts resets a day after the first one.
 - A success clears the account's count. On the per-IP count, a success only takes back its own attempt. People signing in from one office address don't use up its limit, and an attacker can't reset the limit by signing in to an account of their own between guesses.
+- A completed password reset clears the account's in-a-row counts, and its per-minute counts, locks and lockout count on the factors that can start a sign in, under the account's `username` attribute, the user's ID and each of the account's known devices, so the owner can sign in straight away. Second factors keep their locks, because a reset only proves control of the mailbox and could otherwise be repeated to keep guessing a code. The `password_reset` log entry records it. Per-IP limits stay, so a reset can't be used to get around them. If a custom [`findUsersUsing()`](sign-in-flow.md#finding-the-user) also accepts something else, like a username next to the email address, failures typed under that are only cleared if the app says so.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
 
-Factors can set their own limits by overriding `limits()`. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
+Factors can set their own limits by overriding `limits()`. A reset only clears the keys the default `limits()` builds, so a factor with its own per-account keys should clear them in a `PasswordReset` listener. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Apps can redefine the limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each pending attempt can send three codes per 10 minutes.
 
 ### Single-Use Codes
 
@@ -92,7 +93,7 @@ Factors can set their own limits by overriding `limits()`. Other routes use Lara
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
 - Reverting an email change signs out every session, closes later changes and removes sign-in methods added since.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
-- Password resets give the same answer for every address, sign out every session, cancel pending email changes and lift risk locks.
+- Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
 - New passwords follow OWASP's length rules, are checked against breach lists, and are refused rather than silently cut short by bcrypt.
 

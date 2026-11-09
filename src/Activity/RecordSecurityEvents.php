@@ -148,7 +148,7 @@ class RecordSecurityEvents
 
     public function passwordReset(Events\PasswordReset $event): void
     {
-        $this->log->record('password_reset', $event->user);
+        $this->log->record('password_reset', $event->user, meta: ['sign_in_locks_cleared' => true]);
     }
 
     public function protectionBypassed(Events\ProtectionBypassed $event): void
