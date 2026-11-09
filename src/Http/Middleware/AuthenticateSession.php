@@ -171,9 +171,11 @@ class AuthenticateSession
 
         // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
         // login, remembering where they were going.
+        redirect()->setIntendedUrl($this->intendedUrl($request));
+
         $response = $this->wantsJson($request)
             ? new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401)
-            : redirect()->guest(route('login'))->with('status', 'signed-out');
+            : redirect()->route('login')->with('status', 'signed-out');
 
         // As on sign out: nothing the session cached stays in the browser.
         $response->headers->set('Clear-Site-Data', '"cache", "storage"');

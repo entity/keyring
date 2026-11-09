@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
@@ -191,6 +192,19 @@ it('does not send json callers to another site after confirming', function (stri
     'a lookalike host' => 'http://localhost.evil.example/phish',
     'userinfo before another host' => 'http://localhost@evil.example/phish',
 ]);
+
+it('does not send a form post to another site after confirming', function () {
+    Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->post('/account', fn () => 'danger zone');
+    signIn();
+    $this->travel(16)->minutes();
+
+    $this->withoutMiddleware(ValidateCsrfToken::class)
+        ->post('/account', [], ['Referer' => 'https://evil.example/phish'])
+        ->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+        ->assertRedirect(config('keyring.home'));
+});
 
 it('lets the password through step-up when the only other factor is a used-up set of recovery codes', function () {
     Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();
