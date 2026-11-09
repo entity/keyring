@@ -176,7 +176,7 @@ Keyring itself reads `sign_out_others`, an optional boolean that defaults to `tr
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
-Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, and cancels any pending email change. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, cancels any pending email change, and ends any reset links still outstanding. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Password Rules
 
@@ -218,7 +218,7 @@ The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent t
 - dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`,
 - redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.
 
-Resets use Laravel's password broker (`passwords.broker`, or your default), so its token expiry and throttling apply. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
+Resets use Laravel's password broker (`passwords.broker`, or your default), so its token expiry and throttling apply. A reset link stops working as soon as the password changes through Keyring, the account's email address changes, or the user is deleted. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
 
 ## Email Verification
 

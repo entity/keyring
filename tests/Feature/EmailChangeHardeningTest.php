@@ -2,6 +2,7 @@
 
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
@@ -163,6 +164,37 @@ it('cancels pending email changes when the password is reset', function () {
 
     expect(confirmBoth($change->fresh(), $tokens))->toBe(EmailConfirmation::Invalid)
         ->and($this->user->fresh()->email)->toBe('taylor@example.com');
+});
+
+it('ends reset links for the old address when the email changes, and they do not return with a revert', function () {
+    $token = Password::broker()->createToken($this->user);
+
+    $change = requestChange($this->user, 'new@example.com');
+    $tokens = tokensFor('new@example.com', 'taylor@example.com');
+    expect(confirmBoth($change, $tokens))->toBe(EmailConfirmation::Applied)
+        ->and(Password::broker()->tokenExists(new User(['email' => 'taylor@example.com']), $token))->toBeFalse();
+
+    // A link sent to the new address goes when the change is undone, too.
+    $sentToNew = Password::broker()->createToken($this->user->fresh());
+    expect(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeTrue()
+        ->and(Password::broker()->tokenExists(new User(['email' => 'new@example.com']), $sentToNew))->toBeFalse();
+
+    $this->post('/logout');
+    $this->post(route('password.update'), ['token' => $token, 'email' => 'taylor@example.com', 'password' => 'attacker set passphrase', 'password_confirmation' => 'attacker set passphrase'])
+        ->assertSessionHasErrors('email');
+    expect(Hash::check('password', $this->user->fresh()->password))->toBeTrue();
+});
+
+it('leaves a reset link for the new address working after the email changes', function () {
+    $change = requestChange($this->user, 'new@example.com');
+    confirmBoth($change, tokensFor('new@example.com', 'taylor@example.com'));
+    $token = Password::broker()->createToken($this->user->fresh());
+
+    $this->post('/logout');
+    $this->post(route('password.update'), ['token' => $token, 'email' => 'new@example.com', 'password' => 'a brand new passphrase', 'password_confirmation' => 'a brand new passphrase'])
+        ->assertRedirect(route('login'));
+
+    expect(Hash::check('a brand new passphrase', $this->user->fresh()->password))->toBeTrue();
 });
 
 it('asks the current address to confirm when the second factor was only just added by this session', function () {
