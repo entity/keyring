@@ -10,6 +10,10 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
 use Keyring\Features;
 use Keyring\KeyringServiceProvider;
 use Keyring\Testing\InteractsWithKeyring;
@@ -38,6 +42,7 @@ abstract class TestCase extends Orchestra
         // Every feature, so the suite covers them all. Tests of a feature
         // being off turn it off themselves.
         $app['config']->set('keyring.features', Features::all());
+        $app['config']->set('keyring.notifications', ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used']);
         // What a new Laravel app uses, so nothing relies on PHP serialization.
         $app['config']->set('session.serialization', 'json');
     }
@@ -46,7 +51,9 @@ abstract class TestCase extends Orchestra
     {
         parent::setUp();
 
-        // Registered like the published provider does.
+        // A full install: the usual sign-in methods, and the actions
+        // registered like the published provider does.
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class]);
         Keyring::createUsersUsing(CreateNewUser::class)
             ->resetUserPasswordsUsing(ResetUserPassword::class)
             ->updateUserPasswordsUsing(UpdateUserPassword::class)

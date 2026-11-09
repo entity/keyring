@@ -31,7 +31,7 @@ class FactorRegistry
     public function __construct(
         protected Container $container,
     ) {
-        $this->definitions = [Password::class, WebAuthn::passkeys(...), Totp::class, RecoveryCodes::class];
+        $this->definitions = [Password::class];
     }
 
     /**

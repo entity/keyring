@@ -167,7 +167,7 @@ it('only allows the shorter password with a real second factor, not recovery cod
     expect(Validator::make(['password' => 'short pass', 'password_confirmation' => 'short pass'], ['password' => PasswordRules::for($this->user->fresh())])->fails())->toBeFalse();
 });
 
-it('tells the user when a sign-in method is added, by default', function () {
+it('tells the user when a sign-in method is added', function () {
     Notification::fake();
 
     $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');

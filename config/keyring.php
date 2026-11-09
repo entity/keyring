@@ -244,16 +244,15 @@ return [
     | Security Emails
     |--------------------------------------------------------------------------
     |
-    | Which security notices Keyring sends. By default the ones NIST SP
-    | 800-63B requires (a sign-in method added, a recovery code used) and the
-    | other account changes. Set [] to send your own, or call Keyring::notify()
-    | to turn them all on. Types: new_device, password_changed,
-    | authenticator_added, authenticator_removed, second_factor_failed,
-    | recovery_code_used, suspicious_activity, clone_suspected.
+    | Which security notices Keyring sends to the user. NIST SP 800-63B asks
+    | for password_changed, authenticator_added, authenticator_removed and
+    | recovery_code_used. The others: new_device, second_factor_failed,
+    | suspicious_activity, clone_suspected. Keyring::notify() with no types
+    | sends them all.
     |
     */
 
-    'notifications' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
+    'notifications' => [],
 
     /*
     |--------------------------------------------------------------------------
