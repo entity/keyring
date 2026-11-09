@@ -167,11 +167,7 @@ class Ceremonies
      */
     public function credentialId(string $credential): ?string
     {
-        try {
-            return Base64UrlSafe::encodeUnpadded($this->fromJson($credential, PublicKeyCredential::class)->rawId);
-        } catch (Throwable) {
-            return null;
-        }
+        return rescue(fn () => Base64UrlSafe::encodeUnpadded($this->fromJson($credential, PublicKeyCredential::class)->rawId), report: false);
     }
 
     /**
@@ -269,12 +265,7 @@ class Ceremonies
 
     protected function attestationSupport(): AttestationStatementSupportManager
     {
-        if ($this->attestation === null) {
-            $this->attestation = AttestationStatementSupportManager::create();
-            $this->attestation->add(NoneAttestationStatementSupport::create());
-        }
-
-        return $this->attestation;
+        return $this->attestation ??= tap(AttestationStatementSupportManager::create())->add(NoneAttestationStatementSupport::create());
     }
 
     protected function serializer(): SerializerInterface

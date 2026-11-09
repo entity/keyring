@@ -79,8 +79,8 @@ abstract class Factor implements FactorContract
         // it's checked, as it must before the user is known. Confirming under
         // the ID would be a second allowance of guesses.
         $account = match (true) {
-            $attempt === null => $this->normalizeAccount((string) $request->input(Keyring::username())),
-            $this instanceof PrimaryFactor => $this->normalizeAccount((string) $attempt->user()->getAttribute(Keyring::username())),
+            $attempt === null => static::accountKey((string) $request->input(Keyring::username())),
+            $this instanceof PrimaryFactor => static::accountKey((string) $attempt->user()->getAttribute(Keyring::username())),
             default => (string) $attempt->userId,
         };
 
@@ -119,11 +119,6 @@ abstract class Factor implements FactorContract
     public static function accountBucket(string $factor, string $account, ?string $device = null): string
     {
         return $factor.'|account|'.$account.($device === null ? '' : '|device|'.$device);
-    }
-
-    protected function normalizeAccount(string $account): string
-    {
-        return static::accountKey($account);
     }
 
     /**

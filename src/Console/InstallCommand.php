@@ -9,6 +9,7 @@ use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Keyring\Concerns\HasKeyring;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
@@ -197,7 +198,7 @@ class InstallCommand extends Command
 
         foreach (Features::all() as $feature) {
             if (! in_array($feature, $features, true)) {
-                $method = lcfirst(str_replace(' ', '', ucwords(str_replace('-', ' ', $feature))));
+                $method = Str::camel($feature);
                 $config = str_replace("        Features::{$method}(),", "        // Features::{$method}(),", $config);
             }
         }

@@ -4,6 +4,7 @@ namespace Keyring\Changes;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Enums\Purpose;
@@ -86,7 +87,7 @@ class AuthenticatorChanges
                     ->each(fn (Authenticator $other) => $other->forceFill(['is_default' => false])->save());
             }
 
-            $authenticator->fill(array_intersect_key($changes, ['name' => true]));
+            $authenticator->fill(Arr::only($changes, 'name'));
 
             if (array_key_exists('default', $changes)) {
                 $authenticator->is_default = (bool) $changes['default'];
@@ -182,7 +183,7 @@ class AuthenticatorChanges
      */
     protected function recoveryCodes(): ?array
     {
-        $factor = $this->keyring->hasFactor(RecoveryCodes::KEY) ? $this->keyring->factor(RecoveryCodes::KEY) : null;
+        $factor = $this->keyring->registered()->get(RecoveryCodes::KEY);
 
         if (! $factor instanceof RecoveryCodes) {
             return null;

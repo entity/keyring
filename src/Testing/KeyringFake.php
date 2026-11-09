@@ -22,18 +22,14 @@ class KeyringFake
 
     public function pass(string ...$factors): static
     {
-        foreach ($factors as $factor) {
-            $this->decisions[$factor] = true;
-        }
+        $this->decisions = array_fill_keys($factors, true) + $this->decisions;
 
         return $this;
     }
 
     public function fail(string ...$factors): static
     {
-        foreach ($factors as $factor) {
-            $this->decisions[$factor] = false;
-        }
+        $this->decisions = array_fill_keys($factors, false) + $this->decisions;
 
         return $this;
     }
