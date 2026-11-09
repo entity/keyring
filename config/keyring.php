@@ -287,8 +287,8 @@ return [
     | Default attempts per minute, per account and per IP address, and the
     | failures in a row an account's factor allows however slowly they come
     | (NIST SP 800-63B caps them at 100; null for no cap). At that cap the
-    | factor is refused until a password reset. Factors may declare their own
-    | limits.
+    | factor is refused for up to 30 days, or for a password until a reset.
+    | Factors may declare their own limits.
     |
     */
 

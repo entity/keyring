@@ -219,7 +219,7 @@ The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent t
 - revokes every session and changes the "remember me" token,
 - cancels any pending email change,
 - lifts any [risk lock](risk.md#actions) on the account,
-- clears the account's in-a-row counts, and its sign-in lockouts and failure counts on the factors that can start a sign in, and logs that it did. Second factors keep their lockouts. Per-IP limits stay,
+- clears the account's sign-in lockouts and failure counts, the in-a-row ones too, on the factors that can start a sign in, and logs that it did. Second factors keep theirs. Per-IP limits stay,
 - dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`,
 - redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.
 

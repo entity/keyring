@@ -121,14 +121,14 @@ class EnsureNotThrottled
     }
 
     /**
-     * Clear the user's per-account limits: the in-a-row count on every factor,
-     * and the counts, locks and escalation on the factors that can start a
-     * sign in. Limits start under the typed username (before the user is
-     * known) and continue under their ID, with a bucket for each known device.
-     * The per-IP limits stay, or a reset would be a way around them. A second
-     * factor's locks stay too: a reset only proves control of the mailbox,
-     * which is what they defend against, and it could be repeated to keep
-     * guessing.
+     * Clear the user's per-account limits on the factors that can start a
+     * sign in: the in-a-row count, and the counts, locks and escalation.
+     * Limits start under the typed username (before the user is known) and
+     * continue under their ID, with a bucket for each known device. The
+     * per-IP limits stay, or a reset would be a way around them. A second
+     * factor's counts and locks stay too: a reset only proves control of the
+     * mailbox, which is what they defend against, and it could be repeated to
+     * keep guessing.
      *
      * The user's username is cleared by default. Apps whose findUsersUsing()
      * also accepts something else pass it in $usernames: nothing on the user
@@ -148,19 +148,18 @@ class EnsureNotThrottled
             : [];
 
         foreach (Keyring::registered() as $name => $factor) {
+            if (! $factor instanceof PrimaryFactor) {
+                continue;
+            }
+
             foreach ($accounts as $account) {
-                $limiter->clear(static::key(new Limit(ConsecutiveLimit::keyFor($name, $account))));
-
-                if (! $factor instanceof PrimaryFactor) {
-                    continue;
-                }
-
                 foreach ([null, ...$devices] as $device) {
                     $key = static::key(new Limit(Factor::accountBucket($name, $account, $device)));
 
                     $limiter->clear($key);
                     $limiter->clear($key.':locked');
                     $limiter->clear($key.':lockouts');
+                    $limiter->clear(static::key(new Limit(ConsecutiveLimit::keyFor($name, $account, $device))));
                 }
             }
         }
