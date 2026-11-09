@@ -176,6 +176,30 @@ it('tells the user when a sign-in method is added', function () {
     Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'authenticator_added');
 });
 
+it('shows a name someone typed as plain text in the email, never as a link', function (string $name, string $html, string $text) {
+    Notification::fake();
+    Keyring::notify();
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => $name])->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+    $notice = Notification::sent($this->user, SecurityNotice::class)->firstWhere('type', 'authenticator_added');
+    $mail = renderedMail($notice->toMail($this->user));
+
+    expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
+        ->toContain($html)
+        ->and($mail['text'])->toContain($text);
+})->with([
+    'a link' => ['[Not you? Remove it here](https://evil.example/x)', '[Not you? Remove it here](https://evil.example/x)', '[Not you? Remove it here](https://evil.example/x)'],
+    'an image' => ['![x](https://evil.example/p.png)', '![x](https://evil.example/p.png)', '![x](https://evil.example/p.png)'],
+    'an autolink' => ['<https://evil.example/y>', '&lt;https://evil.example/y&gt;', '<https://evil.example/y>'],
+    'an html tag' => ['<a href="https://evil.example/z">Hi</a>', '&lt;a href="https://evil.example/z"&gt;Hi&lt;/a&gt;', '<a href="https://evil.example/z">Hi</a>'],
+    'emphasis and code' => ['**bold** _em_ `code`', '**bold** _em_ `code`', '**bold** _em_ `code`'],
+    'a new line' => ["key\n\n# Heading", 'key # Heading', 'key # Heading'],
+    'a legitimate name with punctuation' => ["Robert's [work] key", "Robert's [work] key", "Robert's [work] key"],
+    'an ampersand' => ['R&D key', 'R&amp;D key', 'R&D key'],
+]);
+
 it('skips the notice for a model that can\'t be notified, instead of failing', function () {
     $account = UnnotifiableAccount::query()->findOrFail($this->user->getKey());
     $totp = Authenticator::factory()->totp()->for($account, 'authenticatable')->create();

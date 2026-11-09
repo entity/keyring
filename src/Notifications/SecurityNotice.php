@@ -6,6 +6,8 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Illuminate\Support\Str;
+use Keyring\Support\MailText;
 
 /**
  * One notification for every security notice ("new sign in", "password
@@ -45,10 +47,10 @@ class SecurityNotice extends Notification implements ShouldQueueAfterCommit
     {
         $content = $this->content();
 
-        $message = new MailMessage()->subject($content['subject'])->line($content['intro']);
+        $message = new MailMessage()->subject($content['subject'])->line(MailText::plain($content['intro']));
 
         foreach ($content['details'] as $label => $value) {
-            $message->line($label.': '.$value);
+            $message->line(MailText::plain($label.': '.$value));
         }
 
         if ($content['action'] !== null) {
@@ -70,25 +72,35 @@ class SecurityNotice extends Notification implements ShouldQueueAfterCommit
 
     /**
      * What the notice says, translated, for any channel: build a Slack or SMS
-     * message from this rather than from the raw type.
+     * message from this rather than from the raw type. It's plain text that
+     * can include what users and clients sent, so escape it for your channel.
      *
      * @return array{subject: string, intro: string, details: array<string, string>, action: array{text: string, url: string}|null, footer: string}
      */
     public function content(): array
     {
         $key = 'keyring::notifications.'.$this->type;
+        $replace = array_map($this->clean(...), $this->replace);
         $details = [];
 
-        foreach (array_filter($this->details, fn ($value) => $value !== null && $value !== '') as $label => $value) {
-            $details[__('keyring::notifications.details.'.$label)] = (string) $value;
+        foreach (array_filter(array_map($this->clean(...), $this->details), fn (string $value) => $value !== '') as $label => $value) {
+            $details[__('keyring::notifications.details.'.$label)] = $value;
         }
 
         return [
-            'subject' => __($key.'.subject', $this->replace),
-            'intro' => __($key.'.intro', $this->replace),
+            'subject' => __($key.'.subject', $replace),
+            'intro' => __($key.'.intro', $replace),
             'details' => $details,
             'action' => $this->actionUrl === null ? null : ['text' => __($key.'.action'), 'url' => $this->actionUrl],
             'footer' => __('keyring::notifications.footer'),
         ];
+    }
+
+    /**
+     * One capped line, whatever the channel: these values can be attacker-written.
+     */
+    private function clean(string|int|null $value): string
+    {
+        return Str::squish(Str::limit(mb_scrub((string) $value), 500));
     }
 }

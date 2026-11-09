@@ -9,6 +9,7 @@ use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
+use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
@@ -308,6 +309,74 @@ it('sends security notices through any channel the app chooses', function () {
             && $data['action']['text'] === "This wasn't me"
             && array_key_exists('IP address', $data['details']);
     });
+});
+
+it('shows a device and IP address as plain text in the email', function () {
+    $notice = new SecurityNotice('password_changed', details: [
+        'device' => '[Firefox](https://evil.example/d)',
+        'ip' => '<https://evil.example/i>',
+    ]);
+
+    $mail = renderedMail($notice->toMail($this->user));
+
+    expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
+        ->toContain('Device: [Firefox](https://evil.example/d)')
+        ->toContain('IP address: &lt;https://evil.example/i&gt;')
+        ->and($mail['text'])->toContain('Device: [Firefox](https://evil.example/d)')
+        ->toContain('IP address: <https://evil.example/i>');
+});
+
+it('shows a location from the locator as plain text in the email', function () {
+    Keyring::notify()->risk([new NewCountry(95)]);
+    $this->locator->location = ['country' => 'GB'];
+    signInAs()->assertRedirect('/dashboard');
+    $this->post('/logout');
+
+    $this->locator->location = ['country' => '[Amsterdam](https://evil.example/l)'];
+    signInAs()->assertSessionHasErrors('email');
+
+    $notice = Notification::sent($this->user, SecurityNotice::class)->firstWhere('type', 'suspicious_activity');
+    $mail = renderedMail($notice->toMail($this->user));
+
+    expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
+        ->toContain('Signing in from a new country ([Amsterdam](https://evil.example/l)).')
+        ->and($mail['text'])->toContain('Signing in from a new country ([Amsterdam](https://evil.example/l)).');
+});
+
+it('still renders the email when a value is not valid UTF-8', function () {
+    $notice = new SecurityNotice('authenticator_added', details: ['device' => "Firefox\xFF"], replace: ['name' => "Key\xFF"]);
+
+    expect(renderedMail($notice->toMail($this->user))['text'])->toContain('was added as a way to sign in')
+        ->toContain('Device: Firefox');
+});
+
+it('keeps an app\'s own notice class safe, and gives its other channels plain text', function () {
+    Keyring::notify(['authenticator_added'])->securityNoticesUsing(DatabaseSecurityNotice::class);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create([
+        'name' => "[Not you?](https://evil.example/x)\n\nRobert's key",
+    ]);
+
+    AuthenticatorAdded::dispatch($this->user, $totp);
+
+    $notice = Notification::sent($this->user, DatabaseSecurityNotice::class)->sole();
+    $mail = renderedMail($notice->toMail($this->user));
+
+    expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
+        ->toContain("[Not you?](https://evil.example/x) Robert's key")
+        ->and($mail['text'])->toContain("[Not you?](https://evil.example/x) Robert's key")
+        ->and($notice->toArray($this->user)['intro'])->toBe("\"[Not you?](https://evil.example/x) Robert's key\" was added as a way to sign in to your account.");
+});
+
+it('still builds the notice when a value is mostly whitespace', function () {
+    $notice = new SecurityNotice('password_changed', details: ['device' => 'Fire'.str_repeat(' ', 10000).'fox']);
+
+    expect($notice->content()['details']['Device'])->toBe('Fire...');
+});
+
+it('caps a value in a notice for every channel', function () {
+    $notice = new SecurityNotice('password_changed', details: ['device' => str_repeat('a', 1000)]);
+
+    expect($notice->content()['details']['Device'])->toBe(str_repeat('a', 500).'...');
 });
 
 it('tells the user when someone gets their password but not the second factor', function () {

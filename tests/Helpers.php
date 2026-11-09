@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Mail\Markdown;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
@@ -56,6 +58,19 @@ function withFeatures(array $features): void
     app('router')->setRoutes(new RouteCollection);
     Keyring\Facades\Keyring::routes();
     app('router')->getRoutes()->refreshNameLookups();
+}
+
+/**
+ * A mail message's HTML and plain-text parts, as the mail channel renders them.
+ *
+ * @return array{html: string, text: string}
+ */
+function renderedMail(MailMessage $mail): array
+{
+    return [
+        'html' => (string) $mail->render(),
+        'text' => (string) app(Markdown::class)->renderText($mail->markdown, $mail->data()),
+    ];
 }
 
 function expectValidPhp(string $path): void

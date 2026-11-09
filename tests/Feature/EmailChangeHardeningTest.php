@@ -61,6 +61,20 @@ function confirmBoth(PendingChange $change, array $tokens): EmailConfirmation
     return app(EmailChanges::class)->confirm($change->fresh(), $tokens['confirm']);
 }
 
+it('shows the address in the change notice as plain text', function (string $value, string $shown) {
+    $change = requestChange($this->user, 'new@example.com');
+    $change->value = $value;
+
+    $mail = renderedMail(new EmailChangeNotice($change, 'revert-token')->toMail(new AnonymousNotifiable));
+
+    expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
+        ->toContain($shown)
+        ->and($mail['text'])->toContain($shown);
+})->with([
+    'a link in the domain' => ['a@[x](https://evil.example/e)', 'a•••@[x](https://evil.example/e)'],
+    'a normal address' => ['new@example.com', 'n•••@example.com'],
+]);
+
 it('does not change anything when an emailed link is only opened', function () {
     $change = requestChange($this->user, 'new@example.com');
     $tokens = tokensFor('new@example.com', 'taylor@example.com');
