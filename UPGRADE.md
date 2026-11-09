@@ -12,6 +12,7 @@ Keyring has no tagged release yet, so there's nothing to upgrade between. This s
 | `Keyring::notify([...])` | `Keyring::sendSecurityNotices([...])` |
 | `Keyring::notifies($type)` | `Keyring::sendsSecurityNotice($type)` |
 | `Keyring::changing()`, `Keyring::guardProtectedAttributes()` | Removed. They were internal. Use [`Keyring::withoutProtection()`](docs/protected-changes.md#bypassing-protection) to change a protected attribute. |
+| `Totp::engine()`, `WebAuthn::profile()` | Removed. Nothing used them. |
 
 ### Config Options
 
@@ -54,3 +55,12 @@ The published `UpdateUserPassword` action now checks the current password with `
 - **The per-IP rate limit locks for 15 minutes at most**, and a browser the account has used before isn't held up by it. See [Rate Limiting](docs/security.md#rate-limiting).
 - **Each account can be sent three codes per factor every 10 minutes.**
 - **`SecurityLog::record()` returns `null`** when the log is off or the write failed, and a log or locator failure no longer stops a sign in.
+- **An unknown feature in `config/keyring.php` stops the app booting** with `Keyring\Exceptions\UnknownFeature`, instead of leaving that feature off.
+- **`keyring:import` only imports into users with no sign-in methods in Keyring yet**, so running it again can't bring back one a user removed. Users who set Keyring up themselves are listed as skipped.
+- **Removing an authenticator stops it counting** toward the assurance of every session it was used in.
+- **A session that ends on its own** (a timeout, a risk response, a revoked record) only forgets that browser's "remember me" cookie. Signing out on purpose still changes the token for every browser.
+- **"Was this you?" alerts wait for a browser the account has used before**, with `Features::devices()` on.
+- **`DELETE /user/authenticators/{id}` uses the `keyring` rate limiter**, and every Keyring response sends `Referrer-Policy: no-referrer`.
+- **Password and passkey guesses count under the username** at login and when confirming alike.
+- **TOTP reads Laravel's clock**, so `travel()` moves codes on in tests. `withAssurance()` no longer gives its pretend verifications an authenticator ID.
+- **The browser package's `@entity/keyring/inertia` entry** is built from `inertia.ts` (it was `challenge.ts`). Imports don't change.
