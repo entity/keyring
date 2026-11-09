@@ -4,12 +4,11 @@ namespace Keyring\Http\Middleware;
 
 use Closure;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Enums\Assurance;
-use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\Requirement;
+use Keyring\Login\StepUp;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -21,8 +20,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class RequireEnrollment
 {
-    use ChoosesFormat;
-
     /**
      * Routes users still need: Keyring's own (enrolling, confirming, devices),
      * signing out, verifying their email and changing their password.
@@ -33,6 +30,7 @@ class RequireEnrollment
 
     public function __construct(
         protected KeyringManager $keyring,
+        protected StepUp $stepUp,
     ) {}
 
     public function handle(Request $request, Closure $next, string $level = 'aal2'): Response
@@ -46,15 +44,7 @@ class RequireEnrollment
             return $next($request);
         }
 
-        $message = $this->keyring->statusMessage('enroll-first');
-
-        if ($this->wantsJson($request)) {
-            return new JsonResponse(['status' => 'enroll-first', 'message' => $message, 'redirect' => $url], 403);
-        }
-
-        abort_if($url === null, 403, $message);
-
-        return redirect($url)->with('status', 'enroll-first');
+        return $this->stepUp->enrollFirst($request);
     }
 
     /**

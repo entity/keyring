@@ -140,7 +140,15 @@ it('refuses an aal2 route when the user has nothing that could reach it', functi
 
     // A plain confirm wouldn't raise their level, so it would only loop.
     $this->get('/billing')->assertForbidden();
-    $this->getJson('/billing')->assertForbidden();
+    $this->getJson('/billing')->assertForbidden()->assertJsonPath('status', 'enroll-first');
+});
+
+it('sends a user who has nothing that could reach the level to set something up', function () {
+    config(['keyring.enrollment_url' => '/settings/security']);
+    signIn();
+
+    $this->get('/billing')->assertRedirect('/settings/security')->assertSessionHas('status', 'enroll-first');
+    $this->getJson('/billing')->assertForbidden()->assertJsonPath('redirect', '/settings/security');
 });
 
 it('brings json callers back to the page they were on after confirming', function () {

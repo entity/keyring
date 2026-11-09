@@ -3,6 +3,7 @@
 namespace Keyring\Testing;
 
 use DateTimeInterface;
+use Illuminate\Contracts\Support\MessageBag as MessageBagContract;
 use Illuminate\Support\MessageBag;
 use Illuminate\Support\Timebox;
 use Illuminate\Support\ViewErrorBag;
@@ -57,7 +58,7 @@ trait InteractsWithKeyring
      * a plain array once it saves a JSON session (the default in new apps),
      * so session('errors') isn't always a ViewErrorBag.
      */
-    public function sessionErrors(string $bag = 'default'): MessageBag
+    public function sessionErrors(string $bag = 'default'): MessageBagContract
     {
         $errors = session('errors');
 

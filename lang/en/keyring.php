@@ -15,6 +15,5 @@ return [
     'unknown_device' => 'Unknown device',
     'near' => 'near :place',
     'password_too_long' => 'The :attribute must not be longer than 72 bytes.',
-    'needs_factor' => 'This needs a sign-in method you haven\'t set up yet.',
     'unavailable' => 'Your account needs a sign-in method that isn\'t set up. Please contact support.',
 ];
