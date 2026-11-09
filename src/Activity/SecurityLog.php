@@ -25,12 +25,13 @@ class SecurityLog
      */
     public function record(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = []): ?SecurityEvent
     {
-        return $this->safely(fn () => $this->recordOrFail($type, $user, $factor, $device, $meta), null);
+        return rescue(fn () => $this->recordOrFail($type, $user, $factor, $device, $meta));
     }
 
     /**
      * Log an event that must not happen unlogged. A failed write is thrown,
-     * so whatever was about to happen doesn't.
+     * so whatever was about to happen doesn't. The savepoint leaves the
+     * caller's transaction usable on Postgres.
      *
      * @param  array<string, mixed>  $meta
      */
@@ -56,7 +57,7 @@ class SecurityLog
             $event->authenticatable()->associate($user);
         }
 
-        $event->save();
+        $event->getConnection()->transaction(fn () => $event->save());
 
         return $event;
     }
