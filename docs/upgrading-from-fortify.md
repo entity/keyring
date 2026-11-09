@@ -89,12 +89,12 @@ Things to know:
 | `fortify.passwords` | `keyring.passwords.broker` |
 | `fortify.views` | Always on. Use `Keyring::page()` to change a page. |
 | `fortify.limiters` | `keyring.limits`, a factor's `limits()`, and the `keyring` rate limiter for form routes. See [Rate Limiting](#rate-limiting). |
-| `Features::registration()` | `keyring.features.registration` |
-| `Features::resetPasswords()` | `keyring.features.password_reset` |
-| `Features::emailVerification()` | `keyring.features.email_verification` |
-| `Features::updatePasswords()` | Always on: `PUT /user/password`. |
-| `Features::updateProfileInformation()` | Not included. Keep your own profile route, without `email`. |
-| `Features::twoFactorAuthentication()` | Register `Totp` and `RecoveryCodes` in `Keyring::factors()`, and choose a [policy](policies.md). |
+| `Features::registration()` | `Keyring\Features::registration()` |
+| `Features::resetPasswords()` | `Keyring\Features::resetPasswords()` |
+| `Features::emailVerification()` | `Keyring\Features::emailVerification()` |
+| `Features::updatePasswords()` | `Keyring\Features::updatePasswords()`, which also [protects](protected-changes.md#protected-attributes) the password. |
+| `Features::updateProfileInformation()` | Not included. Keep your own profile route. With `Keyring\Features::emailChanges()`, leave `email` out of it. |
+| `Features::twoFactorAuthentication()` | Register `Totp` and `RecoveryCodes` in `Keyring::factors()`, turn on `Keyring\Features::manageAuthenticators()`, and choose a [policy](policies.md). |
 
 ### Actions
 

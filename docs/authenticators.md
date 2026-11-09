@@ -16,7 +16,15 @@
 
 ## Introduction
 
-One set of routes adds, renames and removes authenticators for every factor. There are no per-factor routes to register: when you add a factor, its enrollment works through the same endpoints.
+One set of routes adds, renames and removes authenticators for every factor. There are no per-factor routes to register: when you add a factor, its enrollment works through the same endpoints. Turn them on with `Features::manageAuthenticators()`:
+
+```php
+'features' => [
+    Features::manageAuthenticators(),
+],
+```
+
+Without it, users can't set up any sign-in method besides the password themselves. `keyring:install` turns it on when you pick one.
 
 ## Routes
 

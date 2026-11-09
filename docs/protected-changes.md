@@ -19,7 +19,18 @@
 
 ## Introduction
 
-Whoever controls the email address and password controls the account. Keyring only lets them change through its own flows, which check who's asking, tell the owner, and can be undone.
+Whoever controls the email address and password controls the account. Keyring's flows for changing them check who's asking, tell the owner, and can be undone. Each is a feature:
+
+```php
+'features' => [
+    Features::resetPasswords(),
+    Features::updatePasswords(),
+    Features::emailChanges(),
+    Features::emailVerification(),
+],
+```
+
+Once Keyring handles changing the password (`updatePasswords()`) or the email (`emailChanges()`), that attribute is [protected](#protected-attributes): it can only change through Keyring's flow. Without the feature, your app changes it however it likes.
 
 ## Routes
 
@@ -45,17 +56,19 @@ Whoever controls the email address and password controls the account. Keyring on
 
 ## Protected Attributes
 
+`Features::updatePasswords()` protects `password`, and `Features::emailChanges()` protects `email`. List any others in the `protected` config option:
+
 ```php
-'protected' => ['email', 'password'],
+'protected' => ['phone'],
 ```
 
-With the `HasKeyring` trait, changing these attributes on a user model outside Keyring's flows throws `Keyring\Exceptions\ProtectedAttributeException`:
+With the `HasKeyring` trait, changing a protected attribute on a user model outside Keyring's flows throws `Keyring\Exceptions\ProtectedAttributeException`:
 
 ```php
 $user->update(['email' => 'new@example.com']); // throws
 ```
 
-That includes your own profile forms, so take `email` out of them and use the email change flow instead. Setting the attributes when a user is created isn't affected.
+That includes your own profile forms, so with `Features::emailChanges()` on, take `email` out of them and use the email change flow instead. Setting the attributes when a user is created isn't affected.
 
 The check runs on the model's `updating` event. Changes that skip Eloquent events, such as query builder updates or `saveQuietly()`, aren't caught.
 
@@ -209,7 +222,7 @@ Resets use Laravel's password broker (`passwords.broker`, or your default), so i
 
 ## Email Verification
 
-With the `email_verification` feature on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
+With `Features::emailVerification()` on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
 
 If you've already set `VerifyEmail::createUrlUsing()` yourself, Keyring leaves it alone.
 
