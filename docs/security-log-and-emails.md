@@ -159,6 +159,8 @@ All the wording for Keyring's emails lives in `lang/en/notifications.php`. Secur
 php artisan vendor:publish --tag=keyring-lang
 ```
 
+Anything a user or client can influence, such as an authenticator name, a device or a location, can't add links, images or other formatting to an email: it shows as plain text. So the `intro` of a security notice and its detail lines are always plain text, even if you add Markdown to them. `footer` has no such values and is still Markdown.
+
 ### Slack, SMS and Other Channels
 
 Security notices use Laravel's notification channels, so they can go anywhere Laravel can send. Extend `SecurityNotice`, choose the channels in `via()` (per user if you like), and add the matching method. `content()` gives you the translated subject, intro, detail lines and action to build from:
@@ -180,10 +182,13 @@ class SecurityNotice extends KeyringSecurityNotice
     {
         $content = $this->content();
 
-        return new SlackMessage()->text($content['subject'].': '.$content['intro']);
+        // Slack reads <...> as a link, and an authenticator's name is whatever the user typed.
+        return new SlackMessage()->text(htmlspecialchars($content['subject'].': '.$content['intro'], ENT_NOQUOTES));
     }
 }
 ```
+
+`content()` is plain text that can include what users and clients sent, on one line and capped in length, so escape it for the channel you send it to. To change the email, start from `parent::toMail($notifiable)`, which is already escaped. If you build your own `MailMessage` from `content()`, pass each line through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown.
 
 Slack needs Laravel's `laravel/slack-notification-channel` package; see [Laravel's notification docs](https://laravel.com/docs/notifications#slack-notifications) for it and the other channels. Then register the class in your `KeyringServiceProvider`:
 
