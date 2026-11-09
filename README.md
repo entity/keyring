@@ -30,6 +30,8 @@ php artisan keyring:install
 php artisan migrate
 ```
 
+> Keyring has no tagged release yet. Until it does, add the repository to your `composer.json` and require `entity/keyring:@dev`.
+
 Add the trait to your user model:
 
 ```php

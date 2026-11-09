@@ -185,9 +185,9 @@ The published actions all take their rules from one trait, `app/Actions/Keyring/
 ```php
 use Illuminate\Validation\Rules\Password;
 
-protected function passwordRules((Authenticatable&Model)|null $user = null): array
+protected function passwordRules((Authenticatable&Model)|null $user = null, array $context = []): array
 {
-    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule);
+    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule, $context);
 }
 ```
 
