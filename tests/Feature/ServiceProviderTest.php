@@ -3,9 +3,9 @@
 use Illuminate\Support\Facades\Route;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\Totp;
 use Keyring\Features;
 use Keyring\KeyringServiceProvider;
-use Keyring\Factors\Totp;
 
 it('lets apps register the routes themselves, e.g. under a prefix', function () {
     Route::prefix('account')->group(fn () => Keyring::routes());
