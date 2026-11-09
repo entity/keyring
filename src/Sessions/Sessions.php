@@ -155,7 +155,7 @@ class Sessions
     {
         if ($user instanceof Model) {
             // Resolved here because EmailChanges needs this class.
-            app(EmailChanges::class)->cancel($user, keepRevertLink: true);
+            app(EmailChanges::class)->cancel($user);
         }
     }
 

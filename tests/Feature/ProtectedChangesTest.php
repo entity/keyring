@@ -16,7 +16,6 @@ use Keyring\Events\ProtectionBypassed;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
-use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailAddressInUse;
 use Keyring\Notifications\EmailChangeNotice;
@@ -142,7 +141,23 @@ describe('changing email', function () {
 
         sentTo('taken@example.com', EmailAddressInUse::class);
         Notification::assertNotSentTo(new AnonymousNotifiable, ConfirmEmailChange::class);
-        expect(PendingChange::count())->toBe(0);
+    });
+
+    it('looks the same to the account when the address is taken', function () {
+        User::create(['name' => 'Other', 'email' => 'taken@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $this->postJson(route('keyring.email.store'), ['email' => 'taken@example.com'])->assertOk();
+
+        $this->getJson(route('keyring.email.show'))
+            ->assertJsonPath('pending.email', 'taken@example.com')
+            ->assertJsonPath('pending.confirmed', false);
+
+        // The current address could confirm, but the taken one never gets a link.
+        $notice = sentTo('taylor@example.com', EmailChangeNotice::class);
+        follow(linkIn($notice, 'Confirm this change'));
+
+        expect($this->user->fresh()->email)->toBe('taylor@example.com');
     });
 
     it('lets the old address revert the change and signs everyone out', function () {

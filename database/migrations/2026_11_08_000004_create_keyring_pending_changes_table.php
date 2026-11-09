@@ -23,6 +23,7 @@ return new class extends Migration
             $table->timestamp('applied_at')->nullable();
             $table->timestamp('reverted_at')->nullable();
             $table->timestamp('cancelled_at')->nullable();
+            $table->timestamp('signed_in_at')->nullable();
             $table->timestamp('expires_at');
             $table->timestamp('revertable_until')->nullable();
             $table->timestamps();

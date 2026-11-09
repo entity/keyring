@@ -102,7 +102,7 @@ Keyring then:
 3. emails the **new** address a link to confirm,
 4. emails the **current** address a notice with a link to revert, and a link to confirm too when it's needed (see below).
 
-If the new address belongs to another account, nothing is stored. The new address gets an email saying someone tried to use it, and the response is the same. Asking for the current address does nothing.
+If the new address belongs to another account, everything the account can see is the same: the response, the pending change and the notice to the current address. Only the email to the new address differs. It says someone tried to use the address and carries no link, so the change can never be confirmed and expires like any other. Asking for the current address does nothing.
 
 All of these emails are sent after the response (with Laravel's `defer()`), so how long the request takes doesn't give away which case it was.
 
@@ -129,9 +129,9 @@ After confirming, the user is redirected to `home` (signed in) or the login page
 
 The current address can revert the change while it's pending, and for `email_changes.revertable_for` after it applies (7 days by default). Reverting:
 
-- puts the old address back,
+- puts the old address back, even when it was a later change that moved it,
 - cancels any later email changes, so links from them can't move the address away again,
-- deletes every authenticator added since the change was requested, one at a time, dispatching `AuthenticatorRemoved` for each,
+- deletes every authenticator added since the session that asked for the change signed in, one at a time, dispatching `AuthenticatorRemoved` for each, so one added just before asking goes too,
 - signs out every session, and changes the "remember me" token.
 
 The user is then redirected to the forgot password page (or the login page, when password resets are off) with `status` set to `email-change-reverted`, since whoever made the change may also know the password. Reverting doesn't change the password itself.
@@ -163,7 +163,9 @@ With the `HasKeyring` trait, saving a user with a reserved address any other way
 
 `confirmed` is whether the new address has confirmed. `DELETE /user/email` cancels it and responds with `email-change-cancelled`.
 
-A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it. Signing out everywhere else cancels it too, as does anything else that goes through `Sessions::revokeAll()`, but the old address's "this wasn't me" link keeps working until the change would have expired, so someone who signs out first can still remove what was added since.
+A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it. Signing out everywhere else cancels it too, as does anything else that goes through `Sessions::revokeAll()`.
+
+However a change is cancelled, the old address's "this wasn't me" link keeps working until the change would have expired. Whoever asked for the change can cancel it too, and that shouldn't take away the owner's way to remove what was added and sign everything out.
 
 ## Changing the Password
 
