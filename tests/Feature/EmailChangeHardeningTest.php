@@ -551,7 +551,7 @@ describe('applying a change', function () {
     });
 
     it('tells both addresses when the app has opted in', function () {
-        Keyring::notify();
+        Keyring::sendSecurityNotices();
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
 
@@ -572,7 +572,7 @@ describe('applying a change', function () {
     });
 
     it('tells both addresses when an applied change is reverted', function () {
-        Keyring::notify();
+        Keyring::sendSecurityNotices();
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
         confirmBoth($change, $tokens);
@@ -584,7 +584,7 @@ describe('applying a change', function () {
     });
 
     it('keeps an app\'s own via() away from an address that has no user', function () {
-        Keyring::notify();
+        Keyring::sendSecurityNotices();
         Keyring::securityNoticesUsing(PerUserChannelsNotice::class);
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
@@ -599,7 +599,7 @@ describe('applying a change', function () {
     });
 
     it('does not mail the address that never confirmed when a pending change is reverted', function () {
-        Keyring::notify();
+        Keyring::sendSecurityNotices();
         $change = requestChange($this->user, 'attacker@example.com');
         $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
 

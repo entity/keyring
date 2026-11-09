@@ -14,13 +14,13 @@ use Keyring\Sessions\Sessions;
 /**
  * Runs signals and decides what to do about the result.
  *
- *     Keyring::risk([NewDevice::class, ImpossibleTravel::class])
+ *     Keyring::risk()->signals([NewDevice::class, ImpossibleTravel::class])
  *         ->respond(fn (Risk $risk, Checkpoint $at) => match ($risk->level) { ... });
  */
 class RiskEngine
 {
     /**
-     * None until the app picks some with Keyring::risk([...]).
+     * None until the app picks some with Keyring::risk()->signals([...]).
      *
      * @var list<class-string<Signal>|Signal>
      */

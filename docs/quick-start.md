@@ -110,7 +110,7 @@ use Keyring\Features;
 A few more things are opt-in, but aren't in the features list:
 
 - [Security emails](security-log-and-emails.md#security-emails): the `notifications` list in `config/keyring.php`.
-- [Risk signals](risk.md): `Keyring::risk([...])` in your `KeyringServiceProvider`.
+- [Risk signals](risk.md): `Keyring::risk()->signals([...])` in your `KeyringServiceProvider`.
 - [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. Step-up sends users there too when they don't have what a route needs.
 
 ## Adding Sign-In Methods

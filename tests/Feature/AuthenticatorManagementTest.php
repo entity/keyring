@@ -260,7 +260,7 @@ it('tells the user when a sign-in method is added', function () {
 
 it('shows a name someone typed as plain text in the email, never as a link', function (string $name, string $html, string $text) {
     Notification::fake();
-    Keyring::notify();
+    Keyring::sendSecurityNotices();
 
     $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => $name])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
@@ -288,7 +288,7 @@ it('skips the notice for a model that can\'t be notified, instead of failing', f
 
     AuthenticatorAdded::dispatch($account, $totp);
 
-    expect(Keyring::notifies('authenticator_added'))->toBeTrue();
+    expect(Keyring::sendsSecurityNotice('authenticator_added'))->toBeTrue();
 });
 
 /**

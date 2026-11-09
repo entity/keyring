@@ -7,7 +7,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
-use Keyring\KeyringManager;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
@@ -22,7 +21,7 @@ use LogicException;
 class PasswordChanges
 {
     public function __construct(
-        protected KeyringManager $keyring,
+        protected ProtectedAttributes $protection,
         protected Sessions $sessions,
         protected EmailChanges $emailChanges,
         protected RiskLocks $locks,
@@ -76,7 +75,7 @@ class PasswordChanges
     {
         $before = $user->getAuthPassword();
 
-        $this->keyring->changing($save, only: [$user->getAuthPasswordName()]);
+        $this->protection->changing($save, only: [$user->getAuthPasswordName()]);
 
         if ($user->newQuery()->find($user->getKey())?->getAuthPassword() === $before) {
             throw new LogicException('The password action returned without saving a new password. Throw a ValidationException to refuse it.');

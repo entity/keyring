@@ -10,7 +10,7 @@ use Keyring\Tests\Fixtures\User;
 beforeEach(function () {
     config(['app.url' => 'https://app.example.com']);
     Notification::fake();
-    Keyring::notify(['new_device']);
+    Keyring::sendSecurityNotices(['new_device']);
 });
 
 it('builds the "this wasn\'t me" link from APP_URL, not the Host header', function () {

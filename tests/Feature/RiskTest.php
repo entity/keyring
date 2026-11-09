@@ -82,7 +82,7 @@ function signInAs(string $agent = FIREFOX, string $password = 'password', array 
 }
 
 it('asks for another factor when risk is medium', function () {
-    Keyring::risk([NewDevice::class, NewCountry::class]);
+    Keyring::risk()->signals([NewDevice::class, NewCountry::class]);
     Keyring::require(Requirement::aal1());
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $this->locator->location = ['country' => 'GB'];
@@ -100,7 +100,7 @@ it('asks for another factor when risk is medium', function () {
 
 it('does not turn away a password-only user when risk steps up under a policy out of reach', function () {
     Keyring::require(Requirement::aal2()->phishingResistant()->ifEnrolled());
-    Keyring::risk([new AlwaysRisky(50)]);
+    Keyring::risk()->signals([new AlwaysRisky(50)]);
 
     signInAs()->assertRedirect('/dashboard');
 
@@ -116,7 +116,7 @@ it('does not ask for more on a familiar device and country', function () {
     $this->post('/logout');
 
     // Each enough on its own to ask for the second factor, had it fired.
-    Keyring::risk([new NewDevice(score: 30), NewCountry::class]);
+    Keyring::risk()->signals([new NewDevice(score: 30), NewCountry::class]);
 
     signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
 });
@@ -127,7 +127,7 @@ it('does not ask for more on a familiar device and country', function () {
  */
 function liveOwnerSession(): string
 {
-    Keyring::risk([]);
+    Keyring::risk()->signals([]);
     signInAs();
     $session = session(Sessions::KEY);
 
@@ -148,7 +148,7 @@ function expectOwnerStillSignedIn(string $session): void
 }
 
 it('refuses critical risk with the usual error, tells the owner and leaves them signed in', function () {
-    Keyring::notify();
+    Keyring::sendSecurityNotices();
     $existing = liveOwnerSession();
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
@@ -156,7 +156,7 @@ it('refuses critical risk with the usual error, tells the owner and leaves them 
         $assessed = $event;
     });
 
-    Keyring::risk([new AlwaysRisky]);
+    Keyring::risk()->signals([new AlwaysRisky]);
     signInAs()->assertSessionHasErrors(['email' => __('auth.failed')]);
 
     $this->assertGuest();
@@ -171,7 +171,7 @@ it('refuses critical risk with the usual error, tells the owner and leaves them 
 it('does not let a custom responder sign the owner out from a login attempt', function () {
     $existing = liveOwnerSession();
 
-    Keyring::risk([new AlwaysRisky])->respond(fn () => Action::deny()->revokeAllSessions()->notify());
+    Keyring::risk()->signals([new AlwaysRisky])->respond(fn () => Action::deny()->revokeAllSessions()->notify());
     signInAs()->assertSessionHasErrors('email');
 
     expectOwnerStillSignedIn($existing);
@@ -181,7 +181,7 @@ it('does not let a custom responder sign the owner out from a login attempt', fu
 it('still revokes everything when a signed-in session is critical', function () {
     $existing = liveOwnerSession();
 
-    Keyring::risk([new SessionFingerprintChanged(score: 95)]);
+    Keyring::risk()->signals([new SessionFingerprintChanged(score: 95)]);
     signInAs()->assertRedirect('/dashboard');
     $current = session(Sessions::KEY);
 
@@ -195,11 +195,11 @@ it('still revokes everything when a signed-in session is critical', function () 
 });
 
 it('can lock sign in for a while', function () {
-    Keyring::risk([new AlwaysRisky(40)])->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->lockFor('1h') : Action::allow());
+    Keyring::risk()->signals([new AlwaysRisky(40)])->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->lockFor('1h') : Action::allow());
 
     signInAs()->assertSessionHasErrors('email');
 
-    Keyring::risk([]);
+    Keyring::risk()->signals([]);
     signInAs()->assertSessionHasErrors('email');
 
     $this->travel(61)->minutes();
@@ -207,9 +207,9 @@ it('can lock sign in for a while', function () {
 });
 
 it('lifts a risk lock when the password is reset', function () {
-    Keyring::risk([new AlwaysRisky(40)])->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->lockFor('1h') : Action::allow());
+    Keyring::risk()->signals([new AlwaysRisky(40)])->respond(fn ($risk) => $risk->isElevated() ? Action::deny()->lockFor('1h') : Action::allow());
     signInAs()->assertSessionHasErrors('email');
-    Keyring::risk([]);
+    Keyring::risk()->signals([]);
 
     $this->post(route('password.update'), [
         'token' => Password::broker()->createToken(User::sole()),
@@ -222,7 +222,7 @@ it('lifts a risk lock when the password is reset', function () {
 });
 
 it('spots impossible travel', function () {
-    Keyring::risk([NewDevice::class, NewCountry::class, ImpossibleTravel::class]);
+    Keyring::risk()->signals([NewDevice::class, NewCountry::class, ImpossibleTravel::class]);
     $this->locator->location = ['country' => 'GB', 'latitude' => 51.5, 'longitude' => -0.12];
     signInAs()->assertRedirect('/dashboard');
     $this->post('/logout');
@@ -235,7 +235,7 @@ it('spots impossible travel', function () {
 });
 
 it('asks again before sensitive pages when the session moves browser', function () {
-    Keyring::risk([SessionFingerprintChanged::class]);
+    Keyring::risk()->signals([SessionFingerprintChanged::class]);
     signInAs();
 
     $this->withHeader('User-Agent', FIREFOX)->get('/sensitive')->assertOk();
@@ -245,7 +245,7 @@ it('asks again before sensitive pages when the session moves browser', function 
 });
 
 it('can sign a hijacked session out', function () {
-    Keyring::risk([SessionFingerprintChanged::class])->respond(fn ($risk, $at) => $risk->isElevated() ? Action::reauthenticate() : Action::allow());
+    Keyring::risk()->signals([SessionFingerprintChanged::class])->respond(fn ($risk, $at) => $risk->isElevated() ? Action::reauthenticate() : Action::allow());
     signInAs();
 
     $this->withHeader('User-Agent', CHROME)->get('/home')->assertRedirect('/login');
@@ -299,7 +299,7 @@ it('sends security emails only when asked to', function () {
     Notification::assertNothingSent();
     $this->post('/logout');
 
-    Keyring::notify(['new_device']);
+    Keyring::sendSecurityNotices(['new_device']);
     $this->user->devices()->delete();
     signInAs();
 
@@ -307,7 +307,7 @@ it('sends security emails only when asked to', function () {
 });
 
 it('sends security notices through any channel the app chooses', function () {
-    Keyring::notify(['new_device'])->securityNoticesUsing(DatabaseSecurityNotice::class);
+    Keyring::sendSecurityNotices(['new_device'])->securityNoticesUsing(DatabaseSecurityNotice::class);
     $this->user->devices()->delete();
 
     signInAs();
@@ -339,7 +339,7 @@ it('shows a device and IP address as plain text in the email', function () {
 });
 
 it('shows a location from the locator as plain text in the email', function () {
-    Keyring::notify()->risk([new NewCountry(95)]);
+    Keyring::sendSecurityNotices()->risk()->signals([new NewCountry(95)]);
     $this->locator->location = ['country' => 'GB'];
     signInAs()->assertRedirect('/dashboard');
     $this->post('/logout');
@@ -363,7 +363,7 @@ it('still renders the email when a value is not valid UTF-8', function () {
 });
 
 it('keeps an app\'s own notice class safe, and gives its other channels plain text', function () {
-    Keyring::notify(['authenticator_added'])->securityNoticesUsing(DatabaseSecurityNotice::class);
+    Keyring::sendSecurityNotices(['authenticator_added'])->securityNoticesUsing(DatabaseSecurityNotice::class);
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create([
         'name' => "[Not you?](https://evil.example/x)\n\nRobert's key",
     ]);
@@ -392,7 +392,7 @@ it('caps a value in a notice for every channel', function () {
 });
 
 it('tells the user when someone gets their password but not the second factor', function () {
-    Keyring::notify();
+    Keyring::sendSecurityNotices();
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
     signInAs();
@@ -432,7 +432,7 @@ it('stores a user agent with broken bytes as valid text', function () {
 
 it('signs in and still sends the new device email when the security log is down', function () {
     Exceptions::fake();
-    Keyring::notify();
+    Keyring::sendSecurityNotices();
     Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
 
     signInAs()->assertRedirect('/dashboard');
@@ -455,7 +455,7 @@ it('still refuses a wrong password when the security log is down', function () {
 it('still refuses a sign in the risk engine denies when the security log is down', function () {
     Exceptions::fake();
     Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
-    Keyring::risk([new AlwaysRisky]);
+    Keyring::risk()->signals([new AlwaysRisky]);
 
     signInAs()->assertSessionHasErrors('email');
 
@@ -497,7 +497,7 @@ it('does not bypass protection when the bypass cannot be logged', function () {
 
 it('does not swallow a failure in something that decides the sign in', function () {
     Exceptions::fake();
-    Keyring::risk([new class implements Signal
+    Keyring::risk()->signals([new class implements Signal
     {
         public function assess(Assessment $assessment): ?Finding
         {
@@ -534,7 +534,7 @@ it('runs no signals until the app picks some', function () {
 
 it('doesn\'t call every browser new when devices are off', function () {
     // Scored to refuse the sign in if it fired.
-    Keyring::risk([new NewDevice(score: 90)]);
+    Keyring::risk()->signals([new NewDevice(score: 90)]);
     config(['keyring.features' => []]);
 
     signInAs()->assertRedirect('/dashboard');

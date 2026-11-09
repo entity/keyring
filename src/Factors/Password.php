@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
@@ -86,7 +87,7 @@ class Password extends Factor implements PrimaryFactor
             return null;
         }
 
-        Keyring::changing(fn () => $this->provider()->rehashPasswordIfRequired($user, $credentials));
+        app(ProtectedAttributes::class)->changing(fn () => $this->provider()->rehashPasswordIfRequired($user, $credentials));
 
         return $this->verified($authenticator);
     }

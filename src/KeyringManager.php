@@ -23,7 +23,6 @@ use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\ResetsUserPasswords;
-use Keyring\Contracts\Signal;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Category;
@@ -76,8 +75,8 @@ class KeyringManager
     /** @var bool|(Closure(Authenticatable&Model, Request): bool) */
     protected bool|Closure $signInAfterRegistering = true;
 
-    /** @var list<string>|null Security emails to send, null for the config value. */
-    protected ?array $notifications = null;
+    /** @var list<string>|null Security notices to send, null for the config value. */
+    protected ?array $securityNotices = null;
 
     public function __construct(
         protected Container $container,
@@ -282,41 +281,37 @@ class KeyringManager
     }
 
     /**
-     * Configure risk signals:
+     * The risk engine, for choosing signals and what to do about them:
      *
-     *     Keyring::risk([NewDevice::class, ImpossibleTravel::class])->respond(fn (Risk $risk) => ...);
-     *
-     * @param  list<class-string<Signal>|Signal>|null  $signals
+     *     Keyring::risk()->signals([NewDevice::class])->respond(fn (Risk $risk) => ...);
      */
-    public function risk(?array $signals = null): RiskEngine
+    public function risk(): RiskEngine
     {
-        $engine = $this->container->make(RiskEngine::class);
-
-        return $signals === null ? $engine : $engine->signals($signals);
+        return $this->container->make(RiskEngine::class);
     }
 
     /**
-     * Send security emails: new sign ins, password changes, failed second
+     * Send security notices: new sign ins, password changes, failed second
      * factors and so on. Pass types to pick, or nothing for all of them.
      *
      * @param  list<string>|null  $types
      */
-    public function notify(?array $types = null): static
+    public function sendSecurityNotices(?array $types = null): static
     {
         $types ??= SendSecurityNotifications::TYPES;
 
         if ($unknown = array_diff($types, SendSecurityNotifications::TYPES)) {
-            throw new InvalidArgumentException('Unknown security email types: '.implode(', ', $unknown).'.');
+            throw new InvalidArgumentException('Unknown security notice types: '.implode(', ', $unknown).'.');
         }
 
-        $this->notifications = $types;
+        $this->securityNotices = $types;
 
         return $this;
     }
 
-    public function notifies(string $type): bool
+    public function sendsSecurityNotice(string $type): bool
     {
-        return in_array($type, $this->notifications ?? config('keyring.notifications', []), true);
+        return in_array($type, $this->securityNotices ?? config('keyring.notifications', []), true);
     }
 
     /**
@@ -324,7 +319,7 @@ class KeyringManager
      */
     public function fake(): KeyringFake
     {
-        if (app()->environment('production')) {
+        if (app()->isProduction()) {
             throw new LogicException('Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
         }
 
@@ -517,9 +512,8 @@ class KeyringManager
     }
 
     /**
-     * The user a password sign in is for, if any.
-     *
-     * @internal
+     * The user a password sign in is for, if any: for a primary factor of
+     * your own that should find users the way the password does.
      */
     public function findUser(Request $request): (Authenticatable&Model)|null
     {
@@ -547,7 +541,8 @@ class KeyringManager
     }
 
     /**
-     * @internal
+     * Whether registering signs this user in, for a registration flow of
+     * your own that should follow the same rule.
      */
     public function signsInAfterRegistering(Authenticatable&Model $user, Request $request): bool
     {
@@ -567,22 +562,6 @@ class KeyringManager
     }
 
     /**
-     * Run a Keyring flow that's allowed to change protected attributes.
-     *
-     * @template T
-     *
-     * @param  Closure(): T  $callback
-     * @param  list<string>|null  $only  the attributes it may change, or all
-     * @return T
-     *
-     * @internal
-     */
-    public function changing(Closure $callback, ?array $only = null): mixed
-    {
-        return $this->protection->changing($callback, $only);
-    }
-
-    /**
      * Change protected attributes outside a Keyring flow, for trusted admin
      * tooling. Every use is announced with a ProtectionBypassed event.
      *
@@ -594,16 +573,6 @@ class KeyringManager
     public function withoutProtection(Closure $callback, ?string $reason = null): mixed
     {
         return $this->protection->bypass($callback, $reason);
-    }
-
-    /**
-     * Refuse changes to protected attributes made outside a Keyring flow.
-     *
-     * @internal
-     */
-    public function guardProtectedAttributes(Model $model): void
-    {
-        $this->protection->guard($model);
     }
 
     /**

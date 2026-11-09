@@ -91,7 +91,7 @@ class VerifyFactor
      */
     protected function fakeDecision(Context $context): ?bool
     {
-        return $this->container->bound(KeyringFake::class) && ! app()->environment('production')
+        return $this->container->bound(KeyringFake::class) && ! app()->isProduction()
             ? $this->container->make(KeyringFake::class)->decision($context->factor->key())
             : null;
     }
