@@ -116,9 +116,9 @@ trait InteractsWithKeyring
             Assurance::AAL1 => [$password],
             Assurance::AAL2 => [
                 $password,
-                new Verification('totp', 'testing', [Category::Possession], at: $at),
+                new Verification('totp', null, [Category::Possession], at: $at),
             ],
-            Assurance::AAL3 => [new Verification('security-key', 'testing', [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
+            Assurance::AAL3 => [new Verification('security-key', null, [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
         };
 
         return $this->withSession([

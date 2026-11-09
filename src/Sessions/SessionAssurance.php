@@ -5,6 +5,7 @@ namespace Keyring\Sessions;
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
+use Keyring\Facades\Keyring;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
@@ -105,11 +106,24 @@ class SessionAssurance
     }
 
     /**
+     * What still counts: an authenticator removed since, say a stolen key the
+     * owner took off their account, stops counting in every session it was
+     * used in.
+     *
      * @return list<Verification>
      */
     public function all(): array
     {
-        return array_values(array_map(Verification::fromArray(...), $this->session->get(static::KEY, [])));
+        $verifications = array_map(Verification::fromArray(...), array_values($this->session->get(static::KEY, [])));
+        $ids = array_values(array_filter(array_column($verifications, 'authenticator')));
+
+        if ($ids === []) {
+            return $verifications;
+        }
+
+        $kept = Keyring::authenticatorModel()::query()->whereKey($ids)->pluck('id')->all();
+
+        return array_values(array_filter($verifications, fn (Verification $verification) => $verification->authenticator === null || in_array($verification->authenticator, $kept, true)));
     }
 
     /**

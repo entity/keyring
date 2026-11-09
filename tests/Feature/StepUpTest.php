@@ -86,6 +86,19 @@ it('drops a confirmation that another user started in the same session', functio
     expect($attempts->current(Purpose::Confirm))->toBeNull();
 });
 
+it('stops counting an authenticator once it is removed, in every session it was used in', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    signIn();
+    $this->post(route('keyring.login.verify', 'totp'), ['authenticator' => $totp->id, 'code' => totpCode($totp->secret)]);
+    $this->get('/billing')->assertOk();
+
+    $totp->delete();
+
+    $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+});
+
 it('needs a fresh verification after the window passes', function () {
     signIn();
 
