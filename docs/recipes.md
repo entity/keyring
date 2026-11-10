@@ -473,7 +473,7 @@ Keyring::findUsersUsing(fn (Request $request) => User::query()
     ->first());
 ```
 
-See [Finding the User](sign-in-flow.md#finding-the-user) for what that means for rate limits.
+Guesses at either one count against the same account. See [Finding the User](sign-in-flow.md#finding-the-user).
 
 ## Links for Apps on Several Domains
 

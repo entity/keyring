@@ -88,16 +88,7 @@ Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
 
 Whether a lookup cares about case also depends on your database: MySQL's default collations ignore it, while PostgreSQL and SQLite don't.
 
-Failed attempts count against what was typed, because Keyring checks the limits before it looks the user up. A password reset clears the limits of the `username` attribute and the user's ID, but it can't tell what else your finder accepts. Pass your other identifiers in a `PasswordReset` listener, or a lock on one stays until it expires, up to 30 days at the consecutive cap, while the user can still sign in with the `username` attribute:
-
-```php
-use Keyring\Events\PasswordReset;
-use Keyring\Support\Throttle;
-
-Event::listen(function (PasswordReset $event) {
-    app(Throttle::class)->clearAccount($event->user, $event->user->username);
-});
-```
+Failed attempts count against the user your finder returns, however the username was typed, so an account has one limit whether someone guesses at its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep it to a lookup.
 
 `findUsersUsing()` only finds the user: Keyring still checks the password, and answers a `null` the same way as a wrong password, in the same time. It answers the same way for a user that Keyring's guard wouldn't load back through its provider, like one of another model. The username field's validation still applies; change it with a [pipeline step](#writing-a-step) if you need to.
 

@@ -7,7 +7,6 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
@@ -41,6 +40,11 @@ class Throttle
      * Requests that don't name an account (like a usernameless passkey) only
      * get the per-IP limit, so they can't fill one bucket every user shares.
      *
+     * An account's limits are its user's, found first, so however the
+     * username was typed they count in one place, and a success only clears
+     * the counts of whoever signed in. A username that finds nobody counts
+     * under what was typed.
+     *
      * A browser the account has signed in from before gets a bucket and an
      * in-a-row count of its own, so someone guessing elsewhere can't lock the
      * owner out. Per IP it counts for that account alone, so others on a
@@ -54,8 +58,9 @@ class Throttle
      */
     public function limitsFor(Factor $factor, Request $request, ?Attempt $attempt): array
     {
-        $account = $this->account($factor, $request, $attempt);
-        $device = $account === '' ? null : $this->knownDevice($request, $attempt);
+        $user = $this->user($factor, $request, $attempt);
+        $account = $user === null ? $this->unknownAccount($request) : $this->accountOf($user);
+        $device = $account === '' ? null : $this->knownDevice($request, $user);
         $consecutive = config('keyring.limits.consecutive');
 
         $ip = $factor->key().'|ip|'.$request->ip().($device === null ? '' : '|account|'.$account);
@@ -153,38 +158,27 @@ class Throttle
 
     /**
      * Clear the user's per-account limits on the factors that can start a
-     * sign in: the in-a-row count, and the counts, locks and escalation.
-     * Limits start under the typed username (before the user is known) and
-     * continue under their ID, with a bucket for each known device. The
-     * per-IP limits stay, or a reset would be a way around them. A second
-     * factor's counts and locks stay too: a reset only proves control of the
-     * mailbox, which is what they defend against, and it could be repeated to
-     * keep guessing.
-     *
-     * The user's username is cleared by default. Apps whose findUsersUsing()
-     * also accepts something else pass it in $usernames: nothing on the user
-     * says what else was typed.
+     * sign in: the in-a-row count, and the counts, locks and escalation, with
+     * those of each known device. The per-IP limits stay, or a reset would
+     * be a way around them. A second factor's counts and locks stay too: a
+     * reset only proves control of the mailbox, which is what they defend
+     * against, and it could be repeated to keep guessing.
      */
-    public function clearAccount(Authenticatable&Model $user, ?string ...$usernames): void
+    public function clearAccount(Authenticatable&Model $user): void
     {
-        $accounts = [
-            (string) $user->getAuthIdentifier(),
-            ...array_map($this->accountKey(...), [$user->getAttribute($this->keyring->username()), ...$usernames]),
-        ];
-
         $devices = Features::enabled(Features::devices())
             ? $this->keyring->deviceModel()::query()->ownedBy($user)->active()->pluck('id')->all()
             : [];
 
         $factors = $this->keyring->registered()->filter(fn (Factor $factor) => $factor instanceof PrimaryFactor)->keys();
 
-        foreach ($factors->crossJoin($accounts, [null, ...$devices]) as [$factor, $account, $device]) {
-            $key = $this->key(new Limit($this->bucket($factor, $account, $device)));
+        foreach ($factors->crossJoin([null, ...$devices]) as [$factor, $device]) {
+            $key = $this->key(new Limit($this->bucket($factor, $this->accountOf($user), $device)));
 
             $this->limiter->clear($key);
             $this->limiter->clear($key.':locked');
             $this->limiter->clear($key.':lockouts');
-            $this->limiter->clear($this->key(new Limit(ConsecutiveLimit::keyFor($factor, $account, $device))));
+            $this->limiter->clear($this->key(new Limit(ConsecutiveLimit::keyFor($factor, $this->accountOf($user), $device))));
         }
     }
 
@@ -219,49 +213,55 @@ class Throttle
     }
 
     /**
-     * How the attempt names its account. A factor that can start a sign in
-     * counts under the username wherever it's checked, as it must before the
-     * user is known: confirming under the ID would be a second allowance of
-     * guesses. Empty when the request names no account.
+     * Whose attempt this is: the user once there's an attempt, and before
+     * that whoever the typed username finds, for a factor that can start a
+     * sign in. Null when it names nobody Keyring knows.
      */
-    protected function account(Factor $factor, Request $request, ?Attempt $attempt): string
+    protected function user(Factor $factor, Request $request, ?Attempt $attempt): (Authenticatable&Model)|null
     {
         return match (true) {
-            $attempt === null => $this->accountKey(Input::text($request, $this->keyring->username())),
-            $factor instanceof PrimaryFactor => $this->accountKey((string) $attempt->user()->getAttribute($this->keyring->username())),
-            default => (string) $attempt->userId,
+            $attempt !== null => $attempt->user(),
+            $factor instanceof PrimaryFactor && $this->typedUsername($request) !== '' => $this->keyring->findUser($request),
+            default => null,
         };
     }
 
     /**
-     * How a typed username names its account in rate limits: transliterated
-     * too, so spelling variants of one address share a limit.
+     * How a user is named in rate limits. By model as well as ID, so two
+     * kinds of account with the same ID don't share a count.
      */
-    protected function accountKey(?string $username): string
+    protected function accountOf(Authenticatable&Model $user): string
     {
-        return Str::transliterate($this->keyring->normalizeUsername((string) $username));
+        return 'user:'.$user->getMorphClass().':'.$user->getAuthIdentifier();
     }
 
     /**
-     * The device's ID when the request's device cookie belongs to the account.
-     * Compares the user or the normalised username, not the transliterated
-     * rate limit key, or a cookie for victim@exämple.com would count as one
-     * for victim@example.com.
+     * How a username that finds nobody is named, so guesses at it are still
+     * limited, and answered like guesses at a real account. Empty when the
+     * request names no account at all.
      */
-    protected function knownDevice(Request $request, ?Attempt $attempt): ?string
+    protected function unknownAccount(Request $request): string
     {
-        $username = fn (mixed $value) => $this->keyring->normalizeUsername((string) $value);
-        $typed = $username(Input::text($request, $this->keyring->username()));
+        $username = $this->typedUsername($request);
 
-        return $this->devices->forBrowser($request)->first(function (Device $device) use ($attempt, $username, $typed) {
-            $user = $device->user();
+        return $username === '' ? '' : 'name:'.$username;
+    }
 
-            return match (true) {
-                $user === null => false,
-                $attempt !== null => $user->is($attempt->user()),
-                default => $typed === $username($user->getAttribute($this->keyring->username())),
-            };
-        })?->id;
+    protected function typedUsername(Request $request): string
+    {
+        return $this->keyring->normalizeUsername(Input::text($request, $this->keyring->username()));
+    }
+
+    /**
+     * The device's ID when the request's device cookie is one of the user's.
+     * Looked up whether or not there's a user, so a username nobody has
+     * takes as long to turn down as a real one.
+     */
+    protected function knownDevice(Request $request, (Authenticatable&Model)|null $user): ?string
+    {
+        $devices = $this->devices->forBrowser($request);
+
+        return $user === null ? null : $devices->first(fn (Device $device) => $device->user()?->is($user) === true)?->id;
     }
 
     /**
