@@ -60,6 +60,14 @@ class AuthenticateSession
         }
 
         $user = $this->keyring->user();
+
+        // Someone the app has stopped letting sign in (Keyring::allowSignInWhen)
+        // isn't left signed in, whatever kept them so: a session, a "remember
+        // me" cookie, or a sign in the app started.
+        if (! $this->keyring->allowsSignIn($user)) {
+            return $this->signOut($request, 'not_allowed');
+        }
+
         $session = $this->sessions->current($request);
 
         if ($session === null) {
@@ -220,7 +228,7 @@ class AuthenticateSession
     }
 
     /**
-     * @param  'revoked'|'expired'|'idle'|'other_user'|'risk'  $reason
+     * @param  'revoked'|'expired'|'idle'|'other_user'|'risk'|'not_allowed'  $reason
      */
     protected function signOut(Request $request, string $reason): Response
     {

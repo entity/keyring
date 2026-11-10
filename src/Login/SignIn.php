@@ -39,7 +39,7 @@ class SignIn
     {
         $user = $attempt->user();
 
-        if (! $this->keyring->belongsToGuard($user)) {
+        if (! $this->keyring->belongsToGuard($user) || ! $this->keyring->allowsSignIn($user)) {
             throw ValidationException::withMessages([$this->keyring->username() => __('auth.failed')]);
         }
 

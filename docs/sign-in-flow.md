@@ -4,6 +4,7 @@
 - [Routes](#routes)
 - [Signing In With a Password](#signing-in-with-a-password)
     - [Finding the User](#finding-the-user)
+    - [Who May Sign In](#who-may-sign-in)
 - [Signing In With a Passkey](#signing-in-with-a-passkey)
 - [Starting a Sign In Yourself](#starting-a-sign-in-yourself)
 - [The Challenge Page](#the-challenge-page)
@@ -76,10 +77,10 @@ By default Keyring looks the user up by the `username` attribute, trimmed and lo
 use App\Models\User;
 use Illuminate\Http\Request;
 
-// Sign in with an email address or a username, and never as a banned user.
+// Sign in with an email address or a username.
 Keyring::findUsersUsing(fn (Request $request) => User::query()
-    ->where(fn ($query) => $query->where('email', $request->email)->orWhere('username', $request->email))
-    ->where('banned', false)
+    ->where('email', $request->email)
+    ->orWhere('username', $request->email)
     ->first());
 
 // Keep usernames' case (for lookups, rate limits, email changes and reservations).
@@ -87,6 +88,30 @@ Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
 ```
 
 Whether a lookup cares about case also depends on your database: MySQL's default collations ignore it, while PostgreSQL and SQLite don't.
+
+The finder only says whose username was typed, and only the password form asks it. A passkey finds its account without one. To keep an account out, use `allowSignInWhen()`.
+
+### Who May Sign In
+
+To keep some accounts out altogether, like banned ones, tell Keyring who may sign in:
+
+```php
+use App\Models\User;
+
+Keyring::allowSignInWhen(fn (User $user) => ! $user->banned);
+```
+
+Keyring asks wherever a session starts or carries on:
+
+- Every way of starting a sign in: the password, a passkey, and any factor of your own.
+- A sign in that's waiting for its second factor.
+- A "remember me" cookie.
+- Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`.
+- Registration, which doesn't sign the new user in.
+
+An account that's turned away gets the same answer as one that doesn't exist. Password reset still works for it, since a reset doesn't sign anyone in.
+
+The callback runs on every signed-in request, so answer from the user it's given rather than with a query.
 
 Failed attempts count against the user your finder returns, however the username was typed, so an account has one limit whether someone guesses at its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep it to a lookup.
 

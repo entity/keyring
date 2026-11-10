@@ -3,7 +3,9 @@
 namespace Keyring\Pipeline\Steps;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Timebox;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
@@ -56,7 +58,7 @@ class VerifyFactor
         if ($context->identifying && $context->factor instanceof PrimaryFactor) {
             $authenticator = $context->factor->identify($context->request);
 
-            $context->authenticator = $authenticator !== null && $this->keyring->belongsToGuard($authenticator->user()) ? $authenticator : null;
+            $context->authenticator = $authenticator !== null && $this->maySignIn($authenticator->user()) ? $authenticator : null;
 
             if ($context->authenticator !== null) {
                 $context->attempt = Attempt::start(
@@ -99,6 +101,15 @@ class VerifyFactor
         FactorVerified::dispatch($attempt, $authenticator, $context->verification);
 
         return $next($context);
+    }
+
+    /**
+     * Whether whoever the factor found can be signed in here. When they
+     * can't, the attempt carries on as if nobody was found.
+     */
+    protected function maySignIn(?Authenticatable $user): bool
+    {
+        return $user instanceof Model && $this->keyring->belongsToGuard($user) && $this->keyring->allowsSignIn($user);
     }
 
     /**

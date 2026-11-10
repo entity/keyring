@@ -47,7 +47,7 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)` (valid for `devices.report_link_for` unless you pass days) for a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
 | `SessionsRevoked` | Sessions were signed out, such as "sign out everywhere else". | `user`, `count` |
-| `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user` or `risk` |
+| `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `risk` or `not_allowed` |
 
 A user signing out on purpose is `LoggedOut`, not `SessionEnded`. See [Devices & Sessions](devices-and-sessions.md#events).
 

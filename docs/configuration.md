@@ -328,11 +328,12 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::usePendingChangeModel($model)` | Uses your own subclass of `Keyring\Models\PendingChange`. |
 | `Keyring::useSecurityEventModel($model)` | Uses your own subclass of `Keyring\Models\SecurityEvent`. |
 | `Keyring::attempt($request, $factor)` | Starts a sign in with a factor from a route of your own, through the same pipeline as the login form. See [Starting a Sign In Yourself](sign-in-flow.md#starting-a-sign-in-yourself). |
+| `Keyring::allowSignInWhen($callback)` | Decides who may be signed in at all, such as accounts that aren't banned. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |
 | `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. See [Emailed Links](security.md#emailed-links). |
 | `Keyring::recordIpsUsing($callback)` | What Keyring stores as a request's IP address. See [What's Stored](security-log-and-emails.md#whats-stored). |
 | `Keyring::describeDevicesUsing($callback)` | Names devices your own way, in place of "Firefox on Windows". See [Device Names](devices-and-sessions.md#device-names). |
-| `Keyring::findUsersUsing($callback)` | Finds the user for a password sign in your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
+| `Keyring::findUsersUsing($callback)` | Finds the user a typed username belongs to your own way, for a password sign in. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::normalizeUsernamesUsing($callback)` | Normalises usernames your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::signInAfterRegistering($when)` | Whether registering signs the user in. See [Registration](sign-in-flow.md#registration). |
 | `Keyring::findUser($request)` | The user a password sign in is for, for a primary factor of your own. |
@@ -366,5 +367,6 @@ It also answers questions about your setup, for your own controllers, factors an
 | `Keyring::notification($type, $arguments)` | The app's notification for a type, or `null`. `Keyring::requiredNotification()` throws when there isn't one. |
 | `Keyring::belongsToGuard($user)` | Whether Keyring's guard would load this user back, so they can be signed in. |
 | `Keyring::recordedIp($request)` | The request's IP address as Keyring stores it. |
+| `Keyring::allowsSignIn($user)` | Whether the app lets this user be signed in. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowsEnrollment($user)` | Whether the user may add a sign-in method. See [Who May Enroll](authenticators.md#who-may-enroll). |
 | `Keyring::authenticatorModel()` | The authenticator model's class. `deviceModel()`, `pendingChangeModel()` and `securityEventModel()` do the same for theirs. |

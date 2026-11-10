@@ -32,6 +32,7 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | The route prefix, domain and middleware | `prefix`, `domain` and `middleware` | [Routes](configuration.md#routes) |
 | The middleware on account changes | `changes_middleware` | [Account Changes and Enrollment](configuration.md#account-changes-and-enrollment) |
 | The form rate limits | The `keyring` and `keyring-login-options` rate limiters | [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits) |
+| Who may sign in at all | `Keyring::allowSignInWhen()` | [Who May Sign In](sign-in-flow.md#who-may-sign-in) |
 | Who may add a sign-in method | `Keyring::allowEnrollmentWhen()` | [Who May Enroll](authenticators.md#who-may-enroll) |
 | Whether registering signs the user in | `Keyring::signInAfterRegistering()` | [Registration](sign-in-flow.md#registration) |
 | Risk signals and what they do | `Keyring::risk()`, your own `Signal` | [Risk](risk.md) |
