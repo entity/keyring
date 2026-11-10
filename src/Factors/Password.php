@@ -39,6 +39,11 @@ class Password extends Factor implements PrimaryFactor
         return true;
     }
 
+    public function answersChallenges(): bool
+    {
+        return true;
+    }
+
     public function categories(Authenticator $authenticator): array
     {
         return [Category::Knowledge];

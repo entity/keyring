@@ -76,3 +76,30 @@ it('drops a half-finished sign in when a new one starts', function () {
 
     $this->assertAuthenticatedAs($other);
 });
+
+// The provider's answer only arrives with the request that starts a sign in,
+// so a challenge or a step-up has nothing of its own to check.
+it('does not offer a factor that can only start a sign in as a way to confirm', function () {
+    Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
+
+    $this->get('/sso/callback')->assertRedirect('/dashboard');
+    $this->travel(16)->minutes();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->inertia()->get(route('keyring.confirm.challenge'))
+        ->assertJsonPath('props.factor', 'password')
+        ->assertJsonPath('props.alternatives', []);
+});
+
+it('refuses to confirm with a factor that can only start a sign in', function () {
+    Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
+
+    $this->get('/sso/callback')->assertRedirect('/dashboard');
+    $this->travel(16)->minutes();
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->post(route('keyring.confirm.verify', 'sso'))->assertSessionHasErrors();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+});

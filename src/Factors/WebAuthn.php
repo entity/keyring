@@ -266,6 +266,11 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         return $this->profile->primary;
     }
 
+    public function answersChallenges(): bool
+    {
+        return true;
+    }
+
     protected function defaultName(): string
     {
         return $this->profile->primary ? __('Passkey') : __('Security key');

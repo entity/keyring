@@ -106,6 +106,12 @@ class VerifyFactor
      */
     protected function check(Context $context): ?Verification
     {
+        // On a challenge or a step-up nobody was identified, so a factor
+        // whose proof is who identify() found has nothing to check.
+        if (! $context->identifying && $context->factor instanceof PrimaryFactor && ! $context->factor->answersChallenges()) {
+            return null;
+        }
+
         return $context->factor->verify($context->attempt(), $context->authenticator(), $context->request);
     }
 

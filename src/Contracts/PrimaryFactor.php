@@ -18,6 +18,14 @@ interface PrimaryFactor extends Factor
     public function startsLogin(): bool;
 
     /**
+     * Whether verify() checks a proof of its own, so the factor can also
+     * answer a challenge or a step-up, which never call identify(). Return
+     * false when the proof is who identify() found, like a social login:
+     * that factor can only start a login.
+     */
+    public function answersChallenges(): bool;
+
+    /**
      * Find the authenticator the request is aimed at.
      *
      * Implementations must take the same time whether or not a user is found,
