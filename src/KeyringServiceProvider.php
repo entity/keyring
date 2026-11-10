@@ -5,6 +5,7 @@ namespace Keyring;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -15,7 +16,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Activity\DispatchLaravelEvents;
@@ -201,12 +201,17 @@ class KeyringServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip()));
+        // Once the rate limiter is asked for, not now: building it takes its
+        // cache store, and a provider that boots after this one may be what
+        // registers that store (Octane's "octane" store).
+        $this->callAfterResolving(RateLimiter::class, function (RateLimiter $limiter) {
+            $limiter->for('keyring', fn (Request $request) => Limit::perMinute(6)->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip()));
 
-        // The login page asks for these on every load, for passkey autofill,
-        // and an office shares one address, so six a minute would be too few.
-        // One a second still limits how many challenges a script can make.
-        RateLimiter::for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
+            // The login page asks for these on every load, for passkey autofill,
+            // and an office shares one address, so six a minute would be too few.
+            // One a second still limits how many challenges a script can make.
+            $limiter->for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
+        });
     }
 
     /**

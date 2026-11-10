@@ -1,6 +1,11 @@
 <?php
 
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\RateLimiter as Limiter;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Inertia\ServiceProvider;
 use Keyring\Changes\ProtectedAttributes;
@@ -131,3 +136,39 @@ it('refuses a feature it doesn\'t know, rather than leaving it off', function ()
 
     new KeyringServiceProvider($this->app)->boot();
 })->throws(UnknownFeature::class, 'Unknown Keyring features in config/keyring.php: [device]');
+
+/**
+ * The app as it is before anything has asked for the rate limiter, kept in
+ * a cache store that only exists once another package has booted: Octane
+ * adds its "octane" store when its provider boots, which is after Keyring's.
+ */
+function withALateCacheStoreForRateLimits(): void
+{
+    config(['cache.stores.late' => ['driver' => 'late'], 'cache.limiter' => 'late']);
+
+    unset(app()[Limiter::class]);
+    app()->singleton(Limiter::class, fn () => new Limiter(Cache::driver(config('cache.limiter'))));
+    RateLimiter::clearResolvedInstance(Limiter::class);
+}
+
+it('boots before the cache store its rate limits are kept in is registered', function () {
+    withALateCacheStoreForRateLimits();
+
+    new KeyringServiceProvider($this->app)->boot();
+
+    Cache::extend('late', fn () => Cache::repository(new ArrayStore));
+
+    expect(RateLimiter::limiter('keyring')(request())->maxAttempts)->toBe(6)
+        ->and(RateLimiter::limiter('keyring-login-options')(request())->maxAttempts)->toBe(60);
+});
+
+it('keeps a rate limiter the app defines in place of its own', function () {
+    withALateCacheStoreForRateLimits();
+
+    new KeyringServiceProvider($this->app)->boot();
+
+    Cache::extend('late', fn () => Cache::repository(new ArrayStore));
+    RateLimiter::for('keyring', fn () => Limit::perMinute(10));
+
+    expect(RateLimiter::limiter('keyring')(request())->maxAttempts)->toBe(10);
+});
