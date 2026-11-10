@@ -58,7 +58,7 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `password_reset` | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |
 | `protection_bypassed` | `Keyring::withoutProtection()` was used. Linked to the signed-in user who did it. | `reason` |
 | `clone_suspected` | A passkey or security key's counter went backwards. | `name` |
-| `risk_denied`, `risk_reauthenticate`, `risk_step_up`, `risk_revoked_sessions`, `risk_notified` | A risk action did something. | `checkpoint`, `score`, `reasons` |
+| `risk_denied`, `risk_reauthenticate`, `risk_locked`, `risk_step_up`, `risk_revoked_sessions`, `risk_notified` | A risk action did something. | `checkpoint`, `score`, `reasons` |
 
 A wrong password for an unknown account is logged as `factor_failed` with no user.
 
@@ -207,6 +207,8 @@ use Illuminate\Notifications\Messages\MailMessage;
 
 class PasswordChanged extends SecurityNotice
 {
+    // subject() and intro() as published.
+
     public function toMail(object $notifiable): MailMessage
     {
         return (new MailMessage)

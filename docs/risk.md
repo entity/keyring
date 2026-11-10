@@ -212,4 +212,4 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->risk?->has('new_
 
 ## Events and Logging
 
-When an action does anything, Keyring dispatches `Keyring\Events\RiskAssessed` with `user`, `risk`, `action` and `checkpoint` (the `Checkpoint` enum, `Checkpoint::Login` or `Checkpoint::Request`), and logs it as `risk_denied`, `risk_reauthenticate`, `risk_step_up`, `risk_revoked_sessions` or `risk_notified`, with the checkpoint (`login` or `request`), score and reasons.
+When an action does anything, Keyring dispatches `Keyring\Events\RiskAssessed` with `user`, `risk`, `action` and `checkpoint` (the `Checkpoint` enum, `Checkpoint::Login` or `Checkpoint::Request`), and logs it under the strongest thing it did: `risk_denied`, `risk_reauthenticate`, `risk_locked`, `risk_step_up`, `risk_revoked_sessions` or `risk_notified`, with the checkpoint (`login` or `request`), score and reasons.

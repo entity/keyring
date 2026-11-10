@@ -83,6 +83,12 @@ function signInAs(string $agent = FIREFOX, string $password = 'password', array 
         ->post('/login', ['email' => 'taylor@example.com', 'password' => $password]);
 }
 
+it('logs an action that only locks as a lock', function () {
+    expect(Action::allow()->lockFor('1h')->name())->toBe('locked')
+        ->and(Action::deny()->lockFor('1h')->name())->toBe('denied')
+        ->and(Action::allow()->name())->toBe('allowed');
+});
+
 it('asks for another factor when risk is medium', function () {
     Keyring::risk()->signals([NewDevice::class, NewCountry::class]);
     Keyring::require(Requirement::aal1());
