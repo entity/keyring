@@ -7,9 +7,8 @@ use Illuminate\Events\Dispatcher;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
-use Keyring\Devices\UserAgent;
 use Keyring\Events;
-use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 
 /**
  * Sends the app's notification for each security notice it has registered
@@ -17,6 +16,10 @@ use Keyring\Facades\Keyring;
  */
 class SendSecurityNotifications
 {
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
+
     /**
      * @return array<class-string, string>
      */
@@ -124,10 +127,10 @@ class SendSecurityNotifications
         // The current request, not one captured at boot (Octane).
         $request = request();
 
-        $notification = Keyring::notification($type, [
+        $notification = $this->keyring->notification($type, [
             'when' => now()->toDayDateTimeString(),
             'at' => now(),
-            ...$describeRequest ? ['device' => $this->clean(UserAgent::describe($request->userAgent())), 'ip' => Keyring::recordedIp($request)] : [],
+            ...$describeRequest ? ['device' => $this->clean($this->keyring->describeDevice($request->userAgent())), 'ip' => $this->keyring->recordedIp($request)] : [],
             ...array_map(fn (mixed $value) => is_string($value) ? $this->clean($value) : $value, $with),
         ]);
 

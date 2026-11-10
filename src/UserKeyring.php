@@ -8,7 +8,6 @@ use Illuminate\Support\Collection;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
-use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Requirement;
@@ -28,6 +27,7 @@ class UserKeyring
 
     public function __construct(
         public readonly Authenticatable&Model $user,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -42,7 +42,7 @@ class UserKeyring
         return $this->stored()
             ->pluck('factor')
             ->unique()
-            ->reject(fn (string $factor) => Keyring::hasFactor($factor))
+            ->reject(fn (string $factor) => $this->keyring->hasFactor($factor))
             ->values()
             ->all();
     }
@@ -52,7 +52,7 @@ class UserKeyring
      */
     protected function stored(): Collection
     {
-        return $this->stored ??= Keyring::authenticatorModel()::query()
+        return $this->stored ??= $this->keyring->authenticatorModel()::query()
             ->ownedBy($this->user)
             ->confirmed()
             ->get()
@@ -214,7 +214,7 @@ class UserKeyring
      */
     protected function load(): Collection
     {
-        return Keyring::registered()
+        return $this->keyring->registered()
             ->flatMap(fn (Factor $factor) => $factor->authenticators($this->user, $this->stored()))
             ->sortBy([
                 fn (Authenticator $a, Authenticator $b) => $b->is_default <=> $a->is_default,

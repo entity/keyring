@@ -52,6 +52,10 @@ class Ceremonies
 
     protected ?AttestationStatementSupportManager $attestation = null;
 
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
+
     /**
      * @param  list<PublicKeyCredentialDescriptor>  $exclude
      */
@@ -60,9 +64,9 @@ class Ceremonies
         return PublicKeyCredentialCreationOptions::create(
             rp: PublicKeyCredentialRpEntity::create($this->relyingPartyName(), $this->relyingPartyId()),
             user: PublicKeyCredentialUserEntity::create(
-                name: (string) $user->getAttribute(Keyring::username()),
+                name: (string) $user->getAttribute($this->keyring->username()),
                 id: $this->userHandle($user),
-                displayName: (string) ($user->getAttribute('name') ?? $user->getAttribute(Keyring::username())),
+                displayName: (string) ($user->getAttribute('name') ?? $user->getAttribute($this->keyring->username())),
             ),
             challenge: random_bytes(32),
             pubKeyCredParams: array_map(
@@ -180,7 +184,7 @@ class Ceremonies
      */
     public function userHandle(Authenticatable&Model $user): string
     {
-        $existing = Keyring::authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
+        $existing = $this->keyring->authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
 
         return $existing === null
             ? KeyedHash::make('keyring|'.$user->getAuthIdentifier())

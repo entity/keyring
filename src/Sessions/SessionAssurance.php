@@ -36,6 +36,7 @@ class SessionAssurance
     public function __construct(
         protected Session $session,
         protected Sessions $sessions,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -124,7 +125,7 @@ class SessionAssurance
             return $verifications;
         }
 
-        $kept = Keyring::authenticatorModel()::query()->whereKey($ids)->pluck('id')->all();
+        $kept = $this->keyring->authenticatorModel()::query()->whereKey($ids)->pluck('id')->all();
 
         return array_values(array_filter($verifications, fn (Verification $verification) => $verification->authenticator === null || in_array($verification->authenticator, $kept, true)));
     }

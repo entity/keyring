@@ -5,7 +5,6 @@ namespace Keyring\Activity;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
 use Keyring\Events;
-use Keyring\Facades\Keyring;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 
@@ -16,6 +15,7 @@ class RecordSecurityEvents
 {
     public function __construct(
         protected SecurityLog $log,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -158,7 +158,7 @@ class RecordSecurityEvents
      */
     public function protectionBypassed(Events\ProtectionBypassed $event): void
     {
-        $actor = Keyring::guard()->user();
+        $actor = $this->keyring->guard()->user();
 
         $this->log->recordOrFail('protection_bypassed', $actor instanceof Authenticatable ? $actor : null, meta: ['reason' => $event->reason]);
     }
