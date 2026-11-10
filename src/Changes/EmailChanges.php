@@ -53,6 +53,7 @@ class EmailChanges
         protected Sessions $sessions,
         protected SessionAssurance $assurance,
         protected ReservedAddresses $reserved,
+        protected PendingEmailChanges $pending,
     ) {}
 
     /**
@@ -193,7 +194,7 @@ class EmailChanges
         $change = $change->fresh();
 
         if ($reverted && ($user = $change?->user())) {
-            $this->sessions->revokeAll($user);
+            $this->sessions->signOutEverywhere($user);
 
             EmailChangeReverted::dispatch($user, $change);
         }
@@ -203,22 +204,17 @@ class EmailChanges
 
     /**
      * Cancel every change still waiting for confirmation, e.g. after the
-     * account was recovered with a password reset. The emailed "this wasn't
-     * me" link keeps working until the change would have expired: whoever
-     * asked for the change can cancel it too, and that mustn't take the
-     * owner's way to undo what they did.
+     * account was recovered with a password reset. Its "this wasn't me" link
+     * keeps working until the change would have expired.
      */
     public function cancel(Authenticatable&Model $user): void
     {
-        $this->changesOf($user)->pending()->update([
-            'cancelled_at' => now(),
-            'revertable_until' => new Expression('expires_at'),
-        ]);
+        $this->pending->cancel($user);
     }
 
     public function pending(Authenticatable&Model $user): ?PendingChange
     {
-        return $this->changesOf($user)->pending()->latest()->first();
+        return $this->pending->current($user);
     }
 
     /**
@@ -284,7 +280,7 @@ class EmailChanges
         $here = $request->hasSession() && $this->signedInAs($user);
 
         if (config('keyring.email_changes.sign_out_others')) {
-            $this->sessions->revokeAll($user, except: $here ? $this->sessions->current($request)?->id : null);
+            $this->sessions->signOutEverywhere($user, except: $here ? $this->sessions->current($request)?->id : null);
         }
 
         if ($here) {
@@ -385,7 +381,7 @@ class EmailChanges
      */
     protected function changesOf(Authenticatable&Model $user): Builder
     {
-        return $this->keyring->pendingChangeModel()::query()->ownedBy($user)->where('attribute', $this->attribute());
+        return $this->pending->of($user);
     }
 
     protected function attribute(): string

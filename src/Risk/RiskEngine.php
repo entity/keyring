@@ -110,7 +110,7 @@ class RiskEngine
         }
 
         if ($action->revokeSessions) {
-            $this->container->make(Sessions::class)->revokeAll($user);
+            $this->container->make(Sessions::class)->signOutEverywhere($user);
         }
 
         if ($action->lockSeconds !== null) {

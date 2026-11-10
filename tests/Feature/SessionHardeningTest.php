@@ -172,7 +172,7 @@ it('replaces a planted session id when the password step leaves a pending login'
     $this->assertAuthenticatedAs($this->user);
 });
 
-it('cancels a pending email change when signing out everywhere else, and from revokeAll', function () {
+it('cancels a pending email change when signing out everywhere else, and from signOutEverywhere', function () {
     Notification::fake();
     signInWith();
 
@@ -187,7 +187,7 @@ it('cancels a pending email change when signing out everywhere else, and from re
     $this->postJson('/user/email', ['email' => 'someone-else@example.com'])->assertOk();
     $change = PendingChange::query()->whereNull('cancelled_at')->sole();
 
-    app(Sessions::class)->revokeAll($this->user);
+    app(Sessions::class)->signOutEverywhere($this->user);
 
     expect($change->fresh()->isPending())->toBeFalse();
 });

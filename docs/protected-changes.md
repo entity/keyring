@@ -112,7 +112,7 @@ The new address must always confirm. The current address must confirm too, unles
 
 The change applies once every required confirmation is in. When it applies, Keyring checks the address is still the one the change was requested from, and that no one else has taken the new one in the meantime. If either has changed, the pending change is cancelled. Applying also sets `email_verified_at`, when the model has that attribute loaded, and stops trusting the user's devices.
 
-Applying also signs out the account's other sessions and changes the "remember me" token, as `Sessions::revokeAll()` does. Set `email_changes.sign_out_others` to `false` to keep them; devices stop being trusted either way. The browser that confirmed keeps its session, under a new ID, only if it was signed in as this account. With `email_changed` and `email_change_reverted` on (see [Security Emails](security-log-and-emails.md#email-types)), both addresses are told when the change applies and when an applied change is reverted.
+Applying also signs out the account's other sessions and changes the "remember me" token, as `Sessions::signOutEverywhere()` does. Set `email_changes.sign_out_others` to `false` to keep them; devices stop being trusted either way. The browser that confirmed keeps its session, under a new ID, only if it was signed in as this account. With `email_changed` and `email_change_reverted` on (see [Security Emails](security-log-and-emails.md#email-types)), both addresses are told when the change applies and when an applied change is reverted.
 
 ### The Emailed Links
 
@@ -163,7 +163,7 @@ With the `HasKeyring` trait, saving a user with a reserved address any other way
 
 `confirmed` is whether the new address has confirmed. `DELETE /user/email` cancels it and responds with `email-change-cancelled`.
 
-A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it. Signing out everywhere else cancels it too, as does anything else that goes through `Sessions::revokeAll()`.
+A password reset or a password change cancels any pending change, since whoever knew the old password shouldn't keep a change they started with it. Signing out everywhere else cancels it too, as does anything else that goes through `Sessions::signOutEverywhere()`.
 
 However a change is cancelled, the old address's "this wasn't me" link keeps working until the change would have expired. Whoever asked for the change can cancel it too, and that shouldn't take away the owner's way to remove what was added and sign everything out.
 

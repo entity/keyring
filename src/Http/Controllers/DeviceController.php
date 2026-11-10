@@ -54,7 +54,7 @@ class DeviceController
      */
     public function destroyOthers(Request $request): StatusResponse
     {
-        $count = $this->sessions->revokeAll($request->user(), except: $this->sessions->current($request)?->id);
+        $count = $this->sessions->signOutEverywhere($request->user(), except: $this->sessions->current($request)?->id);
 
         // Someone who copied this session's cookie doesn't get to stay either.
         $this->sessions->rotate($request);

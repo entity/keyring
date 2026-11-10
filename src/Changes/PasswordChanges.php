@@ -7,7 +7,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
-use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
@@ -42,7 +41,7 @@ class PasswordChanges
         $this->sessions->distrustDevices($user);
 
         if ($signOutOthers) {
-            $this->sessions->revokeAll($user, except: $currentSession);
+            $this->sessions->signOutEverywhere($user, except: $currentSession);
         }
 
         PasswordChanged::dispatch($user);
@@ -59,7 +58,7 @@ class PasswordChanges
     public function reset(Authenticatable&Model $user, Closure $save): void
     {
         $this->save($user, $save);
-        $this->sessions->revokeAll($user);
+        $this->sessions->signOutEverywhere($user);
         $this->locks->unlock($user);
         $this->throttle->clearAccount($user);
 
