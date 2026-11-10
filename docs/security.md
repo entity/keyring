@@ -105,7 +105,7 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 
 ### Links and Headers
 
-- Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request's `Host` header.
+- Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
 - Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
 - Pages opened from emailed links (password resets, email changes, "this wasn't me") keep their token out of the `Referer` header other sites see, like every Keyring response. Your own app still receives it, so a failed form finds its way back.
 
