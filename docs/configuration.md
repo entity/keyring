@@ -353,4 +353,7 @@ It also answers questions about your setup, for your own controllers, factors an
 | `Keyring::statusMessage($status)` | The translated message for a status slug, or `null`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
 | `Keyring::render($name, $props)` | Renders one of Keyring's [pages](sign-in-flow.md#pages), as Inertia or Blade, for a route of your own. |
 | `Keyring::hasNotification($type)` | Whether a notification is registered for a [type](security-log-and-emails.md#email-types). |
-| `Keyring::protectedAttributes()` | The attributes that only change through Keyring's flows. See [Protected Attributes](protected-changes.md#protected-attributes). |
+| `Keyring::protectedAttributes($user = null)` | The attributes that only change through Keyring's flows. Pass a user whose model keeps its password under another name to get that name. See [Protected Attributes](protected-changes.md#protected-attributes). |
+| `Keyring::response($contract, ...$with)` | Builds one of Keyring's [responses](sign-in-flow.md#responses), yours when you swapped it, for a route of your own. |
+| `Keyring::describeDevice($userAgent)` | A user agent as a name people recognise, or `null`. |
+| `Keyring::linkRoot()` | Where emailed links start. |

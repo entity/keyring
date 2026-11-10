@@ -9,7 +9,6 @@ use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
 use Keyring\Features;
-use Keyring\Http\Controllers\Concerns\RespondsToVerification;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
@@ -27,7 +26,7 @@ use Keyring\Support\Throttle;
  */
 class ChallengeController
 {
-    use RespondsToVerification, RespondsWithStatus;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -135,7 +134,7 @@ class ChallengeController
         // instead of refusing keeps the account's counters counting.
         $authenticator = $attempt->exhausted ? null : $this->authenticatorFor($request, $attempt, $factor->key());
 
-        return $this->verifyAndRespond(new Context($request, $purpose, $factor, $attempt, $authenticator));
+        return $this->verifier->respond(new Context($request, $purpose, $factor, $attempt, $authenticator));
     }
 
     /**

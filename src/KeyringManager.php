@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Keyring\Activity\SecurityLog;
 use Keyring\Changes\ProtectedAttributes;
+use Keyring\Concerns\BuildsResponses;
 use Keyring\Concerns\HasKeyring;
 use Keyring\Concerns\IdentifiesUsers;
 use Keyring\Concerns\ManagesNotifications;
@@ -46,7 +47,7 @@ use Symfony\Component\HttpFoundation\Response;
 #[Singleton]
 class KeyringManager
 {
-    use IdentifiesUsers, ManagesNotifications, ManagesPipeline, RegistersActions, RendersPages, SwapsModels;
+    use BuildsResponses, IdentifiesUsers, ManagesNotifications, ManagesPipeline, RegistersActions, RendersPages, SwapsModels;
 
     /** @var Closure(Authenticatable&Model, Attempt): Requirement|Requirement */
     protected Closure|Requirement $policy;
@@ -216,19 +217,6 @@ class KeyringManager
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
         return $this->container->make(SecurityLog::class)->activity($user, $limit);
-    }
-
-    /**
-     * Swap one of Keyring's responses.
-     *
-     * @param  class-string  $contract
-     * @param  class-string|Closure  $implementation
-     */
-    public function respondWith(string $contract, string|Closure $implementation): static
-    {
-        $this->container->bind($contract, $implementation);
-
-        return $this;
     }
 
     /**

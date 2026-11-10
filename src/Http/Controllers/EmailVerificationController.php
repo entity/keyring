@@ -20,7 +20,7 @@ class EmailVerificationController
     public function notice(Request $request): mixed
     {
         return $this->verified($request)
-            ? app(VerifiedResponse::class)
+            ? $this->keyring->response(VerifiedResponse::class)
             : $this->keyring->render('verify-email', ['status' => $this->statusMessage($request)]);
     }
 
@@ -30,13 +30,13 @@ class EmailVerificationController
             $request->fulfill();
         }
 
-        return app(VerifiedResponse::class, ['justNow' => true]);
+        return $this->keyring->response(VerifiedResponse::class, justNow: true);
     }
 
     public function send(Request $request): mixed
     {
         if ($this->verified($request)) {
-            return app(VerifiedResponse::class);
+            return $this->keyring->response(VerifiedResponse::class);
         }
 
         $request->user()->sendEmailVerificationNotification();

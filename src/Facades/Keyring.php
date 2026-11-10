@@ -33,6 +33,7 @@ use Keyring\KeyringManager;
  * @method static \Illuminate\Support\Collection<int, \Keyring\Models\SecurityEvent> activity(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user, int $limit = 25)
  * @method static string|null statusMessage(mixed $status)
  * @method static \Keyring\KeyringManager respondWith(string $contract, \Closure|string $implementation)
+ * @method static \Illuminate\Contracts\Support\Responsable response(string $contract, mixed ...$with)
  * @method static \Illuminate\Contracts\Auth\StatefulGuard guard()
  * @method static \Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model user()
  * @method static \Illuminate\Contracts\Auth\UserProvider provider(string|null $guard = null)

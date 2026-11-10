@@ -52,6 +52,6 @@ class RegisteredUserController
             ? [new Verification(Password::KEY, null, [Category::Knowledge], at: now()->getTimestamp())]
             : []);
 
-        return app(RegisterResponse::class)->toResponse($request);
+        return $this->keyring->response(RegisterResponse::class)->toResponse($request);
     }
 }

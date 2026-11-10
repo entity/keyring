@@ -166,6 +166,6 @@ class AuthenticateSession
             SessionEnded::dispatch($user, $reason);
         }
 
-        return app(SignedOutResponse::class, ['reason' => $reason])->toResponse($request);
+        return $this->keyring->response(SignedOutResponse::class, reason: $reason)->toResponse($request);
     }
 }

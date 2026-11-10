@@ -56,6 +56,6 @@ class AuthenticatedSessionController
             LoggedOut::dispatch($user);
         }
 
-        return app(LogoutResponse::class)->toResponse($request);
+        return $this->keyring->response(LogoutResponse::class)->toResponse($request);
     }
 }

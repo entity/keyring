@@ -47,6 +47,6 @@ class Verifier
             default => FailedResponse::class,
         };
 
-        return $this->container->make($contract, ['context' => $context])->toResponse($context->request);
+        return $this->keyring->response($contract, context: $context)->toResponse($context->request);
     }
 }

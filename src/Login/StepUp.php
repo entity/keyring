@@ -35,7 +35,7 @@ class StepUp
 
         $this->begin($request, $requirement, $proved);
 
-        return app(ConfirmationRequiredResponse::class)->toResponse($request);
+        return $this->keyring->response(ConfirmationRequiredResponse::class)->toResponse($request);
     }
 
     /**
@@ -44,7 +44,7 @@ class StepUp
      */
     public function enrollFirst(Request $request): Response
     {
-        return app(EnrollmentRequiredResponse::class)->toResponse($request);
+        return $this->keyring->response(EnrollmentRequiredResponse::class)->toResponse($request);
     }
 
     /**

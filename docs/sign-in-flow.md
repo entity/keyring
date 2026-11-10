@@ -92,7 +92,6 @@ Failed attempts count against what was typed, because Keyring checks the limits 
 
 ```php
 use Keyring\Events\PasswordReset;
-use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Support\Throttle;
 
 Event::listen(function (PasswordReset $event) {
@@ -376,7 +375,9 @@ use Keyring\Contracts\Responses\AuthenticatedResponse;
 Keyring::respondWith(AuthenticatedResponse::class, WelcomeBack::class);
 ```
 
-Your class must implement the contract. After a verification, responses are built with the pipeline's context, so you can accept it in the constructor:
+Your class must implement the contract. Keyring builds it through the container, passing what it knows by constructor parameter name, and each contract lists those names in its `BUILT_WITH` constant: `status`, `data` and `redirect` for a `StatusResponse`, `reason` for a `SignedOutResponse`, `justNow` for a `VerifiedResponse`. Take the ones you need, and type-hint anything else for the container to inject. A required parameter Keyring can't fill is refused when you call `respondWith()`, so it fails at boot and not at someone's first sign in.
+
+After a verification, responses are built with the pipeline's `context`, so you can accept it in the constructor:
 
 ```php
 use Keyring\Contracts\Responses\AuthenticatedResponse;
@@ -398,7 +399,11 @@ class WelcomeBack implements AuthenticatedResponse
 
 `LogoutResponse` and `RegisterResponse` are never given a context.
 
-`respondWith()` also accepts a closure, which is bound in the container like any other binding.
+`respondWith()` also accepts a closure, which is bound in the container like any other binding and receives what Keyring passes as its second argument. To answer with one of these responses from a route of your own, build it the same way with `Keyring::response()`:
+
+```php
+return Keyring::response(StatusResponse::class, status: 'device-revoked', redirect: route('login'));
+```
 
 ### Status Responses
 

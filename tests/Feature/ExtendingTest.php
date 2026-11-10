@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\RouteCollection;
+use Illuminate\Routing\UrlGenerator;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -78,6 +79,42 @@ it('lets apps swap the response for every action', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
         ->deleteJson('/user/devices')
         ->assertExactJson(['custom' => 'sessions-revoked']);
+});
+
+it('refuses a response it could not build, when the app swaps it in', function () {
+    $unfillable = new class('saved') implements StatusResponse
+    {
+        public function __construct(public string $slug) {}
+
+        public function toResponse($request)
+        {
+            return response()->noContent();
+        }
+    };
+
+    expect(fn () => Keyring::respondWith(StatusResponse::class, $unfillable::class))
+        ->toThrow(InvalidArgumentException::class, 'asks for $slug, which Keyring can\'t give it. A [StatusResponse] is built with $status, $data, $redirect.')
+        ->and(fn () => Keyring::respondWith(StatusResponse::class, stdClass::class))
+        ->toThrow(InvalidArgumentException::class, 'must implement');
+});
+
+it('builds a swapped response from what the contract says it passes, and the container', function () {
+    $response = new class('saved', app('url')) implements StatusResponse
+    {
+        public function __construct(public string $status, public UrlGenerator $url, public ?string $redirect = null) {}
+
+        public function toResponse($request)
+        {
+            return response()->noContent();
+        }
+    };
+
+    Keyring::respondWith(StatusResponse::class, $response::class);
+
+    expect(Keyring::response(StatusResponse::class, status: 'device-revoked', data: [], redirect: '/login'))
+        ->toBeInstanceOf($response::class)
+        ->status->toBe('device-revoked')
+        ->redirect->toBe('/login');
 });
 
 it('answers json callers with the status and its message', function () {
