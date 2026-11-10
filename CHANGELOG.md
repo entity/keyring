@@ -12,7 +12,7 @@ The first release. Nothing is tagged yet.
 - Devices and sessions: trusted devices, new-device emails with a "this wasn't me" link, and signing out everywhere else, on any session driver.
 - Protected `email` and `password` attributes, with email changes confirmed from both addresses and revertable from the old one.
 - Risk signals with an action for each level.
-- A security log, "was this you?" alerts and security emails.
+- A security log, "was this you?" alerts and security emails, each a notification published into your app.
 - `keyring:install`, `keyring:import fortify` and `keyring:prune`.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment and the challenge page, with Vue and React bindings.

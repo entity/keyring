@@ -99,6 +99,8 @@ An eight digit code sent to the user's current email address. It's opt-in, becau
 Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor()]);
 ```
 
+The code goes out in your `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs), which `keyring:install` publishes and registers.
+
 A code:
 
 - is only sent when the user asks (see [Sending Codes](sign-in-flow.md#sending-codes)), never just by opening the challenge page,

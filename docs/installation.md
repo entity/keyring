@@ -41,7 +41,7 @@ The command asks which sign-in methods you want besides the password, which [fea
 php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --emails
 ```
 
-`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration` and `reset-passwords`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--no-emails` leaves the security emails out.
+`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration` and `reset-passwords`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--emails` and `--no-emails` say whether the provider registers the four security notices about password and sign-in method changes; the classes are published either way.
 
 Pass `--force` to overwrite files that already exist; without it, existing files are skipped, and with `config/keyring.php` already there it doesn't ask which features to turn on. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
 
@@ -53,15 +53,16 @@ If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fort
 
 | File | What it is |
 |---|---|
-| `config/keyring.php` | A short config: the guard, username, home, your features, security emails and enrollment page. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
+| `config/keyring.php` | A short config: the guard, username, home, your features and enrollment page. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
 | `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. They're all created, so turning a feature on later needs no new migration. Tables for features you don't use stay empty. |
-| `app/Providers/KeyringServiceProvider.php` | Where you register sign-in methods, the policy and your actions. It lists the sign-in methods you picked, and it's added to `bootstrap/providers.php` for you. |
+| `app/Providers/KeyringServiceProvider.php` | Where you register sign-in methods, the policy, your actions and your emails. It lists the sign-in methods you picked, and it's added to `bootstrap/providers.php` for you. |
 | `app/Actions/Keyring/*.php` | Your code for the features that need it, all published and registered so a feature works as soon as you turn it on: registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
+| `app/Notifications/Keyring/*.php` | Every email Keyring sends, as ordinary Laravel notifications that are yours to reword, restyle or send another way. The ones a flow needs are registered, and so are the security notices if you said yes to them; the rest are listed commented out. See [Security Emails](security-log-and-emails.md#security-emails). |
 
 You can publish files on their own with the `keyring-config`, `keyring-migrations` and `keyring-lang` tags. `keyring-config` publishes the full config file, with every option and its default:
 
 ```bash
-php artisan vendor:publish --tag=keyring-lang
+php artisan vendor:publish --tag=keyring-config
 ```
 
 The migrations use `morphs()` to link rows to users. If your users have UUID or ULID keys, set Laravel's default morph key type (for example with `Schema::morphUsingUlids()`) before running them, or edit the published migrations.

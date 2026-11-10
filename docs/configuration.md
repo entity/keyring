@@ -14,7 +14,6 @@
 - [Passwords](#passwords)
 - [Risk](#risk)
 - [Security Log](#security-log)
-- [Security Emails](#security-emails)
 - [Pending Logins, Timebox and Rate Limits](#pending-logins-timebox-and-rate-limits)
 - [Messages and Translations](#messages-and-translations)
 - [The Keyring Facade](#the-keyring-facade)
@@ -26,7 +25,7 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `security_notices` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features` and `security_notices`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
@@ -225,14 +224,6 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in. The log itself is turned on with `Features::securityLog()`. See [Security Log & Emails](security-log-and-emails.md). Without it, "was this you?" alerts and the `RepeatedFactorFailures` risk signal don't work, since both read from the log.
 
-## Security Emails
-
-```php
-'security_notices' => [],
-```
-
-The security notices to send, none by default. `keyring:install` offers the four NIST SP 800-63B asks for: `password_changed`, `authenticator_added`, `authenticator_removed` and `recovery_code_used`. `Keyring::sendSecurityNotices()` in your provider overrides this. See [Security Emails](security-log-and-emails.md#security-emails).
-
 ## Pending Logins, Timebox and Rate Limits
 
 ```php
@@ -269,15 +260,14 @@ RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)->by($r
 
 ## Messages and Translations
 
-Keyring's text lives in three translation files under the `keyring::` namespace:
+Keyring's text lives in two translation files under the `keyring::` namespace:
 
 | File | Holds |
 |---|---|
 | `lang/en/keyring.php` | Validation and error messages, such as `keyring::keyring.invalid`. |
 | `lang/en/status.php` | The message for each status slug, such as `keyring::status.password-updated`. See [Status Responses](sign-in-flow.md#status-responses). |
-| `lang/en/notifications.php` | The copy for every email Keyring sends. See [Customising the Copy](security-log-and-emails.md#customising-the-copy). |
 
-Publish them to change the wording or add languages:
+Publish them to change the wording or add languages. The wording of emails is in [your notification classes](security-log-and-emails.md#security-emails) instead:
 
 ```bash
 php artisan vendor:publish --tag=keyring-lang
@@ -296,12 +286,11 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::respondWith($contract, $implementation)` | Swaps a response. See [Responses](sign-in-flow.md#responses). |
 | `Keyring::page($name, $component)` | Changes the component a page renders. See [Pages](sign-in-flow.md#pages). |
 | `Keyring::risk()->signals([...])->respond(...)` | Configures risk signals and actions. `Keyring::risk()->push(...)` adds to the signals already on. See [Risk](risk.md). |
-| `Keyring::sendSecurityNotices([...])` | Turns security notices on. Unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
+| `Keyring::notifications([...])` | Registers your notification class for each email Keyring sends. A security notice with none isn't sent, and unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
 | `Keyring::createUsersUsing($action)` | Sets the registration action. |
 | `Keyring::resetUserPasswordsUsing($action)` | Sets the password reset action. See [Resetting the Password](protected-changes.md#resetting-the-password). |
 | `Keyring::updateUserPasswordsUsing($action)` | Sets the password change action. See [Changing the Password](protected-changes.md#changing-the-password). |
 | `Keyring::validateEmailChangesUsing($action)` | Sets the email change validation action. See [Requesting a Change](protected-changes.md#requesting-a-change). |
-| `Keyring::securityNoticesUsing($notification)` | Sends security notices with your own notification class. See [Other Channels](security-log-and-emails.md#slack-sms-and-other-channels). |
 | `Keyring::routes()` | Registers Keyring's routes yourself, when `routes` is `false`. See [Routes](#routes). |
 | `Keyring::useAuthenticatorModel($model)` | Uses your own subclass of `Keyring\Models\Authenticator`. |
 | `Keyring::useDeviceModel($model)` | Uses your own subclass of `Keyring\Models\Device`. See [Your Own Device Model](devices-and-sessions.md#your-own-device-model). |
@@ -330,5 +319,5 @@ It also answers questions about your setup, for your own controllers, factors an
 | `Keyring::requirementFor($user, $attempt)` | What this user must prove to finish the attempt. See [Checking Requirements in Code](policies.md#checking-requirements-in-code). |
 | `Keyring::statusMessage($status)` | The translated message for a status slug, or `null`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
 | `Keyring::render($name, $props)` | Renders one of Keyring's [pages](sign-in-flow.md#pages), as Inertia or Blade, for a route of your own. |
-| `Keyring::sendsSecurityNotice($type)` | Whether a [security notice](security-log-and-emails.md#security-emails) type is on. |
+| `Keyring::hasNotification($type)` | Whether a notification is registered for a [type](security-log-and-emails.md#email-types). |
 | `Keyring::protectedAttributes()` | The attributes that only change through Keyring's flows. See [Protected Attributes](protected-changes.md#protected-attributes). |
