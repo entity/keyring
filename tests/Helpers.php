@@ -62,7 +62,7 @@ function passkeyRow(User $user): array
 {
     $ceremonies = app(Ceremonies::class);
     $options = $ceremonies->creationOptions($user, Profile::passkeys(), []);
-    $record = $ceremonies->register(json_encode(new VirtualAuthenticator()->register($ceremonies->toBrowser($options))), $ceremonies->toJson($options));
+    $record = $ceremonies->register(json_encode(new VirtualAuthenticator()->register($ceremonies->toBrowser($options))), $ceremonies->toJson($options), Profile::passkeys());
 
     return [
         'credential_id' => Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId),

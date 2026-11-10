@@ -32,6 +32,7 @@ use LogicException;
  * @property string|null $public_key
  * @property int $sign_count
  * @property string|null $aaguid
+ * @property string|null $attestation
  * @property list<string>|null $transports
  * @property array<string, mixed>|null $meta
  * @property bool $is_default

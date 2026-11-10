@@ -23,6 +23,7 @@ use Keyring\Activity\RecordSecurityEvents;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Contracts\TrustsAuthenticators;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\UnknownFeature;
 use Keyring\Http\Middleware\AuthenticateSession;
@@ -36,6 +37,7 @@ use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use Keyring\Support\Url;
+use Keyring\WebAuthn\ConfiguredRoots;
 
 class KeyringServiceProvider extends ServiceProvider
 {
@@ -80,6 +82,7 @@ class KeyringServiceProvider extends ServiceProvider
         $this->app->bind(RiskLocks::class, fn (Application $app) => new RiskLocks($app->make('cache')->store(config('keyring.risk.store'))));
         $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
         $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
+        $this->app->bind(TrustsAuthenticators::class, ConfiguredRoots::class);
 
         // The app registers its own actions; say how when it hasn't.
         foreach (self::ACTIONS as $contract => $method) {
