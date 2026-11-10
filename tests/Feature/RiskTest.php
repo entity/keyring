@@ -584,8 +584,8 @@ class OwnNewDevice extends Illuminate\Notifications\Notification
 }
 
 it('runs no signals until the app picks some', function () {
-    expect(new RiskEngine(app())->signalsFor(Checkpoint::Login))->toBe([])
-        ->and(new RiskEngine(app())->signalsFor(Checkpoint::Request))->toBe([]);
+    expect(new RiskEngine()->signalsFor(Checkpoint::Login))->toBe([])
+        ->and(new RiskEngine()->signalsFor(Checkpoint::Request))->toBe([]);
 });
 
 it('doesn\'t call every browser new when devices are off', function () {

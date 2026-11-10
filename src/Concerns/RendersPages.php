@@ -66,7 +66,7 @@ trait RendersPages
      */
     protected function rememberPage(): void
     {
-        $request = $this->container->make('request');
+        $request = request();
 
         if ($request->isMethod('GET') && $request->hasSession() && ! $request->prefetch()) {
             $request->session()->setPreviousUrl($request->fullUrl());

@@ -5,7 +5,6 @@ namespace Keyring\Risk;
 use Closure;
 use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Contracts\Container\Container;
 use Keyring\Contracts\Signal;
 use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\ImpossibleTravel;
@@ -33,10 +32,6 @@ class RiskEngine
 
     /** @var list<Signal>|null */
     protected ?array $resolved = null;
-
-    public function __construct(
-        protected Container $container,
-    ) {}
 
     /**
      * Replace the signals.
@@ -112,17 +107,17 @@ class RiskEngine
         }
 
         if ($action->revokeSessions) {
-            $this->container->make(Sessions::class)->signOutEverywhere($user);
+            app(Sessions::class)->signOutEverywhere($user);
         }
 
         if ($action->lockSeconds !== null) {
             // Like revoking sessions, a login attempt may not cost the owner
             // their trusted devices: the lock already refuses every sign in.
             if ($checkpoint !== Checkpoint::Login) {
-                $this->container->make(Sessions::class)->distrustDevices($user);
+                app(Sessions::class)->distrustDevices($user);
             }
 
-            $this->container->make(RiskLocks::class)->lock($user, $action->lockSeconds);
+            app(RiskLocks::class)->lock($user, $action->lockSeconds);
         }
 
         return $action;
@@ -134,7 +129,7 @@ class RiskEngine
     public function signalsFor(Checkpoint $checkpoint): array
     {
         $this->resolved ??= array_map(
-            fn (string|Signal $signal) => $signal instanceof Signal ? $signal : $this->container->make($signal),
+            fn (string|Signal $signal) => $signal instanceof Signal ? $signal : app($signal),
             $this->signals,
         );
 

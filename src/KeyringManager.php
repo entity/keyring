@@ -46,6 +46,12 @@ use Keyring\Testing\KeyringFake;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * Built once and kept for as long as the app is, which under Octane is many
+ * requests. Each of those runs in a copy of the booted app, so everything
+ * here is resolved with app() when it's needed, from the copy handling the
+ * request, and never from a container kept since boot.
+ */
 #[Singleton]
 class KeyringManager
 {
@@ -73,7 +79,6 @@ class KeyringManager
     protected array $usesKeyring = [];
 
     public function __construct(
-        protected Container $container,
         protected FactorRegistry $factors,
         protected ProtectedAttributes $protection,
     ) {
@@ -196,7 +201,7 @@ class KeyringManager
      */
     public function risk(): RiskEngine
     {
-        return $this->container->make(RiskEngine::class);
+        return app(RiskEngine::class);
     }
 
     /**
@@ -206,10 +211,10 @@ class KeyringManager
     {
         throw_if(app()->isProduction(), LogicException::class, 'Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
 
-        $this->container->singletonIf(KeyringFake::class);
-        $this->container->bind(VerifyFactor::class, FakeVerifyFactor::class);
+        app()->singletonIf(KeyringFake::class);
+        app()->bind(VerifyFactor::class, FakeVerifyFactor::class);
 
-        return $this->container->make(KeyringFake::class);
+        return app(KeyringFake::class);
     }
 
     /**
@@ -219,7 +224,7 @@ class KeyringManager
      */
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
-        return $this->container->make(SecurityLog::class)->activity($user, $limit);
+        return app(SecurityLog::class)->activity($user, $limit);
     }
 
     /**
@@ -233,7 +238,7 @@ class KeyringManager
             throw MissingTrait::on($user::class);
         }
 
-        return $this->container->make(UserKeyring::class, ['user' => $user]);
+        return app(UserKeyring::class, ['user' => $user]);
     }
 
     /**
@@ -265,9 +270,9 @@ class KeyringManager
 
         abort_unless($factor instanceof PrimaryFactor && $factor->startsLogin(), 404);
 
-        $this->container->make(AttemptStore::class)->forget(Purpose::Login);
+        app(AttemptStore::class)->forget(Purpose::Login);
 
-        return $this->container->make(Verifier::class)->respond(new Context($request, Purpose::Login, $factor));
+        return app(Verifier::class)->respond(new Context($request, Purpose::Login, $factor));
     }
 
     /**

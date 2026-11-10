@@ -57,7 +57,7 @@ trait ManagesNotifications
     public function notification(string $type, array $arguments = []): ?Notification
     {
         return $this->hasNotification($type)
-            ? $this->container->make($this->notifications[$type], $arguments)
+            ? app($this->notifications[$type], $arguments)
             : null;
     }
 

@@ -67,7 +67,7 @@ it('keeps one of each service for the app\'s lifetime, or the request\'s', funct
 ]);
 
 it('keeps a service the app replaced for as long as its own', function () {
-    $replacement = new class(app(), app(FactorRegistry::class), app(ProtectedAttributes::class)) extends KeyringManager {};
+    $replacement = new class(app(FactorRegistry::class), app(ProtectedAttributes::class)) extends KeyringManager {};
 
     app()->bind(KeyringManager::class, $replacement::class);
 
