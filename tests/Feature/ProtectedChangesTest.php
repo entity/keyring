@@ -4,6 +4,7 @@ use App\Notifications\Keyring\ConfirmEmailChange;
 use App\Notifications\Keyring\EmailAddressInUse;
 use App\Notifications\Keyring\EmailChangeNotice;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
@@ -97,6 +98,18 @@ describe('protected attributes', function () {
         expect($this->user->fresh()->email)->toBe('admin-set@example.com');
         Event::assertDispatched(ProtectionBypassed::class, fn ($event) => $event->reason === 'support ticket 42');
     });
+});
+
+it('protects the password under whatever name the model keeps it', function () {
+    $user = new #[Table(name: 'users')] class extends User
+    {
+        protected $authPasswordName = 'name';
+    };
+
+    $account = $user->newQuery()->findOrFail($this->user->id);
+
+    expect(Keyring::protectedAttributes($account))->toContain('name')->not->toContain('password')
+        ->and(fn () => $account->update(['name' => 'Someone Else']))->toThrow(ProtectedAttributeException::class);
 });
 
 describe('changing email', function () {

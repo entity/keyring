@@ -8,17 +8,21 @@ use Keyring\Support\Duration;
  * An authenticator being set up. Props are shown to the user; state stays on
  * the server until the enrollment is confirmed.
  */
-final readonly class Enrollment
+final class Enrollment
 {
+    public bool $expired {
+        get => $this->expiresAt < now()->getTimestamp();
+    }
+
     /**
      * @param  array<string, mixed>  $props
      * @param  array<string, mixed>  $state
      */
     public function __construct(
-        public string $factor,
-        public array $props,
-        public array $state,
-        public int $expiresAt,
+        public readonly string $factor,
+        public readonly array $props,
+        public readonly array $state,
+        public readonly int $expiresAt,
     ) {}
 
     /**
@@ -39,11 +43,6 @@ final readonly class Enrollment
     public function state(string $key, mixed $default = null): mixed
     {
         return $this->state[$key] ?? $default;
-    }
-
-    public function expired(): bool
-    {
-        return $this->expiresAt < now()->getTimestamp();
     }
 
     /**

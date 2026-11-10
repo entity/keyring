@@ -9,7 +9,7 @@ use Illuminate\Events\Dispatcher;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\Lockout;
 use Keyring\Events\PasswordReset;
-use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 
 /**
  * Raises Laravel's own auth events next to Keyring's, as Fortify does, so
@@ -18,6 +18,10 @@ use Keyring\Facades\Keyring;
  */
 class DispatchLaravelEvents
 {
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
+
     /**
      * @return array<class-string, string>
      */
@@ -32,7 +36,7 @@ class DispatchLaravelEvents
 
     public function failed(FactorFailed $event): void
     {
-        $username = Keyring::username();
+        $username = $this->keyring->username();
         $user = $event->attempt?->user();
 
         // Only who it was for, never the password or code that was tried.

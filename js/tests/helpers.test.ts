@@ -25,6 +25,28 @@ describe('enrollment', () => {
 })
 
 describe('routes', () => {
+  test('follow the server\'s route prefix, however its slashes are written', () => {
+    configureRoutes({ prefix: 'account/' })
+
+    expect(routes.login).toBe('/account/login')
+    expect(routes.loginOptions('passkey')).toBe('/account/login/passkey/options')
+    expect(routes.verify('confirm', 'totp')).toBe('/account/confirm/totp')
+    expect(routes.enroll('totp')).toBe('/account/user/authenticators/totp')
+
+    configureRoutes({ prefix: '' })
+
+    expect(routes.login).toBe('/login')
+    expect(routes.authenticator('abc')).toBe('/user/authenticators/abc')
+  })
+
+  test('use an overridden route as written', () => {
+    configureRoutes({ prefix: 'account', login: '/sign-in' })
+
+    expect(routes.login).toBe('/sign-in')
+
+    configureRoutes({ prefix: '', login: '/login' })
+  })
+
   test('follow a changed challenge prefix', () => {
     configureRoutes({ challengeBase: purpose => purpose === 'login' ? '/auth/challenge' : '/auth/confirm' })
 

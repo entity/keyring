@@ -2,17 +2,15 @@
 
 namespace Keyring\Risk\Signals;
 
-use Keyring\Contracts\Signal;
 use Keyring\Facades\Keyring;
 use Keyring\Risk\Assessment;
-use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 
 /**
  * Two sign ins further apart than anyone could travel in the time between.
  * Needs a locator that gives coordinates.
  */
-class ImpossibleTravel implements Signal
+class ImpossibleTravel extends Signal
 {
     public function __construct(
         protected int $score = 60,
@@ -45,11 +43,6 @@ class ImpossibleTravel implements Signal
         return $km >= $this->minKm && $km / $hours > $this->maxKph
             ? new Finding('impossible_travel', $this->score, sprintf('%d km from the last sign in, %d minutes later.', $km, $hours * 60))
             : null;
-    }
-
-    public function checkpoints(): array
-    {
-        return [Checkpoint::Login];
     }
 
     protected function distance(float $lat1, float $lon1, float $lat2, float $lon2): float

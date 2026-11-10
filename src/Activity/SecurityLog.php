@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Keyring\Devices\UserAgent;
-use Keyring\Facades\Keyring;
 use Keyring\Features;
+use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
 
 /**
@@ -18,6 +18,10 @@ use Keyring\Models\SecurityEvent;
  */
 class SecurityLog
 {
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
+
     /**
      * Log an event, with Features::securityLog(). Without it, nothing is kept.
      *
@@ -41,11 +45,11 @@ class SecurityLog
             return null;
         }
 
-        $event = Keyring::securityEventModel()::make([
+        $event = $this->keyring->securityEventModel()::make([
             'type' => $type,
             'factor' => $factor,
             'device_id' => $device,
-            'ip' => Keyring::recordedIp(request()),
+            'ip' => $this->keyring->recordedIp(request()),
             'user_agent' => UserAgent::from(request()),
             'meta' => $meta === [] ? null : $meta,
             'created_at' => now(),
@@ -85,7 +89,7 @@ class SecurityLog
                 ->get();
 
             if ($alerts->isNotEmpty()) {
-                Keyring::securityEventModel()::query()->whereKey($alerts->modelKeys())->update(['seen_at' => now()]);
+                $this->keyring->securityEventModel()::query()->whereKey($alerts->modelKeys())->update(['seen_at' => now()]);
             }
 
             return $alerts;
@@ -117,7 +121,7 @@ class SecurityLog
      */
     protected function safely(Closure $callback, mixed $fallback): mixed
     {
-        return rescue(fn () => Keyring::securityEventModel()::query()->getConnection()->transaction($callback), $fallback);
+        return rescue(fn () => $this->keyring->securityEventModel()::query()->getConnection()->transaction($callback), $fallback);
     }
 
     /**
@@ -125,6 +129,6 @@ class SecurityLog
      */
     protected function query(Authenticatable&Model $user): Builder
     {
-        return Keyring::securityEventModel()::query()->ownedBy($user);
+        return $this->keyring->securityEventModel()::query()->ownedBy($user);
     }
 }

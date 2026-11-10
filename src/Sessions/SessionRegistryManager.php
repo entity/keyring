@@ -2,6 +2,7 @@
 
 namespace Keyring\Sessions;
 
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Support\Manager;
 use Keyring\Contracts\SessionRegistry;
 
@@ -11,6 +12,7 @@ use Keyring\Contracts\SessionRegistry;
  *
  * @mixin SessionRegistry
  */
+#[Singleton]
 class SessionRegistryManager extends Manager
 {
     public function getDefaultDriver(): string

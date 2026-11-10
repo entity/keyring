@@ -4,6 +4,7 @@ namespace Keyring\Login;
 
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Factors\RecoveryCodes;
 
 /**
  * What a user must prove before an attempt is complete.
@@ -102,7 +103,7 @@ final readonly class Requirement
      * @param  list<string>  $except
      */
     #[\NoDiscard]
-    public function noDowngrade(array $except = ['recovery']): static
+    public function noDowngrade(array $except = [RecoveryCodes::KEY]): static
     {
         return clone ($this, ['noDowngrade' => true, 'downgradeExceptions' => $except]);
     }

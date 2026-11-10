@@ -2,20 +2,17 @@
 
 namespace Keyring\Devices;
 
-use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
  * Just enough user agent parsing to name a device for humans ("Firefox on
  * Windows"). The name is also a weak risk signal (a session's browser
- * changing), never a factor. Plug in a real parser with describeUsing().
+ * changing), never a factor. Plug in a real parser with
+ * Keyring::describeDevicesUsing().
  */
 final class UserAgent
 {
-    /** @var (Closure(string): ?string)|null */
-    private static ?Closure $describer = null;
-
     private const array BROWSERS = [
         'Edge' => '/Edg(e|A|iOS)?\//',
         'Opera' => '/OPR\/|Opera/',
@@ -36,14 +33,6 @@ final class UserAgent
     ];
 
     /**
-     * @param  (Closure(string): ?string)|null  $describer
-     */
-    public static function describeUsing(?Closure $describer): void
-    {
-        self::$describer = $describer;
-    }
-
-    /**
      * The request's user agent, trimmed for storage.
      */
     public static function from(Request $request): ?string
@@ -55,10 +44,6 @@ final class UserAgent
     {
         if ($userAgent === null || $userAgent === '') {
             return null;
-        }
-
-        if (self::$describer !== null) {
-            return (self::$describer)($userAgent);
         }
 
         $browser = self::match(self::BROWSERS, $userAgent);

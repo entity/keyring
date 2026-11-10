@@ -10,5 +10,10 @@ use Illuminate\Contracts\Support\Responsable;
  */
 interface StatusResponse extends Responsable
 {
-    //
+    /**
+     * The constructor arguments Keyring passes, by name.
+     *
+     * @var list<string>
+     */
+    public const array BUILT_WITH = ['status', 'data', 'redirect'];
 }

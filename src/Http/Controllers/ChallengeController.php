@@ -9,7 +9,6 @@ use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
 use Keyring\Features;
-use Keyring\Http\Controllers\Concerns\RespondsToVerification;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
@@ -18,6 +17,7 @@ use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
+use Keyring\Pipeline\Verifier;
 use Keyring\Support\Throttle;
 
 /**
@@ -26,12 +26,14 @@ use Keyring\Support\Throttle;
  */
 class ChallengeController
 {
-    use RespondsToVerification, RespondsWithStatus;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
         protected AttemptStore $attempts,
         protected StepUp $stepUp,
+        protected Throttle $throttle,
+        protected Verifier $verifier,
     ) {}
 
     public function show(Request $request, ?string $factor = null): mixed
@@ -108,7 +110,7 @@ class ChallengeController
 
         $authenticator = $this->authenticatorFor($request, $attempt, $factor->key()) ?? abort(404);
 
-        Throttle::sending($factor->key(), $attempt->userId);
+        $this->throttle->sending($factor->key(), $attempt->userId);
 
         $factor->send($attempt, $authenticator);
 
@@ -132,7 +134,7 @@ class ChallengeController
         // instead of refusing keeps the account's counters counting.
         $authenticator = $attempt->exhausted ? null : $this->authenticatorFor($request, $attempt, $factor->key());
 
-        return $this->verifyAndRespond(new Context($request, $purpose, $factor, $attempt, $authenticator));
+        return $this->verifier->respond(new Context($request, $purpose, $factor, $attempt, $authenticator));
     }
 
     /**

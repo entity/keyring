@@ -203,6 +203,15 @@ it('checks the password is long enough on its own before removing the last secon
     expect(Authenticator::find($tablet->id))->not->toBeNull();
 });
 
+it('refuses a password that is not a string when removing the last second factor', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => ['password']])
+        ->assertJsonValidationErrors('password');
+
+    expect(Authenticator::find($totp->id))->not->toBeNull();
+});
+
 it('limits password guesses when removing the last second factor', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 

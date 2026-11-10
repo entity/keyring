@@ -7,12 +7,17 @@ use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
+use Keyring\KeyringManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
 
 class PasswordController
 {
     use RespondsWithStatus;
+
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
 
     /**
      * Change the password through the app's UpdatesUserPasswords action.

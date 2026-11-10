@@ -59,7 +59,7 @@ class EmailChangeController
      * links on their own, so the change only happens when the person presses
      * the button, which POSTs back to the same URL.
      */
-    public function page(Request $request, string $change, string $token): mixed
+    public function page(Request $request, string $change, #[\SensitiveParameter] string $token): mixed
     {
         $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
         $action = $request->routeIs('keyring.email.revert') ? 'revert' : 'confirm';
@@ -74,7 +74,7 @@ class EmailChangeController
      * Confirm from either address. Works signed out, since the link may open
      * in another browser.
      */
-    public function confirm(string $change, string $token): StatusResponse
+    public function confirm(string $change, #[\SensitiveParameter] string $token): StatusResponse
     {
         $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
 
@@ -87,7 +87,7 @@ class EmailChangeController
         return $this->status($status, redirect: $this->keyring->guard()->check() ? config('keyring.home') : route('login'));
     }
 
-    public function revert(string $change, string $token): StatusResponse
+    public function revert(string $change, #[\SensitiveParameter] string $token): StatusResponse
     {
         $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
 

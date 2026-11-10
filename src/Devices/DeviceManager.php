@@ -11,8 +11,8 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Events\DeviceRevoked;
-use Keyring\Facades\Keyring;
 use Keyring\Features;
+use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
@@ -26,6 +26,7 @@ class DeviceManager
 {
     public function __construct(
         protected Sessions $sessions,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -46,55 +47,65 @@ class DeviceManager
     {
         $token = Features::enabled(Features::devices()) ? $this->token($request) : null;
 
-        return $token === null ? new EloquentCollection : Keyring::deviceModel()::query()
+        return $token === null ? new EloquentCollection : $this->keyring->deviceModel()::query()
             ->withToken($token)
             ->active()
             ->get();
     }
 
     /**
-     * Record a sign in from this browser. Returns the device and whether it's
-     * new, or no device when the feature is off.
+     * Record a sign in from this browser and return its device, or null when
+     * the feature is off. One the account hasn't used before was just
+     * created, so $device->wasRecentlyCreated says whether it's new.
      *
-     * @return array{0: ?Device, 1: bool}
+     * A sign in that proved a second factor gives the browser a new cookie,
+     * and only one of those may mark the device trusted.
      */
-    public function signIn(Request $request, Authenticatable&Model $user, bool $trust = false, bool $fullSignIn = false): array
+    public function signIn(Request $request, Authenticatable&Model $user, bool $provedSecondFactor = false, bool $trust = false): ?Device
     {
         if (! Features::enabled(Features::devices())) {
-            return [null, false];
+            return null;
         }
 
-        $device = $this->find($request, $user);
-        $new = $device === null;
-
-        if ($new) {
-            $token = $this->tokenForNewDevice($request, $user);
-
-            $device = Keyring::deviceModel()::make(['token_hash' => Keyring::deviceModel()::hashToken($token), 'first_seen_at' => now()]);
-            $device->authenticatable()->associate($user);
-
-            $this->queueCookie($token);
-        }
+        $device = $this->find($request, $user) ?? $this->newDevice($request, $user);
 
         $device->fill([
-            'name' => UserAgent::describe($request->userAgent()),
+            'name' => $this->keyring->describeDevice($request->userAgent()),
             'user_agent' => UserAgent::from($request),
-            'ip' => Keyring::recordedIp($request),
+            'ip' => $this->keyring->recordedIp($request),
             'location' => Location::of($request) ?? $device->location,
             'last_seen_at' => now(),
         ]);
 
-        if ($trust && ($for = config('keyring.devices.trust_for')) !== null) {
-            $device->trusted_until = Duration::fromNow($for);
+        if ($provedSecondFactor) {
+            $this->rotateToken($request, $device);
         }
 
-        if ($trust || $fullSignIn) {
-            $this->rotateToken($request, $device);
+        if ($provedSecondFactor && $trust && ($for = config('keyring.devices.trust_for')) !== null) {
+            $device->trusted_until = Duration::fromNow($for);
         }
 
         $device->save();
 
-        return [$device, $new];
+        return $device;
+    }
+
+    /**
+     * An unsaved device for a browser the account hasn't used before, with
+     * its cookie queued.
+     */
+    protected function newDevice(Request $request, Authenticatable&Model $user): Device
+    {
+        $token = $this->tokenForNewDevice($request, $user);
+
+        $device = $this->keyring->deviceModel()::make([
+            'token_hash' => $this->keyring->deviceModel()::hashToken($token),
+            'first_seen_at' => now(),
+        ]);
+
+        $this->queueCookie($token);
+
+        return $device->authenticatable()->associate($user);
     }
 
     /**
@@ -179,10 +190,10 @@ class DeviceManager
     protected function rotateToken(Request $request, Device $device): void
     {
         $token = Str::random(40);
-        $hash = Keyring::deviceModel()::hashToken($token);
+        $hash = $this->keyring->deviceModel()::hashToken($token);
 
         if (($presented = $this->token($request)) !== null) {
-            Keyring::deviceModel()::query()->withToken($presented)->active()->update(['token_hash' => $hash]);
+            $this->keyring->deviceModel()::query()->withToken($presented)->active()->update(['token_hash' => $hash]);
         }
 
         $device->token_hash = $hash;
@@ -190,7 +201,7 @@ class DeviceManager
         $this->queueCookie($token);
     }
 
-    protected function queueCookie(string $token): void
+    protected function queueCookie(#[\SensitiveParameter] string $token): void
     {
         Cookie::queue(Cookie::make(
             $this->cookie(),
@@ -207,6 +218,6 @@ class DeviceManager
      */
     protected function query(Authenticatable&Model $user): Builder
     {
-        return Keyring::deviceModel()::query()->ownedBy($user);
+        return $this->keyring->deviceModel()::query()->ownedBy($user);
     }
 }

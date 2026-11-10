@@ -3,6 +3,7 @@
 namespace Keyring\Risk;
 
 use Closure;
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\Container;
 use Keyring\Contracts\Signal;
@@ -17,6 +18,7 @@ use Keyring\Sessions\Sessions;
  *     Keyring::risk()->signals([NewDevice::class, ImpossibleTravel::class])
  *         ->respond(fn (Risk $risk, Checkpoint $at) => match ($risk->level) { ... });
  */
+#[Singleton]
 class RiskEngine
 {
     /**
@@ -71,10 +73,12 @@ class RiskEngine
 
     public function assess(Assessment $assessment): Risk
     {
-        return new Risk(array_values(array_filter(array_map(
+        $findings = array_map(
             fn (Signal $signal) => $signal->assess($assessment),
             $this->signalsFor($assessment->checkpoint),
-        ))));
+        );
+
+        return new Risk($findings |> array_filter(...) |> array_values(...));
     }
 
     public function decide(Risk $risk, Checkpoint $checkpoint): Action
@@ -108,7 +112,7 @@ class RiskEngine
         }
 
         if ($action->revokeSessions) {
-            $this->container->make(Sessions::class)->revokeAll($user);
+            $this->container->make(Sessions::class)->signOutEverywhere($user);
         }
 
         if ($action->lockSeconds !== null) {

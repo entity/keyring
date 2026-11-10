@@ -4,8 +4,10 @@ namespace Keyring\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\StatusResponse;
-use Keyring\Facades\Keyring;
 
+/**
+ * For controllers that keep the manager as $keyring.
+ */
 trait RespondsWithStatus
 {
     /**
@@ -15,7 +17,7 @@ trait RespondsWithStatus
      */
     protected function status(string $status, array $data = [], ?string $redirect = null): StatusResponse
     {
-        return app(StatusResponse::class, ['status' => $status, 'data' => $data, 'redirect' => $redirect]);
+        return $this->keyring->response(StatusResponse::class, status: $status, data: $data, redirect: $redirect);
     }
 
     /**
@@ -26,6 +28,6 @@ trait RespondsWithStatus
     {
         $status = $request->session()->get('status');
 
-        return Keyring::statusMessage($status) ?? $status;
+        return $this->keyring->statusMessage($status) ?? $status;
     }
 }

@@ -19,6 +19,8 @@ use Keyring\Support\MailText;
  */
 class EmailCode extends CodeFactor
 {
+    public const string KEY = 'email-code';
+
     final public function __construct(bool $acceptRisk = false, ?int $length = null, ?string $expireAfter = null, ?int $maxGuesses = null)
     {
         if (! $acceptRisk) {
@@ -43,8 +45,6 @@ class EmailCode extends CodeFactor
         return new static(true, $length, $expireAfter, $maxGuesses);
     }
 
-    public const string KEY = 'email-code';
-
     public function key(): string
     {
         return self::KEY;
@@ -63,7 +63,7 @@ class EmailCode extends CodeFactor
         return false;
     }
 
-    protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, string $code): void
+    protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, #[\SensitiveParameter] string $code): void
     {
         // An authenticator that isn't saved yet means this code confirms enrollment.
         Notification::send($user, Keyring::requiredNotification('verification_code', [

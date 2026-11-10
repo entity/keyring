@@ -27,6 +27,7 @@ class AuthenticatorController
         protected KeyringManager $keyring,
         protected EnrollmentStore $enrollments,
         protected AuthenticatorChanges $changes,
+        protected Throttle $throttle,
     ) {}
 
     /**
@@ -38,7 +39,7 @@ class AuthenticatorController
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
-            Throttle::sending($factor->key(), $request->user()->getAuthIdentifier());
+            $this->throttle->sending($factor->key(), $request->user()->getAuthIdentifier());
         }
 
         $enrollment = $factor->beginEnrollment($request->user(), $request);
@@ -88,6 +89,9 @@ class AuthenticatorController
 
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
+        // Only asked for when this is the last second factor.
+        $request->validate(['password' => ['nullable', 'string']]);
+
         $this->changes->remove($request->user(), $authenticator, $request->input('password'));
 
         return $this->status('authenticator-removed');

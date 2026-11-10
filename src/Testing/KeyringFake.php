@@ -75,7 +75,7 @@ class KeyringFake
 
     public function assertNothingChecked(): static
     {
-        Assert::assertSame([], array_values(array_unique(array_column($this->checks, 'factor'))), 'Factors were checked.');
+        Assert::assertSame([], array_column($this->checks, 'factor') |> array_unique(...) |> array_values(...), 'Factors were checked.');
 
         return $this;
     }

@@ -8,7 +8,7 @@ namespace Keyring\Support;
  */
 final class KeyedHash
 {
-    public static function make(string $value, ?string $key = null): string
+    public static function make(#[\SensitiveParameter] string $value, #[\SensitiveParameter] ?string $key = null): string
     {
         return hash_hmac('sha256', $value, $key ?? config('app.key'));
     }
@@ -19,7 +19,7 @@ final class KeyedHash
      *
      * @return list<string>
      */
-    public static function candidates(string $value): array
+    public static function candidates(#[\SensitiveParameter] string $value): array
     {
         return array_map(
             fn (string $key) => self::make($value, $key),

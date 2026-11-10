@@ -104,7 +104,7 @@ Build an action with one of the static constructors and chain extras:
 | `Action::stepUp()` | Ask for a second factor, if the user has one (the requirement becomes at least AAL2). | Forget what the session has proved, so step-up middleware asks again. |
 | `Action::reauthenticate()` | Nothing. | Sign the session out. |
 | `Action::deny()` | Refuse the sign in with the usual "these credentials don't match" error. | Sign the session out. |
-| `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::revokeAll()`). |
+| `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::signOutEverywhere()`). |
 | `->lockFor('1h')` | Refuse sign ins for that long. Trusted devices stay trusted, for the same reason sessions aren't revoked. | Refuse sign ins for that long, from now, and stop trusting the user's devices. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 
@@ -149,17 +149,16 @@ The constructor options are: `score` on every signal, `maxKph` and `minKm` on `I
 
 ## Writing a Signal
 
-Implement `Keyring\Contracts\Signal`:
+Extend `Keyring\Risk\Signals\Signal` and write `assess()`:
 
 ```php
 namespace App\Keyring;
 
-use Keyring\Contracts\Signal;
 use Keyring\Risk\Assessment;
-use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
+use Keyring\Risk\Signals\Signal;
 
-class BlocklistedIp implements Signal
+class BlocklistedIp extends Signal
 {
     public function assess(Assessment $assessment): ?Finding
     {
@@ -167,13 +166,10 @@ class BlocklistedIp implements Signal
             ? new Finding('blocklisted_ip', 40, 'Signing in from a blocklisted address.')
             : null;
     }
-
-    public function checkpoints(): array
-    {
-        return [Checkpoint::Login];
-    }
 }
 ```
+
+A signal runs while signing in unless its `checkpoints()` says otherwise. Return `[Checkpoint::Request]` to run on every signed-in request instead, and keep those cheap. The base class is only a default: anything that implements `Keyring\Contracts\Signal` works.
 
 The `Assessment` gives you:
 

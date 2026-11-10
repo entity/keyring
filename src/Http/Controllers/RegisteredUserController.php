@@ -11,6 +11,7 @@ use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Responses\RegisterResponse;
 use Keyring\Enums\Category;
 use Keyring\Exceptions\EmailVerificationRequired;
+use Keyring\Factors\Password;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -48,9 +49,9 @@ class RegisteredUserController
 
         // They just chose their password, which counts as knowing it.
         $signIn->as($request, $user, filled($user->getAuthPassword())
-            ? [new Verification('password', null, [Category::Knowledge], at: now()->getTimestamp())]
+            ? [new Verification(Password::KEY, null, [Category::Knowledge], at: now()->getTimestamp())]
             : []);
 
-        return app(RegisterResponse::class)->toResponse($request);
+        return $this->keyring->response(RegisterResponse::class)->toResponse($request);
     }
 }

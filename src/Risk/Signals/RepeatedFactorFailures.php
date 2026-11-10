@@ -3,13 +3,11 @@
 namespace Keyring\Risk\Signals;
 
 use Keyring\Activity\SecurityLog;
-use Keyring\Contracts\Signal;
 use Keyring\Risk\Assessment;
-use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Support\Duration;
 
-class RepeatedFactorFailures implements Signal
+class RepeatedFactorFailures extends Signal
 {
     public function __construct(
         protected SecurityLog $log,
@@ -28,10 +26,5 @@ class RepeatedFactorFailures implements Signal
         return $failures >= $this->threshold
             ? new Finding('repeated_failures', $failures >= $this->threshold * 2 ? $this->score * 2 : $this->score, "{$failures} failed second factors in the last {$this->within}.")
             : null;
-    }
-
-    public function checkpoints(): array
-    {
-        return [Checkpoint::Login];
     }
 }

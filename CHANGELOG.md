@@ -17,5 +17,3 @@ The first release. Nothing is tagged yet.
 - `Keyring::attempt()` to start a sign in from your own route, for social logins and the like.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment and the challenge page, with Vue and React bindings.
-
-Apps that installed `dev-main` before the first release should read the [upgrade guide](UPGRADE.md).

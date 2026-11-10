@@ -173,7 +173,7 @@ it('stops trusting the other devices when signing out everywhere else', function
     expect($here->fresh()->isTrusted())->toBeTrue()
         ->and($elsewhere->fresh()->isTrusted())->toBeFalse();
 
-    app(Sessions::class)->revokeAll($this->user);
+    app(Sessions::class)->signOutEverywhere($this->user);
 
     expect($here->fresh()->isTrusted())->toBeFalse();
 });
@@ -670,7 +670,7 @@ it('never queries the devices table when devices are off', function () {
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret), 'authenticator' => $totp->id, 'trust' => true])->assertRedirect('/dashboard');
     $this->deleteJson(route('keyring.authenticators.destroy', $backup->id))->assertOk();
     app(Sessions::class)->distrustDevices($this->user);
-    app(Sessions::class)->revokeAll($this->user);
+    app(Sessions::class)->signOutEverywhere($this->user);
 
     expect($queries)->not->toBeEmpty()
         ->and(array_filter($queries, fn (string $sql) => str_contains($sql, 'keyring_devices')))->toBe([]);

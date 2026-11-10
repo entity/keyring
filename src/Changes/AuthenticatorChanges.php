@@ -105,7 +105,7 @@ class AuthenticatorChanges
      *
      * @throws ValidationException
      */
-    public function remove(Authenticatable&Model $user, string $id, ?string $password = null): Authenticator
+    public function remove(Authenticatable&Model $user, string $id, #[\SensitiveParameter] ?string $password = null): Authenticator
     {
         $removed = RowLock::hold($user, function () use ($user, $id, $password) {
             $authenticator = $this->find($user, $id);
@@ -148,7 +148,7 @@ class AuthenticatorChanges
      *
      * @throws ValidationException
      */
-    protected function ensurePasswordStandsAlone(Authenticatable&Model $user, ?string $password): void
+    protected function ensurePasswordStandsAlone(Authenticatable&Model $user, #[\SensitiveParameter] ?string $password): void
     {
         if (blank($user->getAuthPassword())) {
             return;

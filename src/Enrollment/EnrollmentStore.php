@@ -2,40 +2,36 @@
 
 namespace Keyring\Enrollment;
 
-use Illuminate\Contracts\Encryption\DecryptException;
-use Illuminate\Contracts\Session\Session;
-use Illuminate\Support\Facades\Crypt;
+use Illuminate\Container\Attributes\Scoped;
+use Keyring\Support\EncryptedSession;
+use TypeError;
 
 /**
  * Keeps in-progress enrollments in the session, one per factor.
  */
+#[Scoped]
 class EnrollmentStore
 {
     public function __construct(
-        protected Session $session,
+        protected EncryptedSession $session,
     ) {}
 
     public function put(Enrollment $enrollment): void
     {
-        $this->session->put(
-            $this->key($enrollment->factor),
-            Crypt::encryptString(json_encode($enrollment->toArray(), JSON_THROW_ON_ERROR)),
-        );
+        $this->session->put($this->key($enrollment->factor), $enrollment->toArray());
     }
 
     public function get(string $factor): ?Enrollment
     {
-        $payload = $this->session->get($this->key($factor));
+        $data = $this->session->get($this->key($factor));
 
         try {
-            $enrollment = is_string($payload)
-                ? Enrollment::fromArray(json_decode(Crypt::decryptString($payload), true, flags: JSON_THROW_ON_ERROR))
-                : null;
-        } catch (DecryptException|\JsonException|\TypeError) {
+            $enrollment = $data === null ? null : Enrollment::fromArray($data);
+        } catch (TypeError) {
             $enrollment = null;
         }
 
-        if ($enrollment?->expired()) {
+        if ($enrollment?->expired) {
             $this->forget($factor);
 
             return null;

@@ -8,12 +8,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Session\CookieSessionHandler;
 use Illuminate\Support\Str;
-use Keyring\Changes\EmailChanges;
+use Keyring\Changes\PendingEmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
-use Keyring\Facades\Keyring;
 use Keyring\Features;
+use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
 
@@ -26,6 +26,8 @@ class Sessions
 
     public function __construct(
         protected SessionRegistry $registry,
+        protected KeyringManager $keyring,
+        protected PendingEmailChanges $emailChanges,
     ) {}
 
     public function start(Request $request, Authenticatable $user, ?Device $device, Assurance $assurance): RegisteredSession
@@ -38,7 +40,7 @@ class Sessions
             guard: config('keyring.guard'),
             deviceId: $device?->id,
             assurance: $assurance,
-            ip: Keyring::recordedIp($request),
+            ip: $this->keyring->recordedIp($request),
             userAgent: UserAgent::from($request),
             authenticatedAt: $now,
             lastActivityAt: $now,
@@ -138,14 +140,17 @@ class Sessions
      * device stays trusted, and an email change waiting for confirmation is
      * cancelled, though its "this wasn't me" link keeps working.
      */
-    public function revokeAll(Authenticatable $user, ?string $except = null): int
+    public function signOutEverywhere(Authenticatable $user, ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
         $count = $this->registry->revokeAll($user, $except);
 
         $this->cycleRememberToken($user);
         $this->distrustDevices($user, except: $keptDevice);
-        $this->cancelEmailChanges($user);
+
+        if ($user instanceof Model) {
+            $this->emailChanges->cancel($user);
+        }
 
         return $count;
     }
@@ -168,19 +173,11 @@ class Sessions
     public function distrustDevices(Authenticatable $user, ?string $except = null): void
     {
         if ($user instanceof Model && Features::enabled(Features::devices())) {
-            Keyring::deviceModel()::query()
+            $this->keyring->deviceModel()::query()
                 ->ownedBy($user)
                 ->whereNotNull('trusted_until')
                 ->when($except, fn (Builder $query) => $query->whereKeyNot($except))
                 ->update(['trusted_until' => null]);
-        }
-    }
-
-    protected function cancelEmailChanges(Authenticatable $user): void
-    {
-        if ($user instanceof Model) {
-            // Resolved here because EmailChanges needs this class.
-            app(EmailChanges::class)->cancel($user);
         }
     }
 

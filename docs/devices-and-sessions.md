@@ -136,9 +136,9 @@ Only use it when requests can't reach your app without passing through that prox
 Keyring's own user agent parsing only knows the common browsers and platforms. To use a real parser, pass a closure that receives the user agent string and returns a name, or `null`, in a service provider's `boot()` method:
 
 ```php
-use Keyring\Devices\UserAgent;
+use Keyring\Facades\Keyring;
 
-UserAgent::describeUsing(fn (string $userAgent) => app(UserAgentParser::class)->parse($userAgent)->summary());
+Keyring::describeDevicesUsing(fn (string $userAgent) => app(UserAgentParser::class)->parse($userAgent)->summary());
 ```
 
 `UserAgent::from($request)` returns the request's user agent trimmed to 500 characters, as Keyring stores it.
@@ -183,12 +183,12 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 `DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::revokeAll()`, which returns how many sessions it revoked, and `rotate()`, which gives the current session its new ID:
+`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::signOutEverywhere()`, which returns how many sessions it revoked, and `rotate()`, which gives the current session its new ID:
 
 ```php
 use Keyring\Sessions\Sessions;
 
-app(Sessions::class)->revokeAll($user, except: app(Sessions::class)->current($request)?->id);
+app(Sessions::class)->signOutEverywhere($user, except: app(Sessions::class)->current($request)?->id);
 
 app(Sessions::class)->rotate($request);
 ```
@@ -239,7 +239,7 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 | `forUser($user)` | The user's sessions that haven't expired or been revoked, most recent first. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |
-| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. `Sessions::revokeAll()` calls it, then also changes the remember token and stops trusting the other devices, so call that one from your own code. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. `Sessions::signOutEverywhere()` calls it, then also changes the remember token, stops trusting the other devices and cancels a pending email change, so call that one from your own code. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A store that expires records itself can return `0`. |
 

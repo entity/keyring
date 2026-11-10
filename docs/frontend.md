@@ -321,11 +321,17 @@ They use the browser's built-in JSON parsing when it exists, and convert by hand
 
 ## Changing Routes
 
-The helpers use Keyring's default paths. If you changed the route prefix, or registered the routes yourself, override them once at startup:
+The helpers use Keyring's default paths. If you changed the `prefix` option, tell them once at startup:
 
 ```ts
 import { configureRoutes } from '@entity/keyring'
 
+configureRoutes({ prefix: 'account' })
+```
+
+If you registered the routes yourself, override the ones you moved:
+
+```ts
 configureRoutes({
   enroll: factor => `/account/authenticators/${factor}`,
   confirmEnrollment: factor => `/account/authenticators/${factor}/confirm`,
@@ -333,7 +339,7 @@ configureRoutes({
 })
 ```
 
-The keys are `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three. An override is used as written, without the `prefix`:
 
 ```ts
 configureRoutes({

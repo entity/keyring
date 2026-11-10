@@ -5,6 +5,7 @@ namespace Keyring\Http\Middleware;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Uri;
 use Keyring\Enums\Assurance;
 use Keyring\KeyringManager;
 use Keyring\Login\Requirement;
@@ -54,6 +55,6 @@ class RequireEnrollment
     protected function isExcepted(Request $request, ?string $url): bool
     {
         return $request->routeIs(...$this->except, ...config('keyring.enrollment_except'))
-            || ($url !== null && $request->is(trim((string) parse_url($url, PHP_URL_PATH), '/') ?: '/'));
+            || ($url !== null && $request->is(Uri::of($url)->path()));
     }
 }

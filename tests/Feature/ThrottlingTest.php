@@ -19,6 +19,7 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Support\Throttle;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
@@ -594,7 +595,7 @@ describe('a completed password reset', function () {
             ->orWhere('name', $request->input('email'))
             ->first());
         // The null: identifiers can be optional, and a missing one mustn't break the reset.
-        Event::listen(fn (PasswordReset $event) => EnsureNotThrottled::clearAccount($event->user, $event->user->name, null));
+        Event::listen(fn (PasswordReset $event) => app(Throttle::class)->clearAccount($event->user, $event->user->name, null));
 
         guessPassword(3, 'tay');
 

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Models\Concerns\BelongsToUser;
+use Keyring\Models\Concerns\HashesTokens;
 use Keyring\Support\Duration;
 use Keyring\Support\Url;
 
@@ -35,7 +36,7 @@ use Keyring\Support\Url;
 #[Hidden('token_hash', 'authenticatable_type', 'authenticatable_id')]
 class Device extends Model
 {
-    use BelongsToUser, HasUlids, MassPrunable;
+    use BelongsToUser, HashesTokens, HasUlids, MassPrunable;
 
     protected function casts(): array
     {
@@ -46,14 +47,6 @@ class Device extends Model
             'trusted_until' => 'datetime',
             'revoked_at' => 'datetime',
         ];
-    }
-
-    /**
-     * The device cookie is stored as a SHA-256 hash.
-     */
-    public static function hashToken(string $token): string
-    {
-        return hash('sha256', $token);
     }
 
     /**
@@ -69,7 +62,7 @@ class Device extends Model
      * @param  Builder<static>  $query
      */
     #[Scope]
-    protected function withToken(Builder $query, string $token): void
+    protected function withToken(Builder $query, #[\SensitiveParameter] string $token): void
     {
         $query->where('token_hash', static::hashToken($token));
     }

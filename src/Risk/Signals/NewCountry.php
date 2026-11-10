@@ -2,16 +2,14 @@
 
 namespace Keyring\Risk\Signals;
 
-use Keyring\Contracts\Signal;
 use Keyring\Facades\Keyring;
 use Keyring\Risk\Assessment;
-use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 
 /**
  * A country none of the user's devices have been seen in. Needs a locator.
  */
-class NewCountry implements Signal
+class NewCountry extends Signal
 {
     public function __construct(
         protected int $score = 30,
@@ -35,10 +33,5 @@ class NewCountry implements Signal
         return $known->isNotEmpty() && ! $known->contains($country)
             ? new Finding('new_country', $this->score, "Signing in from a new country ({$country}).")
             : null;
-    }
-
-    public function checkpoints(): array
-    {
-        return [Checkpoint::Login];
     }
 }

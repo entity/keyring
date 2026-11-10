@@ -5,7 +5,8 @@ namespace Keyring\Activity;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
 use Keyring\Events;
-use Keyring\Facades\Keyring;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\KeyringManager;
 
 /**
  * Turns Keyring's events into security log entries.
@@ -14,6 +15,7 @@ class RecordSecurityEvents
 {
     public function __construct(
         protected SecurityLog $log,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -97,12 +99,12 @@ class RecordSecurityEvents
 
     public function recoveryCodeUsed(Events\RecoveryCodeUsed $event): void
     {
-        $this->log->record('recovery_code_used', $event->authenticator->user(), 'recovery', meta: ['remaining' => $event->remaining]);
+        $this->log->record('recovery_code_used', $event->authenticator->user(), RecoveryCodes::KEY, meta: ['remaining' => $event->remaining]);
     }
 
     public function recoveryCodesGenerated(Events\RecoveryCodesGenerated $event): void
     {
-        $this->log->record('recovery_codes_generated', $event->user, 'recovery');
+        $this->log->record('recovery_codes_generated', $event->user, RecoveryCodes::KEY);
     }
 
     public function newDevice(Events\NewDeviceSignedIn $event): void
@@ -156,7 +158,7 @@ class RecordSecurityEvents
      */
     public function protectionBypassed(Events\ProtectionBypassed $event): void
     {
-        $actor = Keyring::guard()->user();
+        $actor = $this->keyring->guard()->user();
 
         $this->log->recordOrFail('protection_bypassed', $actor instanceof Authenticatable ? $actor : null, meta: ['reason' => $event->reason]);
     }

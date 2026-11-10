@@ -2,12 +2,12 @@
 
 namespace Keyring\Sessions;
 
+use Illuminate\Container\Attributes\Scoped;
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
-use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
-use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
 /**
@@ -20,6 +20,7 @@ use Keyring\Login\Verification;
  * lapses it until the user proves every factor for it again. The session
  * itself stays signed in at whatever level is left.
  */
+#[Scoped]
 class SessionAssurance
 {
     public const string KEY = 'keyring.verified';
@@ -33,6 +34,7 @@ class SessionAssurance
     public function __construct(
         protected Session $session,
         protected Sessions $sessions,
+        protected KeyringManager $keyring,
     ) {}
 
     /**
@@ -115,13 +117,13 @@ class SessionAssurance
     public function all(): array
     {
         $verifications = array_map(Verification::fromArray(...), array_values($this->session->get(static::KEY, [])));
-        $ids = array_values(array_filter(array_column($verifications, 'authenticator')));
+        $ids = array_column($verifications, 'authenticator') |> array_filter(...) |> array_values(...);
 
         if ($ids === []) {
             return $verifications;
         }
 
-        $kept = Keyring::authenticatorModel()::query()->whereKey($ids)->pluck('id')->all();
+        $kept = $this->keyring->authenticatorModel()::query()->whereKey($ids)->pluck('id')->all();
 
         return array_values(array_filter($verifications, fn (Verification $verification) => $verification->authenticator === null || in_array($verification->authenticator, $kept, true)));
     }
@@ -141,10 +143,7 @@ class SessionAssurance
      */
     public function level(): Assurance
     {
-        return array_find(
-            [Assurance::AAL3, Assurance::AAL2, Assurance::AAL1],
-            fn (Assurance $level) => Requirement::for($level)->isMetBy($this->countingToward($level)),
-        ) ?? Assurance::None;
+        return Assurance::highest($this->countingToward(...));
     }
 
     /**

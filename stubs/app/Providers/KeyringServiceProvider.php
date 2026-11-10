@@ -7,9 +7,6 @@ use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use App\Notifications\Keyring as Notifications;
-use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
@@ -63,9 +60,5 @@ class KeyringServiceProvider extends ServiceProvider
             // 'email_changed' => Notifications\EmailChanged::class,
             // 'email_change_reverted' => Notifications\EmailChangeReverted::class,
         ]);
-
-        // The limit on registration, password resets and changes, enrollment
-        // and emailed links. Sign in attempts use the "limits" config instead.
-        RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(6)->by(Keyring::guard()->id() ?: $request->ip()));
     }
 }

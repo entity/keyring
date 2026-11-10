@@ -3,10 +3,211 @@
 namespace Keyring\Support;
 
 use Illuminate\Cache\RateLimiter;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Keyring\Contracts\Factor;
+use Keyring\Contracts\PrimaryFactor;
+use Keyring\Devices\DeviceManager;
+use Keyring\Features;
+use Keyring\KeyringManager;
+use Keyring\Login\Attempt;
+use Keyring\Models\Device;
+use Keyring\Pipeline\ConsecutiveLimit;
+use Keyring\Pipeline\SharedLimit;
 
-final class Throttle
+/**
+ * Every rate limit on verifying a factor: the limits a factor runs under,
+ * counting attempts against them, locking out repeated failures, and
+ * clearing them again. What counts an attempt and what clears it sit side
+ * by side, so the two can't drift apart.
+ */
+class Throttle
 {
+    public function __construct(
+        protected RateLimiter $limiter,
+        protected KeyringManager $keyring,
+        protected DeviceManager $devices,
+    ) {}
+
+    /**
+     * The limits a factor runs under unless it declares its own: per IP
+     * address, per account, and failures in a row.
+     *
+     * The per-IP limit is a SharedLimit, so a success never clears it.
+     * Requests that don't name an account (like a usernameless passkey) only
+     * get the per-IP limit, so they can't fill one bucket every user shares.
+     *
+     * A browser the account has signed in from before gets a bucket and an
+     * in-a-row count of its own, so someone guessing elsewhere can't lock the
+     * owner out. Per IP it counts for that account alone, so others on a
+     * shared address can't hold it up. That's per account rather than per
+     * device so that several stolen cookies share one count.
+     *
+     * The per-IP limit comes first, so an attempt the address refuses is
+     * never counted against the account.
+     *
+     * @return list<Limit>
+     */
+    public function limitsFor(Factor $factor, Request $request, ?Attempt $attempt): array
+    {
+        $account = $this->account($factor, $request, $attempt);
+        $device = $account === '' ? null : $this->knownDevice($request, $attempt);
+        $consecutive = config('keyring.limits.consecutive');
+
+        $ip = $factor->key().'|ip|'.$request->ip().($device === null ? '' : '|account|'.$account);
+        $limits = [SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($ip)];
+
+        if ($account !== '') {
+            $limits[] = Limit::perMinute(config('keyring.limits.per_account'))->by($this->bucket($factor->key(), $account, $device));
+        }
+
+        if ($account !== '' && $consecutive !== null) {
+            $limits[] = ConsecutiveLimit::of($consecutive, $factor->key(), $account, $device);
+        }
+
+        return $limits;
+    }
+
+    /**
+     * Count an attempt against the limits before it's verified, so
+     * overlapping requests can't all slip under one while they're being
+     * checked. Returns the seconds to wait when a limit refuses it. They're
+     * counted in order, so one refused by a limit never reaches the next.
+     *
+     * @param  list<Limit>  $limits
+     */
+    public function hit(array $limits): ?int
+    {
+        foreach ($limits as $limit) {
+            $key = $limit instanceof ConsecutiveLimit ? $this->key($limit) : $this->lock($limit);
+
+            if ($this->limiter->tooManyAttempts($key, $limit instanceof ConsecutiveLimit ? $limit->maxAttempts : 1)) {
+                return $this->limiter->availableIn($key);
+            }
+        }
+
+        foreach ($limits as $limit) {
+            if (! $limit instanceof ConsecutiveLimit && $this->limiter->hit($this->key($limit), $limit->decaySeconds) > $limit->maxAttempts) {
+                return $this->limiter->availableIn($this->key($limit));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The attempt failed. Once a key reaches its limit, lock it. Each lock
+     * lasts twice as long as the last one, up to "longest_lock", and the
+     * lockout count resets a day after the first lockout.
+     *
+     * A shared limit's lock stops growing at "longest_ip_lock", or everyone
+     * on that address would pay for one person's failures for a day.
+     *
+     * @param  list<Limit>  $limits
+     */
+    public function failed(array $limits): void
+    {
+        foreach ($limits as $limit) {
+            $key = $this->key($limit);
+
+            // Counted here, not up front, so it's failures in a row: no window,
+            // no lock of its own, just refused at the cap until a success.
+            if ($limit instanceof ConsecutiveLimit) {
+                $this->limiter->hit($key, $limit->decaySeconds);
+
+                continue;
+            }
+
+            if ($this->limiter->attempts($key) < $limit->maxAttempts) {
+                continue;
+            }
+
+            $lockouts = $this->limiter->hit($key.':lockouts', 86400);
+            $longest = Duration::seconds(config($limit instanceof SharedLimit ? 'keyring.limits.longest_ip_lock' : 'keyring.limits.longest_lock'));
+
+            $this->limiter->hit($this->lock($limit), min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
+            $this->limiter->clear($key);
+        }
+    }
+
+    /**
+     * The attempt succeeded, which clears an account's count. On a shared
+     * limit it only takes back its own attempt: people signing in from one
+     * office address don't use it up, and an attacker can't reset it with
+     * their own login.
+     *
+     * @param  list<Limit>  $limits
+     */
+    public function succeeded(array $limits): void
+    {
+        foreach ($limits as $limit) {
+            $limit instanceof SharedLimit
+                ? $this->limiter->decrement($this->key($limit), $limit->decaySeconds)
+                : $this->limiter->clear($this->key($limit));
+        }
+    }
+
+    /**
+     * Clear the user's per-account limits on the factors that can start a
+     * sign in: the in-a-row count, and the counts, locks and escalation.
+     * Limits start under the typed username (before the user is known) and
+     * continue under their ID, with a bucket for each known device. The
+     * per-IP limits stay, or a reset would be a way around them. A second
+     * factor's counts and locks stay too: a reset only proves control of the
+     * mailbox, which is what they defend against, and it could be repeated to
+     * keep guessing.
+     *
+     * The user's username is cleared by default. Apps whose findUsersUsing()
+     * also accepts something else pass it in $usernames: nothing on the user
+     * says what else was typed.
+     */
+    public function clearAccount(Authenticatable&Model $user, ?string ...$usernames): void
+    {
+        $accounts = [
+            (string) $user->getAuthIdentifier(),
+            ...array_map($this->accountKey(...), [$user->getAttribute($this->keyring->username()), ...$usernames]),
+        ];
+
+        $devices = Features::enabled(Features::devices())
+            ? $this->keyring->deviceModel()::query()->ownedBy($user)->active()->pluck('id')->all()
+            : [];
+
+        $factors = $this->keyring->registered()->filter(fn (Factor $factor) => $factor instanceof PrimaryFactor)->keys();
+
+        foreach ($factors->crossJoin($accounts, [null, ...$devices]) as [$factor, $account, $device]) {
+            $key = $this->key(new Limit($this->bucket($factor, $account, $device)));
+
+            $this->limiter->clear($key);
+            $this->limiter->clear($key.':locked');
+            $this->limiter->clear($key.':lockouts');
+            $this->limiter->clear($this->key(new Limit(ConsecutiveLimit::keyFor($factor, $account, $device))));
+        }
+    }
+
+    /**
+     * Count a code about to be sent, and refuse it when the account has been
+     * sent its limit for the factor (three every ten minutes, unless the
+     * limits.codes options say otherwise). Counted per account, not per sign
+     * in, so starting again doesn't buy more, and sign ins, step-ups and
+     * enrollments share the count.
+     *
+     * @throws ValidationException
+     */
+    public function sending(string $factor, int|string $userId): void
+    {
+        $key = 'keyring-send:'.$factor.'|'.$userId;
+
+        if ($this->limiter->tooManyAttempts($key, config('keyring.limits.codes'))) {
+            throw static::exception('code', $this->limiter->availableIn($key));
+        }
+
+        $this->limiter->hit($key, Duration::seconds(config('keyring.limits.codes_per')));
+    }
+
     /**
      * Laravel's "too many attempts" message on the field, as a 429.
      */
@@ -18,21 +219,69 @@ final class Throttle
     }
 
     /**
-     * Count a code about to be sent, and refuse it when the account has been
-     * sent its limit for the factor (three every ten minutes, unless the
-     * limits.codes options say otherwise). Counted per account,
-     * not per sign in, so starting again doesn't buy more, and sign ins,
-     * step-ups and enrollments share the count.
+     * How the attempt names its account. A factor that can start a sign in
+     * counts under the username wherever it's checked, as it must before the
+     * user is known: confirming under the ID would be a second allowance of
+     * guesses. Empty when the request names no account.
      */
-    public static function sending(string $factor, int|string $userId): void
+    protected function account(Factor $factor, Request $request, ?Attempt $attempt): string
     {
-        $limiter = app(RateLimiter::class);
-        $key = 'keyring-send:'.$factor.'|'.$userId;
+        return match (true) {
+            $attempt === null => $this->accountKey((string) $request->input($this->keyring->username())),
+            $factor instanceof PrimaryFactor => $this->accountKey((string) $attempt->user()->getAttribute($this->keyring->username())),
+            default => (string) $attempt->userId,
+        };
+    }
 
-        if ($limiter->tooManyAttempts($key, config('keyring.limits.codes'))) {
-            throw self::exception('code', $limiter->availableIn($key));
-        }
+    /**
+     * How a typed username names its account in rate limits: transliterated
+     * too, so spelling variants of one address share a limit.
+     */
+    protected function accountKey(?string $username): string
+    {
+        return Str::transliterate($this->keyring->normalizeUsername((string) $username));
+    }
 
-        $limiter->hit($key, Duration::seconds(config('keyring.limits.codes_per')));
+    /**
+     * The device's ID when the request's device cookie belongs to the account.
+     * Compares the user or the normalised username, not the transliterated
+     * rate limit key, or a cookie for victim@exämple.com would count as one
+     * for victim@example.com.
+     */
+    protected function knownDevice(Request $request, ?Attempt $attempt): ?string
+    {
+        $username = fn (mixed $value) => $this->keyring->normalizeUsername((string) $value);
+        $typed = $username($request->input($this->keyring->username()));
+
+        return $this->devices->forBrowser($request)->first(function (Device $device) use ($attempt, $username, $typed) {
+            $user = $device->user();
+
+            return match (true) {
+                $user === null => false,
+                $attempt !== null => $user->is($attempt->user()),
+                default => $typed === $username($user->getAttribute($this->keyring->username())),
+            };
+        })?->id;
+    }
+
+    /**
+     * The key of an account's per-minute limit, or of a known device's.
+     */
+    protected function bucket(string $factor, string $account, ?string $device = null): string
+    {
+        return $factor.'|account|'.$account.($device === null ? '' : '|device|'.$device);
+    }
+
+    /**
+     * The rate limiter key for a limit.
+     */
+    protected function key(Limit $limit): string
+    {
+        return 'keyring:'.sha1((string) $limit->key);
+    }
+
+    protected function lock(Limit $limit): string
+    {
+        return $this->key($limit).':locked';
     }
 }

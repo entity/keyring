@@ -3,13 +3,23 @@
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Route;
 use Inertia\ServiceProvider;
+use Keyring\Changes\ProtectedAttributes;
+use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Exceptions\UnknownFeature;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Totp;
 use Keyring\Features;
+use Keyring\KeyringManager;
 use Keyring\KeyringServiceProvider;
+use Keyring\Login\AttemptStore;
+use Keyring\Risk\RiskEngine;
+use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
+use Keyring\Support\EncryptedSession;
+use Keyring\WebAuthn\Ceremonies;
 
 it('lets apps register the routes themselves, e.g. under a prefix', function () {
     Route::prefix('account')->group(fn () => Keyring::routes());
@@ -30,6 +40,37 @@ it('limits routes that check a secret outside the sign in limits', function (str
     'register.store', 'password.email', 'password.update', 'user-password.update',
     'keyring.authenticators.confirm', 'keyring.authenticators.destroy', 'keyring.email.store', 'keyring.email.revert.store',
 ]);
+
+it('keeps one of each service for the app\'s lifetime, or the request\'s', function (string $service, bool $perRequest) {
+    $first = app($service);
+
+    expect(app($service))->toBe($first);
+
+    app()->forgetScopedInstances();
+
+    $perRequest
+        ? expect(app($service))->not->toBe($first)
+        : expect(app($service))->toBe($first);
+})->with([
+    [KeyringManager::class, false],
+    [FactorRegistry::class, false],
+    [ProtectedAttributes::class, false],
+    [Ceremonies::class, false],
+    [SessionRegistryManager::class, false],
+    [RiskEngine::class, false],
+    [AttemptStore::class, true],
+    [EnrollmentStore::class, true],
+    [SessionAssurance::class, true],
+    [EncryptedSession::class, true],
+]);
+
+it('keeps a service the app replaced for as long as its own', function () {
+    $replacement = new class(app(), app(FactorRegistry::class), app(ProtectedAttributes::class)) extends KeyringManager {};
+
+    app()->bind(KeyringManager::class, $replacement::class);
+
+    expect(app(KeyringManager::class))->toBeInstanceOf($replacement::class)->toBe(app(KeyringManager::class));
+});
 
 it('registers custom factors with extend, under the key they report', function () {
     Keyring::extend('totp', fn ($app) => $app->make(Totp::class));

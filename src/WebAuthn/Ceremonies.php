@@ -7,9 +7,10 @@ use Cose\Algorithm\Manager;
 use Cose\Algorithm\Signature\ECDSA\ES256;
 use Cose\Algorithm\Signature\EdDSA\Ed25519;
 use Cose\Algorithm\Signature\RSA\RS256;
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use ParagonIE\ConstantTime\Base64UrlSafe;
@@ -43,11 +44,16 @@ use Webauthn\PublicKeyCredentialUserEntity;
  * The WebAuthn plumbing: building options, (de)serializing and validating
  * responses with web-auth/webauthn-lib. Factors stay free of library details.
  */
+#[Singleton]
 class Ceremonies
 {
     protected ?SerializerInterface $serializer = null;
 
     protected ?AttestationStatementSupportManager $attestation = null;
+
+    public function __construct(
+        protected KeyringManager $keyring,
+    ) {}
 
     /**
      * @param  list<PublicKeyCredentialDescriptor>  $exclude
@@ -57,9 +63,9 @@ class Ceremonies
         return PublicKeyCredentialCreationOptions::create(
             rp: PublicKeyCredentialRpEntity::create($this->relyingPartyName(), $this->relyingPartyId()),
             user: PublicKeyCredentialUserEntity::create(
-                name: (string) $user->getAttribute(Keyring::username()),
+                name: (string) $user->getAttribute($this->keyring->username()),
                 id: $this->userHandle($user),
-                displayName: (string) ($user->getAttribute('name') ?? $user->getAttribute(Keyring::username())),
+                displayName: (string) ($user->getAttribute('name') ?? $user->getAttribute($this->keyring->username())),
             ),
             challenge: random_bytes(32),
             pubKeyCredParams: array_map(
@@ -177,7 +183,7 @@ class Ceremonies
      */
     public function userHandle(Authenticatable&Model $user): string
     {
-        $existing = Keyring::authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
+        $existing = $this->keyring->authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
 
         return $existing === null
             ? KeyedHash::make('keyring|'.$user->getAuthIdentifier())
@@ -205,11 +211,17 @@ class Ceremonies
     {
         $origins = config('keyring.webauthn.origins') ?: [config('app.url')];
 
-        return array_values(array_filter(array_map(function (string $origin) {
-            $url = Url::parse($origin);
+        return array_map($this->origin(...), $origins) |> array_filter(...) |> array_values(...);
+    }
 
-            return $url === null ? null : $url->getScheme().'://'.$url->getAsciiHost().($url->getPort() ? ':'.$url->getPort() : '');
-        }, $origins)));
+    /**
+     * A URL's origin, or null when it isn't a URL.
+     */
+    protected function origin(string $url): ?string
+    {
+        $url = Url::parse($url);
+
+        return $url === null ? null : $url->getScheme().'://'.$url->getAsciiHost().($url->getPort() ? ':'.$url->getPort() : '');
     }
 
     /**
