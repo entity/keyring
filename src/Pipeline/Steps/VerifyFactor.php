@@ -13,11 +13,13 @@ use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
 use Keyring\Pipeline\Context;
+use Keyring\Pipeline\Outcome;
 use Keyring\Support\Duration;
 
 /**
  * Identifies the user (for primary factors) and checks the proof, inside a
- * timebox so failures and unknown users take the same time.
+ * timebox so every refusal takes the same time: a wrong proof, an unknown
+ * user, or a right proof a later step turns down.
  */
 class VerifyFactor
 {
@@ -31,31 +33,43 @@ class VerifyFactor
     {
         $context->request->validate($this->rules($context));
 
-        $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context) {
-            if ($context->identifying && $context->factor instanceof PrimaryFactor) {
-                $authenticator = $context->factor->identify($context->request);
+        // The timebox stays open until the attempt is answered, not just
+        // until the proof is checked: a right password refused further on,
+        // by a risk lock say, has to take as long as a wrong one.
+        return $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context, $next) {
+            $context = $this->verify($context, $next);
 
-                $context->authenticator = $authenticator !== null && $this->keyring->belongsToGuard($authenticator->user()) ? $authenticator : null;
-
-                if ($context->authenticator !== null) {
-                    $context->attempt = Attempt::start(
-                        $context->purpose,
-                        $context->authenticator->user(),
-                        $context->request->boolean('remember'),
-                    );
-                }
-            }
-
-            if ($context->attempt === null || $context->authenticator === null) {
-                return;
-            }
-
-            $context->verification = $this->check($context);
-
-            if ($context->verification !== null) {
+            if (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true)) {
                 $timebox->returnEarly();
             }
+
+            return $context;
         }, Duration::milliseconds(config('keyring.timebox')) * 1000);
+    }
+
+    /**
+     * Identify the user when the factor starts a login, check the proof, and
+     * carry on down the pipeline when it holds.
+     */
+    protected function verify(Context $context, Closure $next): Context
+    {
+        if ($context->identifying && $context->factor instanceof PrimaryFactor) {
+            $authenticator = $context->factor->identify($context->request);
+
+            $context->authenticator = $authenticator !== null && $this->keyring->belongsToGuard($authenticator->user()) ? $authenticator : null;
+
+            if ($context->authenticator !== null) {
+                $context->attempt = Attempt::start(
+                    $context->purpose,
+                    $context->authenticator->user(),
+                    $context->request->boolean('remember'),
+                );
+            }
+        }
+
+        if ($context->attempt !== null && $context->authenticator !== null) {
+            $context->verification = $this->check($context);
+        }
 
         if ($context->verification === null) {
             FactorFailed::dispatch($context->attempt, $context->authenticator, $context->factor->key(), $context->request);
