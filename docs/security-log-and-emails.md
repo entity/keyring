@@ -155,6 +155,8 @@ Keyring::notifications([
 
 A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on; the rest are there commented out. Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
+An account is sent each kind of notice five times an hour at most (`limits.notices` every `limits.notices_per`), so nobody can make your app mail one person without end, by signing in from a new browser over and over, say. The [security log](#the-security-log) records every event either way. A `MustVerifyEmail` user gets none until their address is verified, because until then it's only what someone typed when registering.
+
 The classes are ordinary Laravel notifications and they're yours: change the wording, the channels or the whole template, or register a different class altogether. Keyring builds each one through the container and passes what it has to say as named constructor arguments, so a class takes only the ones it wants.
 
 ### Email Types

@@ -14,6 +14,7 @@ return [
     'password_too_short_alone' => 'Without a second factor your password needs at least :min characters. Change it first, then remove this.',
     'enrollment_expired' => 'Setting this up took too long. Please start again.',
     'enrollment_too_many_codes' => 'Too many wrong codes. Please try again in 15 minutes.',
+    'verify_email_to_change' => 'Please verify your email address before changing it.',
     'verify_email_first' => 'Please verify your email address before adding a sign-in method.',
     'device_name' => ':browser on :platform',
     'unknown_device' => 'Unknown device',

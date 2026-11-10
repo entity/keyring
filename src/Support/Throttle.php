@@ -244,6 +244,29 @@ class Throttle
     }
 
     /**
+     * Count a notice about to be mailed to an account or an address, and
+     * return the seconds to wait when it has had its limit of that kind
+     * (five an hour, unless the limits.notices options say otherwise).
+     *
+     * None of this mail is a guess at anything, so the factor limits never
+     * see it: a sign in that succeeds isn't counted, and the form limiter
+     * only counts the sender. Without a count per recipient, the app could
+     * be made to mail one address as often as it can answer.
+     */
+    public function notifying(string $type, string $recipient): ?int
+    {
+        $key = 'keyring-notice:'.$type.'|'.sha1($recipient);
+
+        if ($this->limiter->tooManyAttempts($key, config('keyring.limits.notices'))) {
+            return $this->limiter->availableIn($key);
+        }
+
+        $this->limiter->hit($key, Duration::seconds(config('keyring.limits.notices_per')));
+
+        return null;
+    }
+
+    /**
      * Laravel's "too many attempts" message on the field, as a 429.
      */
     public static function exception(string $field, int $seconds): ValidationException

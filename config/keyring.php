@@ -329,7 +329,9 @@ return [
     | account locked out of signing in that many times in a day stays locked
     | for "remember_failures_for", or until its password is reset or you call
     | Keyring::unlock(). "codes" is how many codes an account can be sent for
-    | one factor every "codes_per".
+    | one factor every "codes_per", and "notices" how many security notices
+    | of one kind, or email change requests, an account or an address can be
+    | sent every "notices_per".
     |
     */
 
@@ -343,6 +345,8 @@ return [
         'lock_after' => null,
         'codes' => 3,
         'codes_per' => '10m',
+        'notices' => 5,
+        'notices_per' => '1h',
     ],
 
 ];
