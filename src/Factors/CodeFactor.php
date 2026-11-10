@@ -37,7 +37,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     /**
      * Send the code to the user. Never log it.
      */
-    abstract protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, string $code): void;
+    abstract protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, #[\SensitiveParameter] string $code): void;
 
     /**
      * The default name for a new authenticator of this factor.
@@ -87,7 +87,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         // aimed at another one leaves it be.
         $ours = ($sent['authenticator'] ?? null) === $authenticator->getKey();
 
-        [$valid, $issued, $guesses] = $this->check($ours ? $sent : null, (string) $request->input('code'), $attempt->state($this->key(), 'guesses', 0));
+        ['valid' => $valid, 'issued' => $issued, 'guesses' => $guesses] = $this->check($ours ? $sent : null, (string) $request->input('code'), $attempt->state($this->key(), 'guesses', 0));
 
         $attempt->put($this->key(), 'guesses', $guesses);
 
@@ -132,7 +132,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
-        [$valid, $issued, $guesses] = $this->check($enrollment->state('code'), (string) $request->input('code'), $enrollment->state('guesses', 0));
+        ['valid' => $valid, 'issued' => $issued, 'guesses' => $guesses] = $this->check($enrollment->state('code'), (string) $request->input('code'), $enrollment->state('guesses', 0));
 
         if (! $valid) {
             // Keep the guess count, or enrollment codes could be guessed forever.
@@ -171,7 +171,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     /**
      * @return array{hash: string, expires_at: int, authenticator: ?string}
      */
-    protected function issue(string $code, ?Authenticator $authenticator = null): array
+    protected function issue(#[\SensitiveParameter] string $code, ?Authenticator $authenticator = null): array
     {
         return [
             'hash' => $this->hash($code),
@@ -181,25 +181,27 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     }
 
     /**
-     * Guesses are counted apart from the code, because the count has to
+     * Check a guess at the issued code: whether it's valid, the code to keep
+     * (null once it's spent, expired or out of guesses) and the guesses so
+     * far. They're counted apart from the code, because the count has to
      * outlive it: a code can expire or be replaced, the count carries on.
      *
      * @param  array{hash: string, expires_at: int, authenticator?: ?string}|null  $issued
-     * @return array{0: bool, 1: array{hash: string, expires_at: int, authenticator?: ?string}|null, 2: int}
+     * @return array{valid: bool, issued: array{hash: string, expires_at: int, authenticator?: ?string}|null, guesses: int}
      */
-    protected function check(?array $issued, string $code, int $guesses): array
+    protected function check(?array $issued, #[\SensitiveParameter] string $code, int $guesses): array
     {
         if ($issued === null || $issued['expires_at'] < now()->getTimestamp() || $guesses >= $this->maxGuesses) {
-            return [false, null, $guesses];
+            return ['valid' => false, 'issued' => null, 'guesses' => $guesses];
         }
 
         if (hash_equals($issued['hash'], $this->hash($this->normalizeCode($code)))) {
-            return [true, null, $guesses];
+            return ['valid' => true, 'issued' => null, 'guesses' => $guesses];
         }
 
         $guesses++;
 
-        return [false, $guesses >= $this->maxGuesses ? null : $issued, $guesses];
+        return ['valid' => false, 'issued' => $guesses >= $this->maxGuesses ? null : $issued, 'guesses' => $guesses];
     }
 
     protected function tooManyEnrollmentGuesses(): ValidationException
@@ -207,7 +209,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         return ValidationException::withMessages([$this->errorKey() => __('keyring::keyring.enrollment_too_many_codes')]);
     }
 
-    protected function hash(string $code): string
+    protected function hash(#[\SensitiveParameter] string $code): string
     {
         return KeyedHash::make($this->key().'|'.$code);
     }
