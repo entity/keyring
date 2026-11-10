@@ -8,8 +8,9 @@ use Keyring\Support\MailText;
 
 /**
  * Sent to the current address during an email change: your email is being
- * changed, with a link to cancel it. Accounts without a second factor must
- * also confirm from here, and get $confirmUrl. The notifiable is that bare
+ * changed, with a link to cancel it. Unless the session that asked proved a
+ * second factor the account has had a while, this address must confirm too,
+ * and gets $confirmUrl. The notifiable is that bare
  * address, not your user.
  */
 class EmailChangeNotice extends Notification
