@@ -105,6 +105,20 @@ it('fails a passkey that has no public key to check, like any other wrong proof'
     $this->assertGuest();
 });
 
+it('fails a key whose stored record can not be read, and lets the user add another', function () {
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+    Authenticator::query()->update(['public_key' => '{"counter":0}']);
+
+    $options = $this->getJson('/login/passkey/options')->assertOk()->json();
+    $this->postJson('/login/passkey', ['credential' => $key->assert($options)])->assertJsonValidationErrors('credential');
+    $this->assertGuest();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+        ->postJson(route('keyring.authenticators.store', 'passkey'))
+        ->assertOk();
+});
+
 it('caps a passkey that syncs at aal2, as nist does', function () {
     $key = new VirtualAuthenticator(synced: true);
     enroll('passkey', $key);

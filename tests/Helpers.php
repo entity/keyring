@@ -6,8 +6,12 @@ use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Str;
 use Keyring\Factors\Totp;
 use Keyring\KeyringManager;
+use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
+use Keyring\WebAuthn\Ceremonies;
+use Keyring\WebAuthn\Profile;
+use ParagonIE\ConstantTime\Base64UrlSafe;
 use PragmaRX\Google2FA\Google2FA;
 
 // The published actions in stubs/app are what the tests run, against the
@@ -35,6 +39,24 @@ function taylor(array $attributes = []): User
 function staff(): Staff
 {
     return Staff::create(['id' => User::query()->max('id') ?? 1, 'name' => 'Staff', 'email' => 'staff@example.com', 'password' => 'password']);
+}
+
+/**
+ * A passkey as laravel/passkeys keeps one: its credential ID and the record
+ * a real registration produced.
+ *
+ * @return array{credential_id: string, credential: string}
+ */
+function passkeyRow(User $user): array
+{
+    $ceremonies = app(Ceremonies::class);
+    $options = $ceremonies->creationOptions($user, Profile::passkeys(), []);
+    $record = $ceremonies->register(json_encode(new VirtualAuthenticator()->register($ceremonies->toBrowser($options))), $ceremonies->toJson($options));
+
+    return [
+        'credential_id' => Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId),
+        'credential' => $ceremonies->toJson($record),
+    ];
 }
 
 /**

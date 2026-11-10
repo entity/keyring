@@ -153,6 +153,19 @@ describe('keyring:install', function () {
     });
 })->skip(fn () => getenv('TEST_TOKEN') !== false, 'Publishes into the testbench app every parallel worker shares.');
 
+function passkeysTable(): void
+{
+    Schema::create('passkeys', function (Blueprint $table) {
+        $table->id();
+        $table->foreignId('user_id');
+        $table->string('name');
+        $table->string('credential_id');
+        $table->json('credential');
+        $table->timestamp('last_used_at')->nullable();
+        $table->timestamps();
+    });
+}
+
 describe('keyring:import fortify', function () {
     beforeEach(function () {
         Keyring::factors([Password::class, Totp::class, WebAuthn::passkeys(), RecoveryCodes::class]);
@@ -331,15 +344,7 @@ describe('keyring:import fortify', function () {
     });
 
     it('reports passkeys it can\'t import', function () {
-        Schema::create('passkeys', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('name');
-            $table->string('credential_id');
-            $table->json('credential');
-            $table->timestamp('last_used_at')->nullable();
-            $table->timestamps();
-        });
+        passkeysTable();
         DB::table('passkeys')->insert([
             ['id' => 1, 'user_id' => 999, 'name' => 'Orphan', 'credential_id' => 'a', 'credential' => '{}'],
             ['id' => 2, 'user_id' => $this->user->id, 'name' => 'Broken', 'credential_id' => 'b', 'credential' => '{}'],
@@ -352,24 +357,68 @@ describe('keyring:import fortify', function () {
         expect(Authenticator::count())->toBe(0);
     });
 
+    it('will not import a passkey whose record it could not read back', function (string $id, string $credential) {
+        passkeysTable();
+        DB::table('passkeys')->insert(['id' => 1, 'user_id' => $this->user->id, 'name' => 'Junk', 'credential_id' => $id, 'credential' => $credential]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Failed passkey 1 of user {$this->user->id}: its credential is in an unexpected format")
+            ->assertFailed();
+
+        expect(Authenticator::count())->toBe(0);
+    })->with([
+        'json that is not a credential record' => ['YWJjZGVmZ2g', '{"counter":0}'],
+        'an id that is not base64url' => ['not base64url!', '{"counter":0}'],
+    ]);
+
+    it('finishes a two factor import that failed before, though the passkey came across', function () {
+        $secret = app(Google2FA::class)->generateSecretKey();
+        passkeysTable();
+        DB::table('users')->update([
+            'two_factor_secret' => new Encrypter(random_bytes(32), 'aes-256-cbc')->encrypt($secret),
+            'two_factor_confirmed_at' => now(),
+        ]);
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'MacBook', ...passkeyRow($this->user)]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertFailed();
+        expect(Authenticator::query()->where('factor', 'totp')->sole()->secret)->toBeNull()
+            ->and(Authenticator::query()->where('factor', 'passkey')->count())->toBe(1);
+
+        DB::table('users')->update(['two_factor_secret' => encrypt($secret)]);
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        expect(Authenticator::query()->where('factor', 'totp')->sole()->secret)->toBe($secret)
+            ->and(Authenticator::query()->where('factor', 'passkey')->count())->toBe(1);
+    });
+
+    it('says so when it leaves out a passkey an earlier run did not bring across', function () {
+        passkeysTable();
+        DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()), 'two_factor_confirmed_at' => now()]);
+        DB::table('passkeys')->insert(['id' => 1, 'user_id' => $this->user->id, 'name' => 'MacBook', 'credential_id' => 'YWJjZGVmZ2g', 'credential' => '{}']);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertFailed();
+
+        DB::table('passkeys')->update(passkeyRow($this->user));
+
+        // It can't tell a row that failed from one the user removed since, so
+        // it stays out, and the run says which.
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Skipped passkey 1 of user {$this->user->id}: an earlier import left this out, or they removed it since")
+            ->assertSuccessful();
+
+        expect(Authenticator::query()->where('factor', 'passkey')->exists())->toBeFalse();
+    });
+
     it('imports users the model\'s global scopes hide, so a restored user keeps their factors', function () {
         Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
         config(['auth.providers.users.model' => SoftDeletingUser::class]);
-        Schema::create('passkeys', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('name');
-            $table->string('credential_id');
-            $table->json('credential');
-            $table->timestamp('last_used_at')->nullable();
-            $table->timestamps();
-        });
+        passkeysTable();
         DB::table('users')->update([
             'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
             'two_factor_confirmed_at' => now(),
             'deleted_at' => now(),
         ]);
-        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'MacBook', 'credential_id' => 'a', 'credential' => '{"counter":0}']);
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'MacBook', ...passkeyRow($this->user)]);
 
         $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
 
@@ -391,15 +440,7 @@ describe('keyring:import fortify', function () {
 
         // Pretend that passkey was made by laravel/passkeys instead.
         $made = Authenticator::where('factor', 'passkey')->sole();
-        Schema::create('passkeys', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id');
-            $table->string('name');
-            $table->string('credential_id');
-            $table->json('credential');
-            $table->timestamp('last_used_at')->nullable();
-            $table->timestamps();
-        });
+        passkeysTable();
         DB::table('passkeys')->insert([
             'user_id' => $this->user->id,
             'name' => 'MacBook',
