@@ -6,10 +6,8 @@ use Illuminate\Container\Attributes\Scoped;
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
-use Keyring\Facades\Keyring;
 use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
-use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
 /**
@@ -119,7 +117,7 @@ class SessionAssurance
     public function all(): array
     {
         $verifications = array_map(Verification::fromArray(...), array_values($this->session->get(static::KEY, [])));
-        $ids = array_values(array_filter(array_column($verifications, 'authenticator')));
+        $ids = array_column($verifications, 'authenticator') |> array_filter(...) |> array_values(...);
 
         if ($ids === []) {
             return $verifications;

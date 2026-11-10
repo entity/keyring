@@ -10,7 +10,6 @@ use Cose\Algorithm\Signature\RSA\RS256;
 use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Keyring\Facades\Keyring;
 use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
@@ -212,11 +211,17 @@ class Ceremonies
     {
         $origins = config('keyring.webauthn.origins') ?: [config('app.url')];
 
-        return array_values(array_filter(array_map(function (string $origin) {
-            $url = Url::parse($origin);
+        return array_map($this->origin(...), $origins) |> array_filter(...) |> array_values(...);
+    }
 
-            return $url === null ? null : $url->getScheme().'://'.$url->getAsciiHost().($url->getPort() ? ':'.$url->getPort() : '');
-        }, $origins)));
+    /**
+     * A URL's origin, or null when it isn't a URL.
+     */
+    protected function origin(string $url): ?string
+    {
+        $url = Url::parse($url);
+
+        return $url === null ? null : $url->getScheme().'://'.$url->getAsciiHost().($url->getPort() ? ':'.$url->getPort() : '');
     }
 
     /**

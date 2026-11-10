@@ -66,10 +66,12 @@ class CompleteAttempt
      */
     protected function skippedChecks(Context $context): array
     {
-        return array_values(array_diff(array_keys(array_filter([
+        $skipped = [
             EnsureNotThrottled::class => ! $context->throttleChecked,
             VerifyFactor::class => $context->verification === null,
             EnsureNotRiskLocked::class => ! $context->riskLockChecked,
-        ])), $this->keyring->dangerouslyChangedSteps()));
+        ] |> array_filter(...) |> array_keys(...);
+
+        return array_values(array_diff($skipped, $this->keyring->dangerouslyChangedSteps()));
     }
 }

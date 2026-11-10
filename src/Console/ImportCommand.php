@@ -343,7 +343,7 @@ class ImportCommand extends Command
             $this->counts['already_imported']++;
         } else {
             $this->issues['skipped'][] = "user {$user->getKey()}: they already have sign-in methods in Keyring, so Fortify's are left out";
-            $this->issues['skipped'] = array_values(array_unique($this->issues['skipped']));
+            $this->issues['skipped'] = $this->issues['skipped'] |> array_unique(...) |> array_values(...);
         }
 
         return true;

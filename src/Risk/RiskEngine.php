@@ -73,10 +73,12 @@ class RiskEngine
 
     public function assess(Assessment $assessment): Risk
     {
-        return new Risk(array_values(array_filter(array_map(
+        $findings = array_map(
             fn (Signal $signal) => $signal->assess($assessment),
             $this->signalsFor($assessment->checkpoint),
-        ))));
+        );
+
+        return new Risk($findings |> array_filter(...) |> array_values(...));
     }
 
     public function decide(Risk $risk, Checkpoint $checkpoint): Action
