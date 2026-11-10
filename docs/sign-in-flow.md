@@ -5,6 +5,7 @@
 - [Signing In With a Password](#signing-in-with-a-password)
     - [Finding the User](#finding-the-user)
 - [Signing In With a Passkey](#signing-in-with-a-passkey)
+- [Starting a Sign In Yourself](#starting-a-sign-in-yourself)
 - [The Challenge Page](#the-challenge-page)
     - [Page Props](#page-props)
     - [Choosing an Authenticator](#choosing-an-authenticator)
@@ -112,6 +113,23 @@ The same options work for autofill ("conditional UI"), where the browser offers 
 A passkey sign in still goes through the policy, so a policy like `Requirement::factors(3)` would still ask for more.
 
 Only factors that implement `PrimaryFactor` and return `true` from `startsLogin()` can start a login, and only `DiscoverableFactor`s serve options; other factor keys return a 404. Security keys share the passkey driver but their `startsLogin()` is `false`, so `/login/security-key` and its options route return a 404 too.
+
+## Starting a Sign In Yourself
+
+`POST /login/{factor}` starts a sign in with any factor that can. When the proof arrives somewhere else, such as the callback of a social login, start it from your own route with `Keyring::attempt()`:
+
+```php
+use Illuminate\Http\Request;
+use Keyring\Facades\Keyring;
+
+Route::get('/auth/github/callback', fn (Request $request) => Keyring::attempt($request, 'github'))
+    ->middleware('guest')
+    ->block();
+```
+
+It runs the same [pipeline](#the-verification-pipeline) as the login form, so rate limits, the policy and risk all apply, and a user with a second factor is sent to the challenge page. It answers with the same [responses](#responses): for a failure that's a `ValidationException`, which you may want to catch and turn into a redirect to your login page. A factor that can't start a login answers `404`.
+
+[Social Login With Socialite](recipes.md#social-login-with-socialite) has a complete example.
 
 ## The Challenge Page
 

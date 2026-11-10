@@ -90,7 +90,7 @@ The link is built from `APP_URL`, and its signature covers only the path and que
 
 Keyring asks a locator class for each request's rough location. The default `Keyring\Devices\NullLocator` knows nothing, so locations are empty and the location [risk signals](risk.md) stay quiet.
 
-To turn locations on, set `devices.locator` to a class implementing `Keyring\Contracts\LocatesIps`:
+To turn locations on, set `devices.locator` to a class implementing `Keyring\Contracts\LocatesIps`. [Recipes](recipes.md#locations-with-stevebaumanlocation) has one for `stevebauman/location`:
 
 ```php
 use Illuminate\Http\Request;

@@ -149,6 +149,8 @@ A factor declares the categories it expects in `categories()`, which Keyring use
 
 ## Writing a Code Factor
 
+[Recipes](recipes.md#sms-codes) has a complete SMS factor, and [a social login](recipes.md#social-login-with-socialite) written as a factor that starts a sign in.
+
 Factors that send a one-time code extend `Keyring\Factors\CodeFactor`. It implements sending, checking, expiry, guess limits, resending and enrollment. A code only verifies the authenticator it was sent to, so a user with two phones can't send to one and type the code against the other. You provide a key, a default name and the delivery:
 
 ```php
