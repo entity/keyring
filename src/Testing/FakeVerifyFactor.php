@@ -46,6 +46,6 @@ class FakeVerifyFactor extends VerifyFactor
 
     protected function fake(): ?KeyringFake
     {
-        return app()->isProduction() ? null : $this->container->make(KeyringFake::class);
+        return app()->isProduction() ? null : app(KeyringFake::class);
     }
 }

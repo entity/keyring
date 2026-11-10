@@ -17,6 +17,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Support\PasswordRules;
+use Keyring\Support\RowLock;
 
 /**
  * The user's password, kept in the users table so password resets and
@@ -101,9 +102,33 @@ class Password extends Factor implements PrimaryFactor
             return null;
         }
 
-        app(ProtectedAttributes::class)->changing(fn () => $this->provider()->rehashPasswordIfRequired($user, $credentials));
+        if (Hash::needsRehash((string) $user->getAuthPassword()) && ! $this->rehash($user, $credentials)) {
+            return null;
+        }
 
         return $this->verified($authenticator);
+    }
+
+    /**
+     * Save the password under the app's current hashing, but only over the
+     * hash it was just checked against. A reset or change that finished
+     * since this request loaded the user has stored a new password, and a
+     * rehash of the old one would put it back: then it fails, as the old
+     * password now should.
+     *
+     * @param  array{password: string}  $credentials
+     */
+    protected function rehash(Authenticatable&Model $user, #[\SensitiveParameter] array $credentials): bool
+    {
+        return RowLock::hold($user, function (?Model $stored) use ($user, $credentials) {
+            if (! $stored instanceof Authenticatable || ! hash_equals((string) $user->getAuthPassword(), (string) $stored->getAuthPassword())) {
+                return false;
+            }
+
+            app(ProtectedAttributes::class)->changing(fn () => $this->provider()->rehashPasswordIfRequired($user, $credentials));
+
+            return true;
+        });
     }
 
     public function errorKey(): string

@@ -426,4 +426,26 @@ describe('a "remember me" cookie first sent to a route without the session middl
         $this->assertGuest();
         expect(sessionEndedReasons())->toBe(['risk']);
     });
+
+    it('stays refused once the lock is lifted, or the account is let back in', function (Closure $keepOut, Closure $letBack) {
+        $cookies = rememberedSignIn();
+        $keepOut($this->user);
+
+        $this->flushSession();
+        browser($cookies)->get('/outside')->assertOk();
+        browser($cookies)->get('/home')->assertRedirect('/login');
+
+        $letBack($this->user);
+
+        expectKeptCookiesRefused($cookies);
+    })->with([
+        'a risk lock' => [
+            fn (User $user) => app(RiskLocks::class)->lock($user, 3600),
+            fn (User $user) => app(RiskLocks::class)->unlock($user),
+        ],
+        'an account the app keeps out' => [
+            fn () => Keyring::allowSignInWhen(fn () => false),
+            fn () => Keyring::allowSignInWhen(fn () => true),
+        ],
+    ]);
 });

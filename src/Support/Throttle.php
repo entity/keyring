@@ -5,9 +5,12 @@ namespace Keyring\Support;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
@@ -31,6 +34,7 @@ class Throttle
         protected RateLimiter $limiter,
         protected KeyringManager $keyring,
         protected DeviceManager $devices,
+        protected CacheFactory $cache,
     ) {}
 
     /**
@@ -52,11 +56,13 @@ class Throttle
      * wrong password. Otherwise locking an account under one name would show
      * which other names are the same account's, and which have one at all.
      *
-     * A browser the account has signed in from before gets a bucket and an
-     * in-a-row count of its own, so someone guessing elsewhere can't lock the
-     * owner out. Per IP it counts for that account alone, so others on a
-     * shared address can't hold it up. That's per account rather than per
-     * device so that several stolen cookies share one count.
+     * Browsers the account has signed in from share a bucket and an in-a-row
+     * count of their own, so someone guessing elsewhere can't lock the owner
+     * out. Per IP they count for that account alone, so others on a shared
+     * address can't hold it up. One count for all of them, not one each: a
+     * device cookie is made at every sign in from a new browser, so whoever
+     * could once sign in may hold any number, and each would buy the
+     * account's whole allowance of guesses again.
      *
      * The per-IP limit comes first, so an attempt the address refuses is
      * never counted against the account.
@@ -74,20 +80,17 @@ class Throttle
             default => '',
         };
 
-        $device = $account === '' ? null : $this->knownDevice($request, $user);
-        $ip = $factor->key().'|ip|'.$request->ip().($device === null ? '' : '|account|'.$account);
-        $limits = [SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($ip)];
-
         if ($account === '') {
-            return $limits;
+            return [SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($factor->key().'|ip|'.$request->ip())];
         }
 
-        $cleared = $this->timesCleared($factor, $account);
+        $known = $this->knownBrowser($request, $user, (int) $this->mark('known-since', $account));
+        $since = $this->startsSignIn($factor) ? '|cleared|'.$this->mark('cleared', $account) : '';
 
         return [
-            ...$limits,
-            ...($typed === '' ? [] : $this->accountLimits($factor, 'typed:'.$typed.$cleared, $device)),
-            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== ''), $this->accountLimits($factor, $account.$cleared, $device)),
+            SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($factor->key().'|ip|'.$request->ip().($known ? '|account|'.$account : '')),
+            ...($typed === '' ? [] : $this->accountLimits($factor, 'typed:'.$typed.$since, $known)),
+            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== ''), $this->accountLimits($factor, $account.$since, $known)),
         ];
     }
 
@@ -203,9 +206,9 @@ class Throttle
     /**
      * Start the user's limits over on the factors that can start a sign in:
      * the per-minute and in-a-row counts, the locks and how long the next
-     * lock would be, on every known device and under every name they were
-     * typed with. They're counted under how many times this has been done,
-     * so the old ones are left behind to run out.
+     * lock would be, for known browsers and under every name they were typed
+     * with. They're counted under a mark that's replaced here, so the old
+     * ones are left behind to run out.
      *
      * The per-IP limits stay, or a reset would be a way around them. A
      * second factor's counts and locks stay too: a reset only proves control
@@ -214,13 +217,22 @@ class Throttle
      */
     public function clearAccount(Authenticatable&Model $user): void
     {
-        $key = $this->cleared($this->accountOf($user));
-        $times = (int) $this->limiter->attempts($key);
+        // Never the same twice and never forgotten, so no lock can outlast
+        // the mark it was made under and come back with a later one.
+        $this->marks()->forever($this->markKey('cleared', $this->accountOf($user)), Str::random(16));
+    }
 
-        // Kept from now for as long as anything counted before could last,
-        // so a number is never used twice while its counts are still there.
-        $this->limiter->clear($key);
-        $this->limiter->increment($key, max($this->remembered(), Duration::seconds(config('keyring.limits.longest_lock')), 86400), $times + 1);
+    /**
+     * Stop the browsers the account has signed in from counting as known,
+     * until each signs in again. Whoever held the account before a reset, a
+     * password change or a sign-out everywhere may still hold its device
+     * cookies, and those get no count of their own against what's set now.
+     * Kept for good, like the mark above: a device row lasts as long as it's
+     * used.
+     */
+    public function forgetBrowsers(Authenticatable&Model $user): void
+    {
+        $this->marks()->forever($this->markKey('known-since', $this->accountOf($user)), (string) now()->getTimestamp());
     }
 
     /**
@@ -286,31 +298,43 @@ class Throttle
     }
 
     /**
-     * How many times the account's limits on the factor have been cleared,
-     * as its limits are keyed. Only kept for a factor that can start a sign
-     * in, and read for a name nobody has too, so it costs what a real one
+     * A mark kept for an account: the value its limits were last cleared
+     * under, or when its browsers were last forgotten. Empty when it never
+     * happened. Read for a name nobody has too, so it costs what a real one
      * does.
      */
-    protected function timesCleared(Factor $factor, string $account): string
+    protected function mark(string $kind, string $account): string
     {
-        return $factor instanceof PrimaryFactor ? '|cleared|'.(int) $this->limiter->attempts($this->cleared($account)) : '';
+        $mark = $this->marks()->get($this->markKey($kind, $account));
+
+        return is_scalar($mark) ? (string) $mark : '';
+    }
+
+    /**
+     * Whether the factor is one a reset clears and "lock_after" can hold:
+     * those that can start a sign in. A security key is the same class as a
+     * passkey, but only ever comes second.
+     */
+    protected function startsSignIn(Factor $factor): bool
+    {
+        return $factor instanceof PrimaryFactor && $factor->startsLogin();
     }
 
     /**
      * An account's per-minute limit and its failures in a row, or those of
-     * one of its known devices.
+     * its known browsers.
      *
      * @return list<AccountLimit>
      */
-    protected function accountLimits(Factor $factor, string $account, ?string $device): array
+    protected function accountLimits(Factor $factor, string $account, bool $known): array
     {
         $consecutive = config('keyring.limits.consecutive');
 
         return [
             AccountLimit::perMinute(config('keyring.limits.per_account'))
-                ->by($this->bucket($factor->key(), $account, $device))
-                ->holdAfter($factor instanceof PrimaryFactor ? config('keyring.limits.lock_after') : null),
-            ...($consecutive === null ? [] : [ConsecutiveLimit::of($consecutive, $factor->key(), $account, $device)]),
+                ->by($this->bucket($factor->key(), $account, $known))
+                ->holdAfter($this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null),
+            ...($consecutive === null ? [] : [ConsecutiveLimit::of($consecutive, $factor->key(), $account, $known)]),
         ];
     }
 
@@ -320,24 +344,26 @@ class Throttle
     }
 
     /**
-     * The device's ID when the request's device cookie is one of the user's.
-     * Looked up whether or not there's a user, and compared without loading
-     * each device's owner, so a username nobody has costs the same queries
-     * as a real one: this runs before the timebox opens.
+     * Whether the request's device cookie is one of the user's, and has
+     * signed in since their browsers were last forgotten. Looked up whether
+     * or not there's a user, and compared without loading each device's
+     * owner, so a username nobody has costs the same queries as a real one.
      */
-    protected function knownDevice(Request $request, (Authenticatable&Model)|null $user): ?string
+    protected function knownBrowser(Request $request, (Authenticatable&Model)|null $user, int $since): bool
     {
         $devices = $this->devices->forBrowser($request);
 
-        return $user === null ? null : $devices->first(fn (Device $device) => $device->authenticatable()->is($user))?->id;
+        return $user !== null && $devices->contains(
+            fn (Device $device) => $device->authenticatable()->is($user) && ($since === 0 || $device->last_seen_at?->getTimestamp() > $since),
+        );
     }
 
     /**
-     * The key of an account's per-minute limit, or of a known device's.
+     * The key of an account's per-minute limit, or of its known browsers'.
      */
-    protected function bucket(string $factor, string $account, ?string $device = null): string
+    protected function bucket(string $factor, string $account, bool $known = false): string
     {
-        return $factor.'|account|'.$account.($device === null ? '' : '|device|'.$device);
+        return $factor.'|account|'.$account.($known ? '|known' : '');
     }
 
     /**
@@ -362,10 +388,16 @@ class Throttle
     }
 
     /**
-     * Where the number of times an account's limits were cleared is kept.
+     * Where the marks are kept: the rate limiter's own store, next to the
+     * limits they key.
      */
-    protected function cleared(string $account): string
+    protected function marks(): CacheRepository
     {
-        return $this->key(new Limit($account.'|cleared'));
+        return $this->cache->store(config('cache.limiter'));
+    }
+
+    protected function markKey(string $kind, string $account): string
+    {
+        return 'keyring:'.$kind.':'.sha1($account);
     }
 }
