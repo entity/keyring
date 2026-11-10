@@ -1,7 +1,7 @@
 # The code keyring:install publishes into apps, at the strictest level, since
 # it becomes the app's own and apps often run Larastan high.
 includes:
-    - vendor/larastan/larastan/extension.neon
+    - vendor/calebdw/phpstan-laravel/extension.neon
 
 parameters:
     level: 9

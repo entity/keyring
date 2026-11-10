@@ -74,9 +74,9 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "require-dev": {
+        "calebdw/phpstan-laravel": "^1.12",
         "driftingly/rector-laravel": "^2.7",
         "inertiajs/inertia-laravel": "^3.7",
-        "larastan/larastan": "^3.14",
         "laravel/pint": "^1.32",
         "orchestra/testbench": "^11.0",
         "pestphp/pest": "^5.3",

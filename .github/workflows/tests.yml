@@ -42,6 +42,8 @@ jobs:
           php-version: '8.5'
           extensions: sqlite3, pdo_sqlite, sodium, bcmath, intl
           coverage: none
+      # Without the analyser, which needs a newer Laravel than Keyring does.
+      - run: composer remove --dev calebdw/phpstan-laravel --no-update --no-interaction
       - run: composer update --prefer-lowest --prefer-stable --no-interaction --prefer-dist
       - run: vendor/bin/pest
 

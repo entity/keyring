@@ -1,5 +1,5 @@
 includes:
-    - vendor/larastan/larastan/extension.neon
+    - vendor/calebdw/phpstan-laravel/extension.neon
 
 parameters:
     level: 8
@@ -8,3 +8,7 @@ parameters:
         - tests/Fixtures
         - tests/TestCase.php
         - tests/Feature/ConformanceTest.php
+    laravel:
+        rules:
+            # Keyring's services live for a whole Octane worker.
+            octaneCompatibility: true
