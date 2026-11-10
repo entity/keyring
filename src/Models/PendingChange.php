@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Concerns\BelongsToUser;
+use Keyring\Models\Concerns\HashesTokens;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 
@@ -45,7 +46,7 @@ use Keyring\Support\KeyedHash;
 #[Hidden('confirm_token', 'current_token', 'revert_token', 'value', 'previous_value', 'previous_value_hash')]
 class PendingChange extends Model
 {
-    use BelongsToUser, HasUlids, MassPrunable;
+    use BelongsToUser, HashesTokens, HasUlids, MassPrunable;
 
     protected static function booted(): void
     {
@@ -57,19 +58,11 @@ class PendingChange extends Model
     }
 
     /**
-     * Tokens are emailed in plain text and stored as SHA-256 hashes.
-     */
-    public static function hashToken(string $token): string
-    {
-        return hash('sha256', $token);
-    }
-
-    /**
      * Whether the token is the one stored in the given token column.
      *
      * @param  'confirm_token'|'current_token'|'revert_token'  $column
      */
-    public function matches(string $column, string $token): bool
+    public function matches(string $column, #[\SensitiveParameter] string $token): bool
     {
         return $this->{$column} !== null && hash_equals($this->{$column}, static::hashToken($token));
     }
