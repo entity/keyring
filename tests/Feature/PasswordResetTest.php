@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Hashing\BcryptHasher;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
@@ -119,4 +120,57 @@ it('does not leave a sign in that was under way during a reset signed in', funct
 
     $this->assertGuest();
     expect(app(SessionRegistry::class)->forUser($user))->toBeEmpty();
+});
+
+// Checking a password can rehash it, which writes the typed password back.
+// A reset that finished in between has stored a new one.
+it('does not let a rehash put back the password a reset replaced while it was being checked', function () {
+    $user = taylor();
+
+    // A hasher that wants a rehash, and plays the whole reset just before it
+    // checks: after the sign in loaded the user, before it saves anything.
+    Hash::extend('racing', fn () => new class(['rounds' => 5]) extends BcryptHasher
+    {
+        public static ?Closure $before = null;
+
+        public function check(#[SensitiveParameter] $value, $hashedValue, array $options = [])
+        {
+            [$before, self::$before] = [self::$before, null];
+            $before?->__invoke();
+
+            return parent::check($value, $hashedValue, $options);
+        }
+    });
+    config(['hashing.driver' => 'racing']);
+
+    Hash::driver()::$before = fn () => app(PasswordChanges::class)->reset(
+        $owner = $user->fresh(),
+        fn () => $owner->forceFill(['password' => 'a-brand-new-long-password-1'])->save(),
+    );
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+    $this->assertGuest();
+    expect(Hash::check('a-brand-new-long-password-1', $user->fresh()->password))->toBeTrue()
+        ->and(app(SessionRegistry::class)->forUser($user))->toBeEmpty();
+});
+
+it('does not leave a browser trusted by a sign in that a reset ended', function () {
+    withFeatures([Features::resetPasswords(), Features::devices()]);
+    config(['keyring.devices.trust_for' => '30d']);
+    $totp = $this->mfa->authenticators()->where('factor', 'totp')->sole();
+
+    $this->post('/login', ['email' => 'mfa@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+    // The reset, start to finish, between the code check and the session.
+    Event::listen(fn (FactorVerified $event) => $event->authenticator->factor === 'totp' && app(PasswordChanges::class)->reset(
+        $owner = $this->mfa->fresh(),
+        fn () => $owner->forceFill(['password' => 'a-brand-new-long-password-1'])->save(),
+    ));
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret), 'trust' => true]);
+
+    $this->assertGuest();
+    expect(Keyring::deviceModel()::query()->whereNotNull('trusted_until')->count())->toBe(0);
 });
