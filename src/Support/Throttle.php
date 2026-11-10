@@ -256,14 +256,15 @@ class Throttle
 
     /**
      * The device's ID when the request's device cookie is one of the user's.
-     * Looked up whether or not there's a user, so a username nobody has
-     * takes as long to turn down as a real one.
+     * Looked up whether or not there's a user, and compared without loading
+     * each device's owner, so a username nobody has costs the same queries
+     * as a real one: this runs before the timebox opens.
      */
     protected function knownDevice(Request $request, (Authenticatable&Model)|null $user): ?string
     {
         $devices = $this->devices->forBrowser($request);
 
-        return $user === null ? null : $devices->first(fn (Device $device) => $device->user()?->is($user) === true)?->id;
+        return $user === null ? null : $devices->first(fn (Device $device) => $device->authenticatable()->is($user))?->id;
     }
 
     /**

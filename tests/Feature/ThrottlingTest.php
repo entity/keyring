@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
@@ -355,6 +356,34 @@ describe('a shared address', function () {
         $limits = Keyring::factor('totp')->limits(Request::create('/', 'POST', cookies: ['keyring_device' => $token]), Attempt::start(Purpose::Login, $user));
 
         expect(collect($limits)->pluck('key')->implode(' '))->not->toContain('|device|');
+    });
+
+    // The limits are worked out before the timebox opens, so what they
+    // cost can't depend on whether the username found anyone.
+    it('runs the same queries for a real username and an unknown one, however many accounts share the cookie', function () {
+        $owner = account('taylor@example.com');
+        $token = str_repeat('a', 40);
+
+        foreach ([$owner, account('abigail@example.com'), account('jess@example.com')] as $user) {
+            $device = Keyring::deviceModel()::make(['token_hash' => Keyring::deviceModel()::hashToken($token), 'first_seen_at' => now()]);
+            $device->authenticatable()->associate($user);
+            $device->save();
+        }
+
+        $queries = function (string $email) use ($token): int {
+            DB::flushQueryLog();
+            Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => $email], ['keyring_device' => $token]), null);
+
+            return count(DB::getQueryLog());
+        };
+
+        DB::enableQueryLog();
+
+        expect($queries('taylor@example.com'))->toBe($queries('nobody@example.com'));
+
+        $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => 'taylor@example.com'], ['keyring_device' => $token]), null);
+
+        expect(collect($limits)->pluck('key')->implode(' '))->toContain('|device|');
     });
 
     it('treats a device cookie like any other browser when devices are off', function () {
