@@ -467,6 +467,16 @@ it('ends a half-finished sign in when the password changes meanwhile', function 
     $this->assertGuest();
 });
 
+it('signs in when checking the password rehashes it', function () {
+    $user = taylor();
+    Hash::driver('bcrypt')->setRounds(5);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+
+    expect(password_get_info($user->fresh()->password)['options']['cost'])->toBe(5);
+    $this->assertAuthenticatedAs($user);
+});
+
 it('keeps a half-finished sign in when checking the password rehashes it', function () {
     $user = taylor();
     $totp = totpFor($user);

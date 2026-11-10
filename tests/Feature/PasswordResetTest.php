@@ -1,7 +1,11 @@
 <?php
 
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Keyring\Changes\PasswordChanges;
+use Keyring\Contracts\SessionRegistry;
+use Keyring\Events\FactorVerified;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
@@ -97,4 +101,22 @@ it('changes the password and deletes the user when resets are off and the token 
     $this->plain->fresh()->delete();
 
     expect(User::find($this->plain->id))->toBeNull();
+});
+
+// A reset signs out the sessions registered by then. A sign in that checked
+// the old password just before is registered just after.
+it('does not leave a sign in that was under way during a reset signed in', function () {
+    $user = taylor();
+
+    // The reset, start to finish, between the password check and the session.
+    Event::listen(fn (FactorVerified $event) => app(PasswordChanges::class)->reset(
+        $owner = $user->fresh(),
+        fn () => $owner->forceFill(['password' => 'a-brand-new-long-password-1'])->save(),
+    ));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+    $this->assertGuest();
+    expect(app(SessionRegistry::class)->forUser($user))->toBeEmpty();
 });
