@@ -90,16 +90,33 @@ class Sessions
      */
     public function rotate(Request $request): void
     {
-        $session = $this->current($request);
-
-        if ($session !== null && $request->session()->getHandler() instanceof CookieSessionHandler) {
-            $this->registry->save($rotated = $session->with(['id' => Str::random(40)]));
-            $this->registry->revoke($session->id);
-
-            $request->session()->put(self::KEY, $rotated->id);
+        if ($request->session()->getHandler() instanceof CookieSessionHandler) {
+            $this->reregister($request);
         }
 
         $request->session()->regenerate(true);
+    }
+
+    /**
+     * Swap the session's registry record for a new one and revoke the old.
+     * Only this request's copy of the session learns the new ID, so any
+     * other copy from before now (an older cookie, a request that overlapped
+     * and saves later) is signed out when it's next used.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public function reregister(Request $request, array $changes = []): void
+    {
+        $session = $this->current($request);
+
+        if ($session === null) {
+            return;
+        }
+
+        $this->registry->save($current = $session->with(['id' => Str::random(40), ...$changes]));
+        $this->registry->revoke($session->id);
+
+        $request->session()->put(self::KEY, $current->id);
     }
 
     /**
