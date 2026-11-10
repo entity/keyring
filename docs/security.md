@@ -139,7 +139,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours) | NIST SP 800-63B, reauthentication |
 | A cap of 100 failures in a row on an account's factor | NIST SP 800-63B, rate limiting |
 | Proving the account's factors again before adding a sign-in method | NIST SP 800-63B, binding an authenticator |
-| A phishing-resistant option among the default factors | NIST SP 800-63B |
+| Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
 | Email codes being opt-in, and below AAL2 | NIST SP 800-63B, which rules out email for authentication codes |
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
 | Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |

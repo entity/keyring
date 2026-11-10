@@ -88,6 +88,7 @@ final readonly class Action
         return match (true) {
             $this->deny => 'denied',
             $this->reauthenticate => 'reauthenticate',
+            $this->lockSeconds !== null => 'locked',
             $this->stepUp => 'step_up',
             $this->revokeSessions => 'revoked_sessions',
             $this->notify => 'notified',

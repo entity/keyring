@@ -17,8 +17,7 @@ use Keyring\Exceptions\UnknownFactor;
 class FactorRegistry
 {
     /**
-     * Until the app chooses its own. Passkeys are among them, so there's a
-     * phishing-resistant option.
+     * Until the app chooses its own: the password alone, like Fortify.
      *
      * @var list<class-string<Factor>|Factor|Closure(Container): Factor>
      */

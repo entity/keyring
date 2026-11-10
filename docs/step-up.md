@@ -79,7 +79,7 @@ When a request needs step-up, Keyring starts a confirm attempt with the requirem
 | `POST` | `/confirm/{factor}` | `keyring.confirm.verify` |
 | `POST` | `/confirm/{factor}/send` | `keyring.confirm.send` |
 
-These routes need a user signed in to Keyring's guard (`auth:{guard}`), and the verify and send routes take the session lock like the login challenge's. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress, including after one times out, starts one that any one factor except a recovery code satisfies: it doesn't know what the user was doing, so a code spent there might not get them there. A user with nothing to confirm with (no password, and no other sign-in method) is sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) instead, or gets a `403` without one.
+These routes need a user signed in to Keyring's guard (`auth:{guard}`), and the page and its verify and send routes take the session lock like the login challenge's. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress, including after one times out, starts one that any one factor except a recovery code satisfies: it doesn't know what the user was doing, so a code spent there might not get them there. A user with nothing to confirm with (no password, and no other sign-in method) is sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) instead, or gets a `403` without one.
 
 A page that asks again while a confirm attempt for the same requirement is in progress continues it, so what the user already proved isn't lost.
 
