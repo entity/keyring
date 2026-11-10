@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 /**
  * The guard Keyring signs users in to, and how a typed username finds one
@@ -46,7 +47,8 @@ trait IdentifiesUsers
     {
         $guard ??= config('keyring.guard');
 
-        return Auth::createUserProvider(config("auth.guards.{$guard}.provider"));
+        return Auth::createUserProvider(config("auth.guards.{$guard}.provider"))
+            ?? throw new InvalidArgumentException("Keyring's guard [{$guard}] has no user provider. Check the \"guard\" option in config/keyring.php against config/auth.php.");
     }
 
     /**
