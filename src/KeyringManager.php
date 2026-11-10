@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\ComponentNotFoundException;
 use Inertia\ResponseFactory;
 use InvalidArgumentException;
@@ -26,10 +27,12 @@ use Keyring\Changes\ProtectedAttributes;
 use Keyring\Concerns\HasKeyring;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Factor;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
 use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\MissingNotification;
 use Keyring\Exceptions\MissingPage;
@@ -37,16 +40,20 @@ use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Attempt;
+use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
+use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps;
+use Keyring\Pipeline\Verifier;
 use Keyring\Risk\RiskEngine;
 use Keyring\Support\Url;
 use Keyring\Testing\KeyringFake;
 use LogicException;
+use Symfony\Component\HttpFoundation\Response;
 
 class KeyringManager
 {
@@ -587,6 +594,26 @@ class KeyringManager
         $this->signInAfterRegistering = $when;
 
         return $this;
+    }
+
+    /**
+     * Start a sign in with a factor that can, from a route of your own: a
+     * social login's callback, say. It runs the same pipeline as Keyring's
+     * login form (rate limits, the policy, risk), so a user with a second
+     * factor is still asked for it. Answers as that form would, which for a
+     * failure means throwing a ValidationException.
+     *
+     * @throws ValidationException
+     */
+    public function attempt(Request $request, string $factor = 'password'): Response
+    {
+        $factor = $this->factor($factor);
+
+        abort_unless($factor instanceof PrimaryFactor && $factor->startsLogin(), 404);
+
+        $this->container->make(AttemptStore::class)->forget(Purpose::Login);
+
+        return $this->container->make(Verifier::class)->respond(new Context($request, Purpose::Login, $factor));
     }
 
     /**

@@ -220,7 +220,7 @@ class PasswordChanged extends SecurityNotice
 }
 ```
 
-Blade's `{{ }}` escapes those values for HTML. The [example app](https://github.com/entity/keyring-example#emails) builds every email this way: Maizzle templates compiled to Blade views, one shared by all ten notices, with a local page to preview them. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
+Blade's `{{ }}` escapes those values for HTML. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through it, and the [example app](https://github.com/entity/keyring-example#emails) builds every email this way: Maizzle templates compiled to Blade views, one shared by all ten notices, with a local page to preview them. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
 
 ### Slack, SMS and Other Channels
 

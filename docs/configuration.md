@@ -324,6 +324,7 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::useDeviceModel($model)` | Uses your own subclass of `Keyring\Models\Device`. See [Your Own Device Model](devices-and-sessions.md#your-own-device-model). |
 | `Keyring::usePendingChangeModel($model)` | Uses your own subclass of `Keyring\Models\PendingChange`. |
 | `Keyring::useSecurityEventModel($model)` | Uses your own subclass of `Keyring\Models\SecurityEvent`. |
+| `Keyring::attempt($request, $factor)` | Starts a sign in with a factor from a route of your own, through the same pipeline as the login form. See [Starting a Sign In Yourself](sign-in-flow.md#starting-a-sign-in-yourself). |
 | `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |
 | `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. See [Emailed Links](security.md#emailed-links). |
 | `Keyring::recordIpsUsing($callback)` | What Keyring stores as a request's IP address. See [What's Stored](security-log-and-emails.md#whats-stored). |

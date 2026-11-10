@@ -85,6 +85,7 @@ npm install @entity/keyring
 - [Frontend](docs/frontend.md)
 - [Example app](https://github.com/entity/keyring-example): every page, in React with the Laravel starter kit
 - [Extending Keyring](docs/extending.md)
+- [Recipes](docs/recipes.md)
 - [Testing](docs/testing.md)
 - [Security](docs/security.md)
 

@@ -6,20 +6,15 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\DiscoverableFactor;
-use Keyring\Contracts\PrimaryFactor;
 use Keyring\Contracts\Responses\LogoutResponse;
-use Keyring\Enums\Purpose;
 use Keyring\Events\LoggedOut;
-use Keyring\Http\Controllers\Concerns\RespondsToVerification;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
-use Keyring\Login\AttemptStore;
 use Keyring\Login\SignIn;
-use Keyring\Pipeline\Context;
 
 class AuthenticatedSessionController
 {
-    use RespondsToVerification, RespondsWithStatus;
+    use RespondsWithStatus;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -49,15 +44,9 @@ class AuthenticatedSessionController
     /**
      * Start a login with a primary factor (the password by default).
      */
-    public function store(Request $request, AttemptStore $attempts, string $factor = 'password'): mixed
+    public function store(Request $request, string $factor = 'password'): mixed
     {
-        $factor = $this->keyring->factor($factor);
-
-        abort_unless($factor instanceof PrimaryFactor && $factor->startsLogin(), 404);
-
-        $attempts->forget(Purpose::Login);
-
-        return $this->verifyAndRespond(new Context($request, Purpose::Login, $factor));
+        return $this->keyring->attempt($request, $factor);
     }
 
     public function destroy(Request $request, SignIn $signIn): mixed

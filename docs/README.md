@@ -31,4 +31,5 @@ Keyring is an authentication backend for Laravel. It handles sign in, registrati
 
 - [Frontend](frontend.md): the Inertia pages and the `@entity/keyring` browser package.
 - [Extending Keyring](extending.md): every option and hook in one place, and what stays fixed.
+- [Recipes](recipes.md): worked examples with real packages: IP locations, Maizzle emails, SMS codes, social login and more.
 - [Testing](testing.md): test helpers, fakes, factories and the conformance suite.

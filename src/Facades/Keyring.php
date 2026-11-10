@@ -41,6 +41,7 @@ use Keyring\KeyringManager;
  * @method static string username()
  * @method static string email()
  * @method static \Keyring\KeyringManager allowEnrollmentWhen(\Closure $callback)
+ * @method static \Symfony\Component\HttpFoundation\Response attempt(\Illuminate\Http\Request $request, string $factor = 'password')
  * @method static \Keyring\KeyringManager linkRootUsing(\Closure $callback)
  * @method static \Keyring\KeyringManager recordIpsUsing(\Closure $callback)
  * @method static string|null recordedIp(\Illuminate\Http\Request $request)
