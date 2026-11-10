@@ -45,7 +45,7 @@ class SecurityLog
             return null;
         }
 
-        $event = $this->keyring->securityEventModel()::make([
+        $event = new ($this->keyring->securityEventModel())([
             'type' => $type,
             'factor' => $factor,
             'device_id' => $device,

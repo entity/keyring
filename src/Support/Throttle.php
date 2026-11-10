@@ -172,13 +172,15 @@ class Throttle
 
         $factors = $this->keyring->registered()->filter(fn (Factor $factor) => $factor instanceof PrimaryFactor)->keys();
 
-        foreach ($factors->crossJoin([null, ...$devices]) as [$factor, $device]) {
-            $key = $this->key(new Limit($this->bucket($factor, $this->accountOf($user), $device)));
+        foreach ($factors as $factor) {
+            foreach ([null, ...$devices] as $device) {
+                $key = $this->key(new Limit($this->bucket($factor, $this->accountOf($user), $device)));
 
-            $this->limiter->clear($key);
-            $this->limiter->clear($key.':locked');
-            $this->limiter->clear($key.':lockouts');
-            $this->limiter->clear($this->key(new Limit(ConsecutiveLimit::keyFor($factor, $this->accountOf($user), $device))));
+                $this->limiter->clear($key);
+                $this->limiter->clear($key.':locked');
+                $this->limiter->clear($key.':lockouts');
+                $this->limiter->clear($this->key(new Limit(ConsecutiveLimit::keyFor($factor, $this->accountOf($user), $device))));
+            }
         }
     }
 

@@ -85,7 +85,7 @@ class EmailChanges
         $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent, $signedInAt) {
             $this->cancel($user);
 
-            $change = $this->keyring->pendingChangeModel()::make([
+            $change = new ($this->keyring->pendingChangeModel())([
                 'attribute' => $this->attribute(),
                 'value' => $email,
                 'previous_value' => $current,

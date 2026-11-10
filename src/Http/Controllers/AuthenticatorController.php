@@ -3,6 +3,7 @@
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
@@ -78,11 +79,16 @@ class AuthenticatorController
     {
         $authenticator = $this->changes->find($this->keyring->user(), $authenticator);
 
-        $this->changes->update($authenticator, $request->validate([
+        $changes = $request->validate([
             'name' => ['sometimes', 'string', 'max:64'],
             // Recovery codes are a fallback, never the way to sign in first.
             'default' => ['sometimes', 'boolean', Rule::prohibitedIf($authenticator->factor === RecoveryCodes::KEY)],
-        ]));
+        ]);
+
+        $this->changes->update($authenticator, [
+            ...Arr::only($changes, 'name'),
+            ...$request->has('default') ? ['default' => $request->boolean('default')] : [],
+        ]);
 
         return $this->status('authenticator-updated', ['authenticator' => $authenticator->factor()->present($authenticator)]);
     }

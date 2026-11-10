@@ -378,6 +378,6 @@ class ImportCommand extends Command
      */
     protected function create(Model $user, array $attributes): void
     {
-        Keyring::authenticatorModel()::make($attributes)->authenticatable()->associate($user)->save();
+        new (Keyring::authenticatorModel())($attributes)->authenticatable()->associate($user)->save();
     }
 }

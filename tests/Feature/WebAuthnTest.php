@@ -376,6 +376,13 @@ it('lets a passkey satisfy a phishing resistant policy', function () {
         ->assertRedirect('/dashboard');
 });
 
+it('accepts no origin, without failing, when the app has no url', function () {
+    config(['app.url' => null]);
+
+    expect(app(Ceremonies::class)->origins())->toBe([])
+        ->and(app(Ceremonies::class)->relyingPartyId())->toBe('localhost');
+});
+
 it('answers from the app\'s own origin by default, port and all', function () {
     config(['app.url' => 'http://localhost:8765']);
     $key = new VirtualAuthenticator;

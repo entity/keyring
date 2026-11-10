@@ -98,7 +98,7 @@ class DeviceManager
     {
         $token = $this->tokenForNewDevice($request, $user);
 
-        $device = $this->keyring->deviceModel()::make([
+        $device = new ($this->keyring->deviceModel())([
             'token_hash' => $this->keyring->deviceModel()::hashToken($token),
             'first_seen_at' => now(),
         ]);
