@@ -1,11 +1,20 @@
 <?php
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
+use Keyring\Contracts\Responses\SignedOutResponse;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\Enrollment;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
+use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\ConsecutiveLimit;
+use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
+use Keyring\Support\Url;
 use Keyring\Tests\Fixtures\User;
 
 function device(User $user, array $attributes = []): Device
@@ -51,4 +60,63 @@ it('signs "this wasn\'t me" links for as long as the app says', function () {
     parse_str((string) parse_url($device->revokeUrl(), PHP_URL_QUERY), $query);
 
     expect((int) $query['expires'])->toBe(now()->addDays(2)->getTimestamp());
+});
+
+it('starts emailed links wherever the app says', function () {
+    Keyring::linkRootUsing(fn () => 'https://tenant.example.com/');
+
+    expect(device(taylor())->revokeUrl())->toStartWith('https://tenant.example.com/devices/');
+})->after(fn () => Url::rootUsing(null));
+
+it('keeps the ip address the app wants kept', function () {
+    Keyring::recordIpsUsing(fn (Request $request) => null);
+
+    $this->post('/login', ['email' => taylor()->email, 'password' => 'password'])->assertRedirect('/dashboard');
+
+    expect(Device::sole()->ip)->toBeNull()
+        ->and(SecurityEvent::query()->whereNotNull('ip')->count())->toBe(0)
+        ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->ip)->toBeNull();
+});
+
+it('lets users without a second factor reach the routes the app excepts', function () {
+    Route::middleware(['web', 'auth', 'keyring.enrolled'])->group(function () {
+        Route::get('/billing', fn () => 'billing')->name('billing');
+        Route::get('/help', fn () => 'help')->name('help.index');
+    });
+    config(['keyring.enrollment_except' => ['help.*']]);
+
+    $this->actingAs(taylor());
+
+    $this->get('/billing')->assertForbidden();
+    $this->get('/help')->assertOk();
+});
+
+it('answers with the app\'s own responses when a session ends or needs confirming', function () {
+    Keyring::respondWith(ConfirmationRequiredResponse::class, fn () => new class implements ConfirmationRequiredResponse
+    {
+        public function toResponse($request)
+        {
+            return response('confirm first', 418);
+        }
+    });
+    Keyring::respondWith(SignedOutResponse::class, fn ($app, array $with) => new class($with['reason']) implements SignedOutResponse
+    {
+        public function __construct(public string $reason) {}
+
+        public function toResponse($request)
+        {
+            return response("signed out: {$this->reason}", 419);
+        }
+    });
+    Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'account');
+    config(['keyring.sessions.idle' => '10m']);
+
+    $this->post('/login', ['email' => taylor()->email, 'password' => 'password']);
+    $this->travel(16)->minutes();
+    $this->get('/account')->assertStatus(419)->assertSee('signed out: idle');
+
+    config(['keyring.sessions.idle' => null]);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->travel(16)->minutes();
+    $this->get('/account')->assertStatus(418)->assertSee('confirm first');
 });

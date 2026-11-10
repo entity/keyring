@@ -2,10 +2,10 @@
 
 namespace Keyring\Login;
 
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
+use Keyring\Contracts\Responses\EnrollmentRequiredResponse;
 use Keyring\Enums\Purpose;
-use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Sessions\SessionAssurance;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,8 +15,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class StepUp
 {
-    use ChoosesFormat;
-
     public function __construct(
         protected AttemptStore $attempts,
         protected SessionAssurance $assurance,
@@ -37,13 +35,7 @@ class StepUp
 
         $this->begin($request, $requirement, $proved);
 
-        redirect()->setIntendedUrl($this->intendedUrl($request));
-
-        $url = route('keyring.confirm.challenge');
-
-        return $this->wantsJson($request)
-            ? new JsonResponse(['message' => __('keyring::keyring.confirm'), 'redirect' => $url], 423)
-            : redirect($url);
+        return app(ConfirmationRequiredResponse::class)->toResponse($request);
     }
 
     /**
@@ -52,16 +44,7 @@ class StepUp
      */
     public function enrollFirst(Request $request): Response
     {
-        $url = config('keyring.enrollment_url');
-        $message = $this->keyring->statusMessage('enroll-first');
-
-        if ($this->wantsJson($request)) {
-            return new JsonResponse(['status' => 'enroll-first', 'message' => $message, 'redirect' => $url], 403);
-        }
-
-        abort_if($url === null, 403, $message);
-
-        return redirect($url)->with('status', 'enroll-first');
+        return app(EnrollmentRequiredResponse::class)->toResponse($request);
     }
 
     /**

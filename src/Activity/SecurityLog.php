@@ -45,7 +45,7 @@ class SecurityLog
             'type' => $type,
             'factor' => $factor,
             'device_id' => $device,
-            'ip' => request()->ip(),
+            'ip' => Keyring::recordedIp(request()),
             'user_agent' => UserAgent::from(request()),
             'meta' => $meta === [] ? null : $meta,
             'created_at' => now(),

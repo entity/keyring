@@ -67,6 +67,10 @@ class KeyringServiceProvider extends ServiceProvider
         Responses\LogoutResponse::class => DefaultResponses\LogoutResponse::class,
         Responses\RegisterResponse::class => DefaultResponses\RegisterResponse::class,
         Responses\StatusResponse::class => DefaultResponses\StatusResponse::class,
+        Responses\SignedOutResponse::class => DefaultResponses\SignedOutResponse::class,
+        Responses\ConfirmationRequiredResponse::class => DefaultResponses\ConfirmationRequiredResponse::class,
+        Responses\EnrollmentRequiredResponse::class => DefaultResponses\EnrollmentRequiredResponse::class,
+        Responses\VerifiedResponse::class => DefaultResponses\VerifiedResponse::class,
     ];
 
     public function register(): void

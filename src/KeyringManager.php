@@ -44,6 +44,7 @@ use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
+use Keyring\Support\Url;
 use Keyring\Testing\KeyringFake;
 use LogicException;
 
@@ -92,6 +93,9 @@ class KeyringManager
 
     /** @var (Closure(Authenticatable&Model): bool)|null */
     protected ?Closure $enrollmentGate = null;
+
+    /** @var (Closure(Request): (string|null))|null */
+    protected ?Closure $ipRecorder = null;
 
     /** @var array<string, class-string<Notification>> The app's notification for each type it sends. */
     protected array $notifications = [];
@@ -583,6 +587,39 @@ class KeyringManager
         $this->signInAfterRegistering = $when;
 
         return $this;
+    }
+
+    /**
+     * Where emailed links start, in place of APP_URL: for an app on several
+     * domains, the one this user is on. Don't take it from the request's
+     * Host header, which whoever sends the request controls.
+     *
+     * @param  Closure(): string  $callback
+     */
+    public function linkRootUsing(Closure $callback): static
+    {
+        Url::rootUsing($callback);
+
+        return $this;
+    }
+
+    /**
+     * What Keyring keeps as a request's IP address, in the security log, on
+     * devices and sessions, and in notices: return a shortened address, or
+     * null to keep none. Rate limits always use the real one.
+     *
+     * @param  Closure(Request): (string|null)  $callback
+     */
+    public function recordIpsUsing(Closure $callback): static
+    {
+        $this->ipRecorder = $callback;
+
+        return $this;
+    }
+
+    public function recordedIp(Request $request): ?string
+    {
+        return $this->ipRecorder === null ? $request->ip() : ($this->ipRecorder)($request);
     }
 
     /**

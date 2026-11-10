@@ -117,9 +117,14 @@ return [
     | Where the keyring.enrolled middleware sends users who still need to add
     | a second factor: your page for setting one up. Null answers 403.
     |
+    | "enrollment_except" names more routes they can still reach meanwhile,
+    | besides that page and Keyring's own: route names, with * as a wildcard.
+    |
     */
 
     'enrollment_url' => null,
+
+    'enrollment_except' => [],
 
     /*
     |--------------------------------------------------------------------------

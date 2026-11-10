@@ -53,7 +53,7 @@ class RequireEnrollment
      */
     protected function isExcepted(Request $request, ?string $url): bool
     {
-        return $request->routeIs(...$this->except)
+        return $request->routeIs(...$this->except, ...config('keyring.enrollment_except'))
             || ($url !== null && $request->is(trim((string) parse_url($url, PHP_URL_PATH), '/') ?: '/'));
     }
 }

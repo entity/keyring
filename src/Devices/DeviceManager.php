@@ -79,7 +79,7 @@ class DeviceManager
         $device->fill([
             'name' => UserAgent::describe($request->userAgent()),
             'user_agent' => UserAgent::from($request),
-            'ip' => $request->ip(),
+            'ip' => Keyring::recordedIp($request),
             'location' => Location::of($request) ?? $device->location,
             'last_seen_at' => now(),
         ]);

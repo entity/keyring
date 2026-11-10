@@ -38,7 +38,7 @@ class Sessions
             guard: config('keyring.guard'),
             deviceId: $device?->id,
             assurance: $assurance,
-            ip: $request->ip(),
+            ip: Keyring::recordedIp($request),
             userAgent: UserAgent::from($request),
             authenticatedAt: $now,
             lastActivityAt: $now,
