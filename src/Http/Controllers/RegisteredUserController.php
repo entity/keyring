@@ -6,11 +6,11 @@ use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Responses\RegisterResponse;
 use Keyring\Enums\Category;
 use Keyring\Exceptions\EmailVerificationRequired;
-use Keyring\Features;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -35,7 +35,7 @@ class RegisteredUserController
         $provider = $this->keyring->provider();
 
         if ($provider instanceof EloquentUserProvider && is_a($provider->getModel(), MustVerifyEmail::class, true)) {
-            throw_unless(Features::enabled(Features::emailVerification()), EmailVerificationRequired::forRegistration($provider->getModel()));
+            throw_unless(Route::has('verification.verify'), EmailVerificationRequired::forRegistration($provider->getModel()));
         }
 
         $user = $creator->create($request->all());

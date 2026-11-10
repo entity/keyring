@@ -95,7 +95,7 @@ it('can leave new users signed out, for everyone or per user', function (bool|Cl
 
 describe('email verification', function () {
     it('refuses to register a MustVerifyEmail user without the verification feature, before saving anything', function () {
-        config(['keyring.features' => [Features::registration()]]);
+        withFeatures([Features::registration()]);
 
         $this->withoutExceptionHandling();
 
@@ -137,5 +137,19 @@ describe('email verification', function () {
 
         expect(fn () => $this->postJson(route('keyring.authenticators.store', 'totp')))
             ->toThrow(EmailVerificationRequired::class, 'implement MustVerifyEmail');
+    });
+
+    it('lets an app that proves addresses its own way say who may add a sign-in method', function () {
+        Keyring::allowEnrollmentWhen(fn ($user) => $user->name === 'Taylor');
+
+        $this->actingAs(taylor(['email_verified_at' => null]))->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.authenticators.store', 'totp'))
+            ->assertOk();
+
+        $this->flushSession();
+
+        $this->actingAs(taylor(['name' => 'Abigail', 'email' => 'abigail@example.com']))->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.authenticators.store', 'totp'))
+            ->assertForbidden();
     });
 });

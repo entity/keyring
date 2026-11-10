@@ -390,6 +390,6 @@ class EmailChanges
 
     protected function attribute(): string
     {
-        return $this->keyring->username();
+        return $this->keyring->email();
     }
 }

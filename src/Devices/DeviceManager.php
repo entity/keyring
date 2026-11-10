@@ -79,7 +79,7 @@ class DeviceManager
         $device->fill([
             'name' => UserAgent::describe($request->userAgent()),
             'user_agent' => UserAgent::from($request),
-            'ip' => $request->ip(),
+            'ip' => Keyring::recordedIp($request),
             'location' => Location::of($request) ?? $device->location,
             'last_seen_at' => now(),
         ]);
@@ -195,7 +195,7 @@ class DeviceManager
         Cookie::queue(Cookie::make(
             $this->cookie(),
             $token,
-            minutes: 60 * 24 * 400,
+            minutes: intdiv(Duration::seconds(config('keyring.devices.cookie_lifetime')), 60),
             secure: config('session.secure'),
             httpOnly: true,
             sameSite: 'lax',

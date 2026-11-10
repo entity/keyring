@@ -2,6 +2,7 @@
 
 namespace Keyring\Support;
 
+use Closure;
 use DateTimeInterface;
 use Illuminate\Support\Facades\URL as Generator;
 
@@ -12,12 +13,31 @@ use Illuminate\Support\Facades\URL as Generator;
  */
 final class Url
 {
+    /** @var (Closure(): string)|null */
+    protected static ?Closure $root = null;
+
+    /**
+     * Where the links start, in place of APP_URL: for an app on several
+     * domains, the one this user is on. Never take it from the Host header.
+     *
+     * @param  (Closure(): string)|null  $callback
+     */
+    public static function rootUsing(?Closure $callback): void
+    {
+        self::$root = $callback;
+    }
+
+    public static function root(): string
+    {
+        return rtrim((string) (self::$root === null ? config('app.url') : (self::$root)()), '/');
+    }
+
     /**
      * @param  array<string, mixed>  $parameters
      */
     public static function route(string $name, array $parameters = []): string
     {
-        return rtrim((string) config('app.url'), '/').route($name, $parameters, absolute: false);
+        return self::root().route($name, $parameters, absolute: false);
     }
 
     /**
@@ -25,6 +45,6 @@ final class Url
      */
     public static function signed(string $name, DateTimeInterface $expires, array $parameters = []): string
     {
-        return rtrim((string) config('app.url'), '/').Generator::temporarySignedRoute($name, $expires, $parameters, absolute: false);
+        return self::root().Generator::temporarySignedRoute($name, $expires, $parameters, absolute: false);
     }
 }

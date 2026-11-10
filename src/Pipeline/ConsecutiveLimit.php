@@ -3,6 +3,7 @@
 namespace Keyring\Pipeline;
 
 use Illuminate\Cache\RateLimiting\Limit;
+use Keyring\Support\Duration;
 
 /**
  * Failures in a row on one account's factor, however slowly they come, 100
@@ -13,12 +14,9 @@ use Illuminate\Cache\RateLimiting\Limit;
  */
 class ConsecutiveLimit extends Limit
 {
-    /** How long a count is kept after its last failure. */
-    public const int REMEMBER_FOR = 30 * 86400;
-
     public static function of(int $maxAttempts, string $factor, string $account, ?string $device = null): self
     {
-        return new self(self::keyFor($factor, $account, $device), $maxAttempts, self::REMEMBER_FOR);
+        return new self(self::keyFor($factor, $account, $device), $maxAttempts, Duration::seconds(config('keyring.limits.remember_failures_for')));
     }
 
     public static function keyFor(string $factor, string $account, ?string $device = null): string

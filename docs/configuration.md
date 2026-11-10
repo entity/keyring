@@ -37,11 +37,15 @@ Options that take a duration accept a number of seconds or a string such as `"30
 'guard' => 'web',
 
 'username' => 'email',
+
+'email' => 'email',
 ```
 
 `guard` is the stateful guard users are signed into. Keyring stores pending logins, step-up state and enrollments in the session, so it needs a session-based guard.
 
-`username` is the user attribute typed at login. It's also the attribute the [email change flow](protected-changes.md#changing-the-email-address) changes, and the field name the login form and password reset forms post. Keyring lowercases what users type before looking them up, so store this attribute lowercased.
+`username` is the user attribute typed at login, and the field name the login form posts. Keyring lowercases what users type before looking them up, so store this attribute lowercased.
+
+`email` is the attribute holding the user's address. It's the one the [email change flow](protected-changes.md#changing-the-email-address) changes and protects, the field the password reset forms post, and where an email code's hint comes from. Leave it as it is unless users sign in with something else, like a handle: then set `username` to that attribute and keep `email` pointing at the address.
 
 ## Features
 
@@ -83,10 +87,10 @@ Signed-out users are sent to the route named `login`.
 
 'domain' => null,
 
-'middleware' => ['web'],
+'middleware' => ['web', PreventCaching::class],
 ```
 
-Keyring registers its routes inside a group with this prefix, domain and middleware. It always adds a middleware that sends `Cache-Control: no-store, private` and `Referrer-Policy: no-referrer` on every Keyring response.
+Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\PreventCaching` sends `Cache-Control: no-store, private` and `Referrer-Policy: no-referrer` on every Keyring response. Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
 
 If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring::routes()` where you want them, for example inside your own group:
 
@@ -94,7 +98,7 @@ If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring
 Route::prefix('account')->middleware('throttle:60,1')->group(fn () => Keyring::routes());
 ```
 
-`Keyring::routes()` adds the `middleware` option and the no-cache middleware, but not `prefix` or `domain`; your group decides those. To change the routes themselves, copy `vendor/entity/keyring/routes/keyring.php` into your app instead, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
+`Keyring::routes()` adds the `middleware` option, but not `prefix` or `domain`; your group decides those. To change the routes themselves, copy `vendor/entity/keyring/routes/keyring.php` into your app instead, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
 
 The browser package uses Keyring's default paths. If you change the prefix, tell it with [`configureRoutes()`](frontend.md#changing-routes).
 
@@ -127,17 +131,35 @@ Extra middleware for adding, renaming and removing authenticators, revoking devi
 
 Where the `keyring.enrolled` middleware sends users who still need a second factor. Null answers `403`. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
 
+```php
+'enrollment_except' => [],
+```
+
+More routes those users can still reach meanwhile, by route name, with `*` as a wildcard (`['billing.*', 'support']`). The enrollment page, Keyring's own routes, signing out, email verification and changing the password are always let through.
+
+```php
+'enrollments' => [
+    'keep_for' => '15m',
+],
+```
+
+How long a user has to finish adding a sign-in method once they've started. See [Enrolling](authenticators.md#enrolling).
+
 ## Devices
 
 ```php
 'devices' => [
     'cookie' => 'keyring_device',
+    'cookie_lifetime' => '400d',
     'trust_for' => '30d',
+    'report_link_for' => '7d',
+    'keep_revoked_for' => '30d',
+    'keep_unseen_for' => '365d',
     'locator' => NullLocator::class,
 ],
 ```
 
-`cookie` is the name of the device cookie. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
+`cookie` is the name of the device cookie and `cookie_lifetime` how long the browser keeps it (400 days is the most browsers allow). `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
 
 ## Sessions
 
@@ -178,12 +200,13 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
     'confirmable_for' => '24h',
     'revertable_for' => '7d',
     'sign_out_others' => true,
+    'keep_ended_for' => '30d',
 ],
 ```
 
-`confirmable_for` is how long the emailed confirmation link works, and `revertable_for` how long the old address can undo the change afterwards. `sign_out_others` ends the account's other sessions when an email change applies.
+`confirmable_for` is how long the emailed confirmation link works, and `revertable_for` how long the old address can undo the change afterwards. `sign_out_others` ends the account's other sessions when an email change applies. `keep_ended_for` is how long a finished change is kept before `keyring:prune` deletes it.
 
-`Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds `email`. List any others in `protected`. See [Protected Changes](protected-changes.md).
+`Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds the [`email` attribute](#guard-and-users). List any others in `protected`. See [Protected Changes](protected-changes.md).
 
 ## Passwords
 
@@ -237,6 +260,11 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
     'per_account' => 5,
     'per_ip' => 20,
     'consecutive' => 100,
+    'remember_failures_for' => '30d',
+    'longest_lock' => '24h',
+    'longest_ip_lock' => '15m',
+    'codes' => 3,
+    'codes_per' => '10m',
 ],
 ```
 
@@ -244,7 +272,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `timebox` is the minimum time a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap). See [Rate Limiting](security.md#rate-limiting).
+`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until `remember_failures_for` after the last one. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. An account can be sent `codes` codes for one factor every `codes_per`. See [Rate Limiting](security.md#rate-limiting).
 
 Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
 
@@ -296,6 +324,9 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::useDeviceModel($model)` | Uses your own subclass of `Keyring\Models\Device`. See [Your Own Device Model](devices-and-sessions.md#your-own-device-model). |
 | `Keyring::usePendingChangeModel($model)` | Uses your own subclass of `Keyring\Models\PendingChange`. |
 | `Keyring::useSecurityEventModel($model)` | Uses your own subclass of `Keyring\Models\SecurityEvent`. |
+| `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |
+| `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. See [Emailed Links](security.md#emailed-links). |
+| `Keyring::recordIpsUsing($callback)` | What Keyring stores as a request's IP address. See [What's Stored](security-log-and-emails.md#whats-stored). |
 | `Keyring::findUsersUsing($callback)` | Finds the user for a password sign in your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::normalizeUsernamesUsing($callback)` | Normalises usernames your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::signInAfterRegistering($when)` | Whether registering signs the user in. See [Registration](sign-in-flow.md#registration). |

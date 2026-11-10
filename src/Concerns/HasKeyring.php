@@ -36,7 +36,7 @@ trait HasKeyring
         // changed must not work again if it comes back, or for whoever gets
         // it next. Until the save finishes the original still holds it.
         static::updated(function (self $user) {
-            if ($user->wasChanged(Keyring::username())) {
+            if ($user->wasChanged(Keyring::email())) {
                 app(ResetTokens::class)->forget((clone $user)->setRawAttributes($user->getRawOriginal()));
             }
         });

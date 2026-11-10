@@ -5,6 +5,7 @@ namespace Keyring;
 use Closure;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Contracts\Container\Container;
@@ -29,12 +30,12 @@ use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Category;
+use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\MissingNotification;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\RecoveryCodes;
-use Keyring\Http\Middleware\PreventCaching;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
@@ -43,6 +44,7 @@ use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
+use Keyring\Support\Url;
 use Keyring\Testing\KeyringFake;
 use LogicException;
 
@@ -88,6 +90,12 @@ class KeyringManager
 
     /** @var bool|(Closure(Authenticatable&Model, Request): bool) */
     protected bool|Closure $signInAfterRegistering = true;
+
+    /** @var (Closure(Authenticatable&Model): bool)|null */
+    protected ?Closure $enrollmentGate = null;
+
+    /** @var (Closure(Request): (string|null))|null */
+    protected ?Closure $ipRecorder = null;
 
     /** @var array<string, class-string<Notification>> The app's notification for each type it sends. */
     protected array $notifications = [];
@@ -248,7 +256,7 @@ class KeyringManager
      */
     public function routes(): void
     {
-        Route::middleware([...config('keyring.middleware'), PreventCaching::class])
+        Route::middleware(config('keyring.middleware'))
             ->group(__DIR__.'/../routes/keyring.php');
     }
 
@@ -505,6 +513,16 @@ class KeyringManager
     }
 
     /**
+     * The attribute holding the user's email address, which password resets,
+     * email changes and email codes use. The same as the username unless
+     * users sign in with something else.
+     */
+    public function email(): string
+    {
+        return config('keyring.email');
+    }
+
+    /**
      * A typed username as Keyring stores and looks it up: trimmed and
      * lowercased, unless the app says otherwise.
      */
@@ -569,6 +587,73 @@ class KeyringManager
         $this->signInAfterRegistering = $when;
 
         return $this;
+    }
+
+    /**
+     * Where emailed links start, in place of APP_URL: for an app on several
+     * domains, the one this user is on. Don't take it from the request's
+     * Host header, which whoever sends the request controls.
+     *
+     * @param  Closure(): string  $callback
+     */
+    public function linkRootUsing(Closure $callback): static
+    {
+        Url::rootUsing($callback);
+
+        return $this;
+    }
+
+    /**
+     * What Keyring keeps as a request's IP address, in the security log, on
+     * devices and sessions, and in notices: return a shortened address, or
+     * null to keep none. Rate limits always use the real one.
+     *
+     * @param  Closure(Request): (string|null)  $callback
+     */
+    public function recordIpsUsing(Closure $callback): static
+    {
+        $this->ipRecorder = $callback;
+
+        return $this;
+    }
+
+    public function recordedIp(Request $request): ?string
+    {
+        return $this->ipRecorder === null ? $request->ip() : ($this->ipRecorder)($request);
+    }
+
+    /**
+     * Decide who may add a sign-in method, in place of Keyring's rule that
+     * an app with registration on has its users verify their email first.
+     * That rule is there because anyone can register someone else's address,
+     * and a sign-in method they add outlives the owner's password reset: only
+     * replace it with a check that the account is really its owner's.
+     *
+     * @param  Closure(Authenticatable&Model): bool  $callback
+     */
+    public function allowEnrollmentWhen(Closure $callback): static
+    {
+        $this->enrollmentGate = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Whether the user may add a sign-in method.
+     *
+     * @throws EmailVerificationRequired when registration is on and nothing proves addresses
+     */
+    public function allowsEnrollment(Authenticatable&Model $user): bool
+    {
+        if ($this->enrollmentGate !== null) {
+            return ($this->enrollmentGate)($user);
+        }
+
+        $verifies = $user instanceof MustVerifyEmail && Features::enabled(Features::emailVerification());
+
+        throw_if(Features::enabled(Features::registration()) && ! $verifies, EmailVerificationRequired::forEnrollment($user::class));
+
+        return ! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail();
     }
 
     /**

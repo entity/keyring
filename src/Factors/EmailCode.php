@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Notification;
 use InvalidArgumentException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Duration;
 use Keyring\Support\MailText;
 
 /**
@@ -18,7 +19,7 @@ use Keyring\Support\MailText;
  */
 class EmailCode extends CodeFactor
 {
-    final public function __construct(bool $acceptRisk = false)
+    final public function __construct(bool $acceptRisk = false, ?int $length = null, ?string $expireAfter = null, ?int $maxGuesses = null)
     {
         if (! $acceptRisk) {
             throw new InvalidArgumentException(
@@ -26,14 +27,20 @@ class EmailCode extends CodeFactor
                 .'Register EmailCode::asSecondFactor() to accept them anyway.',
             );
         }
+
+        $this->length = $length ?? $this->length;
+        $this->ttl = $expireAfter === null ? $this->ttl : Duration::seconds($expireAfter);
+        $this->maxGuesses = $maxGuesses ?? $this->maxGuesses;
     }
 
     /**
      * Accept email codes as a second factor, knowing they fall short of AAL2.
+     * Eight digits, good for ten minutes and five wrong guesses, unless you
+     * say otherwise: EmailCode::asSecondFactor(length: 6, expireAfter: '5m').
      */
-    public static function asSecondFactor(): static
+    public static function asSecondFactor(?int $length = null, ?string $expireAfter = null, ?int $maxGuesses = null): static
     {
-        return new static(acceptRisk: true);
+        return new static(true, $length, $expireAfter, $maxGuesses);
     }
 
     public const string KEY = 'email-code';
@@ -45,7 +52,7 @@ class EmailCode extends CodeFactor
 
     public function present(Authenticator $authenticator): array
     {
-        return [...parent::present($authenticator), 'hint' => MailText::maskAddress((string) $authenticator->user()->getAttribute('email'))];
+        return [...parent::present($authenticator), 'hint' => MailText::maskAddress((string) $authenticator->user()->getAttribute(Keyring::email()))];
     }
 
     /**

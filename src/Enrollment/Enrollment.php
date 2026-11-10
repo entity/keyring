@@ -2,6 +2,8 @@
 
 namespace Keyring\Enrollment;
 
+use Keyring\Support\Duration;
+
 /**
  * An authenticator being set up. Props are shown to the user; state stays on
  * the server until the enrollment is confirmed.
@@ -25,7 +27,7 @@ final readonly class Enrollment
      */
     public static function make(string $factor, array $props = [], array $state = []): self
     {
-        return new self($factor, $props, $state, now()->addMinutes(15)->getTimestamp());
+        return new self($factor, $props, $state, Duration::fromNow(config('keyring.enrollments.keep_for'))->getTimestamp());
     }
 
     #[\NoDiscard]

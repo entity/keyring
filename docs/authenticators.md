@@ -3,6 +3,7 @@
 - [Introduction](#introduction)
 - [Routes](#routes)
 - [Email Verification](#email-verification)
+    - [Who May Enroll](#who-may-enroll)
 - [Adding an Authenticator](#adding-an-authenticator)
     - [Beginning](#beginning)
     - [Confirming](#confirming)
@@ -47,13 +48,23 @@ Until the address is verified, the account may belong to whoever typed that addr
 
 So with `Features::registration()` on, where anyone can type any address, users must be able to verify theirs: your user model must implement `MustVerifyEmail`, with `Features::emailVerification()` on. Otherwise enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` that says what to change. Without registration, accounts come from you (an admin, an import, an invitation), so this isn't required. `keyring:install` turns on email verification when you pick registration and a sign-in method.
 
+### Who May Enroll
+
+If your app proves addresses another way (a code at sign-up, single sign-on, an admin approving accounts), say who may add a sign-in method yourself. This replaces the rule above, including the exception:
+
+```php
+Keyring::allowEnrollmentWhen(fn (User $user) => $user->approved_at !== null);
+```
+
+A user it refuses gets the same `403`. Only return true once you know the account is its owner's: anything less brings back the takeover the rule is there to stop.
+
 ## Adding an Authenticator
 
 Adding is always two steps. Nothing is saved until the second one succeeds.
 
 ### Beginning
 
-`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes. Starting again replaces it. Starting one for a factor that sends a code counts toward the account's [three codes per 10 minutes](sign-in-flow.md#sending-codes). The response's `enrollment` holds what to show the user:
+`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)). Starting again replaces it. Starting one for a factor that sends a code counts toward the account's [three codes per 10 minutes](sign-in-flow.md#sending-codes). The response's `enrollment` holds what to show the user:
 
 | Factor | Request fields | `enrollment` |
 |---|---|---|

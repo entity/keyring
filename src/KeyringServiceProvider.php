@@ -67,6 +67,10 @@ class KeyringServiceProvider extends ServiceProvider
         Responses\LogoutResponse::class => DefaultResponses\LogoutResponse::class,
         Responses\RegisterResponse::class => DefaultResponses\RegisterResponse::class,
         Responses\StatusResponse::class => DefaultResponses\StatusResponse::class,
+        Responses\SignedOutResponse::class => DefaultResponses\SignedOutResponse::class,
+        Responses\ConfirmationRequiredResponse::class => DefaultResponses\ConfirmationRequiredResponse::class,
+        Responses\EnrollmentRequiredResponse::class => DefaultResponses\EnrollmentRequiredResponse::class,
+        Responses\VerifiedResponse::class => DefaultResponses\VerifiedResponse::class,
     ];
 
     public function register(): void
@@ -192,7 +196,7 @@ class KeyringServiceProvider extends ServiceProvider
         if (Features::enabled(Features::resetPasswords()) && ResetPassword::$createUrlCallback === null) {
             ResetPassword::createUrlUsing(fn (CanResetPassword $notifiable, string $token) => Url::route('password.reset', [
                 'token' => $token,
-                'email' => $notifiable->getEmailForPasswordReset(),
+                config('keyring.email') => $notifiable->getEmailForPasswordReset(),
             ]));
         }
     }

@@ -5,13 +5,12 @@ namespace Keyring\Http\Middleware;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\SessionEnded;
-use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
@@ -30,8 +29,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AuthenticateSession
 {
-    use ChoosesFormat;
-
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
@@ -152,7 +149,7 @@ class AuthenticateSession
 
         if ($action->doesSomething()) {
             $this->sessions->registry()->update($session->id, [
-                'ip' => $request->ip(),
+                'ip' => $this->keyring->recordedIp($request),
                 'userAgent' => UserAgent::from($request),
             ]);
         }
@@ -169,17 +166,6 @@ class AuthenticateSession
             SessionEnded::dispatch($user, $reason);
         }
 
-        // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
-        // login, remembering where they were going.
-        redirect()->setIntendedUrl($this->intendedUrl($request));
-
-        $response = $this->wantsJson($request)
-            ? new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401)
-            : to_route('login')->with('status', 'signed-out');
-
-        // As on sign out: nothing the session cached stays in the browser.
-        $response->headers->set('Clear-Site-Data', '"cache", "storage"');
-
-        return $response;
+        return app(SignedOutResponse::class, ['reason' => $reason])->toResponse($request);
     }
 }

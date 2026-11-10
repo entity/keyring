@@ -2,6 +2,7 @@
 
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
+use Keyring\Http\Middleware\PreventCaching;
 
 return [
 
@@ -14,11 +15,17 @@ return [
     | to identify them at login (typically "email"). Login is case-insensitive
     | on this attribute, so store it lowercased.
     |
+    | "email" is the attribute holding their address, for password resets,
+    | email changes and email codes. It's only different from "username" when
+    | users sign in with something else, like a handle.
+    |
     */
 
     'guard' => 'web',
 
     'username' => 'email',
+
+    'email' => 'email',
 
     /*
     |--------------------------------------------------------------------------
@@ -56,7 +63,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Keyring registers its routes under these middleware. Set "routes" to
-    | false to register them yourself with Keyring::routes().
+    | false to register them yourself with Keyring::routes(). PreventCaching
+    | keeps auth pages out of caches and their URLs out of Referer headers.
     |
     */
 
@@ -66,7 +74,7 @@ return [
 
     'domain' => null,
 
-    'middleware' => ['web'],
+    'middleware' => ['web', PreventCaching::class],
 
     /*
     |--------------------------------------------------------------------------
@@ -109,9 +117,14 @@ return [
     | Where the keyring.enrolled middleware sends users who still need to add
     | a second factor: your page for setting one up. Null answers 403.
     |
+    | "enrollment_except" names more routes they can still reach meanwhile,
+    | besides that page and Keyring's own: route names, with * as a wildcard.
+    |
     */
 
     'enrollment_url' => null,
+
+    'enrollment_except' => [],
 
     /*
     |--------------------------------------------------------------------------
@@ -126,7 +139,11 @@ return [
 
     'devices' => [
         'cookie' => 'keyring_device',
+        'cookie_lifetime' => '400d',
         'trust_for' => '30d',
+        'report_link_for' => '7d',
+        'keep_revoked_for' => '30d',
+        'keep_unseen_for' => '365d',
         'locator' => NullLocator::class,
     ],
 
@@ -182,6 +199,7 @@ return [
         'confirmable_for' => '24h',
         'revertable_for' => '7d',
         'sign_out_others' => true,
+        'keep_ended_for' => '30d',
     ],
 
     /*
@@ -260,6 +278,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Enrollments
+    |--------------------------------------------------------------------------
+    |
+    | How long a user has to finish adding a sign-in method once they start:
+    | scanning the QR code, typing the emailed code, touching the key.
+    |
+    */
+
+    'enrollments' => [
+        'keep_for' => '15m',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Timebox
     |--------------------------------------------------------------------------
     |
@@ -277,8 +309,13 @@ return [
     |
     | Default attempts per minute, per account and per IP address, and the
     | failures in a row an account's factor allows however slowly they come
-    | (null for no cap). At that cap the factor is refused for up to 30 days,
-    | or for a password until a reset. Factors may declare their own limits.
+    | (null for no cap). At that cap the factor is refused until the count is
+    | forgotten ("remember_failures_for"), or for a password until a reset.
+    | Factors may declare their own limits.
+    |
+    | Each lockout lasts twice as long as the one before, up to "longest_lock",
+    | or "longest_ip_lock" for a whole IP address. "codes" is how many codes
+    | an account can be sent for one factor every "codes_per".
     |
     */
 
@@ -286,6 +323,11 @@ return [
         'per_account' => 5,
         'per_ip' => 20,
         'consecutive' => 100,
+        'remember_failures_for' => '30d',
+        'longest_lock' => '24h',
+        'longest_ip_lock' => '15m',
+        'codes' => 3,
+        'codes_per' => '10m',
     ],
 
 ];

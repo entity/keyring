@@ -38,7 +38,7 @@ class PasswordResetController
 
     public function store(Request $request): StatusResponse
     {
-        $request->validate([$this->keyring->username() => ['required', 'string', 'email', 'max:255']]);
+        $request->validate([$this->keyring->email() => ['required', 'string', 'email', 'max:255']]);
 
         // After the response, so how long it takes doesn't give away whether
         // the address has an account.
@@ -51,7 +51,7 @@ class PasswordResetController
     {
         return $this->keyring->render('reset-password', [
             'token' => $token,
-            'email' => (string) $request->query($this->keyring->username()),
+            'email' => (string) $request->query($this->keyring->email()),
         ]);
     }
 
@@ -63,7 +63,7 @@ class PasswordResetController
         // an address has an account, and MFA.
         $request->validate([
             'token' => ['required', 'string'],
-            $this->keyring->username() => ['required', 'string', 'email'],
+            $this->keyring->email() => ['required', 'string', 'email'],
             'password' => ['required', 'string'],
         ]);
 
@@ -78,7 +78,7 @@ class PasswordResetController
         // Laravel says "no user with that address" for unknown accounts. Answer
         // every failure like a bad token instead.
         if ($status !== PasswordBroker::PASSWORD_RESET) {
-            throw ValidationException::withMessages([$this->keyring->username() => __(PasswordBroker::INVALID_TOKEN)]);
+            throw ValidationException::withMessages([$this->keyring->email() => __(PasswordBroker::INVALID_TOKEN)]);
         }
 
         return $this->status('password-reset', redirect: route('login'));
@@ -89,9 +89,9 @@ class PasswordResetController
      */
     protected function credentials(Request $request): array
     {
-        $username = $this->keyring->username();
+        $email = $this->keyring->email();
 
-        return [$username => $this->keyring->normalizeUsername((string) $request->input($username))];
+        return [$email => $this->keyring->normalizeUsername((string) $request->input($email))];
     }
 
     protected function broker(): PasswordBroker

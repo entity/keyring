@@ -23,7 +23,7 @@ class NewDeviceSignedIn
     /**
      * A signed "this wasn't me" link that signs the device out.
      */
-    public function revokeUrl(int $days = 7): string
+    public function revokeUrl(?int $days = null): string
     {
         return $this->device->revokeUrl($days);
     }

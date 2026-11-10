@@ -5,7 +5,7 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\Request;
-use Illuminate\Support\Uri;
+use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 
@@ -20,7 +20,7 @@ class EmailVerificationController
     public function notice(Request $request): mixed
     {
         return $this->verified($request)
-            ? redirect()->intended(config('keyring.home'))
+            ? app(VerifiedResponse::class)
             : $this->keyring->render('verify-email', ['status' => $this->statusMessage($request)]);
     }
 
@@ -30,13 +30,13 @@ class EmailVerificationController
             $request->fulfill();
         }
 
-        return redirect()->intended((string) Uri::of(config('keyring.home'))->withQuery(['verified' => 1]));
+        return app(VerifiedResponse::class, ['justNow' => true]);
     }
 
     public function send(Request $request): mixed
     {
         if ($this->verified($request)) {
-            return redirect()->intended(config('keyring.home'));
+            return app(VerifiedResponse::class);
         }
 
         $request->user()->sendEmailVerificationNotification();

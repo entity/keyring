@@ -29,6 +29,7 @@ class Totp extends Factor implements Enrollable
     public function __construct(
         protected Google2FA $engine,
         protected int $window = 1,
+        protected ?string $issuer = null,
     ) {}
 
     public function key(): string
@@ -71,7 +72,7 @@ class Totp extends Factor implements Enrollable
     public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment
     {
         $secret = $this->engine->generateSecretKey(32);
-        $url = $this->engine->getQRCodeUrl(config('app.name'), (string) $user->getAttribute(Keyring::username()), $secret);
+        $url = $this->engine->getQRCodeUrl($this->issuer ?? config('app.name'), (string) $user->getAttribute(Keyring::username()), $secret);
 
         return Enrollment::make($this->key(), [
             'secret' => $secret,

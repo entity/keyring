@@ -12,6 +12,5 @@ use Illuminate\Cache\RateLimiting\Limit;
  */
 class SharedLimit extends Limit
 {
-    /** The longest a shared limit stays locked, in seconds. */
-    public const int LONGEST_LOCK = 900;
+    //
 }

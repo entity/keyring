@@ -126,8 +126,9 @@ class SendSecurityNotifications
 
         $notification = Keyring::notification($type, [
             'when' => now()->toDayDateTimeString(),
-            ...$describeRequest ? ['device' => $this->clean(UserAgent::describe($request->userAgent())), 'ip' => $request->ip()] : [],
-            ...array_map(fn (string|int $value) => is_string($value) ? $this->clean($value) : $value, $with),
+            'at' => now(),
+            ...$describeRequest ? ['device' => $this->clean(UserAgent::describe($request->userAgent())), 'ip' => Keyring::recordedIp($request)] : [],
+            ...array_map(fn (mixed $value) => is_string($value) ? $this->clean($value) : $value, $with),
         ]);
 
         if ($notification !== null) {
