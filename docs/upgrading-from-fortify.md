@@ -83,7 +83,7 @@ Laravel's starter kits come with Fortify already wired in, so a new app is an up
 | The profile controller and its form request | With `Features::emailChanges()`, validate and save only the name. The email goes through [`POST /user/email`](protected-changes.md#changing-the-email-address). |
 | The security settings controller | Pass the page what [Your Settings Page](quick-start.md#your-settings-page) lists. Its password form posts to Keyring's route. |
 | `app/Http/Middleware/HandleInertiaRequests.php` | Share `status` and `keyring.alerts`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
-| `auth/login` | Swap the kit's passkey button for [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey), or take it out. |
+| `auth/login` | Swap the kit's passkey button for [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey), or take it out. The kit's `@laravel/passkeys` hooks [don't fit Keyring's routes](passkeys.md#laravels-passkeys-client). |
 | `auth/register` and `auth/reset-password` | They no longer receive a `passwordRules` prop, so make it optional or drop it. |
 | The kit's auth tests | They assert Fortify's routes and columns, so rewrite the two factor, passkey and password confirmation ones. See [Testing](testing.md). |
 
