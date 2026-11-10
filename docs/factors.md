@@ -270,6 +270,7 @@ The contract's methods:
 | `categories($authenticator)` | none | The categories it's expected to prove. |
 | `verify($attempt, $authenticator, $request)` | none | Check the proof. Return a `Verification`, or `null` when it's wrong. |
 | `phishingResistant($authenticator)` | `false` | Whether the proof is bound to your origin. Only WebAuthn should say yes. |
+| `deviceBound($authenticator)` | `false` | Whether the secret can't leave its device. Only these reach AAL3. |
 | `priority()` | `50` | Higher is offered first. |
 | `authenticators($user, $stored)` | the stored rows with this key | The user's authenticators. Return virtual ones for state kept elsewhere. |
 | `challenge($attempt, $authenticator)` | `[]` | Extra props for the challenge page. Called every time the page loads, so it must be safe to repeat. |
@@ -280,7 +281,7 @@ The contract's methods:
 
 Helpers on `Keyring\Factors\Factor`:
 
-- `verified($authenticator, $categories = null, $phishingResistant = null)` builds the `Verification`.
+- `verified($authenticator, $categories = null, $phishingResistant = null, $deviceBound = null)` builds the `Verification`.
 - `consume($authenticator, $callback)` reloads the authenticator with a row lock inside a transaction, and saves it if your callback returns `true`. Use it for anything single-use, so two requests with the same proof can't both pass.
 - `makeAuthenticator($attributes)` makes an unsaved authenticator of the configured model.
 - `nameFrom($request, $default)` reads the optional `name` the user typed, trimmed and cut to 64 characters, or returns the default.

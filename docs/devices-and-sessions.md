@@ -313,6 +313,6 @@ In `Keyring\Events`:
 
 | Event | Properties |
 |---|---|
-| `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = 7)` |
+| `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = null)` |
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
 | `SessionsRevoked` | `user`, `count` |

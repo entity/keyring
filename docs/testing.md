@@ -148,7 +148,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | `totp($secret = null)` | An authenticator app with a random (or the given) secret. This is also the default state. |
 | `recoveryCodes($codes = ['aaaaa-11111', 'bbbbb-22222', 'ccccc-33333'])` | A set of recovery codes that accepts the given codes. |
 | `emailCode()` | Email codes. |
-| `passkey()` | A user-verified passkey. |
+| `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. Only one that isn't synced reaches AAL3. |
 | `securityKey($userVerified = false)` | A security key. |
 | `default()` | Marks it as the default. |
 | `unconfirmed()` | Not yet confirmed, so it doesn't count. |
@@ -206,6 +206,7 @@ The constructor options:
 | `userVerification` | `true` | Whether it reports verifying the user. Use `false` for a basic security key. |
 | `aaguid` | 16 zero bytes | The AAGUID it reports, as raw bytes. |
 | `algorithm` | `ES256` | `ES256` or `EdDSA`. |
+| `synced` | `false` | Whether it reports being a passkey that syncs between devices. |
 
 `VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys.
 

@@ -125,7 +125,7 @@ export default function ChallengePage(props: ChallengeProps) {
   return (
     <>
       <Suspense fallback={null}>
-        <Component key={`${props.factor}:${props.authenticator.id}`} challenge={challenge} />
+        {Component && <Component key={`${props.factor}:${props.authenticator.id}`} challenge={challenge} />}
       </Suspense>
 
       {props.canTrustDevice && (

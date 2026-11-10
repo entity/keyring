@@ -234,7 +234,7 @@ return [
     | Signal scores add up (0-100) into a level. Pick signals and what to do at
     | each level with Keyring::risk()->signals([...])->respond(fn ...). By
     | default: medium asks for another factor, high also notifies, critical
-    | refuses the sign in and signs out every session.
+    | refuses the sign in, or on a signed-in request signs out every session.
     |
     */
 

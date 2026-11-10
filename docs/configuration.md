@@ -143,7 +143,7 @@ More routes those users can still reach meanwhile, by route name, with `*` as a 
 ],
 ```
 
-How long a user has to finish adding a sign-in method once they've started. See [Enrolling](authenticators.md#enrolling).
+How long a user has to finish adding a sign-in method once they've started. See [Adding an Authenticator](authenticators.md#adding-an-authenticator).
 
 ## Devices
 
@@ -272,7 +272,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `timebox` is the minimum time a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until `remember_failures_for` after the last one. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. An account can be sent `codes` codes for one factor every `codes_per`. See [Rate Limiting](security.md#rate-limiting).
+`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until the count is forgotten, `remember_failures_for` after the first failure of the run. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. An account can be sent `codes` codes for one factor every `codes_per`. See [Rate Limiting](security.md#rate-limiting).
 
 Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
 
@@ -357,3 +357,11 @@ It also answers questions about your setup, for your own controllers, factors an
 | `Keyring::response($contract, ...$with)` | Builds one of Keyring's [responses](sign-in-flow.md#responses), yours when you swapped it, for a route of your own. |
 | `Keyring::describeDevice($userAgent)` | A user agent as a name people recognise, or `null`. |
 | `Keyring::linkRoot()` | Where emailed links start. |
+| `Keyring::email()` | The attribute holding the user's address, `email` by default. |
+| `Keyring::policy($user, $attempt)` | What the policy asks of this user, before considering what they've enrolled. |
+| `Keyring::steps()` | The pipeline's steps, in order. `Keyring::dangerouslyChangedSteps()` lists the mandatory ones an app took out. |
+| `Keyring::notification($type, $arguments)` | The app's notification for a type, or `null`. `Keyring::requiredNotification()` throws when there isn't one. |
+| `Keyring::belongsToGuard($user)` | Whether Keyring's guard would load this user back, so they can be signed in. |
+| `Keyring::recordedIp($request)` | The request's IP address as Keyring stores it. |
+| `Keyring::allowsEnrollment($user)` | Whether the user may add a sign-in method. See [Who May Enroll](authenticators.md#who-may-enroll). |
+| `Keyring::authenticatorModel()` | The authenticator model's class. `deviceModel()`, `pendingChangeModel()` and `securityEventModel()` do the same for theirs. |

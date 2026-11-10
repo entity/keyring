@@ -72,7 +72,7 @@ A few things have no switch, because turning them off would quietly remove a pro
 - Plain `EmailCode::class` is refused. `EmailCode::asSecondFactor()` is the switch, and it says what you're accepting.
 - A user can't remove their last way to sign in, and removing the last second factor takes the password, typed again and long enough to stand alone.
 - An email change is confirmed from the new address, announced to the old one, and can be undone from there.
-- Trusting a device takes a real second factor, and the confirm page never accepts recovery codes.
+- Trusting a device takes a real second factor, and a confirm page opened without a step-up behind it never accepts recovery codes.
 - The steps that check rate limits, the policy and risk can't be dropped from the pipeline by accident. `dangerouslyReplace()` is there when you mean it.
 - Emailed links are never built from the request's `Host` header.
 

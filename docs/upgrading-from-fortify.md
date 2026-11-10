@@ -214,7 +214,7 @@ Keyring's other form routes (registration, password resets, email changes, enrol
 
 ## Things That Behave Differently
 
-- **Profile updates can't change the email.** `$user->update(['email' => ...])` throws. Use the [email change flow](protected-changes.md#changing-the-email-address), or `Keyring::withoutProtection()` for admin tooling.
+- **Profile updates can't change the email.** With `Features::emailChanges()` on, `$user->update(['email' => ...])` throws. Use the [email change flow](protected-changes.md#changing-the-email-address), or `Keyring::withoutProtection()` for admin tooling.
 - **Password resets don't sign users in.** They go back to the login page, so their second factor still applies.
 - **Password resets sign out every session**, and password changes sign out other sessions unless the request sends `sign_out_others: false`. Signing out also changes the "remember me" token.
 - **Adding a factor needs a fresh verification**, with a second factor when the user has one, and a verified email when your user model implements `MustVerifyEmail`.
