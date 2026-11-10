@@ -216,7 +216,7 @@ class Ceremonies
     public function relyingPartyId(): string
     {
         return config('keyring.webauthn.relying_party.id')
-            ?? Url::parse(config('app.url'))?->getAsciiHost()
+            ?? Url::parse(config('app.url') ?? '')?->getAsciiHost()
             ?? 'localhost';
     }
 
@@ -238,11 +238,11 @@ class Ceremonies
     }
 
     /**
-     * A URL's origin, or null when it isn't a URL.
+     * A URL's origin, or null when it isn't a URL (an APP_URL left unset).
      */
-    protected function origin(string $url): ?string
+    protected function origin(?string $url): ?string
     {
-        $url = Url::parse($url);
+        $url = Url::parse($url ?? '');
 
         return $url === null ? null : $url->getScheme().'://'.$url->getAsciiHost().($url->getPort() ? ':'.$url->getPort() : '');
     }
