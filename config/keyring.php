@@ -325,8 +325,11 @@ return [
     | Factors may declare their own limits.
     |
     | Each lockout lasts twice as long as the one before, up to "longest_lock",
-    | or "longest_ip_lock" for a whole IP address. "codes" is how many codes
-    | an account can be sent for one factor every "codes_per".
+    | or "longest_ip_lock" for a whole IP address. With "lock_after" set, an
+    | account locked out of signing in that many times in a day stays locked
+    | for "remember_failures_for", or until its password is reset or you call
+    | Keyring::unlock(). "codes" is how many codes an account can be sent for
+    | one factor every "codes_per".
     |
     */
 
@@ -337,6 +340,7 @@ return [
         'remember_failures_for' => '30d',
         'longest_lock' => '24h',
         'longest_ip_lock' => '15m',
+        'lock_after' => null,
         'codes' => 3,
         'codes_per' => '10m',
     ],

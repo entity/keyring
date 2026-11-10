@@ -371,7 +371,7 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `AuthenticatedResponse` | The login or confirmation is complete. | Redirect to the intended URL or `home`. JSON: `{"status": "authenticated", "redirect": "..."}`. |
 | `ChallengeResponse` | Another factor is needed. | Redirect to the challenge page. JSON: `202` with `{"status": "challenge", "redirect": "..."}`. |
 | `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login, otherwise `keyring::keyring.invalid` on the factor's field. |
-| `LockoutResponse` | Too many attempts. An account's own limit refusing a typed username answers with `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message. |
+| `LockoutResponse` | Too many attempts. An account's own limit refusing a typed username answers with `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message, or `keyring::keyring.locked` when a password reset is the way back in. |
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
 | `RegisterResponse` | A new user registered and was signed in. | The same as `AuthenticatedResponse`. |
 | `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
@@ -504,6 +504,7 @@ All in `Keyring\Events`:
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (nullable), `authenticator` (nullable), `factor`, `request` |
 | `Lockout` | A rate limit was hit. | `request`, `factor`, `retryAfter` |
+| `AccountLocked` | The account is locked until a password reset (only with `limits.lock_after`). | `user`, `factor` |
 | `Authenticated` | A login completed. | `user`, `attempt`, `device` |
 | `Confirmed` | A step-up completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |

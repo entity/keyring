@@ -139,10 +139,18 @@ class Throttle
      * A shared limit's lock stops growing at "longest_ip_lock", or everyone
      * on that address would pay for one person's failures for a day.
      *
+     * With "lock_after" set, an account locked that many times in a day on
+     * a factor that can start a sign in is held: the lock stays for as long
+     * as failures are remembered, or until the account's limits are cleared
+     * by a password reset or Keyring::unlock(). Returns whether this
+     * failure did that.
+     *
      * @param  list<Limit>  $limits
      */
-    public function failed(array $limits): void
+    public function failed(array $limits): bool
     {
+        $held = false;
+
         foreach ($limits as $limit) {
             $key = $this->key($limit);
 
@@ -160,10 +168,15 @@ class Throttle
 
             $lockouts = $this->limiter->hit($key.':lockouts', 86400);
             $longest = Duration::seconds(config($limit instanceof SharedLimit ? 'keyring.limits.longest_ip_lock' : 'keyring.limits.longest_lock'));
+            $hold = $limit instanceof AccountLimit && $limit->holdAfter !== null && $lockouts >= $limit->holdAfter;
 
-            $this->limiter->hit($this->lock($limit), min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
+            $this->limiter->hit($this->lock($limit), $hold ? $this->remembered() : min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
             $this->limiter->clear($key);
+
+            $held = $held || $hold;
         }
+
+        return $held;
     }
 
     /**
@@ -207,11 +220,7 @@ class Throttle
         // Kept from now for as long as anything counted before could last,
         // so a number is never used twice while its counts are still there.
         $this->limiter->clear($key);
-        $this->limiter->increment($key, max(
-            Duration::seconds(config('keyring.limits.remember_failures_for')),
-            Duration::seconds(config('keyring.limits.longest_lock')),
-            86400,
-        ), $times + 1);
+        $this->limiter->increment($key, max($this->remembered(), Duration::seconds(config('keyring.limits.longest_lock')), 86400), $times + 1);
     }
 
     /**
@@ -275,7 +284,9 @@ class Throttle
         $consecutive = config('keyring.limits.consecutive');
 
         return [
-            AccountLimit::perMinute(config('keyring.limits.per_account'))->by($this->bucket($factor->key(), $account, $device)),
+            AccountLimit::perMinute(config('keyring.limits.per_account'))
+                ->by($this->bucket($factor->key(), $account, $device))
+                ->holdAfter($factor instanceof PrimaryFactor ? config('keyring.limits.lock_after') : null),
             ...($consecutive === null ? [] : [ConsecutiveLimit::of($consecutive, $factor->key(), $account, $device)]),
         ];
     }
@@ -312,6 +323,14 @@ class Throttle
     protected function key(Limit $limit): string
     {
         return 'keyring:'.sha1((string) $limit->key);
+    }
+
+    /**
+     * How long failures in a row, and a lock that's held, are kept.
+     */
+    protected function remembered(): int
+    {
+        return Duration::seconds(config('keyring.limits.remember_failures_for'));
     }
 
     protected function lock(Limit $limit): string

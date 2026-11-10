@@ -28,6 +28,7 @@ class RecordSecurityEvents
             Events\Confirmed::class => 'confirmed',
             Events\FactorFailed::class => 'factorFailed',
             Events\Lockout::class => 'lockout',
+            Events\AccountLocked::class => 'accountLocked',
             Events\LoggedOut::class => 'loggedOut',
             Events\AuthenticatorAdded::class => 'authenticatorAdded',
             Events\AuthenticatorRemoved::class => 'authenticatorRemoved',
@@ -80,6 +81,11 @@ class RecordSecurityEvents
     public function lockout(Events\Lockout $event): void
     {
         $this->log->record('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter]);
+    }
+
+    public function accountLocked(Events\AccountLocked $event): void
+    {
+        $this->log->record('account_locked', $event->user, $event->factor);
     }
 
     public function loggedOut(Events\LoggedOut $event): void

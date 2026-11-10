@@ -11,11 +11,13 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Models\Concerns\HashesTokens;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
+use Normalizer;
 
 /**
  * A change to a protected attribute (like the email address) waiting for
@@ -68,12 +70,31 @@ class PendingChange extends Model
     }
 
     /**
-     * How a previous value is found while it's reserved: normalised like a
-     * username, and keyed with APP_KEY since the value itself is encrypted.
+     * How a previous value is found while it's reserved: folded, and keyed
+     * with APP_KEY since the value itself is encrypted.
      */
     public static function lookupHash(string $value): string
     {
-        return KeyedHash::make(Keyring::normalizeUsername($value));
+        return KeyedHash::make(static::fold($value));
+    }
+
+    /**
+     * The value as the loosest database would compare it: normalised like a
+     * username, then without accents, case, width or characters that don't
+     * show. MySQL's default collations take "tàylor@example.com" for
+     * "taylor@example.com", so a reserved address has to be found under
+     * every spelling its unique index would refuse, or the lookalike could
+     * be registered and leave a revert nowhere to put the address back.
+     * Folding too much only keeps a similar address back while the
+     * reservation lasts.
+     */
+    public static function fold(string $value): string
+    {
+        $value = Keyring::normalizeUsername($value);
+        $value = Normalizer::normalize($value, Normalizer::NFKD) ?: $value;
+        $value = preg_replace('/[\p{M}\p{C}\s]+/u', '', $value) ?? $value;
+
+        return Str::lower(Str::transliterate($value, ''));
     }
 
     protected function casts(): array
@@ -153,7 +174,7 @@ class PendingChange extends Model
     #[Scope]
     protected function reserving(Builder $query, string $value): void
     {
-        $query->whereIn('previous_value_hash', KeyedHash::candidates(Keyring::normalizeUsername($value)))
+        $query->whereIn('previous_value_hash', KeyedHash::candidates(static::fold($value)))
             ->whereNotNull('applied_at')
             ->whereNull('cancelled_at')
             ->whereNull('reverted_at')
