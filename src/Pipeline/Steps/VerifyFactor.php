@@ -4,10 +4,8 @@ namespace Keyring\Pipeline\Steps;
 
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Support\Timebox;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
@@ -18,18 +16,14 @@ use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
-use Keyring\Pipeline\Outcome;
-use Keyring\Support\Duration;
 
 /**
- * Identifies the user (for primary factors) and checks the proof, inside a
- * timebox so every refusal takes the same time: a wrong proof, an unknown
- * user, or a right proof a later step turns down.
+ * Identifies the user (for primary factors) and checks the proof. The
+ * verifier's timebox is what makes every refusal take the same time.
  */
 class VerifyFactor
 {
     public function __construct(
-        protected Container $container,
         protected AttemptStore $attempts,
         protected KeyringManager $keyring,
     ) {}
@@ -38,18 +32,7 @@ class VerifyFactor
     {
         $context->request->validate($this->rules($context));
 
-        // The timebox stays open until the attempt is answered, not just
-        // until the proof is checked: a right password refused further on,
-        // by a risk lock say, has to take as long as a wrong one.
-        return $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context, $next) {
-            $context = $this->verify($context, $next);
-
-            if (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true)) {
-                $timebox->returnEarly();
-            }
-
-            return $context;
-        }, Duration::milliseconds(config('keyring.timebox')) * 1000);
+        return $this->verify($context, $next);
     }
 
     /**

@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
+use Illuminate\Support\Timebox;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
@@ -20,6 +21,7 @@ use Keyring\Features;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
+use Keyring\Pipeline\AccountLimit;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Sessions\SessionAssurance;
@@ -382,7 +384,7 @@ describe('a shared address', function () {
 
         $limits = Keyring::factor('totp')->limits(Request::create('/', 'POST', cookies: ['keyring_device' => $token]), Attempt::start(Purpose::Login, $user));
 
-        expect(collect($limits)->pluck('key')->implode(' '))->not->toContain('|device|');
+        expect(collect($limits)->pluck('key')->implode(' '))->not->toContain('|known');
     });
 
     // The limits are worked out before the timebox opens, so what they
@@ -410,7 +412,7 @@ describe('a shared address', function () {
 
         $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => 'taylor@example.com'], ['keyring_device' => $token]), null);
 
-        expect(collect($limits)->pluck('key')->implode(' '))->toContain('|device|');
+        expect(collect($limits)->pluck('key')->implode(' '))->toContain('|known');
     });
 
     it('treats a device cookie like any other browser when devices are off', function () {
@@ -928,4 +930,159 @@ describe('an account locked out again and again', function () {
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
     });
+});
+
+describe('the account\'s device cookies in someone else\'s hands', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 100, 'keyring.limits.per_ip' => 1000, 'keyring.limits.consecutive' => 3]);
+
+        $this->user = account('taylor@example.com');
+    });
+
+    /**
+     * A wrong password from a browser carrying this device cookie, or none.
+     */
+    function guessWith(?string $device): void
+    {
+        test()->withCookie('keyring_device', $device ?? 'a browser nobody has seen')
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+    }
+
+    it('gives every cookie of the account one allowance between them, not one each', function () {
+        $cookies = [deviceCookieFor('taylor@example.com'), deviceCookieFor('taylor@example.com'), deviceCookieFor('taylor@example.com')];
+
+        Hash::spy();
+
+        foreach ([...$cookies, ...$cookies] as $cookie) {
+            guessWith($cookie);
+        }
+
+        // Three passwords looked at, the cap, however many cookies there are.
+        Hash::shouldHaveReceived('check')->times(3);
+    });
+
+    it('still keeps the known browsers\' count apart from everyone else\'s', function () {
+        $cookie = deviceCookieFor('taylor@example.com');
+
+        foreach (range(1, 4) as $guess) {
+            guessWith(null);
+        }
+
+        $this->withCookie('keyring_device', $cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+    });
+
+    it('treats a cookie from before a password reset as a browser it has never seen', function () {
+        $kept = deviceCookieFor('taylor@example.com');
+
+        foreach (range(1, 3) as $guess) {
+            guessWith(null);
+        }
+
+        $this->travel(5)->seconds();
+        completeReset($this->user);
+
+        // The reset started the unknown browsers' count over. The kept
+        // cookie counts there too, so it buys nothing more.
+        Hash::spy();
+
+        foreach (range(1, 3) as $guess) {
+            guessWith(null);
+        }
+
+        foreach (range(1, 3) as $guess) {
+            guessWith($kept);
+        }
+
+        Hash::shouldHaveReceived('check')->times(3);
+    });
+
+    it('knows a browser again once it signs in after the reset', function () {
+        $cookie = deviceCookieFor('taylor@example.com');
+
+        $this->travel(5)->seconds();
+        completeReset($this->user);
+        $this->travel(5)->seconds();
+
+        $this->withCookie('keyring_device', $cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])
+            ->assertRedirect('/dashboard');
+        $this->post('/logout');
+        $this->flushSession();
+
+        foreach (range(1, 4) as $guess) {
+            guessWith(null);
+        }
+
+        $this->withCookie('keyring_device', $cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])
+            ->assertRedirect('/dashboard');
+    });
+});
+
+describe('what a reset clears, long after', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 1000, 'keyring.limits.lock_after' => 3]);
+
+        $this->user = account('taylor@example.com');
+    });
+
+    it('keeps a lock held however long ago the last reset was', function () {
+        completeReset($this->user);
+
+        $this->travel(29)->days();
+        lockOut(3);
+        $this->travel(2)->days();
+
+        $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])->assertStatus(429);
+    });
+
+    it('lets the owner in after one reset, however many came before', function () {
+        completeReset($this->user);
+
+        $this->travel(29)->days();
+        lockOut(3);
+        $this->travel(2)->days();
+
+        completeReset($this->user);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])->assertRedirect('/dashboard');
+    });
+});
+
+it('never holds a security key, which only ever comes second', function () {
+    config(['keyring.limits.per_account' => 2, 'keyring.limits.lock_after' => 1]);
+    Keyring::factors([Password::class, WebAuthn::securityKeys()]);
+
+    $limits = Keyring::factor('security-key')->limits(Request::create('/login/challenge/security-key', 'POST'), Attempt::start(Purpose::Login, account('taylor@example.com')));
+
+    expect(collect($limits)->whereInstanceOf(AccountLimit::class)->pluck('holdAfter')->filter()->all())->toBe([])
+        ->and(collect($limits)->pluck('key')->implode(' '))->not->toContain('|cleared|');
+});
+
+it('holds every refusal for the timebox, whichever limit refused it', function () {
+    config(['keyring.limits.per_account' => 1, 'keyring.limits.per_ip' => 100]);
+    account('taylor@example.com');
+
+    $timebox = new class extends Timebox
+    {
+        /** @var list<bool> */
+        public static array $returnedEarly = [];
+
+        public function call(callable $callback, int $microseconds)
+        {
+            $result = parent::call($callback, 0);
+            self::$returnedEarly[] = $this->earlyReturn;
+
+            return $result;
+        }
+    };
+    $this->app->bind(Timebox::class, $timebox::class);
+
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])->assertStatus(422);
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])->assertStatus(429);
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertStatus(429);
+
+    expect($timebox::$returnedEarly)->toBe([false, false, false]);
 });

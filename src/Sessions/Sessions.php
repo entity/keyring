@@ -19,6 +19,7 @@ use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
+use Keyring\Support\Throttle;
 
 /**
  * Starts, finds and ends registered sessions for the current request.
@@ -312,12 +313,16 @@ class Sessions
     }
 
     /**
-     * Stop trusting the user's devices, or all but one. Does nothing when
-     * devices are off, so a security change can't fail on tables never used.
+     * Stop trusting the user's devices, or all but one, and stop any of them
+     * counting as a known browser for rate limits until it signs in again.
+     * Does nothing when devices are off, so a security change can't fail on
+     * tables never used.
      */
     public function distrustDevices(Authenticatable $user, ?string $except = null): void
     {
         if ($user instanceof Model && Features::enabled(Features::devices())) {
+            app(Throttle::class)->forgetBrowsers($user);
+
             $this->keyring->deviceModel()::query()
                 ->ownedBy($user)
                 ->whereNotNull('trusted_until')

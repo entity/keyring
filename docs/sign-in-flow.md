@@ -275,7 +275,7 @@ Every verification, at login or step-up, goes through one pipeline of steps:
 | Step | Does |
 |---|---|
 | `EnsureNotThrottled` | Checks the factor's rate limits, counts the attempt, and locks out repeated failures. See [Rate Limiting](security.md#rate-limiting). |
-| `VerifyFactor` | Validates the request, identifies the user for primary factors, and checks the proof inside the timebox. Stops the pipeline on failure. |
+| `VerifyFactor` | Validates the request, identifies the user for primary factors, and checks the proof. Stops the pipeline on failure. |
 | `ResolveDevice` | Notes the device this attempt comes from, and the `trust` checkbox. |
 | `EnsureNotRiskLocked` | Refuses a user under a [risk lock](risk.md#actions) with the usual generic error. Skipped for step-up. |
 | `AssessRisk` | Runs the [risk signals](risk.md) once per login and acts on them. Skipped for step-up. |
