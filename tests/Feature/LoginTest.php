@@ -164,6 +164,14 @@ it('does not take a prefetched page for the one the user is on', function () {
     $this->flushHeaders()->post('/login', ['email' => 'taylor@example.com'])->assertRedirect('/login');
 });
 
+it('answers a username that is not text with a validation error', function () {
+    taylor();
+
+    $this->postJson('/login', ['email' => ['taylor@example.com'], 'password' => 'password'])
+        ->assertJsonValidationErrors('email');
+    $this->assertGuest();
+});
+
 it('does not accept the same totp code twice', function () {
     $user = taylor();
     $totp = totpFor($user);

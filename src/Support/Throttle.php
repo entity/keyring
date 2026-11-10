@@ -227,7 +227,7 @@ class Throttle
     protected function account(Factor $factor, Request $request, ?Attempt $attempt): string
     {
         return match (true) {
-            $attempt === null => $this->accountKey((string) $request->input($this->keyring->username())),
+            $attempt === null => $this->accountKey(Input::text($request, $this->keyring->username())),
             $factor instanceof PrimaryFactor => $this->accountKey((string) $attempt->user()->getAttribute($this->keyring->username())),
             default => (string) $attempt->userId,
         };
@@ -251,7 +251,7 @@ class Throttle
     protected function knownDevice(Request $request, ?Attempt $attempt): ?string
     {
         $username = fn (mixed $value) => $this->keyring->normalizeUsername((string) $value);
-        $typed = $username($request->input($this->keyring->username()));
+        $typed = $username(Input::text($request, $this->keyring->username()));
 
         return $this->devices->forBrowser($request)->first(function (Device $device) use ($attempt, $username, $typed) {
             $user = $device->user();

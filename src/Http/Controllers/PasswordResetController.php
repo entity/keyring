@@ -13,6 +13,7 @@ use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Support\Input;
 
 use function Illuminate\Support\defer;
 
@@ -51,7 +52,7 @@ class PasswordResetController
     {
         return $this->keyring->render('reset-password', [
             'token' => $token,
-            'email' => (string) $request->query($this->keyring->email()),
+            'email' => Input::text($request, $this->keyring->email()),
         ]);
     }
 
@@ -91,7 +92,7 @@ class PasswordResetController
     {
         $email = $this->keyring->email();
 
-        return [$email => $this->keyring->normalizeUsername((string) $request->input($email))];
+        return [$email => $this->keyring->normalizeUsername(Input::text($request, $email))];
     }
 
     protected function broker(): PasswordBroker

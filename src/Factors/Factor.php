@@ -13,6 +13,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
 
@@ -133,7 +134,7 @@ abstract class Factor implements FactorContract
      */
     protected function nameFrom(Request $request, string $default): string
     {
-        return $request->string('name')->trim()->limit(64, '')->value() ?: $default;
+        return str(Input::text($request, 'name'))->trim()->limit(64, '')->value() ?: $default;
     }
 
     /**

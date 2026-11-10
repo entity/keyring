@@ -46,6 +46,12 @@ it('renders the reset page with a custom non-inertia page', function () {
         ->assertHeader('Referrer-Policy', 'no-referrer');
 });
 
+it('renders the reset page whatever the query string holds', function () {
+    $this->inertia()->get('/reset-password/a-token?email[]=x')
+        ->assertOk()
+        ->assertJsonPath('props.email', '');
+});
+
 it('ends outstanding reset links when the password is changed', function (bool $signOutOthers) {
     $token = Password::broker()->createToken($this->plain);
 
