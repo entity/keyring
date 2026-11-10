@@ -52,7 +52,7 @@ The pending attempt is encrypted JSON in the session. It lasts `pending_logins.k
 
 The login and registration routes are for guests only, and `/logout` needs `auth:{guard}`. The registration routes exist only when the `registration` feature is on. The `keyring` rate limiter allows 6 a minute by default; see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits).
 
-The routes that spend session state (`POST /login`, `POST /login/{factor}` and the challenge's verify and send routes) take Laravel's session lock with `->block()`, so parallel requests in one session wait their turn instead of spending the same state twice. Your cache store must support locks.
+The routes that spend session state (`POST /login`, `POST /login/{factor}`, the challenge page and its verify and send routes) take Laravel's session lock with `->block()`, so parallel requests in one session wait their turn instead of spending the same state twice. Your cache store must support locks.
 
 A factor key that isn't registered gives a `404` on every route that takes one.
 
@@ -161,7 +161,7 @@ The page (`challenge` for logins, `confirm` for step-up) receives:
 | `authenticator` | How the factor presents this authenticator. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`. |
 | `challenge` | Factor-specific props. See below. |
 | `alternatives` | The user's other authenticators that would help, for "try another way". Same shape as `authenticator`. |
-| `canTrustDevice` | Whether to show "don't ask again on this device". `true` for logins when `devices.trust_for` isn't `null`. |
+| `canTrustDevice` | Whether to show "don't ask again on this device". `true` for logins with `Features::devices()` on and `devices.trust_for` not `null`. |
 | `expiresAt` | When the pending attempt expires, ISO 8601. |
 
 `challenge` for the built-in factors:
@@ -458,6 +458,8 @@ Keyring renders these pages:
 With Inertia installed, each renders the component `auth/{name}`, such as `auth/login`. Without Inertia, Keyring renders the Blade view `auth.{name}`, such as `resources/views/auth/login.blade.php`, with the props as view data. Keyring doesn't ship Blade views, so you write them. Until you do, the page throws a `Keyring\Exceptions\MissingPage` exception naming the view to create and the data it receives.
 
 Inertia only notices a missing component in the browser, unless you turn on `pages.ensure_pages_exist` in `config/inertia.php`. With it on, Keyring throws the same exception, naming the component.
+
+A form on one of these pages that fails validation comes back to that page. Keyring's pages send no `Referer`, and Laravel doesn't remember an Inertia visit as the last page seen, so Keyring notes each page it renders as the one to go back to. You don't need Inertia's `store_previous_url` option for this.
 
 Change the component for a page with `Keyring::page()`:
 

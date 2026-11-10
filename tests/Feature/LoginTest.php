@@ -140,6 +140,30 @@ it('rejects a wrong code and keeps the user signed out', function () {
     $this->assertGuest();
 });
 
+it('sends a failed form back to its own page, though the browser sends no referer', function () {
+    totpFor(taylor());
+
+    // The last page loaded in full, which is what Laravel remembers.
+    $this->get('/login');
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    // An Inertia visit, which Laravel doesn't.
+    $this->inertia()->withHeaders(['X-Requested-With' => 'XMLHttpRequest'])->get('/login/challenge/totp')->assertOk();
+
+    $this->flushHeaders()->post('/login/challenge/totp', ['code' => '000000'])
+        ->assertRedirect('/login/challenge/totp')
+        ->assertSessionHasErrors('code');
+});
+
+it('does not take a prefetched page for the one the user is on', function () {
+    taylor();
+    $this->get('/login');
+
+    $this->inertia()->withHeaders(['X-Requested-With' => 'XMLHttpRequest', 'Purpose' => 'prefetch'])->get('/register')->assertOk();
+
+    $this->flushHeaders()->post('/login', ['email' => 'taylor@example.com'])->assertRedirect('/login');
+});
+
 it('does not accept the same totp code twice', function () {
     $user = taylor();
     $totp = totpFor($user);
