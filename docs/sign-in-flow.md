@@ -450,7 +450,7 @@ With Inertia installed, each renders the component `auth/{name}`, such as `auth/
 
 Inertia only notices a missing component in the browser, unless you turn on `pages.ensure_pages_exist` in `config/inertia.php`. With it on, Keyring throws the same exception, naming the component.
 
-A form on one of these pages that fails validation comes back to that page. Keyring's pages send no `Referer`, and Laravel doesn't remember an Inertia visit as the last page seen, so Keyring notes each page it renders as the one to go back to. You don't need Inertia's `store_previous_url` option for this.
+A form on one of these pages that fails validation comes back to that page. Keyring notes each page it renders as the one to go back to, for browsers that send no `Referer` at all, since Laravel doesn't remember an Inertia visit as the last page seen. You don't need Inertia's `store_previous_url` option for Keyring's pages.
 
 Change the component for a page with `Keyring::page()`:
 

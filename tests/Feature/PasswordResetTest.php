@@ -43,7 +43,7 @@ it('renders the reset page with a custom non-inertia page', function () {
     $this->get(route('password.reset', ['token' => 'abc', 'email' => 'plain@example.com']))
         ->assertOk()
         ->assertSee('reset page for plain@example.com')
-        ->assertHeader('Referrer-Policy', 'no-referrer');
+        ->assertHeader('Referrer-Policy', 'same-origin');
 });
 
 it('renders the reset page whatever the query string holds', function () {

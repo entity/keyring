@@ -140,6 +140,12 @@ it('rejects a wrong code and keeps the user signed out', function () {
     $this->assertGuest();
 });
 
+it('lets the app keep its own referer, and keeps it from other sites', function () {
+    // A page in a single-page app keeps the policy of the page it loaded on:
+    // none at all would strip the referer from every request after signing in.
+    $this->get('/login')->assertHeader('Referrer-Policy', 'same-origin');
+});
+
 it('sends a failed form back to its own page, though the browser sends no referer', function () {
     totpFor(taylor());
 
