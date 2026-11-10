@@ -64,6 +64,7 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 - Users with two factors prove both again, as NIST SP 800-63B asks before binding a new authenticator. A stolen session plus one phished factor can't add, remove or change anything.
 - Users who have any possession factor (an authenticator app, a passkey, a security key, email or recovery codes) always use one.
 - A policy the user can't fully meet yet (one that asks for a passkey they haven't added) counts as far as they can, so they can still add it.
+- A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about one nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is fresh for step-up too.
 

@@ -4,6 +4,7 @@ namespace Keyring\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\KeyringManager;
@@ -28,12 +29,13 @@ class RequireFreshVerification
         protected SessionAssurance $assurance,
         protected StepUp $stepUp,
         protected KeyringManager $keyring,
+        protected DeviceManager $devices,
     ) {}
 
     public function handle(Request $request, Closure $next, string $window = '15m'): Response
     {
         $since = now()->getTimestamp() - Duration::seconds($window);
-        $requirement = $this->requirement();
+        $requirement = $this->requirement($request);
 
         if ($requirement->isMetBy($this->assurance->since($since))) {
             return $next($request);
@@ -46,11 +48,21 @@ class RequireFreshVerification
      * What signing in would ask of this user, and a possession factor
      * whenever they have one: otherwise a stolen session plus one phished
      * factor could add new ones without ever touching the rest.
+     *
+     * The policy is asked twice: about this browser as a sign in would find
+     * it, and about one nothing is known of. The stricter answer stands, so
+     * a policy that asks more of a new device is heard here, and one that
+     * asks less of a trusted device gets no discount.
      */
-    protected function requirement(): Requirement
+    protected function requirement(Request $request): Requirement
     {
         $user = $this->keyring->user();
-        $requirement = $this->keyring->requirementFor($user, Attempt::start(Purpose::Login, $user), reachable: true);
+
+        $here = Attempt::start(Purpose::Login, $user);
+        $here->resolveDevice($this->devices->find($request, $user)?->id);
+
+        $requirement = $this->keyring->requirementFor($user, $here, reachable: true)
+            ->atLeast($this->keyring->requirementFor($user, Attempt::start(Purpose::Login, $user), reachable: true));
 
         return $this->keyring->for($user)->has(Category::Possession)
             ? $requirement->atLeast(Requirement::aal1()->including(Category::Possession))

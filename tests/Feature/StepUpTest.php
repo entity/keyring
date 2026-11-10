@@ -8,10 +8,13 @@ use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\WebAuthn;
+use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\Staff;
+use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
@@ -410,4 +413,60 @@ it('sends a user with nothing to confirm with to set something up, not round in 
     $this->get(route('keyring.confirm.challenge'))
         ->assertRedirect('/settings/security')
         ->assertSessionHas('status', 'enroll-first');
+});
+
+describe('under a policy that asks more of a browser it hasn\'t seen', function () {
+    beforeEach(function () {
+        Keyring::require(fn (User $user, Attempt $attempt) => $attempt->isNewDevice() ? Requirement::aal2()->ifEnrolled() : Requirement::aal1());
+
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        // Signed in a while ago, from a browser the account now knows.
+        signIn();
+        $this->device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])
+            ->assertRedirect('/dashboard')
+            ->getCookie('keyring_device')->getValue();
+
+        $this->travel(16)->minutes();
+    });
+
+    it('asks for everything a sign in from this browser would, when the browser is not one the account knows', function () {
+        $this->withUnencryptedCookies([]);
+
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+        // The code alone isn't enough, as it wouldn't be to sign in from here.
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)]);
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+        $this->get('/account')->assertOk();
+    });
+
+    it('asks what the policy asks of a browser the account knows', function () {
+        $this->withCookie('keyring_device', $this->device);
+
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])->assertRedirect('/account');
+        $this->get('/account')->assertOk();
+    });
+});
+
+it('gives a trusted device no discount on a fresh verification', function () {
+    Keyring::require(fn (User $user, Attempt $attempt) => $attempt->device()?->isTrusted() ? Requirement::aal1() : Requirement::aal2()->ifEnrolled());
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    signIn();
+    $device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret), 'trust' => true])
+        ->assertRedirect('/dashboard')
+        ->getCookie('keyring_device')->getValue();
+
+    $this->travel(16)->minutes();
+    $this->withCookie('keyring_device', $device);
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, 1)]);
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
 });
