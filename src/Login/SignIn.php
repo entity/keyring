@@ -58,10 +58,11 @@ class SignIn
 
         $this->sessions->start($request, $user, $device, $this->assurance->level(), remembered: $attempt->remember);
 
-        // A password reset or change signs out the sessions registered by
-        // then. This one was still being checked, and is only registered
-        // now, so look again: with the new password saved, it ends here.
-        if ($this->passwordChangedMeanwhile($user)) {
+        // A password reset or change, or an email change or its undo, signs
+        // out the sessions registered by then. This one was still being
+        // checked, and is only registered now, so look again: with the new
+        // password or address saved, it ends here.
+        if ($this->changedMeanwhile($user)) {
             $this->out($request, onlyThisBrowser: true);
 
             throw ValidationException::withMessages([$this->keyring->username() => __('auth.failed')]);
@@ -100,15 +101,19 @@ class SignIn
     }
 
     /**
-     * Whether the password is no longer the one this request loaded and
-     * checked. Read after the session is registered: if it's still the same,
-     * a reset hasn't saved yet, and its sign-out will find this session.
+     * Whether the password or the email address is no longer the one this
+     * request loaded and checked. Read after the session is registered: if
+     * they're still the same, a change hasn't saved yet, and its sign-out
+     * will find this session.
      */
-    protected function passwordChangedMeanwhile(Authenticatable&Model $user): bool
+    protected function changedMeanwhile(Authenticatable&Model $user): bool
     {
         $now = $user->newQuery()->whereKey($user->getKey())->first();
+        $email = $this->keyring->email();
 
-        return ! $now instanceof Authenticatable || ! hash_equals((string) $user->getAuthPassword(), (string) $now->getAuthPassword());
+        return ! $now instanceof Authenticatable
+            || ! hash_equals((string) $user->getAuthPassword(), (string) $now->getAuthPassword())
+            || $user->getAttribute($email) !== $now->getAttribute($email);
     }
 
     public function confirm(Request $request, Attempt $attempt): void

@@ -5,6 +5,7 @@ use App\Notifications\Keyring\EmailAddressInUse;
 use App\Notifications\Keyring\EmailChanged;
 use App\Notifications\Keyring\EmailChangeNotice;
 use App\Notifications\Keyring\EmailChangeReverted;
+use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Auth;
@@ -22,9 +23,12 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\FactorVerified;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Exceptions\ReservedAddressException;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\Password as PasswordFactor;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
@@ -409,6 +413,58 @@ it('puts the address back from the link for an earlier change that a later one r
     expect(app(EmailChanges::class)->revert($earlier->fresh(), $first['revert']))->toBeTrue()
         ->and($this->user->fresh()->email)->toBe('taylor@example.com')
         ->and($later->fresh()->canRevert())->toBeFalse();
+});
+
+it('ends a sign in that was waiting for a code sent to the address the undo takes away', function () {
+    Keyring::factors([PasswordFactor::class, EmailCode::asSecondFactor()]);
+    $this->travelTo(now()->subMonth(), fn () => Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]));
+
+    $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);
+    confirmBoth($change, $tokens = tokensFor('attacker@example.com', 'taylor@example.com'));
+    $this->post('/logout');
+    $this->flushSession();
+
+    // Whoever moved the address gets past the password and has a code sent
+    // to their own inbox.
+    $this->post('/login', ['email' => 'attacker@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+    $this->post(route('keyring.login.send', 'email-code'));
+
+    $code = null;
+    Notification::assertSentTo($this->user, VerificationCode::class, function (VerificationCode $notification) use (&$code) {
+        return (bool) ($code = $notification->code);
+    });
+
+    expect(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeTrue();
+
+    $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code]);
+
+    $this->assertGuest();
+    expect(session()->has('keyring.attempt.login'))->toBeFalse()
+        ->and(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+});
+
+it('ends a sign in that was waiting for its second factor when a change moves the address', function () {
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+    Keyring::withoutProtection(fn () => $this->user->fresh()->update(['email' => 'moved@example.com']));
+
+    $this->get(route('keyring.login.challenge'))->assertRedirect(route('login'));
+    expect(session()->has('keyring.attempt.login'))->toBeFalse();
+});
+
+it('ends a sign in whose address moved while it was being checked', function () {
+    // The move, start to finish, between the password check and the session.
+    Event::listen(fn (FactorVerified $event) => Keyring::withoutProtection(
+        fn () => $this->user->fresh()->update(['email' => 'moved@example.com']),
+    ));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+    $this->assertGuest();
+    expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
 });
 
 it('says a link was invalid when the token is wrong', function () {

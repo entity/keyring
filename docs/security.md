@@ -29,7 +29,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 - A sign-in only succeeds for a user Keyring's guard would load back through its provider. A passkey that belongs to another model (say, staff when the guard signs in users) fails like an unknown one, even when the IDs match.
 - Every refused verification takes at least `timebox` (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist. That includes a right password turned down by a risk lock or a risk response, which answers like a wrong one.
 - A password longer than its stored hash can check (72 bytes for bcrypt) fails like a wrong one, with the same error, timing and throttling, wherever Keyring checks a password: signing in, step-up, removing the last second factor and the current password on a change. The over-long value never reaches the hasher.
-- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_logins.keep_for`, as soon as the user's password changes, or when `keyring.guard` is no longer the guard they started under.
+- Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_logins.keep_for`, as soon as the user's password or email address changes, or when `keyring.guard` is no longer the guard they started under. An emailed code could have gone to the address the account no longer has, so an email change and its undo both end a sign in that was waiting for one.
 - The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
@@ -119,7 +119,7 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 - An email change only applies if the address is still the one it was requested from.
 - Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing.
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
-- Reverting an email change signs out every session, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
+- Reverting an email change signs out every session, ends any sign in still waiting for its second factor, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
