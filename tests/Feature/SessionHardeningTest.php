@@ -18,8 +18,6 @@ use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 
-const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
-
 class RevokesDuringAssessment implements Signal
 {
     public static bool $fired = false;
