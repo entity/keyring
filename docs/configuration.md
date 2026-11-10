@@ -271,7 +271,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `pending_logins.keep_for` is how long a half-finished login or confirmation stays valid, as a [duration](#durations). It's also the `expiresAt` shown on the challenge page.
 
-`timebox` is the minimum time a failed factor check takes, so timing doesn't reveal whether an account exists. Successful checks return straight away.
+`timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. Verifications that go through return straight away.
 
 `limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until the count is forgotten, `remember_failures_for` after the first failure of the run. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. An account can be sent `codes` codes for one factor every `codes_per`. See [Rate Limiting](security.md#rate-limiting).
 

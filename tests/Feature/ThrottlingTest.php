@@ -1,12 +1,10 @@
 <?php
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
-use Keyring\Events\PasswordReset;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -19,7 +17,6 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Sessions\SessionAssurance;
-use Keyring\Support\Throttle;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
@@ -84,17 +81,50 @@ it('does not reset the per-ip counter when the attacker signs in to their own ac
     expect($error)->toContain('Too many');
 });
 
-it('counts spelling variants of the same address against one account limit', function () {
+it('counts every way of typing an account\'s username against that account\'s limit', function () {
     config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 100]);
     account('taylor@example.com');
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
 
-    $this->post('/login', ['email' => ' TÂYLOR@example.com ', 'password' => 'nope']);
+    $this->post('/login', ['email' => ' TAYLOR@Example.com ', 'password' => 'nope']);
     $error = $this->sessionErrors()->first('email');
 
     expect($error)->toContain('Too many');
+});
+
+it('does not let signing in to a lookalike account clear another account\'s limits', function () {
+    config(['keyring.limits.per_account' => 5, 'keyring.limits.consecutive' => 10, 'keyring.limits.per_ip' => 1000]);
+    account('victim@example.com');
+    // Another account where the database tells accents apart.
+    User::create(['name' => 'Mallory', 'email' => 'vìctim@example.com', 'password' => 'a passphrase of her own', 'email_verified_at' => now()]);
+
+    $statuses = [];
+
+    foreach (range(1, 3) as $round) {
+        foreach (range(1, 4) as $guess) {
+            $statuses[] = $this->postJson('/login', ['email' => 'victim@example.com', 'password' => "guess {$round} {$guess}"])->status();
+        }
+
+        $this->postJson('/login', ['email' => 'vìctim@example.com', 'password' => 'a passphrase of her own'])->assertOk();
+        $this->post('/logout');
+        $this->flushSession();
+    }
+
+    // Five a minute, whoever else signs in between them.
+    expect(array_count_values($statuses))->toBe([422 => 5, 429 => 7]);
+})->skip(fn () => databaseIgnoresAccents(), 'The database treats the two addresses as one, so both accounts can\'t exist.');
+
+it('limits guesses at a username nobody has like guesses at a real one', function () {
+    config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 100]);
+
+    $statuses = array_map(
+        fn () => $this->postJson('/login', ['email' => 'nobody@example.com', 'password' => 'nope'])->status(),
+        range(1, 3),
+    );
+
+    expect($statuses)->toBe([422, 422, 429]);
 });
 
 it('counts overlapping attempts before verifying them', function () {
@@ -314,7 +344,7 @@ describe('a shared address', function () {
         $this->withCookie('keyring_device', $device)
             ->post('/login', ['email' => ' VICTIM@EXÄMPLE.COM ', 'password' => 'password'])
             ->assertRedirect('/dashboard');
-    });
+    })->skip(fn () => databaseIgnoresAccents(), 'The database treats the two addresses as one account, whose device this is.');
 
     it('treats another model\'s device with the same id as unknown on the second factor', function () {
         $user = account('taylor@example.com');
@@ -479,7 +509,7 @@ describe('a completed password reset', function () {
     }
 
     it('lets the owner in straight away from elsewhere, however the guesses spelled the address', function () {
-        guessPassword(3, ' TÂYLOR@example.com ');
+        guessPassword(3, ' TAYLOR@Example.com ');
 
         signInFrom('198.51.100.7', password: 'password')->assertSessionHasErrors('email');
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
@@ -586,7 +616,7 @@ describe('a completed password reset', function () {
         expect(SecurityEvent::query()->where('type', 'password_reset')->sole()->meta)->toBe(['sign_in_locks_cleared' => true]);
     });
 
-    it('clears another identifier the finder accepts, when the app names it', function () {
+    it('clears them whichever of the account\'s identifiers the guesses were typed with', function () {
         config(['keyring.limits.consecutive' => 3]);
         $this->user->update(['name' => 'tay']);
 
@@ -594,8 +624,6 @@ describe('a completed password reset', function () {
             ->where('email', $request->input('email'))
             ->orWhere('name', $request->input('email'))
             ->first());
-        // The null: identifiers can be optional, and a missing one mustn't break the reset.
-        Event::listen(fn (PasswordReset $event) => app(Throttle::class)->clearAccount($event->user, $event->user->name, null));
 
         guessPassword(3, 'tay');
 

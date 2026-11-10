@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Timebox;
 use Illuminate\Testing\TestResponse;
 use Keyring\Activity\SecurityLog;
 use Keyring\Contracts\LocatesIps;
@@ -31,6 +32,7 @@ use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\RiskEngine;
+use Keyring\Risk\RiskLocks;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
@@ -87,6 +89,31 @@ it('logs an action that only locks as a lock', function () {
     expect(Action::allow()->lockFor('1h')->name())->toBe('locked')
         ->and(Action::deny()->lockFor('1h')->name())->toBe('denied')
         ->and(Action::allow()->name())->toBe('allowed');
+});
+
+it('takes as long to refuse a locked account with the right password as with a wrong one', function () {
+    app(RiskLocks::class)->lock($this->user, 600);
+
+    $timebox = new class extends Timebox
+    {
+        /** @var list<bool> */
+        public static array $returnedEarly = [];
+
+        public function call(callable $callback, int $microseconds)
+        {
+            $result = parent::call($callback, 0);
+            self::$returnedEarly[] = $this->earlyReturn;
+
+            return $result;
+        }
+    };
+    $this->app->bind(Timebox::class, $timebox::class);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertSessionHasErrors('email');
+    $this->assertGuest();
+
+    expect($timebox::$returnedEarly)->toBe([false, false]);
 });
 
 it('asks for another factor when risk is medium', function () {

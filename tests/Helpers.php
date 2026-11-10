@@ -3,6 +3,7 @@
 use Illuminate\Mail\Markdown;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Keyring\Factors\Totp;
 use Keyring\KeyringManager;
@@ -39,6 +40,16 @@ function taylor(array $attributes = []): User
 function staff(): Staff
 {
     return Staff::create(['id' => User::query()->max('id') ?? 1, 'name' => 'Staff', 'email' => 'staff@example.com', 'password' => 'password']);
+}
+
+/**
+ * Whether the database treats addresses that differ by an accent as one, as
+ * MySQL's default collation does: two such accounts can't both exist there,
+ * and either spelling finds the one that does.
+ */
+function databaseIgnoresAccents(): bool
+{
+    return in_array(DB::connection()->getDriverName(), ['mysql', 'mariadb'], true);
 }
 
 /**

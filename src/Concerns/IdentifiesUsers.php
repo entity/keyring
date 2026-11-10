@@ -105,7 +105,8 @@ trait IdentifiesUsers
     /**
      * Find the user a password sign in is for your own way, e.g. by email or
      * username, or skipping banned accounts. Return null for no account;
-     * Keyring checks the password and answers the same either way.
+     * Keyring checks the password and answers the same either way. It's
+     * called to count an attempt as well as to check it, so keep it a lookup.
      *
      * @param  Closure(Request): ((Authenticatable&Model)|null)  $callback
      */
