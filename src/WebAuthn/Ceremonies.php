@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Model;
 use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
+use LogicException;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
 use Symfony\Component\Serializer\Normalizer\AbstractObjectNormalizer;
@@ -227,6 +228,8 @@ class Ceremonies
 
     /**
      * Origins allowed to complete ceremonies, normalised to scheme://host[:port].
+     * Empty when none of them is a full URL, and then every ceremony is
+     * refused.
      *
      * @return list<string>
      */
@@ -293,9 +296,15 @@ class Ceremonies
 
     protected function steps(): CeremonyStepManagerFactory
     {
+        $origins = $this->origins();
+
+        // The library takes an empty list as no list, and then accepts any
+        // https origin on the relying party's host, whatever the port.
+        throw_if($origins === [], LogicException::class, 'Keyring has no origin to check WebAuthn responses against. Set APP_URL to a full URL such as https://example.com, or list full URLs in keyring.webauthn.origins.');
+
         $factory = new CeremonyStepManagerFactory;
         $factory->setAlgorithmManager($this->algorithms());
-        $factory->setAllowedOrigins($this->origins());
+        $factory->setAllowedOrigins($origins);
         $factory->setAttestationStatementSupportManager($this->attestationSupport());
 
         return $factory;
@@ -313,7 +322,8 @@ class Ceremonies
 
     /**
      * Expected failures (bad signature, wrong origin, replayed counter) aren't
-     * worth reporting. Anything else is a bug.
+     * worth reporting. Anything else is a bug, or a setting that needs
+     * fixing, and is reported while the ceremony is refused.
      */
     protected function isRejection(Throwable $e): bool
     {

@@ -4,6 +4,7 @@ use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Http\Request;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
@@ -376,12 +377,37 @@ it('lets a passkey satisfy a phishing resistant policy', function () {
         ->assertRedirect('/dashboard');
 });
 
-it('accepts no origin, without failing, when the app has no url', function () {
+it('has no origin, without failing, when the app has no url', function () {
     config(['app.url' => null]);
 
     expect(app(Ceremonies::class)->origins())->toBe([])
         ->and(app(Ceremonies::class)->relyingPartyId())->toBe('localhost');
 });
+
+// The library would otherwise fall back to any https origin on the relying
+// party's host, on any port.
+it('refuses every response, and reports why, when no origin is a full url', function (array $config) {
+    $key = new VirtualAuthenticator(origin: 'https://example.test');
+    config(['app.url' => 'https://example.test']);
+    enroll('passkey', $key);
+
+    config(['keyring.webauthn.relying_party.id' => 'example.test', ...$config]);
+    Exceptions::fake();
+
+    foreach (['https://example.test', 'https://example.test:8443'] as $origin) {
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+
+        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options, origin: $origin)])
+            ->assertSessionHasErrors();
+        $this->assertGuest();
+    }
+
+    Exceptions::assertReported(fn (LogicException $e) => str_contains($e->getMessage(), 'no origin'));
+})->with([
+    'no app url' => [['app.url' => null]],
+    'an app url without a scheme' => [['app.url' => 'example.test']],
+    'origins listed as host names' => [['keyring.webauthn.origins' => ['example.test']]],
+]);
 
 it('answers from the app\'s own origin by default, port and all', function () {
     config(['app.url' => 'http://localhost:8765']);
