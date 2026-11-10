@@ -24,7 +24,7 @@ class PasswordController
      */
     public function update(Request $request, UpdatesUserPasswords $updater, PasswordChanges $passwords, Sessions $sessions): StatusResponse
     {
-        $user = $request->user();
+        $user = $this->keyring->user();
 
         // Keyring's own field; the rest of the request is the action's.
         $request->validate(['sign_out_others' => ['sometimes', 'boolean']]);

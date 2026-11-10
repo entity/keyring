@@ -33,6 +33,6 @@ class SmsCode extends CodeFactor
 
     protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, string $code): void
     {
-        static::$sent[$authenticator->secret] = $code;
+        static::$sent[(string) $authenticator->secret] = $code;
     }
 }

@@ -149,6 +149,6 @@ abstract class Factor implements FactorContract
      */
     protected function normalizeCode(#[\SensitiveParameter] string $code): string
     {
-        return preg_replace('/[\s-]+/', '', $code);
+        return (string) preg_replace('/[\s-]+/', '', $code);
     }
 }

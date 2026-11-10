@@ -33,11 +33,13 @@ class ImpossibleTravel extends Signal
             ->latest('last_seen_at')
             ->first();
 
-        if ($last === null) {
+        $there = $last?->location;
+
+        if ($last?->last_seen_at === null || ! isset($there['latitude'], $there['longitude'])) {
             return null;
         }
 
-        $km = $this->distance($last->location['latitude'], $last->location['longitude'], $here['latitude'], $here['longitude']);
+        $km = $this->distance($there['latitude'], $there['longitude'], $here['latitude'], $here['longitude']);
         $hours = max(1 / 60, $last->last_seen_at->diffInSeconds(now()) / 3600);
 
         return $km >= $this->minKm && $km / $hours > $this->maxKph

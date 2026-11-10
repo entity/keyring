@@ -21,7 +21,9 @@ class EnsureNotRiskLocked
     {
         $context->riskLockChecked = true;
 
-        if ($context->attempt->purpose === Purpose::Login && $this->locks->locked($context->attempt->user())) {
+        $attempt = $context->attempt();
+
+        if ($attempt->purpose === Purpose::Login && $this->locks->locked($attempt->user())) {
             return $context->fail();
         }
 

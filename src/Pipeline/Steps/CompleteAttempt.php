@@ -25,7 +25,7 @@ class CompleteAttempt
 
     public function handle(Context $context, Closure $next): Context
     {
-        $attempt = $context->attempt;
+        $attempt = $context->attempt();
 
         if (! $attempt->complete) {
             // A factor was just proved, so whoever planted or copied the old

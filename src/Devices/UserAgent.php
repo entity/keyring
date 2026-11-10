@@ -49,10 +49,11 @@ final class UserAgent
         $browser = self::match(self::BROWSERS, $userAgent);
         $platform = self::match(self::PLATFORMS, $userAgent);
 
-        return match (true) {
-            $browser !== null && $platform !== null => __('keyring::keyring.device_name', ['browser' => $browser, 'platform' => $platform]),
-            default => $browser ?? $platform,
-        };
+        if ($browser === null || $platform === null) {
+            return $browser ?? $platform;
+        }
+
+        return trans('keyring::keyring.device_name', ['browser' => $browser, 'platform' => $platform]);
     }
 
     /**

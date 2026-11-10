@@ -58,7 +58,7 @@ class CacheSessionRegistry implements SessionRegistry
 
         return new Collection(array_keys($this->ids((string) $user->getAuthIdentifier())))
             ->map(fn (string $id) => $this->find($id))
-            ->filter(fn (?RegisteredSession $session) => $session?->isActive($now))
+            ->filter(fn (?RegisteredSession $session) => $session !== null && $session->isActive($now))
             ->sortByDesc(fn (RegisteredSession $session) => $session->lastActivityAt)
             ->values();
     }

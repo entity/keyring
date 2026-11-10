@@ -11,6 +11,7 @@ use CBOR\UnsignedIntegerObject;
 use Keyring\WebAuthn\Ceremonies;
 use OpenSSLAsymmetricKey;
 use ParagonIE\ConstantTime\Base64UrlSafe;
+use RuntimeException;
 
 /**
  * A software WebAuthn authenticator for tests. It answers the options Keyring
@@ -25,6 +26,7 @@ class VirtualAuthenticator
 {
     public readonly string $credentialId;
 
+    /** @var OpenSSLAsymmetricKey|non-empty-string */
     protected OpenSSLAsymmetricKey|string $key;
 
     protected int $counter = 0;
@@ -41,9 +43,11 @@ class VirtualAuthenticator
         public bool $synced = false,
     ) {
         $this->credentialId = random_bytes(32);
-        $this->key = $algorithm === 'EdDSA'
-            ? sodium_crypto_sign_keypair()
-            : openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
+        $this->key = match ($algorithm) {
+            'EdDSA' => sodium_crypto_sign_keypair(),
+            default => openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC])
+                ?: throw new RuntimeException('OpenSSL could not make a P-256 key pair.'),
+        };
     }
 
     /**
@@ -130,7 +134,7 @@ class VirtualAuthenticator
             'challenge' => $challenge,
             'origin' => $origin ?? $this->origin ?? app(Ceremonies::class)->origins()[0] ?? 'http://localhost',
             'crossOrigin' => false,
-        ], JSON_UNESCAPED_SLASHES);
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 
     protected function authenticatorData(string $rpId, bool $attested): string
@@ -168,7 +172,7 @@ class VirtualAuthenticator
             ]);
         }
 
-        $ec = openssl_pkey_get_details($this->key)['ec'];
+        $ec = (openssl_pkey_get_details($this->key) ?: throw new RuntimeException('OpenSSL could not read the key pair.'))['ec'];
 
         return (string) MapObject::create([
             MapItem::create(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(2)),        // kty: EC2

@@ -93,6 +93,18 @@ it('signs in with a passkey alone, without a username', function (VirtualAuthent
     'Ed25519' => fn () => VirtualAuthenticator::eddsa(),
 ]);
 
+it('fails a passkey that has no public key to check, like any other wrong proof', function () {
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+    Authenticator::query()->update(['public_key' => null]);
+
+    $options = $this->getJson('/login/passkey/options')->assertOk()->json();
+
+    $this->postJson('/login/passkey', ['credential' => $key->assert($options)])
+        ->assertJsonValidationErrors('credential');
+    $this->assertGuest();
+});
+
 it('caps a passkey that syncs at aal2, as nist does', function () {
     $key = new VirtualAuthenticator(synced: true);
     enroll('passkey', $key);

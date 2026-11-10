@@ -58,7 +58,7 @@ class RiskEngine
      */
     public function push(string|Signal ...$signals): static
     {
-        return $this->signals([...$this->signals, ...$signals]);
+        return $this->signals([...$this->signals, ...array_values($signals)]);
     }
 
     /**

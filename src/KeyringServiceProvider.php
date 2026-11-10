@@ -75,7 +75,7 @@ class KeyringServiceProvider extends ServiceProvider
 
         // Keyring's services say how long they live themselves, with
         // #[Singleton] or #[Scoped]. These need building a particular way.
-        $this->app->bind(RiskLocks::class, fn (Application $app) => new RiskLocks($app['cache']->store(config('keyring.risk.store'))));
+        $this->app->bind(RiskLocks::class, fn (Application $app) => new RiskLocks($app->make('cache')->store(config('keyring.risk.store'))));
         $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
         $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
 
@@ -112,7 +112,7 @@ class KeyringServiceProvider extends ServiceProvider
 
     protected function registerMiddleware(): void
     {
-        $router = $this->app['router'];
+        $router = $this->app->make('router');
 
         $router->aliasMiddleware('keyring', RequireAssurance::class);
         $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);

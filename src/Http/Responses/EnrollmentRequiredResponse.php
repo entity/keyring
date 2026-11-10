@@ -22,7 +22,7 @@ class EnrollmentRequiredResponse implements EnrollmentRequiredResponseContract
             return new JsonResponse(['status' => 'enroll-first', 'message' => $message, 'redirect' => $url], 403);
         }
 
-        abort_if($url === null, 403, $message);
+        abort_if($url === null, 403, $message ?? '');
 
         return redirect($url)->with('status', 'enroll-first');
     }

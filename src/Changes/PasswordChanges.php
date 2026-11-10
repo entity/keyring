@@ -78,7 +78,7 @@ class PasswordChanges
 
         $this->protection->changing($save, only: [$user->getAuthPasswordName()]);
 
-        if ($user->newQuery()->find($user->getKey())?->getAuthPassword() === $before) {
+        if ($user->newQuery()->whereKey($user->getKey())->first()?->getAuthPassword() === $before) {
             throw new LogicException('The password action returned without saving a new password. Throw a ValidationException to refuse it.');
         }
 

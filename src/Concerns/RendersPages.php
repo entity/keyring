@@ -62,6 +62,8 @@ trait RendersPages
      */
     public function statusMessage(mixed $status): ?string
     {
-        return is_string($status) && Lang::has($key = 'keyring::status.'.$status) ? __($key) : null;
+        $message = is_string($status) && Lang::has($key = 'keyring::status.'.$status) ? __($key) : null;
+
+        return is_string($message) ? $message : null;
     }
 }

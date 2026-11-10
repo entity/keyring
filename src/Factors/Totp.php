@@ -107,9 +107,11 @@ class Totp extends Factor implements Enrollable
     {
         $code = $this->normalizeCode((string) $request->input('code'));
 
-        return ctype_digit($code)
+        $timestep = ctype_digit($code)
             ? $this->engine->verifyKeyNewer($secret, $code, $after, $this->window, static::timestep())
             : false;
+
+        return is_int($timestep) ? $timestep : false;
     }
 
     protected function qr(string $url): string

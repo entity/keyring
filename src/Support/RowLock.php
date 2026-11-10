@@ -25,7 +25,7 @@ final class RowLock
     public static function hold(Model $model, Closure $callback): mixed
     {
         return $model->getConnection()->transaction(
-            fn () => $callback($model->newQuery()->lockForUpdate()->find($model->getKey())),
+            fn () => $callback($model->newQuery()->lockForUpdate()->whereKey($model->getKey())->first()),
         );
     }
 }

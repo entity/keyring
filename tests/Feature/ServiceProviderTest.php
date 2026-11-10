@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\ServiceProvider;
 use Keyring\Changes\ProtectedAttributes;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Enums\Purpose;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Exceptions\UnknownFeature;
@@ -15,6 +16,7 @@ use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\KeyringServiceProvider;
 use Keyring\Login\AttemptStore;
+use Keyring\Pipeline\Context;
 use Keyring\Risk\RiskEngine;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
@@ -70,6 +72,19 @@ it('keeps a service the app replaced for as long as its own', function () {
     app()->bind(KeyringManager::class, $replacement::class);
 
     expect(app(KeyringManager::class))->toBeInstanceOf($replacement::class)->toBe(app(KeyringManager::class));
+});
+
+it('says which guard has no user provider', function () {
+    config(['keyring.guard' => 'api']);
+
+    expect(fn () => Keyring::provider())->toThrow(InvalidArgumentException::class, "Keyring's guard [api] has no user provider.");
+});
+
+it('tells a step that needs the attempt to run after the one that starts it', function () {
+    $context = new Context(request(), Purpose::Login, Keyring::factor('password'));
+
+    expect(fn () => $context->attempt())->toThrow(LogicException::class, 'has to run after VerifyFactor')
+        ->and(fn () => $context->authenticator())->toThrow(LogicException::class, 'has to run after VerifyFactor');
 });
 
 it('registers custom factors with extend, under the key they report', function () {

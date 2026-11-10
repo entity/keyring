@@ -11,7 +11,10 @@ use Illuminate\Http\Request;
 interface LocatesIps
 {
     /**
-     * @return array{country?: string, region?: string, city?: string, latitude?: float, longitude?: float}|null
+     * Whichever of these is known: country, region, city, and latitude and
+     * longitude as floats. Null when nothing is.
+     *
+     * @return array<string, mixed>|null
      */
     public function locate(Request $request): ?array;
 }

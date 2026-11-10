@@ -26,7 +26,7 @@ class DetermineRequirement
 
     public function handle(Context $context, Closure $next): Context
     {
-        $attempt = $context->attempt;
+        $attempt = $context->attempt();
 
         if (($unregistered = $attempt->keyring()->unregistered()) !== []) {
             report(UnregisteredFactor::for($attempt->user(), $unregistered));

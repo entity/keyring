@@ -18,7 +18,7 @@ class ResolveDevice
 
     public function handle(Context $context, Closure $next): Context
     {
-        $attempt = $context->attempt;
+        $attempt = $context->attempt();
 
         if (! $attempt->deviceResolved) {
             $attempt->resolveDevice($this->devices->find($context->request, $attempt->user())?->id);

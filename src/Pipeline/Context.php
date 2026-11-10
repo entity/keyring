@@ -9,6 +9,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use LogicException;
 
 /**
  * What travels through the verification pipeline.
@@ -38,6 +39,23 @@ final class Context
         public ?Authenticator $authenticator = null,
     ) {
         $this->identifying = $attempt === null && $factor instanceof PrimaryFactor;
+    }
+
+    /**
+     * The attempt being verified. There's one from VerifyFactor onwards: it
+     * starts the attempt when a primary factor identifies the user.
+     */
+    public function attempt(): Attempt
+    {
+        return $this->attempt ?? throw new LogicException('This step needs the attempt, so it has to run after VerifyFactor.');
+    }
+
+    /**
+     * The authenticator being verified, known from VerifyFactor onwards.
+     */
+    public function authenticator(): Authenticator
+    {
+        return $this->authenticator ?? throw new LogicException('This step needs the authenticator, so it has to run after VerifyFactor.');
     }
 
     public function fail(): self

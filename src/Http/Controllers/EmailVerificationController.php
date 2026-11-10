@@ -39,14 +39,18 @@ class EmailVerificationController
             return $this->keyring->response(VerifiedResponse::class);
         }
 
-        $request->user()->sendEmailVerificationNotification();
+        $user = $this->keyring->user();
+
+        if ($user instanceof MustVerifyEmail) {
+            $user->sendEmailVerificationNotification();
+        }
 
         return $this->status('verification-link-sent');
     }
 
     protected function verified(Request $request): bool
     {
-        $user = $request->user();
+        $user = $this->keyring->user();
 
         return ! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail();
     }

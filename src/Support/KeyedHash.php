@@ -23,7 +23,7 @@ final class KeyedHash
     {
         return array_map(
             fn (string $key) => self::make($value, $key),
-            [config('app.key'), ...config('app.previous_keys', [])],
+            array_values([config('app.key'), ...config('app.previous_keys', [])]),
         );
     }
 }
