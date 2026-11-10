@@ -212,6 +212,12 @@ it('refuses a password that is not a string when removing the last second factor
     expect(Authenticator::find($totp->id))->not->toBeNull();
 });
 
+it('gives an authenticator its usual name when the one sent is not text', function () {
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => ['x']])->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000', 'name' => ['x']])
+        ->assertJsonValidationErrors('name');
+});
+
 it('limits password guesses when removing the last second factor', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 

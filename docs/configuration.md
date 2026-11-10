@@ -199,12 +199,13 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 'email_changes' => [
     'confirmable_for' => '24h',
     'revertable_for' => '7d',
+    'established_after' => '7d',
     'sign_out_others' => true,
     'keep_ended_for' => '30d',
 ],
 ```
 
-`confirmable_for` is how long the emailed confirmation link works, and `revertable_for` how long the old address can undo the change afterwards. `sign_out_others` ends the account's other sessions when an email change applies. `keep_ended_for` is how long a finished change is kept before `keyring:prune` deletes it.
+`confirmable_for` is how long the emailed confirmation link works, and `revertable_for` how long the old address can undo the change afterwards. `established_after` is how long the account must have had a second factor before proving it lets a change skip the old address's confirmation, and how far back undoing a change removes sign-in methods. See [Confirming](protected-changes.md#confirming). `sign_out_others` ends the account's other sessions when an email change applies. `keep_ended_for` is how long a finished change is kept before `keyring:prune` deletes it.
 
 `Features::updatePasswords()` adds `password` to the protected attributes, and `Features::emailChanges()` adds the [`email` attribute](#guard-and-users). List any others in `protected`. See [Protected Changes](protected-changes.md).
 

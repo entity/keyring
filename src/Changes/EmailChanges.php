@@ -40,7 +40,7 @@ use function Illuminate\Support\defer;
  *  3. Once confirmed, the change applies, and can still be reverted from the
  *     old address for a while. Meanwhile nobody else can take the old
  *     address. Reverting signs everything out, closes any later changes, and
- *     removes sign-in methods added since the session that asked signed in.
+ *     removes sign-in methods too new to be the owner's for certain.
  *
  * Nothing reveals whether the new address belongs to another account.
  */
@@ -162,8 +162,8 @@ class EmailChanges
 
     /**
      * "This wasn't me": put the address back, close every later change, remove
-     * sign-in methods added since the session that asked for the change signed
-     * in, and sign out everywhere. The address goes back even when it was a
+     * sign-in methods that weren't established when the change was asked for,
+     * and sign out everywhere. The address goes back even when it was a
      * later change that moved it, since the link for an earlier, cancelled
      * one still works. Returns whether the link was good.
      */
@@ -184,7 +184,7 @@ class EmailChanges
 
             if ($user !== null) {
                 $this->closeLaterChanges($user, $change);
-                $this->removeAuthenticatorsAddedSince($user, $change->signed_in_at ?? $change->created_at ?? now());
+                $this->removeAuthenticatorsAddedSince($user, $this->unestablishedSince($change));
             }
 
             return true;
@@ -233,10 +233,12 @@ class EmailChanges
 
     /**
      * Skip the current-address confirmation only when this session proved a
-     * second factor that existed before it signed in. Factors added during
-     * the session don't count, or a stolen session could add one, verify it,
-     * and skip the check. Only this account's own factors count: a switched
-     * or impersonated session may hold someone else's verifications.
+     * second factor the account has had for a while ("established_after"),
+     * and since before the session signed in. A newer one doesn't count, or
+     * whoever got in could add one, verify it and skip the check, in this
+     * session or by signing in again with it. Only this account's own
+     * factors count: a switched or impersonated session may hold someone
+     * else's verifications.
      */
     protected function sessionProvedEstablishedSecondFactor(Authenticatable&Model $user, ?CarbonInterface $signedInAt): bool
     {
@@ -252,7 +254,7 @@ class EmailChanges
         return $ids->isNotEmpty() && $this->keyring->authenticatorModel()::query()
             ->ownedBy($user)
             ->whereKey($ids->all())
-            ->where('created_at', '<', $signedInAt)
+            ->where('created_at', '<', $signedInAt->min($this->establishedBefore(now())))
             ->exists();
     }
 
@@ -355,6 +357,27 @@ class EmailChanges
     }
 
     /**
+     * The moment before which a sign-in method had been on the account long
+     * enough, at the given time, to count as its owner's.
+     */
+    protected function establishedBefore(CarbonInterface $at): CarbonInterface
+    {
+        return $at->copy()->subSeconds(Duration::seconds(config('keyring.email_changes.established_after')));
+    }
+
+    /**
+     * Since when a sign-in method could be the work of whoever asked for the
+     * change: it wasn't established yet when they asked, or it was added
+     * after their session signed in.
+     */
+    protected function unestablishedSince(PendingChange $change): CarbonInterface
+    {
+        $asked = $change->created_at ?? now();
+
+        return ($change->signed_in_at ?? $asked)->min($this->establishedBefore($asked));
+    }
+
+    /**
      * One by one, so each removal is logged and announced.
      */
     protected function removeAuthenticatorsAddedSince(Authenticatable&Model $user, CarbonInterface $since): void
@@ -371,7 +394,8 @@ class EmailChanges
 
     protected function taken(Authenticatable&Model $user, string $email): bool
     {
-        return $user->newQuery()->where($this->attribute(), $email)->whereKeyNot($user->getKey())->exists()
+        // Without global scopes: a soft deleted account still holds its address.
+        return $user->newQuery()->withoutGlobalScopes()->where($this->attribute(), $email)->whereKeyNot($user->getKey())->exists()
             || $this->reserved->has($email, except: $user);
     }
 

@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Keyring\Support\Input;
 
 /**
  * The guard Keyring signs users in to, and how a typed username finds one
@@ -123,7 +124,7 @@ trait IdentifiesUsers
     {
         $user = $this->userFinder === null
             ? $this->provider()->retrieveByCredentials([
-                $this->username() => $this->normalizeUsername((string) $request->input($this->username())),
+                $this->username() => $this->normalizeUsername(Input::text($request, $this->username())),
             ])
             : ($this->userFinder)($request);
 

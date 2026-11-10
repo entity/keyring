@@ -52,7 +52,7 @@ function sentTo(string $address, string $notification): object
  */
 function signInWithTotp(User $user): void
 {
-    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
 
     test()->post('/login', ['email' => $user->email, 'password' => 'password']);
     test()->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);

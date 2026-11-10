@@ -20,7 +20,6 @@ use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\AuthenticatorSelectionCriteria;
-use Webauthn\CredentialRecord;
 use Webauthn\Exception\CounterException;
 use Webauthn\PublicKeyCredentialDescriptor;
 
@@ -180,16 +179,10 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             // Against the locked row, so parallel assertions can't both pass
             // one stored count and a slower write can't lower it.
             $this->consume($actual, function (Authenticator $locked) use (&$result, $credential, $options) {
-                // Nothing to check a signature against.
-                if ($locked->public_key === null) {
-                    return false;
-                }
+                $record = $this->ceremonies()->record($locked->public_key);
 
-                $result = $this->ceremonies()->assert(
-                    $credential,
-                    $options,
-                    $this->ceremonies()->fromJson($locked->public_key, CredentialRecord::class),
-                );
+                // Without a record there's nothing to check a signature against.
+                $result = $record === null ? null : $this->ceremonies()->assert($credential, $options, $record);
 
                 if ($result === null) {
                     return false;

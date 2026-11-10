@@ -190,6 +190,9 @@ return [
     |
     | An email change can be confirmed from its emailed link for
     | "confirmable_for", and undone from the old address for "revertable_for".
+    | A second factor only lets a change skip the old address's confirmation
+    | once the account has had it for "established_after", and undoing a
+    | change removes the sign-in methods newer than that.
     |
     */
 
@@ -198,6 +201,7 @@ return [
     'email_changes' => [
         'confirmable_for' => '24h',
         'revertable_for' => '7d',
+        'established_after' => '7d',
         'sign_out_others' => true,
         'keep_ended_for' => '30d',
     ],

@@ -108,7 +108,7 @@ All of these emails are sent after the response (with Laravel's `defer()`), so h
 
 ### Confirming
 
-The new address must always confirm. The current address must confirm too, unless this session proved a possession factor that the user already had **before** this session signed in. A factor added during the session doesn't count, so a stolen session can't add one, use it, and skip the check, and neither does another account's factor, so an impersonated or switched session can't skip it with the admin's.
+The new address must always confirm. The current address must confirm too, unless this session proved a possession factor the account has had for `email_changes.established_after` (7 days by default), and since before this session signed in. A newer factor doesn't count, so whoever got in can't add one, use it and skip the check, in the same session or by signing in again with it. Neither does another account's factor, so an impersonated or switched session can't skip it with the admin's.
 
 The change applies once every required confirmation is in. When it applies, Keyring checks the address is still the one the change was requested from, and that no one else has taken the new one in the meantime. If either has changed, the pending change is cancelled. Applying also sets `email_verified_at`, when the model has that attribute loaded, and stops trusting the user's devices.
 
@@ -131,7 +131,7 @@ The current address can revert the change while it's pending, and for `email_cha
 
 - puts the old address back, even when it was a later change that moved it,
 - cancels any later email changes, so links from them can't move the address away again,
-- deletes every authenticator added since the session that asked for the change signed in, one at a time, dispatching `AuthenticatorRemoved` for each, so one added just before asking goes too,
+- deletes every authenticator that wasn't established when the change was asked for (added within `email_changes.established_after` before it, or since the session that asked signed in), one at a time, dispatching `AuthenticatorRemoved` for each. That can include one the owner added that week, which they can add again,
 - signs out every session, and changes the "remember me" token.
 
 The user is then redirected to the forgot password page (or the login page, when password resets are off) with `status` set to `email-change-reverted`, since whoever made the change may also know the password. Reverting doesn't change the password itself.

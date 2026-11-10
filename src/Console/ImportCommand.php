@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Schema;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Models\Authenticator;
+use Keyring\WebAuthn\Ceremonies;
+use ParagonIE\ConstantTime\Base64UrlSafe;
 use stdClass;
 use Symfony\Component\Console\Attribute\AsCommand;
 
@@ -140,7 +142,8 @@ class ImportCommand extends Command
 
     protected function importTwoFactor(Model $user): void
     {
-        if ($this->alreadyInKeyring($user)) {
+        // A stand-in is an import that failed before, still to be finished.
+        if (! $this->unusable($user)->exists() && $this->alreadyInKeyring($user, 'fortify')) {
             return;
         }
 
@@ -294,13 +297,14 @@ class ImportCommand extends Command
             return;
         }
 
-        if ($this->alreadyInKeyring($user)) {
+        if ($this->alreadyInKeyring($user, 'laravel/passkeys', "passkey {$passkey->id} of ")) {
             return;
         }
 
         $credential = is_string($passkey->credential) ? json_decode($passkey->credential, true) : (array) $passkey->credential;
 
-        if (! is_array($credential) || $credential === []) {
+        // Anything else would be stored, then fail every time it's read.
+        if (! is_array($credential) || ! $this->isCredentialId($passkey->credential_id) || app(Ceremonies::class)->record((string) json_encode($credential)) === null) {
             $this->issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: its credential is in an unexpected format";
 
             return;
@@ -331,8 +335,13 @@ class ImportCommand extends Command
      * than a failed import's stand-in. Once they have, what they have is
      * theirs: importing again would bring back a factor they removed, or a
      * second set of recovery codes, including ones already spent.
+     *
+     * Something left out is said so. A source imported before is counted as
+     * already imported, while one a past run brought nothing from is listed
+     * as skipped: it failed then, or the user removed it since, and nothing
+     * here can tell which.
      */
-    protected function alreadyInKeyring(Model $user): bool
+    protected function alreadyInKeyring(Model $user, string $source, string $what = ''): bool
     {
         $authenticators = fn () => Keyring::authenticatorModel()::query()->ownedBy($user)->whereNull('meta->import_failed_from');
 
@@ -340,14 +349,28 @@ class ImportCommand extends Command
             return false;
         }
 
-        if ($authenticators()->whereNotNull('meta->imported_from')->exists()) {
+        $reason = match (true) {
+            $authenticators()->where('meta->imported_from', $source)->exists() => null,
+            $authenticators()->whereNotNull('meta->imported_from')->exists() => 'an earlier import left this out, or they removed it since, so it stays out. Add it again in the app if it should be there',
+            default => "they already have sign-in methods in Keyring, so Fortify's are left out",
+        };
+
+        if ($reason === null) {
             $this->counts['already_imported']++;
-        } else {
-            $this->issues['skipped'][] = "user {$user->getKey()}: they already have sign-in methods in Keyring, so Fortify's are left out";
-            $this->issues['skipped'] = $this->issues['skipped'] |> array_unique(...) |> array_values(...);
+        } elseif (! in_array($issue = "{$what}user {$user->getKey()}: {$reason}", $this->issues['skipped'], true)) {
+            $this->issues['skipped'][] = $issue;
         }
 
         return true;
+    }
+
+    /**
+     * Whether the ID is unpadded base64url, as Keyring keeps and looks up
+     * credential IDs.
+     */
+    protected function isCredentialId(mixed $id): bool
+    {
+        return is_string($id) && $id !== '' && rescue(fn () => Base64UrlSafe::encodeUnpadded(Base64UrlSafe::decodeNoPadding($id)) === $id, false, report: false);
     }
 
     /**

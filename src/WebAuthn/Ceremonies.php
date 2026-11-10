@@ -195,9 +195,22 @@ class Ceremonies
     {
         $existing = $this->keyring->authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
 
-        return $existing === null
-            ? KeyedHash::make('keyring|'.$user->getAuthIdentifier())
-            : $this->fromJson($existing, CredentialRecord::class)->userHandle;
+        return $this->record($existing)->userHandle ?? KeyedHash::make('keyring|'.$user->getAuthIdentifier());
+    }
+
+    /**
+     * A stored credential record, or null when there's none or it can't be
+     * read: a row that came from somewhere that kept another format.
+     */
+    public function record(?string $json): ?CredentialRecord
+    {
+        try {
+            return $json === null ? null : $this->fromJson($json, CredentialRecord::class);
+        } catch (Throwable $e) {
+            report_if(! $this->isRejection($e), $e);
+
+            return null;
+        }
     }
 
     public function relyingPartyId(): string
