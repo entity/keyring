@@ -1,6 +1,8 @@
 <?php
 
+use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -8,7 +10,11 @@ use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\Enrollment;
+use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\Password;
+use Keyring\Factors\Totp;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\ConsecutiveLimit;
@@ -16,6 +22,7 @@ use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 use Keyring\Tests\Fixtures\User;
+use PragmaRX\Google2FA\Google2FA;
 
 function device(User $user, array $attributes = []): Device
 {
@@ -119,4 +126,25 @@ it('answers with the app\'s own responses when a session ends or needs confirmin
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->travel(16)->minutes();
     $this->get('/account')->assertStatus(418)->assertSee('confirm first');
+});
+
+it('sends email codes of the length the app picks, for as long as it picks', function () {
+    Notification::fake();
+    Keyring::factors([Password::class, EmailCode::asSecondFactor(length: 6, expireAfter: '5m')]);
+
+    $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.authenticators.store', 'email-code'))
+        ->assertJsonPath('enrollment.length', 6);
+
+    Notification::assertSentTo(auth()->user(), VerificationCode::class, fn (VerificationCode $code) => strlen($code->code) === 6 && $code->minutes === 5);
+});
+
+it('names the issuer an authenticator app shows, when the app gives one', function () {
+    Keyring::factors([Password::class, new Totp(app(Google2FA::class), issuer: 'Acme Staff')]);
+
+    $url = $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.authenticators.store', 'totp'))
+        ->json('enrollment.url');
+
+    expect($url)->toContain('issuer=Acme%20Staff');
 });
