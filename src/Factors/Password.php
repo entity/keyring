@@ -27,8 +27,6 @@ class Password extends Factor implements PrimaryFactor
 {
     public const string KEY = 'password';
 
-    private static ?string $dummyHash = null;
-
     public function key(): string
     {
         return self::KEY;
@@ -76,8 +74,10 @@ class Password extends Factor implements PrimaryFactor
         $user = Keyring::findUser($request);
 
         if ($user === null || blank($user->getAuthPassword())) {
-            // Spend the same time hashing as a real check would.
-            Hash::check(Str::random(32), self::$dummyHash ??= Hash::make(Str::random(32)));
+            // Spend the time a real check would: one hash, on every request.
+            // Keeping a hash to check against would only save its cost where
+            // the process outlives the request, and show which those are.
+            Hash::make(Str::random(32));
 
             return null;
         }

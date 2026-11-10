@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Hashing\BcryptHasher;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
@@ -104,6 +105,42 @@ it('gives the same error for a wrong password and an unknown account', function 
     expect($wrong)->toBe($unknown)->toBe(__('auth.failed'));
     $this->assertGuest();
     Event::assertDispatchedTimes(FactorFailed::class, 2);
+});
+
+// The timebox only pads a refusal up to its length, so the two have to cost
+// the same underneath it, in a process that lives for one request too.
+it('hashes once for a wrong password and once for an unknown account', function () {
+    taylor();
+
+    $hasher = new class extends BcryptHasher
+    {
+        /** @var list<string> */
+        public array $calls = [];
+
+        public function make(#[SensitiveParameter] $value, array $options = [])
+        {
+            $this->calls[] = 'make';
+
+            return parent::make($value, $options);
+        }
+
+        public function check(#[SensitiveParameter] $value, $hashedValue, array $options = [])
+        {
+            $this->calls[] = 'check';
+
+            return parent::check($value, $hashedValue, $options);
+        }
+    };
+
+    Hash::extend('counting', fn () => $hasher);
+    config(['hashing.driver' => 'counting']);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+    expect($hasher->calls)->toBe(['check']);
+
+    $this->post('/login', ['email' => 'nobody@example.com', 'password' => 'nope']);
+    $this->post('/login', ['email' => 'nobody@example.com', 'password' => 'nope']);
+    expect($hasher->calls)->toBe(['check', 'make', 'make']);
 });
 
 it('asks for a second factor when one is enrolled', function () {
