@@ -2,6 +2,7 @@
 
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
+use Keyring\Http\Middleware\PreventCaching;
 
 return [
 
@@ -14,11 +15,17 @@ return [
     | to identify them at login (typically "email"). Login is case-insensitive
     | on this attribute, so store it lowercased.
     |
+    | "email" is the attribute holding their address, for password resets,
+    | email changes and email codes. It's only different from "username" when
+    | users sign in with something else, like a handle.
+    |
     */
 
     'guard' => 'web',
 
     'username' => 'email',
+
+    'email' => 'email',
 
     /*
     |--------------------------------------------------------------------------
@@ -56,7 +63,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Keyring registers its routes under these middleware. Set "routes" to
-    | false to register them yourself with Keyring::routes().
+    | false to register them yourself with Keyring::routes(). PreventCaching
+    | keeps auth pages out of caches and their URLs out of Referer headers.
     |
     */
 
@@ -66,7 +74,7 @@ return [
 
     'domain' => null,
 
-    'middleware' => ['web'],
+    'middleware' => ['web', PreventCaching::class],
 
     /*
     |--------------------------------------------------------------------------

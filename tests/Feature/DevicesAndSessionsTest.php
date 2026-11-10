@@ -312,6 +312,13 @@ it('never lets auth pages be cached', function () {
     $this->get('/login')->assertHeader('Cache-Control', 'no-store, private');
 });
 
+it('leaves caching to an app that takes the middleware out of the config', function () {
+    config(['keyring.middleware' => ['web']]);
+    withFeatures(Features::all());
+
+    $this->get('/login')->assertHeaderMissing('Referrer-Policy');
+});
+
 it('cycles the remember token when a device is revoked', function () {
     $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
     $token = $this->user->fresh()->remember_token;

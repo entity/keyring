@@ -192,7 +192,7 @@ class KeyringServiceProvider extends ServiceProvider
         if (Features::enabled(Features::resetPasswords()) && ResetPassword::$createUrlCallback === null) {
             ResetPassword::createUrlUsing(fn (CanResetPassword $notifiable, string $token) => Url::route('password.reset', [
                 'token' => $token,
-                'email' => $notifiable->getEmailForPasswordReset(),
+                config('keyring.email') => $notifiable->getEmailForPasswordReset(),
             ]));
         }
     }

@@ -24,7 +24,7 @@ class ReservedAddresses
     public function has(string $address, ?Model $except = null): bool
     {
         return $this->keyring->pendingChangeModel()::query()
-            ->where('attribute', $this->keyring->username())
+            ->where('attribute', $this->keyring->email())
             ->reserving($address)
             ->when($except?->exists, fn (Builder $query) => $query->whereNot(fn (Builder $query) => $query->ownedBy($except)))
             ->exists();
@@ -35,7 +35,7 @@ class ReservedAddresses
      */
     public function guard(Model $user): void
     {
-        $attribute = $this->keyring->username();
+        $attribute = $this->keyring->email();
         $address = $user->getAttribute($attribute);
 
         if ($user->isDirty($attribute) && is_string($address) && $this->has($address, except: $user)) {

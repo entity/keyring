@@ -15,7 +15,7 @@ class EmailVerificationRequired extends LogicException
      */
     public static function forRegistration(string $model): self
     {
-        return new self("[{$model}] implements MustVerifyEmail, so new users get a verification email, but email verification isn't on. Add Features::emailVerification() to the features in config/keyring.php.");
+        return new self("[{$model}] implements MustVerifyEmail, so new users get a verification email, but there's no [verification.verify] route for its link. Add Features::emailVerification() to the features in config/keyring.php, or define the route yourself.");
     }
 
     /**
@@ -24,6 +24,6 @@ class EmailVerificationRequired extends LogicException
      */
     public static function forEnrollment(string $model): self
     {
-        return new self("Registration is on, so anyone could sign up with someone else's address and add a sign-in method that outlives the owner's password reset. Users must verify their address first: implement MustVerifyEmail on [{$model}] and add Features::emailVerification() to the features in config/keyring.php.");
+        return new self("Registration is on, so anyone could sign up with someone else's address and add a sign-in method that outlives the owner's password reset. Users must verify their address first: implement MustVerifyEmail on [{$model}] and add Features::emailVerification() to the features in config/keyring.php. If you prove addresses another way, say who may add one with Keyring::allowEnrollmentWhen().");
     }
 }

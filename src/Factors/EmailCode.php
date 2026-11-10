@@ -45,7 +45,7 @@ class EmailCode extends CodeFactor
 
     public function present(Authenticator $authenticator): array
     {
-        return [...parent::present($authenticator), 'hint' => MailText::maskAddress((string) $authenticator->user()->getAttribute('email'))];
+        return [...parent::present($authenticator), 'hint' => MailText::maskAddress((string) $authenticator->user()->getAttribute(Keyring::email()))];
     }
 
     /**
