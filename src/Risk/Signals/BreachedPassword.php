@@ -4,6 +4,7 @@ namespace Keyring\Risk\Signals;
 
 use Illuminate\Contracts\Validation\UncompromisedVerifier;
 use Keyring\Contracts\Signal;
+use Keyring\Factors\Password;
 use Keyring\Login\Verification;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
@@ -24,7 +25,7 @@ class BreachedPassword implements Signal
     public function assess(Assessment $assessment): ?Finding
     {
         $verifications = $assessment->attempt->verifications ?? [];
-        $usedPassword = array_any($verifications, fn (Verification $verification) => $verification->factor === 'password');
+        $usedPassword = array_any($verifications, fn (Verification $verification) => $verification->factor === Password::KEY);
         $password = $assessment->request->input('password');
 
         if (! $usedPassword || ! is_string($password)) {

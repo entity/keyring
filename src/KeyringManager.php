@@ -38,6 +38,7 @@ use Keyring\Exceptions\MissingNotification;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
+use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
@@ -605,7 +606,7 @@ class KeyringManager
      *
      * @throws ValidationException
      */
-    public function attempt(Request $request, string $factor = 'password'): Response
+    public function attempt(Request $request, string $factor = Password::KEY): Response
     {
         $factor = $this->factor($factor);
 

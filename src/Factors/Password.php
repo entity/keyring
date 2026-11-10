@@ -25,16 +25,18 @@ use Keyring\Support\PasswordRules;
  */
 class Password extends Factor implements PrimaryFactor
 {
-    public function startsLogin(): bool
-    {
-        return true;
-    }
+    public const string KEY = 'password';
 
     private static ?string $dummyHash = null;
 
     public function key(): string
     {
-        return 'password';
+        return self::KEY;
+    }
+
+    public function startsLogin(): bool
+    {
+        return true;
     }
 
     public function categories(Authenticator $authenticator): array

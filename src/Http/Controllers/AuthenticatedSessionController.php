@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\DiscoverableFactor;
 use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Events\LoggedOut;
+use Keyring\Factors\Password;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -44,7 +45,7 @@ class AuthenticatedSessionController
     /**
      * Start a login with a primary factor (the password by default).
      */
-    public function store(Request $request, string $factor = 'password'): mixed
+    public function store(Request $request, string $factor = Password::KEY): mixed
     {
         return $this->keyring->attempt($request, $factor);
     }

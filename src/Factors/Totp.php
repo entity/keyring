@@ -26,6 +26,8 @@ use PragmaRX\Google2FA\Google2FA;
  */
 class Totp extends Factor implements Enrollable
 {
+    public const string KEY = 'totp';
+
     public function __construct(
         protected Google2FA $engine,
         protected int $window = 1,
@@ -34,7 +36,7 @@ class Totp extends Factor implements Enrollable
 
     public function key(): string
     {
-        return 'totp';
+        return self::KEY;
     }
 
     public function categories(Authenticator $authenticator): array
@@ -101,7 +103,7 @@ class Totp extends Factor implements Enrollable
      * The time step the request's code is from, if it's a valid code for the
      * secret newer than the given step.
      */
-    protected function check(string $secret, Request $request, int $after = 0): int|false
+    protected function check(#[\SensitiveParameter] string $secret, Request $request, int $after = 0): int|false
     {
         $code = $this->normalizeCode((string) $request->input('code'));
 

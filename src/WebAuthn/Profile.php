@@ -10,6 +10,10 @@ use Webauthn\AuthenticatorSelectionCriteria;
  */
 final readonly class Profile
 {
+    public const string PASSKEY = 'passkey';
+
+    public const string SECURITY_KEY = 'security-key';
+
     public function __construct(
         public string $key,
         public string $residentKey,
@@ -25,7 +29,7 @@ final readonly class Profile
     public static function passkeys(): self
     {
         return new self(
-            key: 'passkey',
+            key: self::PASSKEY,
             residentKey: AuthenticatorSelectionCriteria::RESIDENT_KEY_REQUIREMENT_REQUIRED,
             userVerification: AuthenticatorSelectionCriteria::USER_VERIFICATION_REQUIREMENT_REQUIRED,
             primary: true,
@@ -40,7 +44,7 @@ final readonly class Profile
     public static function securityKeys(): self
     {
         return new self(
-            key: 'security-key',
+            key: self::SECURITY_KEY,
             residentKey: AuthenticatorSelectionCriteria::RESIDENT_KEY_REQUIREMENT_DISCOURAGED,
             userVerification: AuthenticatorSelectionCriteria::USER_VERIFICATION_REQUIREMENT_PREFERRED,
             primary: false,

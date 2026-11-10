@@ -24,11 +24,11 @@ use ParagonIE\ConstantTime\Base32;
  */
 class RecoveryCodes extends Factor implements Enrollable
 {
+    public const string KEY = 'recovery';
+
     public function __construct(
         protected int $count = 8,
     ) {}
-
-    public const string KEY = 'recovery';
 
     public function key(): string
     {
@@ -132,7 +132,7 @@ class RecoveryCodes extends Factor implements Enrollable
     /**
      * A recovery codes authenticator for the given secret.
      */
-    public function make(string $secret): Authenticator
+    public function make(#[\SensitiveParameter] string $secret): Authenticator
     {
         return $this->makeAuthenticator(['name' => __('Recovery codes'), 'secret' => $secret]);
     }
@@ -160,7 +160,7 @@ class RecoveryCodes extends Factor implements Enrollable
      *
      * @param  list<string>  $codes
      */
-    public function secretFor(array $codes): string
+    public function secretFor(#[\SensitiveParameter] array $codes): string
     {
         return json_encode(array_map($this->hash(...), $codes));
     }
@@ -173,7 +173,7 @@ class RecoveryCodes extends Factor implements Enrollable
         return json_decode($authenticator->secret ?? '[]', true) ?: [];
     }
 
-    protected function hash(string $code): string
+    protected function hash(#[\SensitiveParameter] string $code): string
     {
         return KeyedHash::make($this->normalizeCode($code));
     }
@@ -181,7 +181,7 @@ class RecoveryCodes extends Factor implements Enrollable
     /**
      * Codes are case-insensitive.
      */
-    protected function normalizeCode(string $code): string
+    protected function normalizeCode(#[\SensitiveParameter] string $code): string
     {
         return Str::lower(parent::normalizeCode($code));
     }

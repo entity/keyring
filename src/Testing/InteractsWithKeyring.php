@@ -9,10 +9,12 @@ use Illuminate\Support\Timebox;
 use Illuminate\Support\ViewErrorBag;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\WebAuthn\Profile;
 use PragmaRX\Google2FA\Google2FA;
 
 /**
@@ -104,7 +106,7 @@ trait InteractsWithKeyring
     {
         $at = ($this->keyringVerifiedAt ?? now())->getTimestamp();
 
-        $password = new Verification('password', null, [Category::Knowledge], at: $at);
+        $password = new Verification(Password::KEY, null, [Category::Knowledge], at: $at);
 
         $verifications = $this->keyringVerifiedWith !== [] ? [
             $password,
@@ -118,9 +120,9 @@ trait InteractsWithKeyring
             Assurance::AAL1 => [$password],
             Assurance::AAL2 => [
                 $password,
-                new Verification('totp', null, [Category::Possession], at: $at),
+                new Verification(Totp::KEY, null, [Category::Possession], at: $at),
             ],
-            Assurance::AAL3 => [new Verification('security-key', null, [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
+            Assurance::AAL3 => [new Verification(Profile::SECURITY_KEY, null, [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
         };
 
         return $this->withSession([
