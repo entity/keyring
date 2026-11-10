@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Concerns\BelongsToUser;
+use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 
 /**
@@ -106,7 +107,7 @@ class PendingChange extends Model
      */
     public function prunable(): Builder
     {
-        $cutoff = now()->subDays(30);
+        $cutoff = Duration::ago(config('keyring.email_changes.keep_ended_for'));
 
         return static::query()
             ->where(fn (Builder $query) => $query->whereNull('applied_at')->where('expires_at', '<', $cutoff))

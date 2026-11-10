@@ -19,7 +19,8 @@ final class Throttle
 
     /**
      * Count a code about to be sent, and refuse it when the account has been
-     * sent three for the factor in the last ten minutes. Counted per account,
+     * sent its limit for the factor (three every ten minutes, unless the
+     * limits.codes options say otherwise). Counted per account,
      * not per sign in, so starting again doesn't buy more, and sign ins,
      * step-ups and enrollments share the count.
      */
@@ -28,10 +29,10 @@ final class Throttle
         $limiter = app(RateLimiter::class);
         $key = 'keyring-send:'.$factor.'|'.$userId;
 
-        if ($limiter->tooManyAttempts($key, 3)) {
+        if ($limiter->tooManyAttempts($key, config('keyring.limits.codes'))) {
             throw self::exception('code', $limiter->availableIn($key));
         }
 
-        $limiter->hit($key, 600);
+        $limiter->hit($key, Duration::seconds(config('keyring.limits.codes_per')));
     }
 }

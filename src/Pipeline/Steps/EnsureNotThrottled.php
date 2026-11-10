@@ -16,6 +16,7 @@ use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
 use Keyring\Pipeline\SharedLimit;
+use Keyring\Support\Duration;
 
 /**
  * Checks the factor's rate limits, counts attempts and locks out repeated failures.
@@ -87,7 +88,7 @@ class EnsureNotThrottled
         }
 
         $lockouts = $this->limiter->hit($key.':lockouts', 86400);
-        $longest = $limit instanceof SharedLimit ? SharedLimit::LONGEST_LOCK : 86400;
+        $longest = Duration::seconds(config($limit instanceof SharedLimit ? 'keyring.limits.longest_ip_lock' : 'keyring.limits.longest_lock'));
 
         $this->limiter->hit($this->lock($limit), min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
         $this->limiter->clear($key);

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Models\Concerns\BelongsToUser;
+use Keyring\Support\Duration;
 use Keyring\Support\Url;
 
 /**
@@ -81,8 +82,8 @@ class Device extends Model
     public function prunable(): Builder
     {
         return static::query()
-            ->where('revoked_at', '<', now()->subDays(30))
-            ->orWhere('last_seen_at', '<', now()->subYear());
+            ->where('revoked_at', '<', Duration::ago(config('keyring.devices.keep_revoked_for')))
+            ->orWhere('last_seen_at', '<', Duration::ago(config('keyring.devices.keep_unseen_for')));
     }
 
     public function isTrusted(): bool
@@ -99,9 +100,11 @@ class Device extends Model
      * A signed link for "this wasn't me" emails. Signs the device out
      * everywhere without needing the user to be signed in.
      */
-    public function revokeUrl(int $days = 7): string
+    public function revokeUrl(?int $days = null): string
     {
-        return Url::signed('keyring.devices.report', now()->addDays($days), ['device' => $this->id]);
+        $expires = $days === null ? Duration::fromNow(config('keyring.devices.report_link_for')) : now()->addDays($days);
+
+        return Url::signed('keyring.devices.report', $expires, ['device' => $this->id]);
     }
 
     /**
