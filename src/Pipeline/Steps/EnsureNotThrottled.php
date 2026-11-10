@@ -3,6 +3,8 @@
 namespace Keyring\Pipeline\Steps;
 
 use Closure;
+use Illuminate\Cache\RateLimiting\Limit;
+use Keyring\Events\AccountLocked;
 use Keyring\Events\Lockout;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
@@ -42,11 +44,24 @@ class EnsureNotThrottled
         $context = $next($context);
 
         match ($context->outcome) {
-            Outcome::Failed => $this->throttle->failed($limits),
+            Outcome::Failed => $this->failed($context, $limits),
             Outcome::Challenge, Outcome::Complete => $this->throttle->succeeded($limits),
             default => null,
         };
 
         return $context;
+    }
+
+    /**
+     * Count the failure, and say so when it locked the account until its
+     * limits are cleared. Nobody is told for a name that found no account.
+     *
+     * @param  list<Limit>  $limits
+     */
+    protected function failed(Context $context, array $limits): void
+    {
+        if ($this->throttle->failed($limits) && $context->attempt !== null) {
+            AccountLocked::dispatch($context->attempt->user(), $context->factor->key());
+        }
     }
 }

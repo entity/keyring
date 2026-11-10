@@ -41,6 +41,8 @@ use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\VerifyFactor;
 use Keyring\Pipeline\Verifier;
 use Keyring\Risk\RiskEngine;
+use Keyring\Risk\RiskLocks;
+use Keyring\Support\Throttle;
 use Keyring\Testing\FakeVerifyFactor;
 use Keyring\Testing\KeyringFake;
 use LogicException;
@@ -407,6 +409,18 @@ class KeyringManager
         throw_if(Features::enabled(Features::registration()) && ! $verifies, EmailVerificationRequired::forEnrollment($user::class));
 
         return ! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail();
+    }
+
+    /**
+     * Let a user who's been locked out try again without resetting their
+     * password, from a support tool say. Lifts their risk lock and clears
+     * the limits and locks on the factors that can start a sign in, as a
+     * completed password reset does. A second factor's stay.
+     */
+    public function unlock(Authenticatable&Model $user): void
+    {
+        app(RiskLocks::class)->unlock($user);
+        app(Throttle::class)->clearAccount($user);
     }
 
     /**

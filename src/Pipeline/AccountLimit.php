@@ -14,9 +14,19 @@ class AccountLimit extends Limit
 {
     public bool $quiet = false;
 
+    /** How many lockouts in a day it takes for the next lock to hold until the limits are cleared. */
+    public ?int $holdAfter = null;
+
     public function quietly(bool $quiet = true): static
     {
         $this->quiet = $quiet;
+
+        return $this;
+    }
+
+    public function holdAfter(?int $lockouts): static
+    {
+        $this->holdAfter = $lockouts;
 
         return $this;
     }

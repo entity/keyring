@@ -34,6 +34,7 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (null when the user wasn't found), `authenticator` (nullable), `factor`, `request` |
 | `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. | `request`, `factor`, `retryAfter` (seconds) |
+| `AccountLocked` | Failed attempts locked the account out of a factor that can start a sign in until a password reset or `Keyring::unlock()`. Only with `limits.lock_after` set. | `user`, `factor` |
 | `Authenticated` | A login completed and the user was signed in. | `user`, `attempt`, `device` (null without `Features::devices()`) |
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |
