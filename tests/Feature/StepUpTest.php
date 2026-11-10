@@ -393,6 +393,13 @@ it('reports an expired confirmation on the field the confirm page asks for next'
     $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'totp');
 });
 
+it('answers 403 when the enrollment page itself asks for what the user has not set up', function () {
+    config(['keyring.enrollment_url' => '/billing']);
+    signIn();
+
+    $this->get('/billing')->assertForbidden();
+});
+
 it('sends a user with nothing to confirm with to set something up, not round in a loop', function () {
     $this->user->forceFill(['password' => null])->saveQuietly();
 
