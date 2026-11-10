@@ -149,7 +149,7 @@ The constructor options are: `score` on every signal, `maxKph` and `minKm` on `I
 
 ## Writing a Signal
 
-Implement `Keyring\Contracts\Signal`:
+Extend `Keyring\Risk\Signals\Signal` and write `assess()`:
 
 ```php
 namespace App\Keyring;
@@ -158,8 +158,9 @@ use Keyring\Contracts\Signal;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
+use Keyring\Risk\Signals\Signal;
 
-class BlocklistedIp implements Signal
+class BlocklistedIp extends Signal
 {
     public function assess(Assessment $assessment): ?Finding
     {
@@ -167,13 +168,10 @@ class BlocklistedIp implements Signal
             ? new Finding('blocklisted_ip', 40, 'Signing in from a blocklisted address.')
             : null;
     }
-
-    public function checkpoints(): array
-    {
-        return [Checkpoint::Login];
-    }
 }
 ```
+
+A signal runs while signing in unless its `checkpoints()` says otherwise. Return `[Checkpoint::Request]` to run on every signed-in request instead, and keep those cheap. The base class is only a default: anything that implements `Keyring\Contracts\Signal` works.
 
 The `Assessment` gives you:
 

@@ -2,7 +2,6 @@
 
 namespace Keyring\Risk\Signals;
 
-use Keyring\Contracts\Signal;
 use Keyring\Devices\UserAgent;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
@@ -13,7 +12,7 @@ use Keyring\Risk\Finding;
  * session cookie was stolen. IP changes alone are normal (mobile networks)
  * and don't count.
  */
-class SessionFingerprintChanged implements Signal
+class SessionFingerprintChanged extends Signal
 {
     public function __construct(
         protected int $score = 60,
