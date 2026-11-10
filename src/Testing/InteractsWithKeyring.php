@@ -39,7 +39,7 @@ trait InteractsWithKeyring
      */
     protected function setUpInteractsWithKeyring(): void
     {
-        $this->app->bind(Timebox::class, InstantTimebox::class);
+        app()->bind(Timebox::class, InstantTimebox::class);
     }
 
     /**
@@ -99,7 +99,7 @@ trait InteractsWithKeyring
      */
     public function totpCode(Authenticator|string $authenticator, int $step = 0): string
     {
-        return app(Google2FA::class)->oathTotp($authenticator instanceof Authenticator ? $authenticator->secret : $authenticator, Totp::timestep($step));
+        return app(Google2FA::class)->oathTotp($authenticator instanceof Authenticator ? (string) $authenticator->secret : $authenticator, Totp::timestep($step));
     }
 
     protected function withKeyringSession(): static

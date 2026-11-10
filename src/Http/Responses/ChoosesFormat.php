@@ -32,6 +32,6 @@ trait ChoosesFormat
 
         return $previous === $root || str_starts_with($previous, $root.'/')
             ? $previous
-            : url(config('keyring.home'));
+            : url()->to(config('keyring.home'));
     }
 }

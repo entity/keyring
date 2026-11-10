@@ -57,7 +57,7 @@ final class Enrollment
     }
 
     /**
-     * @param  array{factor: string, state: array<string, mixed>, expires_at: int}  $data
+     * @param  array<string, mixed>  $data
      */
     public static function fromArray(array $data): self
     {

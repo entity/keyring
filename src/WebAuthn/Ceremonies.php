@@ -80,7 +80,7 @@ class Ceremonies
             // No attestation: any authenticator is accepted, like Fortify.
             attestation: PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
             excludeCredentials: $exclude,
-            timeout: Duration::milliseconds(config('keyring.webauthn.timeout')),
+            timeout: $this->timeout(),
         );
     }
 
@@ -94,8 +94,18 @@ class Ceremonies
             rpId: $this->relyingPartyId(),
             allowCredentials: $allow,
             userVerification: $userVerification,
-            timeout: Duration::milliseconds(config('keyring.webauthn.timeout')),
+            timeout: $this->timeout(),
         );
+    }
+
+    /**
+     * How long the browser waits for the user, in milliseconds.
+     *
+     * @return int<1, max>
+     */
+    protected function timeout(): int
+    {
+        return max(1, Duration::milliseconds(config('keyring.webauthn.timeout')));
     }
 
     /**
@@ -232,7 +242,10 @@ class Ceremonies
         $serializer = $this->serializer();
         assert($serializer instanceof NormalizerInterface);
 
-        return $serializer->normalize($options, 'json', [AbstractObjectNormalizer::SKIP_NULL_VALUES => true]);
+        /** @var array<string, mixed> $normalized */
+        $normalized = $serializer->normalize($options, 'json', [AbstractObjectNormalizer::SKIP_NULL_VALUES => true]);
+
+        return $normalized;
     }
 
     public function toJson(object $value): string

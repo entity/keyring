@@ -65,7 +65,7 @@ class RecoveryCodes extends Factor implements Enrollable
             }
 
             unset($hashes[$match]);
-            $locked->secret = json_encode(array_values($hashes));
+            $locked->secret = json_encode(array_values($hashes), JSON_THROW_ON_ERROR);
 
             return true;
         });
@@ -162,7 +162,7 @@ class RecoveryCodes extends Factor implements Enrollable
      */
     public function secretFor(#[\SensitiveParameter] array $codes): string
     {
-        return json_encode(array_map($this->hash(...), $codes));
+        return json_encode(array_map($this->hash(...), $codes), JSON_THROW_ON_ERROR);
     }
 
     /**

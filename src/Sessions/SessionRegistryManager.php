@@ -23,7 +23,7 @@ class SessionRegistryManager extends Manager
     protected function createDatabaseDriver(): SessionRegistry
     {
         return new DatabaseSessionRegistry(
-            $this->container['db']->connection($this->config->get('keyring.sessions.connection')),
+            $this->container->make('db')->connection($this->config->get('keyring.sessions.connection')),
             $this->config->get('keyring.sessions.table'),
         );
     }
@@ -31,7 +31,7 @@ class SessionRegistryManager extends Manager
     protected function createCacheDriver(): SessionRegistry
     {
         return new CacheSessionRegistry(
-            $this->container['cache']->store($this->config->get('keyring.sessions.store')),
+            $this->container->make('cache')->store($this->config->get('keyring.sessions.store')),
         );
     }
 }

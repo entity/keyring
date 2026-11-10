@@ -45,8 +45,8 @@ class InstallCommand extends Command
     public function handle(Filesystem $files): int
     {
         $unknown = array_filter([
-            '--factor' => [array_diff($this->option('factor'), array_keys(self::FACTORS)), array_keys(self::FACTORS)],
-            '--feature' => [array_diff($this->option('feature'), Features::all()), Features::all()],
+            '--factor' => [array_diff((array) $this->option('factor'), array_keys(self::FACTORS)), array_keys(self::FACTORS)],
+            '--feature' => [array_diff((array) $this->option('feature'), Features::all()), Features::all()],
         ], fn (array $option) => $option[0] !== []);
 
         foreach ($unknown as $option => [$values, $known]) {
@@ -138,7 +138,7 @@ class InstallCommand extends Command
      */
     protected function factors(): array
     {
-        $chosen = $this->option('factor');
+        $chosen = (array) $this->option('factor');
 
         if ($chosen === [] && $this->input->isInteractive()) {
             $chosen = multiselect(
@@ -157,7 +157,7 @@ class InstallCommand extends Command
      */
     protected function features(array $factors): array
     {
-        $chosen = $this->option('feature');
+        $chosen = (array) $this->option('feature');
 
         if ($chosen === []) {
             $chosen = $this->input->isInteractive() ? multiselect(

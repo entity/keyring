@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Schema;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Models\Authenticator;
+use stdClass;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
@@ -277,7 +278,7 @@ class ImportCommand extends Command
      *
      * @param  class-string<Model>  $model
      */
-    protected function importPasskey(string $model, object $passkey): void
+    protected function importPasskey(string $model, stdClass $passkey): void
     {
         if (Keyring::authenticatorModel()::query()->where('credential_id', $passkey->credential_id)->exists()) {
             $this->counts['already_imported']++;
@@ -285,7 +286,7 @@ class ImportCommand extends Command
             return;
         }
 
-        $user = $model::query()->withoutGlobalScopes()->find($passkey->user_id);
+        $user = $model::query()->withoutGlobalScopes()->whereKey($passkey->user_id)->first();
 
         if ($user === null) {
             $this->issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: that user doesn't exist";

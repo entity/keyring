@@ -23,11 +23,15 @@ class ReservedAddresses
      */
     public function has(string $address, ?Model $except = null): bool
     {
-        return $this->keyring->pendingChangeModel()::query()
+        $reserved = $this->keyring->pendingChangeModel()::query()
             ->where('attribute', $this->keyring->email())
-            ->reserving($address)
-            ->when($except?->exists, fn (Builder $query) => $query->whereNot(fn (Builder $query) => $query->ownedBy($except)))
-            ->exists();
+            ->reserving($address);
+
+        if ($except !== null && $except->exists) {
+            $reserved->whereNot(fn (Builder $query) => $query->ownedBy($except));
+        }
+
+        return $reserved->exists();
     }
 
     /**

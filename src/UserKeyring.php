@@ -39,12 +39,11 @@ class UserKeyring
      */
     public function unregistered(): array
     {
-        return $this->stored()
-            ->pluck('factor')
+        return array_values($this->stored()
+            ->map(fn (Authenticator $authenticator) => $authenticator->factor)
             ->unique()
             ->reject(fn (string $factor) => $this->keyring->hasFactor($factor))
-            ->values()
-            ->all();
+            ->all());
     }
 
     /**
@@ -138,7 +137,7 @@ class UserKeyring
      */
     public function canMeet(Requirement $requirement): bool
     {
-        return $requirement->isMetBy($this->all()->map(fn (Authenticator $authenticator) => Verification::of($authenticator))->all());
+        return $requirement->isMetBy(array_values($this->all()->map(fn (Authenticator $authenticator) => Verification::of($authenticator))->all()));
     }
 
     /**

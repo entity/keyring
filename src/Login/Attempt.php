@@ -223,7 +223,7 @@ final class Attempt
             userId: $data['user_id'],
             expiresAt: $data['expires_at'],
             remember: $data['remember'],
-            verifications: array_map(Verification::fromArray(...), $data['verifications']),
+            verifications: array_map(Verification::fromArray(...), array_values($data['verifications'])),
             requirement: $data['requirement'] === null ? null : Requirement::fromArray($data['requirement']),
             state: $data['state'],
             presented: $data['presented'],

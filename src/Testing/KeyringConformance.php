@@ -109,7 +109,7 @@ trait KeyringConformance
 
         foreach (Keyring::protectedAttributes($user) as $attribute) {
             try {
-                $user->fresh()->update([$attribute => $attribute === $user->getAuthPasswordName() ? 'something-new-and-long' : 'changed-'.uniqid().'@example.com']);
+                ($user->fresh() ?? $user)->update([$attribute => $attribute === $user->getAuthPasswordName() ? 'something-new-and-long' : 'changed-'.uniqid().'@example.com']);
                 $this->fail("The [{$attribute}] attribute changed outside a Keyring flow.");
             } catch (ProtectedAttributeException) {
                 $this->addToAssertionCount(1);

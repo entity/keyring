@@ -184,7 +184,7 @@ class EmailChanges
 
             if ($user !== null) {
                 $this->closeLaterChanges($user, $change);
-                $this->removeAuthenticatorsAddedSince($user, $change->signed_in_at ?? $change->created_at);
+                $this->removeAuthenticatorsAddedSince($user, $change->signed_in_at ?? $change->created_at ?? now());
             }
 
             return true;

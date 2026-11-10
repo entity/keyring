@@ -103,6 +103,9 @@ trait SwapsModels
      */
     protected function model(string $base): string
     {
-        return $this->models[$base] ?? $base;
+        /** @var class-string<TModel> $model */
+        $model = $this->models[$base] ?? $base;
+
+        return $model;
     }
 }

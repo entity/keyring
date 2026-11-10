@@ -67,7 +67,7 @@ class SendSecurityNotifications
 
     public function factorFailed(Events\FactorFailed $event): void
     {
-        if ($event->afterPassword()) {
+        if ($event->attempt !== null && $event->afterPassword()) {
             $this->send($event->attempt->user(), 'second_factor_failed');
         }
     }
