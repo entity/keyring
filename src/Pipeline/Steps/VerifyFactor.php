@@ -14,7 +14,6 @@ use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
 use Keyring\Pipeline\Context;
 use Keyring\Support\Duration;
-use Keyring\Testing\KeyringFake;
 
 /**
  * Identifies the user (for primary factors) and checks the proof, inside a
@@ -30,9 +29,7 @@ class VerifyFactor
 
     public function handle(Context $context, Closure $next): Context
     {
-        if ($this->fakeDecision($context) === null) {
-            $context->request->validate($this->rules($context));
-        }
+        $context->request->validate($this->rules($context));
 
         $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context) {
             if ($context->identifying && $context->factor instanceof PrimaryFactor) {
@@ -87,32 +84,11 @@ class VerifyFactor
     }
 
     /**
-     * What Keyring::fake() decided for this factor, if it's faked. Production
-     * always checks for real, even if something bound the fake by hand.
+     * Check the proof in the request. Null when it doesn't match.
      */
-    protected function fakeDecision(Context $context): ?bool
-    {
-        return $this->fake()?->decision($context->factor->key());
-    }
-
-    protected function fake(): ?KeyringFake
-    {
-        return $this->container->bound(KeyringFake::class) && ! app()->isProduction()
-            ? $this->container->make(KeyringFake::class)
-            : null;
-    }
-
     protected function check(Context $context): ?Verification
     {
-        $verification = match ($this->fakeDecision($context)) {
-            null => $context->factor->verify($context->attempt, $context->authenticator, $context->request),
-            true => Verification::of($context->authenticator),
-            false => null,
-        };
-
-        $this->fake()?->record($context->factor->key(), $verification !== null);
-
-        return $verification;
+        return $context->factor->verify($context->attempt, $context->authenticator, $context->request);
     }
 
     /**

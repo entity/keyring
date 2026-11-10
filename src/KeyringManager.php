@@ -38,8 +38,10 @@ use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
+use Keyring\Pipeline\Steps\VerifyFactor;
 use Keyring\Pipeline\Verifier;
 use Keyring\Risk\RiskEngine;
+use Keyring\Testing\FakeVerifyFactor;
 use Keyring\Testing\KeyringFake;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
@@ -205,6 +207,7 @@ class KeyringManager
         throw_if(app()->isProduction(), LogicException::class, 'Keyring::fake() cannot be used in production, where it would let wrong passwords and codes sign in. Only call it from your tests.');
 
         $this->container->singletonIf(KeyringFake::class);
+        $this->container->bind(VerifyFactor::class, FakeVerifyFactor::class);
 
         return $this->container->make(KeyringFake::class);
     }
