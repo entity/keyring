@@ -16,5 +16,6 @@ The first release. Nothing is tagged yet.
 - A security log, "was this you?" alerts and security emails, each a notification published into your app.
 - `keyring:install`, `keyring:import fortify` and `keyring:prune`.
 - `Keyring::attempt()` to start a sign in from your own route, for social logins and the like.
+- `Keyring::allowSignInWhen()` to keep banned or unapproved accounts out, however they try to sign in.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment and the challenge page, with Vue and React bindings.

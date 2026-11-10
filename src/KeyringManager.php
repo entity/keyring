@@ -64,6 +64,9 @@ class KeyringManager
     protected bool|Closure $signInAfterRegistering = true;
 
     /** @var (Closure(Authenticatable&Model): bool)|null */
+    protected ?Closure $signInGate = null;
+
+    /** @var (Closure(Authenticatable&Model): bool)|null */
     protected ?Closure $enrollmentGate = null;
 
     /** @var (Closure(Request): (string|null))|null */
@@ -345,6 +348,34 @@ class KeyringManager
     }
 
     /**
+     * Decide who may be signed in at all, to keep out a banned account or
+     * one nobody has approved yet. Keyring asks wherever a session starts or
+     * carries on: every factor that can start a sign in, a sign in waiting
+     * for its second factor, "remember me", and each request of a session
+     * that's already signed in, which is signed out once the answer is no.
+     * An account that's turned away is answered like one that doesn't exist.
+     *
+     * It's asked on every signed-in request, so answer from the user you're
+     * given rather than with a query.
+     *
+     * @param  Closure(Authenticatable&Model): bool  $callback
+     */
+    public function allowSignInWhen(Closure $callback): static
+    {
+        $this->signInGate = $callback;
+
+        return $this;
+    }
+
+    /**
+     * Whether the app lets this user be signed in.
+     */
+    public function allowsSignIn(Authenticatable&Model $user): bool
+    {
+        return $this->signInGate === null || ($this->signInGate)($user);
+    }
+
+    /**
      * Decide who may add a sign-in method, in place of Keyring's rule that
      * an app with registration on has its users verify their email first.
      * That rule is there because anyone can register someone else's address,
@@ -384,9 +415,9 @@ class KeyringManager
      */
     public function signsInAfterRegistering(Authenticatable&Model $user, Request $request): bool
     {
-        return is_bool($this->signInAfterRegistering)
+        return $this->allowsSignIn($user) && (is_bool($this->signInAfterRegistering)
             ? $this->signInAfterRegistering
-            : ($this->signInAfterRegistering)($user, $request);
+            : ($this->signInAfterRegistering)($user, $request));
     }
 
     /**

@@ -529,22 +529,18 @@ How long things are kept is config too:
 
 ## Accounts an Admin Approves
 
-For an app where someone reviews each sign-up, don't sign new users in, and don't let them sign in until they're approved:
+For an app where someone reviews each sign-up, don't let anyone sign in until they're approved:
 
 ```php
 use App\Models\User;
-use Illuminate\Http\Request;
 
-// Registering sends them to the login page instead of signing them in.
-Keyring::signInAfterRegistering(false);
-
-// Only approved accounts are found at sign in. Everyone else gets the same
-// answer as a wrong password.
-Keyring::findUsersUsing(fn (Request $request) => User::query()
-    ->where('email', $request->string('email')->lower()->value())
-    ->whereNotNull('approved_at')
-    ->first());
+// Only approved accounts can sign in, however they try: the password, a
+// passkey, "remember me". Everyone else gets the same answer as a wrong
+// password, and registering sends them to the login page.
+Keyring::allowSignInWhen(fn (User $user) => $user->approved_at !== null);
 ```
+
+Withdrawing an approval signs the account out on its next request. See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
 
 Approval can also be what lets a user add a sign-in method, in place of verifying their email address:
 

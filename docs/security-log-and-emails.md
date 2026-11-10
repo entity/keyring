@@ -52,7 +52,7 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `device_revoked` | A device was signed out. | `device` |
 | `device_reported` | A device was signed out from the "this wasn't me" link. | `device` |
 | `sessions_revoked` | "Sign out everywhere else". | `count` |
-| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user` or `risk` |
+| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `risk` or `not_allowed` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |
 | `password_changed` | | |
 | `password_reset` | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |

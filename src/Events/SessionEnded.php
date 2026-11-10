@@ -15,7 +15,7 @@ class SessionEnded
     use Dispatchable, SerializesModels;
 
     /**
-     * @param  'revoked'|'expired'|'idle'|'other_user'|'risk'  $reason
+     * @param  'revoked'|'expired'|'idle'|'other_user'|'risk'|'not_allowed'  $reason
      */
     public function __construct(
         public readonly Authenticatable $user,

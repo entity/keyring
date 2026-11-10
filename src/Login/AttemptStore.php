@@ -7,6 +7,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Enums\Purpose;
 use Keyring\Exceptions\AttemptExpired;
+use Keyring\Facades\Keyring;
 use Keyring\Support\EncryptedSession;
 use TypeError;
 use ValueError;
@@ -36,10 +37,10 @@ class AttemptStore
 
     /**
      * The attempt in progress, unless it expired, it started under another
-     * guard, a confirmation isn't the signed-in user's, its user is gone, or
-     * their password changed since it was saved: a reset or change elsewhere
-     * ends every half-finished sign in, including one that already got past
-     * the old password.
+     * guard, a confirmation isn't the signed-in user's, its user is gone or
+     * no longer allowed to sign in, or their password changed since it was
+     * saved: a reset or change elsewhere ends every half-finished sign in,
+     * including one that already got past the old password.
      */
     public function current(Purpose $purpose): ?Attempt
     {
@@ -80,7 +81,8 @@ class AttemptStore
                 && $attempt->guard === config('keyring.guard')
                 && ($purpose === Purpose::Login || $attempt->userId == auth()->guard($attempt->guard)->id())
                 && is_string($passwordHash)
-                && hash_equals($passwordHash, $this->passwordHash($attempt->user()));
+                && hash_equals($passwordHash, $this->passwordHash($attempt->user()))
+                && Keyring::allowsSignIn($attempt->user());
         } catch (AttemptExpired) {
             return false;
         }
