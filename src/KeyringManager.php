@@ -265,9 +265,12 @@ class KeyringManager
 
         abort_unless($factor instanceof PrimaryFactor && $factor->startsLogin(), 404);
 
-        $this->container->make(AttemptStore::class)->forget(Purpose::Login);
+        // Built by the app handling this request, not the one this manager was
+        // built with at boot: under Octane each request runs in a copy of the
+        // booted app, and the sign in belongs in that copy's session.
+        app(AttemptStore::class)->forget(Purpose::Login);
 
-        return $this->container->make(Verifier::class)->respond(new Context($request, Purpose::Login, $factor));
+        return app(Verifier::class)->respond(new Context($request, Purpose::Login, $factor));
     }
 
     /**
