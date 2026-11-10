@@ -2,21 +2,23 @@
 
 namespace Keyring\Login;
 
+use Illuminate\Container\Attributes\Scoped;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Contracts\Encryption\DecryptException;
-use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Crypt;
 use Keyring\Enums\Purpose;
 use Keyring\Exceptions\AttemptExpired;
+use Keyring\Support\EncryptedSession;
+use TypeError;
+use ValueError;
 
 /**
  * Keeps attempts in the session, one per purpose.
  */
+#[Scoped]
 class AttemptStore
 {
     public function __construct(
-        protected Session $session,
+        protected EncryptedSession $session,
     ) {}
 
     /**
@@ -35,30 +37,21 @@ class AttemptStore
     /**
      * The attempt in progress, unless it expired, it started under another
      * guard, a confirmation isn't the signed-in user's, its user is gone, or
-     * their password changed since it was saved:
-     * a reset or change elsewhere ends every half-finished sign in, including
-     * one that already got past the old password.
+     * their password changed since it was saved: a reset or change elsewhere
+     * ends every half-finished sign in, including one that already got past
+     * the old password.
      */
     public function current(Purpose $purpose): ?Attempt
     {
-        $payload = $this->session->get(static::key($purpose));
-
-        if (! is_string($payload)) {
-            return null;
-        }
+        $data = $this->session->get(static::key($purpose));
 
         try {
-            $data = json_decode(Crypt::decryptString($payload), true, flags: JSON_THROW_ON_ERROR);
-            $attempt = Attempt::fromArray($data);
-            $valid = ! $attempt->expired
-                && $attempt->guard === config('keyring.guard')
-                && ($purpose === Purpose::Login || $attempt->userId == auth()->guard($attempt->guard)->id())
-                && hash_equals($data['password'] ?? '', $this->passwordHash($attempt->user()));
-        } catch (AttemptExpired|DecryptException|\JsonException|\TypeError|\ValueError) {
-            $valid = false;
+            $attempt = $data === null ? null : Attempt::fromArray($data);
+        } catch (TypeError|ValueError) {
+            $attempt = null;
         }
 
-        if (! $valid) {
+        if ($attempt === null || ! $this->stillStands($purpose, $attempt, $data['password'] ?? null)) {
             $this->forget($purpose);
 
             return null;
@@ -69,18 +62,28 @@ class AttemptStore
 
     public function save(Attempt $attempt): void
     {
-        $this->session->put(
-            static::key($attempt->purpose),
-            Crypt::encryptString(json_encode([
-                ...$attempt->toArray(),
-                'password' => $this->passwordHash($attempt->user()),
-            ], JSON_THROW_ON_ERROR)),
-        );
+        $this->session->put(static::key($attempt->purpose), [
+            ...$attempt->toArray(),
+            'password' => $this->passwordHash($attempt->user()),
+        ]);
     }
 
     public function forget(Purpose $purpose): void
     {
         $this->session->forget(static::key($purpose));
+    }
+
+    protected function stillStands(Purpose $purpose, Attempt $attempt, mixed $passwordHash): bool
+    {
+        try {
+            return ! $attempt->expired
+                && $attempt->guard === config('keyring.guard')
+                && ($purpose === Purpose::Login || $attempt->userId == auth()->guard($attempt->guard)->id())
+                && is_string($passwordHash)
+                && hash_equals($passwordHash, $this->passwordHash($attempt->user()));
+        } catch (AttemptExpired) {
+            return false;
+        }
     }
 
     /**
