@@ -38,9 +38,11 @@ class AttemptStore
     /**
      * The attempt in progress, unless it expired, it started under another
      * guard, a confirmation isn't the signed-in user's, its user is gone or
-     * no longer allowed to sign in, or their password changed since it was
-     * saved: a reset or change elsewhere ends every half-finished sign in,
-     * including one that already got past the old password.
+     * no longer allowed to sign in, or their password or email address
+     * changed since it was saved. A reset or change elsewhere ends every
+     * half-finished sign in, including one that already got past the old
+     * password, and so does an email change or its undo: a code may have
+     * gone to the address the account no longer has.
      */
     public function current(Purpose $purpose): ?Attempt
     {
@@ -52,7 +54,7 @@ class AttemptStore
             $attempt = null;
         }
 
-        if ($attempt === null || ! $this->stillStands($purpose, $attempt, $data['password'] ?? null)) {
+        if ($attempt === null || ! $this->stillStands($purpose, $attempt, $data['credentials'] ?? null)) {
             $this->forget($purpose);
 
             return null;
@@ -65,7 +67,7 @@ class AttemptStore
     {
         $this->session->put(static::key($attempt->purpose), [
             ...$attempt->toArray(),
-            'password' => $this->passwordHash($attempt->user()),
+            'credentials' => $this->credentials($attempt->user()),
         ]);
     }
 
@@ -74,14 +76,14 @@ class AttemptStore
         $this->session->forget(static::key($purpose));
     }
 
-    protected function stillStands(Purpose $purpose, Attempt $attempt, mixed $passwordHash): bool
+    protected function stillStands(Purpose $purpose, Attempt $attempt, mixed $credentials): bool
     {
         try {
             return ! $attempt->expired
                 && $attempt->guard === config('keyring.guard')
                 && ($purpose === Purpose::Login || $attempt->userId == auth()->guard($attempt->guard)->id())
-                && is_string($passwordHash)
-                && hash_equals($passwordHash, $this->passwordHash($attempt->user()))
+                && is_string($credentials)
+                && hash_equals($credentials, $this->credentials($attempt->user()))
                 && Keyring::allowsSignIn($attempt->user());
         } catch (AttemptExpired) {
             return false;
@@ -89,13 +91,13 @@ class AttemptStore
     }
 
     /**
-     * Stands in for the user's password hash. It's taken on every save, so
-     * the rehash that can follow a successful password check doesn't count
-     * as a change.
+     * Stands in for the user's password hash and email address. It's taken
+     * on every save, so the rehash that can follow a successful password
+     * check doesn't count as a change.
      */
-    protected function passwordHash(Authenticatable $user): string
+    protected function credentials(Authenticatable&Model $user): string
     {
-        return hash('sha256', (string) $user->getAuthPassword());
+        return hash('sha256', $user->getAuthPassword().'|'.Keyring::normalizeUsername((string) $user->getAttribute(Keyring::email())));
     }
 
     public static function key(Purpose $purpose): string
