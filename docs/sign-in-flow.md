@@ -113,6 +113,8 @@ An account that's turned away gets the same answer as one that doesn't exist. Pa
 
 The callback runs on every signed-in request, so answer from the user it's given rather than with a query.
 
+Use this rather than a global scope on the user model to keep an account out. A scope makes the account look missing to Keyring, which ends nothing: its sessions, "remember me" cookies, trusted devices and any pending email change are all still there when the scope shows the account again, and no event fires to clear them. `allowSignInWhen()` ends each session on its next request.
+
 Failed attempts count against the user your finder returns, however the username was typed, so an account has one limit whether someone guesses at its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep it to a lookup.
 
 `findUsersUsing()` only finds the user: Keyring still checks the password, and answers a `null` the same way as a wrong password, in the same time. It answers the same way for a user that Keyring's guard wouldn't load back through its provider, like one of another model. The username field's validation still applies; change it with a [pipeline step](#writing-a-step) if you need to.
