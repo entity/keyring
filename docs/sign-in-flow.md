@@ -93,9 +93,10 @@ Failed attempts count against what was typed, because Keyring checks the limits 
 ```php
 use Keyring\Events\PasswordReset;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
+use Keyring\Support\Throttle;
 
 Event::listen(function (PasswordReset $event) {
-    EnsureNotThrottled::clearAccount($event->user, $event->user->username);
+    app(Throttle::class)->clearAccount($event->user, $event->user->username);
 });
 ```
 

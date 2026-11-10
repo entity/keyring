@@ -18,6 +18,7 @@ use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
+use Keyring\Pipeline\Verifier;
 use Keyring\Support\Throttle;
 
 /**
@@ -32,6 +33,8 @@ class ChallengeController
         protected KeyringManager $keyring,
         protected AttemptStore $attempts,
         protected StepUp $stepUp,
+        protected Throttle $throttle,
+        protected Verifier $verifier,
     ) {}
 
     public function show(Request $request, ?string $factor = null): mixed
@@ -108,7 +111,7 @@ class ChallengeController
 
         $authenticator = $this->authenticatorFor($request, $attempt, $factor->key()) ?? abort(404);
 
-        Throttle::sending($factor->key(), $attempt->userId);
+        $this->throttle->sending($factor->key(), $attempt->userId);
 
         $factor->send($attempt, $authenticator);
 

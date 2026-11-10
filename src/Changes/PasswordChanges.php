@@ -10,6 +10,7 @@ use Keyring\Events\PasswordReset;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Throttle;
 use LogicException;
 
 /**
@@ -26,6 +27,7 @@ class PasswordChanges
         protected EmailChanges $emailChanges,
         protected RiskLocks $locks,
         protected ResetTokens $resetTokens,
+        protected Throttle $throttle,
     ) {}
 
     /**
@@ -59,7 +61,7 @@ class PasswordChanges
         $this->save($user, $save);
         $this->sessions->revokeAll($user);
         $this->locks->unlock($user);
-        EnsureNotThrottled::clearAccount($user);
+        $this->throttle->clearAccount($user);
 
         PasswordReset::dispatch($user);
     }

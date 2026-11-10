@@ -27,6 +27,7 @@ class AuthenticatorController
         protected KeyringManager $keyring,
         protected EnrollmentStore $enrollments,
         protected AuthenticatorChanges $changes,
+        protected Throttle $throttle,
     ) {}
 
     /**
@@ -38,7 +39,7 @@ class AuthenticatorController
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
-            Throttle::sending($factor->key(), $request->user()->getAuthIdentifier());
+            $this->throttle->sending($factor->key(), $request->user()->getAuthIdentifier());
         }
 
         $enrollment = $factor->beginEnrollment($request->user(), $request);

@@ -57,7 +57,7 @@ use Keyring\Http\Controllers\AuthenticatorController as KeyringAuthenticatorCont
 $this->app->bind(KeyringAuthenticatorController::class, AuthenticatorController::class);
 ```
 
-The services behind them work the same way: `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager` and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
+The services behind them work the same way: `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager`, `Keyring\Support\Throttle` and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
 
 This is the last resort. A class you've replaced stops getting Keyring's fixes for whatever you overrode, so prefer an option or hook above when one does the job, and call the parent for the rest.
 

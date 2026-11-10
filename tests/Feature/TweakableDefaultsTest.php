@@ -34,11 +34,11 @@ function device(User $user, array $attributes = []): Device
 it('sends as many codes as the app allows, as often as it allows', function () {
     config(['keyring.limits.codes' => 1, 'keyring.limits.codes_per' => '1m']);
 
-    Throttle::sending('sms', 1);
-    expect(fn () => Throttle::sending('sms', 1))->toThrow(ValidationException::class);
+    app(Throttle::class)->sending('sms', 1);
+    expect(fn () => app(Throttle::class)->sending('sms', 1))->toThrow(ValidationException::class);
 
     $this->travel(61)->seconds();
-    Throttle::sending('sms', 1);
+    app(Throttle::class)->sending('sms', 1);
 });
 
 it('gives users as long to finish adding a sign-in method as the app says', function () {
