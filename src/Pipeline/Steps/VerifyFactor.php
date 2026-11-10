@@ -6,14 +6,17 @@ use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Timebox;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
+use Keyring\Events\Lockout;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
+use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
 use Keyring\Support\Duration;
@@ -55,10 +58,22 @@ class VerifyFactor
      */
     protected function verify(Context $context, Closure $next): Context
     {
-        if ($context->identifying && $context->factor instanceof PrimaryFactor) {
-            $authenticator = $context->factor->identify($context->request);
+        // Refused by a rate limit that doesn't say so. Nobody is looked up
+        // and no proof is looked at, so the answer can't depend on either.
+        // It costs what a check would, and the lockout is reported in here,
+        // where a failure would be.
+        if ($context->refused) {
+            if ($context->factor instanceof PrimaryFactor) {
+                $context->factor->stall();
+            }
 
-            $context->authenticator = $authenticator !== null && $this->maySignIn($authenticator->user()) ? $authenticator : null;
+            Lockout::dispatch($context->request, $context->factor->key(), $context->retryAfter);
+
+            return $context->fail();
+        }
+
+        if ($context->identifying && $context->factor instanceof PrimaryFactor) {
+            $context->authenticator = $this->identify($context->factor, $context->request);
 
             if ($context->authenticator !== null) {
                 $context->attempt = Attempt::start(
@@ -104,8 +119,25 @@ class VerifyFactor
     }
 
     /**
-     * Whether whoever the factor found can be signed in here. When they
-     * can't, the attempt carries on as if nobody was found.
+     * Who the request is for, when they can be signed in here. Someone the
+     * app keeps out costs what checking their proof would have, and the
+     * attempt carries on as if nobody was found.
+     */
+    protected function identify(PrimaryFactor $factor, Request $request): ?Authenticator
+    {
+        $authenticator = $factor->identify($request);
+
+        if ($authenticator === null || $this->maySignIn($authenticator->user())) {
+            return $authenticator;
+        }
+
+        $factor->stall();
+
+        return null;
+    }
+
+    /**
+     * Whether whoever the factor found can be signed in here.
      */
     protected function maySignIn(?Authenticatable $user): bool
     {

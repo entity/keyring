@@ -34,6 +34,15 @@ interface PrimaryFactor extends Factor
     public function identify(Request $request): ?Authenticator;
 
     /**
+     * Spend the time verify() would. Keyring calls it in place of verify()
+     * when it turns away whoever identify() found without looking at their
+     * proof: an account the app doesn't let sign in, or one whose rate limit
+     * refuses without saying so. The base factor's does nothing, which is
+     * right when checking a proof costs next to nothing.
+     */
+    public function stall(): void;
+
+    /**
      * Validation rules for the fields used to identify the user.
      *
      * @return array<string, mixed>
