@@ -4,6 +4,7 @@ namespace Keyring;
 
 use Closure;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Auth\StatefulGuard;
@@ -56,6 +57,7 @@ use Keyring\Testing\KeyringFake;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
 
+#[Singleton]
 class KeyringManager
 {
     /**

@@ -19,28 +19,21 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Activity\DispatchLaravelEvents;
 use Keyring\Activity\RecordSecurityEvents;
-use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
-use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\UnknownFeature;
-use Keyring\Factors\FactorRegistry;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireEnrollment;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Responses as DefaultResponses;
-use Keyring\Login\AttemptStore;
 use Keyring\Notifications\SendSecurityNotifications;
-use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
-use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Support\Duration;
 use Keyring\Support\Url;
-use Keyring\WebAuthn\Ceremonies;
 
 class KeyringServiceProvider extends ServiceProvider
 {
@@ -57,6 +50,9 @@ class KeyringServiceProvider extends ServiceProvider
     ];
 
     /**
+     * Keyring's own answer for each response contract, until the app swaps
+     * one with Keyring::respondWith().
+     *
      * @var array<class-string, class-string>
      */
     public array $bindings = [
@@ -77,12 +73,8 @@ class KeyringServiceProvider extends ServiceProvider
     {
         $this->mergeConfig();
 
-        $this->app->singleton(KeyringManager::class);
-        $this->app->singleton(FactorRegistry::class);
-        $this->app->singleton(ProtectedAttributes::class);
-        $this->app->singleton(Ceremonies::class);
-        $this->app->singleton(SessionRegistryManager::class);
-        $this->app->singleton(RiskEngine::class);
+        // Keyring's services say how long they live themselves, with
+        // #[Singleton] or #[Scoped]. These need building a particular way.
         $this->app->bind(RiskLocks::class, fn (Application $app) => new RiskLocks($app['cache']->store(config('keyring.risk.store'))));
         $this->app->bind(SessionRegistry::class, fn (Application $app) => $app->make(SessionRegistryManager::class)->driver());
         $this->app->bind(LocatesIps::class, fn (Application $app) => $app->make(config('keyring.devices.locator')));
@@ -91,11 +83,6 @@ class KeyringServiceProvider extends ServiceProvider
         foreach (self::ACTIONS as $contract => $method) {
             $this->app->bindIf($contract, fn () => throw MissingAction::for($contract, $method));
         }
-
-        // Per request, since they wrap the current session.
-        $this->app->scoped(AttemptStore::class);
-        $this->app->scoped(EnrollmentStore::class);
-        $this->app->scoped(SessionAssurance::class);
     }
 
     public function boot(): void

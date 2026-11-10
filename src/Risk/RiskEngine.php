@@ -3,6 +3,7 @@
 namespace Keyring\Risk;
 
 use Closure;
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Container\Container;
 use Keyring\Contracts\Signal;
@@ -17,6 +18,7 @@ use Keyring\Sessions\Sessions;
  *     Keyring::risk()->signals([NewDevice::class, ImpossibleTravel::class])
  *         ->respond(fn (Risk $risk, Checkpoint $at) => match ($risk->level) { ... });
  */
+#[Singleton]
 class RiskEngine
 {
     /**

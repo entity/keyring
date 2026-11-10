@@ -7,9 +7,11 @@ use Cose\Algorithm\Manager;
 use Cose\Algorithm\Signature\ECDSA\ES256;
 use Cose\Algorithm\Signature\EdDSA\Ed25519;
 use Cose\Algorithm\Signature\RSA\RS256;
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use ParagonIE\ConstantTime\Base64UrlSafe;
@@ -43,6 +45,7 @@ use Webauthn\PublicKeyCredentialUserEntity;
  * The WebAuthn plumbing: building options, (de)serializing and validating
  * responses with web-auth/webauthn-lib. Factors stay free of library details.
  */
+#[Singleton]
 class Ceremonies
 {
     protected ?SerializerInterface $serializer = null;

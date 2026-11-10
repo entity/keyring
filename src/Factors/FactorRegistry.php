@@ -3,6 +3,7 @@
 namespace Keyring\Factors;
 
 use Closure;
+use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -12,6 +13,7 @@ use Keyring\Exceptions\UnknownFactor;
 /**
  * The factors users may sign in with, resolved from the container once.
  */
+#[Singleton]
 class FactorRegistry
 {
     /**

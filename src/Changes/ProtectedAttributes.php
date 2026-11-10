@@ -15,6 +15,7 @@ use Keyring\Features;
  * changing them) that may only change through Keyring's flows, and the flows
  * allowed to change them right now.
  */
+#[Singleton]
 class ProtectedAttributes
 {
     /**

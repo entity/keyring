@@ -22,6 +22,7 @@ use Keyring\Login\Verification;
  * lapses it until the user proves every factor for it again. The session
  * itself stays signed in at whatever level is left.
  */
+#[Scoped]
 class SessionAssurance
 {
     public const string KEY = 'keyring.verified';
