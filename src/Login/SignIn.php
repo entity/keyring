@@ -58,6 +58,15 @@ class SignIn
 
         $this->sessions->start($request, $user, $device, $this->assurance->level(), remembered: $attempt->remember);
 
+        // A password reset or change signs out the sessions registered by
+        // then. This one was still being checked, and is only registered
+        // now, so look again: with the new password saved, it ends here.
+        if ($this->passwordChangedMeanwhile($user)) {
+            $this->out($request, onlyThisBrowser: true);
+
+            throw ValidationException::withMessages([$this->keyring->username() => __('auth.failed')]);
+        }
+
         Authenticated::dispatch($user, $attempt, $device);
 
         // "Was this you?" for anything suspicious since they last signed in.
@@ -88,6 +97,18 @@ class SignIn
         return $attempt->trustDevice
             && Requirement::aal2()->isMetBy($attempt->verifications)
             && (! Features::enabled(Features::emailVerification()) || ! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail());
+    }
+
+    /**
+     * Whether the password is no longer the one this request loaded and
+     * checked. Read after the session is registered: if it's still the same,
+     * a reset hasn't saved yet, and its sign-out will find this session.
+     */
+    protected function passwordChangedMeanwhile(Authenticatable&Model $user): bool
+    {
+        $now = $user->newQuery()->whereKey($user->getKey())->first();
+
+        return ! $now instanceof Authenticatable || ! hash_equals((string) $user->getAuthPassword(), (string) $now->getAuthPassword());
     }
 
     public function confirm(Request $request, Attempt $attempt): void
