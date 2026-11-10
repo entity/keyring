@@ -22,7 +22,6 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
-use Keyring\Support\Url;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -75,7 +74,18 @@ it('starts emailed links wherever the app says', function () {
     Keyring::linkRootUsing(fn () => 'https://tenant.example.com/');
 
     expect(device(taylor())->revokeUrl())->toStartWith('https://tenant.example.com/devices/');
-})->after(fn () => Url::rootUsing(null));
+});
+
+it('names devices the way the app says', function () {
+    expect(Keyring::describeDevice(FIREFOX))->toBe('Firefox on Windows')
+        ->and(Keyring::describeDevice(null))->toBeNull();
+
+    Keyring::describeDevicesUsing(fn (string $userAgent) => str_contains($userAgent, 'Firefox') ? 'A fox' : null);
+
+    expect(Keyring::describeDevice(FIREFOX))->toBe('A fox')
+        ->and(Keyring::describeDevice(CHROME))->toBeNull()
+        ->and(Keyring::describeDevice(''))->toBeNull();
+});
 
 it('keeps the ip address the app wants kept', function () {
     Keyring::recordIpsUsing(fn (Request $request) => null);

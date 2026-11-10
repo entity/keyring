@@ -2,7 +2,7 @@
 
 namespace Keyring\Risk\Signals;
 
-use Keyring\Devices\UserAgent;
+use Keyring\Facades\Keyring;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
@@ -26,8 +26,8 @@ class SessionFingerprintChanged extends Signal
             return null;
         }
 
-        $before = UserAgent::describe($session->userAgent);
-        $now = UserAgent::describe($assessment->request->userAgent());
+        $before = Keyring::describeDevice($session->userAgent);
+        $now = Keyring::describeDevice($assessment->request->userAgent());
 
         return $before !== null && $before !== $now
             ? new Finding('session_fingerprint_changed', $this->score, "The session moved from {$before} to ".($now ?? 'an unknown browser').'.')

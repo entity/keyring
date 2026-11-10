@@ -137,8 +137,9 @@ Keyring's own user agent parsing only knows the common browsers and platforms. T
 
 ```php
 use Keyring\Devices\UserAgent;
+use Keyring\Facades\Keyring;
 
-UserAgent::describeUsing(fn (string $userAgent) => app(UserAgentParser::class)->parse($userAgent)->summary());
+Keyring::describeDevicesUsing(fn (string $userAgent) => app(UserAgentParser::class)->parse($userAgent)->summary());
 ```
 
 `UserAgent::from($request)` returns the request's user agent trimmed to 500 characters, as Keyring stores it.
