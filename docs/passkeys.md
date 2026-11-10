@@ -8,6 +8,7 @@
 - [Attestation and AAGUIDs](#attestation-and-aaguids)
 - [Counters and Cloned Keys](#counters-and-cloned-keys)
 - [Signing In Without a Username](#signing-in-without-a-username)
+- [Laravel's Passkeys Client](#laravels-passkeys-client)
 - [Customising a Profile](#customising-a-profile)
 - [Stored Data](#stored-data)
 
@@ -106,6 +107,20 @@ A challenge works once, for this kind of sign in only: trying it spends it, even
 These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket every user shares. Fetching the options has its own limit of 60 requests a minute per IP address, so a login page that reloads (and an office sharing one address) doesn't run out.
 
 Security keys can't do this. `/login/security-key` and `/login/security-key/options` return a `404`.
+
+## Laravel's Passkeys Client
+
+Keyring's passkey routes are driven by [`@entity/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package and can't be pointed at Keyring's. Each call lets you change its two paths, but not the method it uses or the JSON it reads. Checked against `@laravel/passkeys` 0.4.1 and `laravel/passkeys` 0.3.0:
+
+| What the client does | What Keyring does |
+|---|---|
+| Signing in, it reads `options` from the JSON of `GET /passkeys/login/options`. | `GET /login/passkey/options` returns the options themselves, with nothing around them, so the client finds none. |
+| It posts `{ credential, remember }` to `/passkeys/login` and reads `redirect`. | The same. `POST /login/passkey` is the one request that fits as it is. |
+| Adding a passkey, it reads `options` from `GET /user/passkeys/options`. | Enrolling begins with a `POST` to `/user/authenticators/passkey`, and the options are under `enrollment.options`. |
+| It posts `{ name, credential }` to `/user/passkeys`. `usePasskeyRegister()` doesn't pass the response on. | `POST /user/authenticators/passkey/confirm` takes those fields, but its response can carry [recovery codes](authenticators.md#recovery-codes) that are only shown once. |
+| Confirming, it reads `options` from `GET /passkeys/confirm/options`. | [Step-up](step-up.md) has no options route. The confirm page gets the options as props, for whichever of the user's authenticators comes next. |
+
+Fitting it would take a second set of routes for the same ceremonies, so Keyring doesn't try. Use [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey) to sign in, [`enroll()`](frontend.md#managing-authenticators) to add a passkey and [`useChallenge()`](frontend.md#the-challenge-page) for the challenge and confirm pages. Passkeys made with `laravel/passkeys` keep working once [imported](upgrading-from-fortify.md#importing-two-factor-data).
 
 ## Customising a Profile
 
