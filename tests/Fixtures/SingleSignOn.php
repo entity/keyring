@@ -31,6 +31,11 @@ class SingleSignOn extends Factor implements PrimaryFactor
         return true;
     }
 
+    public function answersChallenges(): bool
+    {
+        return false;
+    }
+
     public function categories(Authenticator $authenticator): array
     {
         return [Category::Knowledge];

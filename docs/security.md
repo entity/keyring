@@ -53,6 +53,8 @@ How they count:
 - A completed password reset clears the account's in-a-row counts, per-minute counts, locks and lockout count on the factors that can start a sign in, with those of each of its known devices, so the owner can sign in straight away. Second factors keep their counts and locks, because a reset only proves control of the mailbox and could otherwise be repeated to keep guessing a code. The `password_reset` log entry records it. Per-IP limits stay, so a reset can't be used to get around them.
 - Requests that don't name an account, like usernameless passkey sign ins, only get the per-IP limit, so junk requests can't fill a bucket every user shares.
 
+All of this is counted in the cache store Laravel's rate limiter uses (`cache.limiter`, or your default store), and [risk locks](risk.md#actions) in `risk.store`. A count that's gone reads as no attempts, so if the store loses its keys every limit starts over and every lock lifts: `php artisan cache:clear` and `optimize:clear` empty the default store, and a store that evicts under memory pressure can drop them one at a time. Where the in-a-row cap and the locks have to hold, point `cache.limiter` and `risk.store` at a persistent store of their own that doesn't evict and that your deploys don't clear.
+
 Factors can set their own limits by overriding `limits()`. A reset only clears the keys the default `limits()` builds, so a factor with its own per-account keys should clear them in a `PasswordReset` listener. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, removing an authenticator, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Usernameless passkey options have their own limiter, `keyring-login-options`, at 60 requests a minute per IP address, because the login page fetches them on every load for autofill. Apps can redefine either limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each account can be sent three codes per factor every 10 minutes (`limits.codes` and `limits.codes_per`), however many sign ins, step-ups or enrollments ask for them.
 
 ### Single-Use Codes
@@ -105,7 +107,7 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 
 ### Links and Headers
 
-- Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request's `Host` header.
+- Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
 - Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
 - Pages opened from emailed links (password resets, email changes, "this wasn't me") keep their token out of the `Referer` header other sites see, like every Keyring response. Your own app still receives it, so a failed form finds its way back.
 

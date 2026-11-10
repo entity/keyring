@@ -141,7 +141,9 @@ class UserKeyring
     }
 
     /**
-     * Authenticators that would bring the verifications closer to the requirement.
+     * Authenticators that would bring the verifications closer to the
+     * requirement. These are what a challenge or a step-up offers, so a
+     * factor that can only start a login isn't among them.
      *
      * @param  list<Verification>  $verifications
      * @return Collection<int, Authenticator>
@@ -152,6 +154,7 @@ class UserKeyring
 
         return $this->all()
             ->reject(fn (Authenticator $authenticator) => in_array($authenticator->id, $used, true))
+            ->reject(fn (Authenticator $authenticator) => ($factor = $authenticator->factor()) instanceof PrimaryFactor && ! $factor->answersChallenges())
             ->filter(fn (Authenticator $authenticator) => $requirement->wouldProgress($verifications, Verification::of($authenticator)))
             ->reject(fn (Authenticator $authenticator) => $authenticator->factor === RecoveryCodes::KEY && ! $this->codeCouldFinish($requirement, $verifications, $authenticator))
             ->values();

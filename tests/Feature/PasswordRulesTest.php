@@ -154,7 +154,9 @@ describe('checking a password against its stored hash', function () {
         $this->post('/login', ['email' => 'nobody@example.com', 'password' => $this->tooLong])
             ->assertSessionHasErrors(['email' => __('auth.failed')]);
 
-        expect($checked->getArrayCopy())->toHaveCount(1)->not->toContain($this->tooLong);
+        // Nothing is checked for them at all: the time is spent making a
+        // hash of something random.
+        expect($checked->getArrayCopy())->toBeEmpty();
     });
 
     it('fails an over-long password at step-up, and takes the right one', function () {

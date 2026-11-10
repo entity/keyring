@@ -66,7 +66,7 @@ When planning what to offer, Keyring assumes a security key will verify the user
 
 - **`relying_party.id`** is the domain keys are bound to. It defaults to the host of `APP_URL`. Keys registered for `example.com` also work on its subdomains, so set it to your registrable domain if users sign in on more than one subdomain. Changing it later makes existing keys stop working.
 - **`relying_party.name`** is shown by some browsers when creating a key. It defaults to `APP_NAME`.
-- **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. If you set a relying party ID that covers several subdomains, list each origin here.
+- **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL: if none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If you set a relying party ID that covers several subdomains, list each origin here.
 - **`timeout`** is how long the browser waits, as a [duration](configuration.md#durations).
 
 For local development, `APP_URL` must match the address in your browser, for example `http://localhost:8000`. Browsers only allow WebAuthn on `https` origins and on `localhost`.

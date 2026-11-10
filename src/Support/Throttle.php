@@ -143,16 +143,20 @@ class Throttle
      * The attempt succeeded, which clears an account's count. On a shared
      * limit it only takes back its own attempt: people signing in from one
      * office address don't use it up, and an attacker can't reset it with
-     * their own login.
+     * their own login. A count that has since gone (its minute ended, or it
+     * became a lock) has nothing to take back, and stays at nothing rather
+     * than starting the next minute below zero.
      *
      * @param  list<Limit>  $limits
      */
     public function succeeded(array $limits): void
     {
         foreach ($limits as $limit) {
-            $limit instanceof SharedLimit
-                ? $this->limiter->decrement($this->key($limit), $limit->decaySeconds)
-                : $this->limiter->clear($this->key($limit));
+            match (true) {
+                ! $limit instanceof SharedLimit => $this->limiter->clear($this->key($limit)),
+                $this->limiter->attempts($this->key($limit)) > 0 => $this->limiter->decrement($this->key($limit), $limit->decaySeconds),
+                default => null,
+            };
         }
     }
 
@@ -256,14 +260,15 @@ class Throttle
 
     /**
      * The device's ID when the request's device cookie is one of the user's.
-     * Looked up whether or not there's a user, so a username nobody has
-     * takes as long to turn down as a real one.
+     * Looked up whether or not there's a user, and compared without loading
+     * each device's owner, so a username nobody has costs the same queries
+     * as a real one: this runs before the timebox opens.
      */
     protected function knownDevice(Request $request, (Authenticatable&Model)|null $user): ?string
     {
         $devices = $this->devices->forBrowser($request);
 
-        return $user === null ? null : $devices->first(fn (Device $device) => $device->user()?->is($user) === true)?->id;
+        return $user === null ? null : $devices->first(fn (Device $device) => $device->authenticatable()->is($user))?->id;
     }
 
     /**

@@ -141,17 +141,22 @@ class AuthenticateSession
             return $this->signOut($request, 'risk');
         }
 
-        // Ask again before anything sensitive, and remember what we've seen
-        // so the same change isn't acted on twice.
-        if ($action->stepUp) {
-            $this->assurance->flush();
+        if (! $action->doesSomething()) {
+            return null;
         }
 
-        if ($action->doesSomething()) {
-            $this->sessions->registry()->update($session->id, [
-                'ip' => $this->keyring->recordedIp($request),
-                'userAgent' => UserAgent::from($request),
-            ]);
+        // Remember what we've seen, so the same change isn't acted on twice.
+        $seen = ['ip' => $this->keyring->recordedIp($request), 'userAgent' => UserAgent::from($request)];
+
+        // Ask again before anything sensitive. Only this request's copy of
+        // the session forgets what it proved, so the session gets a new
+        // record: an older cookie, or a request that overlapped this one and
+        // saves after it, holds the old one and is signed out.
+        if ($action->stepUp) {
+            $this->assurance->flush();
+            $this->sessions->reregister($request, $seen);
+        } else {
+            $this->sessions->registry()->update($session->id, $seen);
         }
 
         return null;

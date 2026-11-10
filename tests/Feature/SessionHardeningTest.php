@@ -280,6 +280,55 @@ it('asks again for laravel password confirmation after a mid-session step-up', f
     $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect('/password-confirm');
 });
 
+// A step-up is only forgotten in the copy of the session that saw it. Any
+// other copy still holds what was proved, so it has to stop working.
+it('signs out a copy of a cookie session from before a mid-session step-up', function () {
+    Keyring::risk()->signals([SessionFingerprintChanged::class]);
+    config(['session.driver' => 'cookie']);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+
+    $copied = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
+
+    session()->flush();
+    app('auth')->forgetGuards();
+    $current = sessionCookies($this->withHeader('User-Agent', CHROME)->withCredentials()->withCookies($copied)->get('/home')->assertOk());
+
+    session()->flush();
+    app('auth')->forgetGuards();
+    $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookies($copied)
+        ->postJson(route('keyring.authenticators.store', 'totp'))->assertUnauthorized();
+
+    session()->flush();
+    app('auth')->forgetGuards();
+    $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookies($current)
+        ->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
+
+    expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
+});
+
+it('signs out a session whose older copy was saved over a mid-session step-up', function (string $driver) {
+    config(['keyring.sessions.driver' => $driver]);
+    Keyring::risk()->signals([SessionFingerprintChanged::class]);
+    useFileSessions();
+
+    signInWith();
+    $id = session()->getId();
+    $before = session()->all();
+
+    $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookie(config('session.cookie'), $id)->get('/home')->assertOk();
+    expect(session()->has(SessionAssurance::KEY))->toBeFalse();
+
+    // A request that read the session before the step-up finishes after it.
+    session()->replace($before);
+    session()->save();
+
+    session()->flush();
+    app('auth')->forgetGuards();
+    $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookie(config('session.cookie'), $id)
+        ->postJson(route('keyring.authenticators.store', 'totp'))->assertUnauthorized();
+})->with('drivers');
+
 it('answers a signed-out json request with a 401, and remembers where a page visit was going', function () {
     config(['keyring.sessions.driver' => 'cache']);
     signInWith();

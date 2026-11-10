@@ -108,7 +108,7 @@ Build an action with one of the static constructors and chain extras:
 | `->lockFor('1h')` | Refuse sign ins for that long. Trusted devices stay trusted, for the same reason sessions aren't revoked. | Refuse sign ins for that long, from now, and stop trusting the user's devices. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 
-Locks are kept in the cache store named in `risk.store`. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
+Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
 
 ## Checkpoints
 
@@ -117,7 +117,7 @@ Signals run at one or both checkpoints (`Keyring\Risk\Checkpoint`):
 - **`Login`**: once per login, after the first factor is verified. All signals that list it run.
 - **`Request`**: on every signed-in request, from the [session middleware](devices-and-sessions.md#the-session-middleware). Only signals that list it run, so keep them cheap. When at least one signal runs at this checkpoint, the responder is called on every request, even at `Level::Low`, so a custom responder should return `Action::allow()` for low risk.
 
-When a request-time action does something without signing the session out (a step-up, say), Keyring updates the session's recorded IP and user agent, so the same change isn't acted on twice.
+When a request-time action does something without signing the session out (a step-up, say), Keyring updates the session's recorded IP and user agent, so the same change isn't acted on twice. A step-up also gives the session a new record and revokes the old one, so only the request that noticed the change carries on: an older copy of the session cookie, or a request that was already under way, is signed out instead of keeping what the session had proved.
 
 ## Configuring Signals
 

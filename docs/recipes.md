@@ -326,6 +326,16 @@ class GitHub extends Factor implements PrimaryFactor
     }
 
     /**
+     * GitHub's answer only comes with the callback that starts a sign in.
+     * A challenge or a confirmation has nothing from GitHub to check, so
+     * this factor is never offered there.
+     */
+    public function answersChallenges(): bool
+    {
+        return false;
+    }
+
+    /**
      * It stands in for the password, so it counts as the same kind of proof.
      */
     public function categories(Authenticator $authenticator): array
@@ -361,8 +371,8 @@ class GitHub extends Factor implements PrimaryFactor
     }
 
     /**
-     * GitHub already checked them, and identify() only finds a user GitHub
-     * vouched for, so there's nothing more to prove.
+     * Only called on the callback, straight after identify() found the user
+     * GitHub vouched for, so there's nothing more to prove.
      */
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
@@ -420,6 +430,7 @@ What this gives you:
 - A linked user with an authenticator app or passkey is sent to the challenge page first.
 - A GitHub account that isn't linked gets the same "these credentials don't match" as a wrong password.
 - Attempts count against the per-IP limit, and a [risk lock](risk.md#actions) refuses them, like any other sign in.
+- GitHub is never offered on the confirm page. A user is asked for their password or another sign-in method there, and one who only has GitHub signs in again to do anything behind [`keyring.fresh`](step-up.md).
 
 **Match on the provider's ID, never on the email address.** Some providers let an account carry an address its owner hasn't proven, so matching on it would let someone sign in to whoever has that address in your app.
 

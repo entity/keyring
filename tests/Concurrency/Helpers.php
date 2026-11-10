@@ -37,9 +37,10 @@ function outcomes(array $results, mixed $value): int
  * then let go and collect what each did.
  *
  * @param  list<list<string|int>>  $operations  worker.php arguments
+ * @param  (Closure(): void)|null  $meanwhile  work to finish, holding the lock, before letting go
  * @return list<mixed>
  */
-function contend(Model $locked, array $operations): array
+function contend(Model $locked, array $operations, ?Closure $meanwhile = null): array
 {
     $connection = $locked->getConnection();
     $connection->beginTransaction();
@@ -65,6 +66,10 @@ function contend(Model $locked, array $operations): array
 
     foreach ($workers as $worker) {
         expect($worker->running())->toBeTrue('An operation ran without waiting for the lock: '.$worker->output().$worker->errorOutput());
+    }
+
+    if ($meanwhile !== null) {
+        $meanwhile();
     }
 
     $connection->commit();
