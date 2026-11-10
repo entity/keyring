@@ -6,7 +6,6 @@ use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Query\Expression;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -126,7 +125,7 @@ class EmailChanges
     /**
      * Handle a confirmation from either address.
      */
-    public function confirm(PendingChange $change, string $token): EmailConfirmation
+    public function confirm(PendingChange $change, #[\SensitiveParameter] string $token): EmailConfirmation
     {
         $result = RowLock::hold($change, function (?PendingChange $change) use ($token) {
             if ($change === null || ! $change->isPending()) {
@@ -168,7 +167,7 @@ class EmailChanges
      * later change that moved it, since the link for an earlier, cancelled
      * one still works. Returns whether the link was good.
      */
-    public function revert(PendingChange $change, string $token): bool
+    public function revert(PendingChange $change, #[\SensitiveParameter] string $token): bool
     {
         $reverted = RowLock::hold($change, function (?PendingChange $change) use ($token) {
             if ($change === null || ! $change->canRevert() || ! $change->matches('revert_token', $token)) {

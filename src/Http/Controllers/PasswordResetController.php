@@ -47,7 +47,7 @@ class PasswordResetController
         return $this->status('reset-link-sent');
     }
 
-    public function edit(Request $request, string $token): mixed
+    public function edit(Request $request, #[\SensitiveParameter] string $token): mixed
     {
         return $this->keyring->render('reset-password', [
             'token' => $token,
