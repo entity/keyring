@@ -56,6 +56,24 @@ How they count:
 
 All of this is counted in the cache store Laravel's rate limiter uses (`cache.limiter`, or your default store), and [risk locks](risk.md#actions) in `risk.store`. A count that's gone reads as no attempts, so if the store loses its keys every limit starts over and every lock lifts: `php artisan cache:clear` and `optimize:clear` empty the default store, and a store that evicts under memory pressure can drop them one at a time. Where the in-a-row cap and the locks have to hold, point `cache.limiter` and `risk.store` at a persistent store of their own that doesn't evict and that your deploys don't clear.
 
+#### Locking Until a Reset
+
+By default every lock lifts by itself, the longest after a day. To stop the guessing altogether, set `limits.lock_after`:
+
+```php
+'limits' => [
+    'lock_after' => 5,
+],
+```
+
+An account locked that many times within a day on a factor that can start a sign in then stays locked. Locks double, so with the default one-minute window the fifth comes after about a quarter of an hour of steady guessing and at most eleven fit in a day: a higher number never holds anything. The sign-in form says to reset the password (`keyring::keyring.locked`) in place of counting down, Keyring dispatches `AccountLocked` and logs `account_locked`, and nothing is emailed: listen for the event to tell the user.
+
+The lock ends with a completed password reset, with `Keyring::unlock($user)` from a support tool of your own, or when failures are forgotten after `limits.remember_failures_for` (30 days), so raise that to hold it for longer. Like every limit it's kept in the cache, so see the note above about a store that doesn't lose its keys.
+
+It follows the other limits' rules. A browser the account has signed in from before keeps its own count and keeps working, so the owner isn't locked out of a browser they already use. A name nobody has locks the same way and gets the same answer. Second factors are never held, because a password reset wouldn't clear them: they keep the in-a-row cap.
+
+This is off by default because it lets anyone who knows a username lock that account for everyone on a new browser until its owner resets the password.
+
 Factors can set their own limits by overriding `limits()`. A reset only clears the keys the default `limits()` builds, so a factor with its own per-account keys should clear them in a `PasswordReset` listener. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, removing an authenticator, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Usernameless passkey options have their own limiter, `keyring-login-options`, at 60 requests a minute per IP address, because the login page fetches them on every load for autofill. Apps can redefine either limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each account can be sent three codes per factor every 10 minutes (`limits.codes` and `limits.codes_per`), however many sign ins, step-ups or enrollments ask for them.
 
 ### Single-Use Codes

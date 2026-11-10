@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
+use Keyring\Events\AccountLocked;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\Lockout;
 use Keyring\Facades\Keyring;
@@ -809,5 +810,122 @@ describe('an account with more than one name', function () {
         $this->withCookie('keyring_device', $device)
             ->post('/login', ['email' => 'dana@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
+    });
+});
+
+describe('an account locked out again and again', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 1000, 'keyring.limits.lock_after' => 3]);
+
+        $this->user = account('taylor@example.com');
+    });
+
+    /**
+     * Guess until the account locks, then wait the lock out.
+     */
+    function lockOut(int $times, string $email = 'taylor@example.com'): void
+    {
+        foreach (range(1, $times) as $lockout) {
+            test()->post('/login', ['email' => $email, 'password' => 'nope']);
+            test()->post('/login', ['email' => $email, 'password' => 'nope']);
+            test()->travel(2 ** $lockout)->minutes();
+        }
+    }
+
+    it('lifts each lock by itself until there have been that many in a day', function () {
+        lockOut(2);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('then keeps it locked until the password is reset, and says how to get back in', function () {
+        Event::fake([AccountLocked::class]);
+
+        lockOut(3);
+        $this->travel(7)->days();
+
+        $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertStatus(429)
+            ->assertJsonPath('errors.email.0', __('keyring::keyring.locked'));
+
+        $this->assertGuest();
+        Event::assertDispatchedTimes(AccountLocked::class, 1);
+        Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->user->is($this->user) && $event->factor === 'password');
+
+        completeReset($this->user);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])->assertRedirect('/dashboard');
+    });
+
+    it('logs it against the account', function () {
+        lockOut(3);
+
+        expect(SecurityEvent::query()->where('type', 'account_locked')->sole())
+            ->authenticatable_id->toBe($this->user->id)
+            ->factor->toBe('password');
+    });
+
+    it('can be unlocked without a reset', function () {
+        lockOut(3);
+
+        Keyring::unlock($this->user);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('answers a name nobody has the same way, and tells nobody', function () {
+        Event::fake([AccountLocked::class]);
+
+        lockOut(3, 'nobody@example.com');
+
+        $this->postJson('/login', ['email' => 'nobody@example.com', 'password' => 'nope'])
+            ->assertStatus(429)
+            ->assertJsonPath('errors.email.0', __('keyring::keyring.locked'));
+
+        Event::assertNotDispatched(AccountLocked::class);
+    });
+
+    it('lets the lock go once failures are forgotten', function () {
+        lockOut(3);
+        $this->travel(31)->days();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('leaves the owner\'s known browser working', function () {
+        $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        $this->post('/logout');
+        $this->flushSession();
+
+        $this->withUnencryptedCookies([]);
+        lockOut(3);
+
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+    });
+
+    it('never holds a second factor, which a reset would not clear', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        foreach (range(1, 4) as $lockout) {
+            $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
+            $this->travel(2 ** $lockout)->minutes();
+        }
+
+        $this->travel(2)->days();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+    });
+
+    it('does nothing unless the app asks for it', function () {
+        config(['keyring.limits.lock_after' => null]);
+
+        lockOut(5);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
     });
 });

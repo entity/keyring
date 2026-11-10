@@ -266,6 +266,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
     'remember_failures_for' => '30d',
     'longest_lock' => '24h',
     'longest_ip_lock' => '15m',
+    'lock_after' => null,
     'codes' => 3,
     'codes_per' => '10m',
 ],
@@ -275,7 +276,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. Verifications that go through return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until the count is forgotten, `remember_failures_for` after the first failure of the run. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. An account can be sent `codes` codes for one factor every `codes_per`. See [Rate Limiting](security.md#rate-limiting).
+`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until the count is forgotten, `remember_failures_for` after the first failure of the run. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. Set `lock_after` to keep an account locked out of signing in once it has been locked that many times in a day, until its password is reset (see [Locking Until a Reset](security.md#locking-until-a-reset)). An account can be sent `codes` codes for one factor every `codes_per`. See [Rate Limiting](security.md#rate-limiting).
 
 Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
 
@@ -328,6 +329,7 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::usePendingChangeModel($model)` | Uses your own subclass of `Keyring\Models\PendingChange`. |
 | `Keyring::useSecurityEventModel($model)` | Uses your own subclass of `Keyring\Models\SecurityEvent`. |
 | `Keyring::attempt($request, $factor)` | Starts a sign in with a factor from a route of your own, through the same pipeline as the login form. See [Starting a Sign In Yourself](sign-in-flow.md#starting-a-sign-in-yourself). |
+| `Keyring::unlock($user)` | Lets a locked-out user try again without a password reset: lifts their risk lock and clears their sign-in limits and locks. See [Locking Until a Reset](security.md#locking-until-a-reset). |
 | `Keyring::allowSignInWhen($callback)` | Decides who may be signed in at all, such as accounts that aren't banned. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |
 | `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. See [Emailed Links](security.md#emailed-links). |
