@@ -353,8 +353,7 @@ class EmailChanges
             ->whereNotNull('applied_at')
             ->whereNull('reverted_at')
             ->lockForUpdate()
-            ->get()
-            ->isNotEmpty();
+            ->first() !== null;
     }
 
     /**
