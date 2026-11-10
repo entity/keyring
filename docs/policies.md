@@ -141,13 +141,16 @@ What the attempt tells you:
 | `$attempt->remember` | Whether "remember me" was ticked. |
 | `$attempt->keyring()` | The user's authenticators. |
 
-The closure must cope with `null` devices and risk. Keyring also calls it with a fresh attempt (no device, no risk) when a user removes an authenticator, to check what's left still meets the policy.
+The closure must cope with `null` devices and risk, and give its strictest answer for them. Keyring also asks it outside a login, about an attempt nothing is known of (no device, no risk, and `isNewDevice()` false):
+
+- When a user removes an authenticator, to check what's left still meets the policy.
+- On every route behind [`keyring.fresh`](step-up.md#fresh-verification), to work out what signing in would ask. There it's asked a second time with the request's device looked up, and the stricter of the two answers stands. Risk is never assessed there, so `$attempt->risk` is `null` both times.
 
 ## How the Policy Is Applied
 
 - The policy is asked again after every factor the user verifies during a login. A risk assessment can raise it partway through.
 - When the [risk response](risk.md#responding-to-risk) asks for a step-up and the user has enough authenticators, the requirement becomes at least `aal2()`.
-- The policy only applies to logins. [Step-up](step-up.md) sets its own requirement.
+- The policy applies to logins, and to [fresh verification](step-up.md#fresh-verification), which asks for as much as a login would. [Step-up](step-up.md) to a level sets its own requirement.
 - [Registration](sign-in-flow.md#registration) signs the new user in with their password without asking the policy, since they can't have other factors yet.
 - Users can't remove an authenticator if what's left can't sign in, or can't meet the policy (unless it uses `ifEnrolled()`). See [Removing Authenticators](authenticators.md#removing-authenticators).
 
