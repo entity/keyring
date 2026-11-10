@@ -109,13 +109,14 @@ class DeviceManager
     }
 
     /**
-     * Sign the device out everywhere and stop trusting it.
+     * Sign the device out everywhere and stop trusting it, whatever state
+     * its account is in: a deactivated one may be restored.
      */
     public function revoke(Device $device, bool $reported = false): void
     {
         $device->forceFill(['revoked_at' => now(), 'trusted_until' => null])->save();
 
-        if ($user = $device->user()) {
+        if ($user = $device->owner()) {
             $this->sessions->registry()->revokeDevice($user, $device->id);
             $this->sessions->cycleRememberToken($user);
 

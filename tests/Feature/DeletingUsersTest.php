@@ -2,11 +2,13 @@
 
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Assurance;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
@@ -67,6 +69,74 @@ it('signs a soft deleted user out but keeps their sign-in methods', function () 
 
     $user->forceDelete();
     expect(Authenticator::count())->toBe(0);
+});
+
+// The "this wasn't me" link of a change that was applied before the account
+// was deactivated. Whoever changed the address may be why it was.
+function appliedEmailChange(SoftDeletingUser $user): PendingChange
+{
+    $change = new PendingChange([
+        'attribute' => 'email',
+        'value' => 'new@example.com',
+        'previous_value' => 'taylor@example.com',
+        'confirm_token' => PendingChange::hashToken('confirm'),
+        'revert_token' => PendingChange::hashToken('revert'),
+        'confirmed_at' => now(),
+        'applied_at' => now(),
+        'revertable_until' => now()->addDays(7),
+        'expires_at' => now()->addDay(),
+    ]);
+
+    return tap($change, fn (PendingChange $change) => $change->authenticatable()->associate($user)->save());
+}
+
+it('still undoes an email change for a soft deleted user, ready for when they are restored', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    config(['auth.providers.users.model' => SoftDeletingUser::class]);
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'new@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $change = appliedEmailChange($user);
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    $user->delete();
+
+    $this->post(route('keyring.email.revert.store', [$change->id, 'revert']))->assertSessionHas('status', 'email-change-reverted');
+
+    $user->restore();
+
+    expect($user->fresh()->email)->toBe('taylor@example.com')
+        ->and(Authenticator::count())->toBe(0)
+        ->and($change->fresh()->reverted_at)->not->toBeNull();
+});
+
+it('does not use up the link when there is no account left to put the address back on', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    config(['auth.providers.users.model' => SoftDeletingUser::class]);
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'new@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    $change = appliedEmailChange($user);
+
+    // Removed without the model knowing, so Keyring's records are still there.
+    DB::table('users')->where('id', $user->id)->delete();
+
+    $this->post(route('keyring.email.revert.store', [$change->id, 'revert']))->assertSessionHas('status', 'email-change-invalid');
+
+    expect($change->fresh()->reverted_at)->toBeNull();
+});
+
+it('signs a reported device out for a soft deleted user too, so a restore does not bring its session back', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    config(['auth.providers.users.model' => SoftDeletingUser::class]);
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $session = session(Sessions::KEY);
+    $device = Device::sole();
+
+    // Deactivated without the model knowing, so nothing signed them out.
+    DB::table('users')->where('id', $user->id)->update(['deleted_at' => now()]);
+
+    app(DeviceManager::class)->revoke($device, reported: true);
+
+    expect(app(SessionRegistry::class)->find($session)->revokedAt)->not->toBeNull();
 });
 
 it('ends the user\'s reset links with them, so whoever registers the address next can\'t be reset with one', function () {

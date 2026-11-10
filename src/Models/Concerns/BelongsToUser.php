@@ -33,6 +33,19 @@ trait BelongsToUser
     }
 
     /**
+     * The user this belongs to, whatever state their account is in: soft
+     * deleted, or hidden by a global scope of the app's. For work that has
+     * to reach the account itself, like undoing a change to it or signing
+     * it out, which a deactivated account needs as much as any other.
+     */
+    public function owner(): (Authenticatable&Model)|null
+    {
+        $owner = $this->authenticatable()->withoutGlobalScopes()->first();
+
+        return $owner instanceof Authenticatable ? $owner : null;
+    }
+
+    /**
      * @param  Builder<static>  $query
      */
     #[Scope]
