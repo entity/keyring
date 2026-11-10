@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Testing\VirtualAuthenticator;
@@ -97,4 +98,33 @@ it('ends with the old address whichever of confirm and revert wins', function ()
         ->and($reverted)->toBeTrue()
         ->and($user->fresh()->email)->toBe('taylor@example.com')
         ->and($change->fresh()->reverted_at)->not->toBeNull();
+});
+
+it('puts the address back when a later change is confirmed while an earlier one is being reverted', function () {
+    $user = taylor();
+    $pending = fn (string $address) => tap(new PendingChange([
+        'attribute' => 'email',
+        'value' => $address,
+        'previous_value' => 'taylor@example.com',
+        'confirm_token' => PendingChange::hashToken('confirm'),
+        'revert_token' => PendingChange::hashToken('revert'),
+        'expires_at' => now()->addDay(),
+    ]), fn (PendingChange $change) => $change->authenticatable()->associate($user)->save());
+
+    // Asked for and then replaced by a second request: its "this wasn't me"
+    // link still works.
+    $first = $pending('first@example.com');
+    $first->forceFill(['cancelled_at' => now(), 'revertable_until' => now()->addDay()])->save();
+    $second = $pending('second@example.com');
+
+    // The second change's confirmation holds its row. The revert waits for
+    // it, and the confirmation finishes before letting go.
+    [$reverted] = contend($second, [['revert-email-change', $first->id, 'revert']], function () use ($user, $second) {
+        Keyring::withoutProtection(fn () => $user->forceFill(['email' => 'second@example.com'])->save());
+        $second->forceFill(['confirmed_at' => now(), 'applied_at' => now(), 'revertable_until' => now()->addDay()])->save();
+    });
+
+    expect($reverted)->toBeTrue()
+        ->and($user->fresh()->email)->toBe('taylor@example.com')
+        ->and($second->fresh()->canRevert())->toBeFalse();
 });

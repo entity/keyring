@@ -176,14 +176,24 @@ class EmailChanges
 
             $user = $change->user();
 
+            // Later changes are closed first. That waits for one being
+            // confirmed right now, so whether the address moved is read
+            // after it has, and none can move it once this has looked.
+            if ($user !== null) {
+                $this->closeLaterChanges($user, $change);
+            }
+
+            // On a fresh copy of the user: the one loaded above may be from
+            // before that confirmation, and would see nothing to put back.
             if ($user !== null && $this->movedAddress($user, $change)) {
-                $this->protection->changing(fn () => $user->forceFill([$change->attribute => $change->previous_value])->save());
+                RowLock::hold($user, fn (?Model $user) => $user !== null && $this->protection->changing(
+                    fn () => $user->forceFill([$change->attribute => $change->previous_value])->save(),
+                ));
             }
 
             $change->forceFill(['reverted_at' => now()])->save();
 
             if ($user !== null) {
-                $this->closeLaterChanges($user, $change);
                 $this->removeAuthenticatorsAddedSince($user, $this->unestablishedSince($change));
             }
 
@@ -333,7 +343,8 @@ class EmailChanges
 
     /**
      * Whether this change, or one asked for after it, moved the address and
-     * hasn't been reverted.
+     * hasn't been reverted. Read with a lock, so it sees a confirmation that
+     * finished since the revert's transaction began.
      */
     protected function movedAddress(Authenticatable&Model $user, PendingChange $change): bool
     {
@@ -341,7 +352,9 @@ class EmailChanges
             ->where($change->getKeyName(), '>=', $change->getKey()) // ULIDs sort by creation
             ->whereNotNull('applied_at')
             ->whereNull('reverted_at')
-            ->exists();
+            ->lockForUpdate()
+            ->get()
+            ->isNotEmpty();
     }
 
     /**
