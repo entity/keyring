@@ -1,8 +1,10 @@
 <?php
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -30,6 +32,24 @@ it('removes sign-in methods, devices, pending changes and sessions with the user
         ->and(Device::count())->toBe(0)
         ->and(PendingChange::count())->toBe(0)
         ->and(app(SessionRegistry::class)->find($session)?->revokedAt)->not->toBeNull();
+});
+
+it('does not let an old remember me cookie back in once a soft deleted user is restored', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    config(['auth.providers.users.model' => SoftDeletingUser::class]);
+    Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+    $user = $user->fresh();
+    $remembered = [Auth::guard()->getRecallerName() => $user->id.'|'.$user->remember_token.'|'.$user->password];
+
+    $user->delete();
+    $user->restore();
+    $this->flushSession();
+    Auth::forgetGuards();
+
+    $this->withCookies($remembered)->get('/home')->assertRedirect('/login');
 });
 
 it('signs a soft deleted user out but keeps their sign-in methods', function () {

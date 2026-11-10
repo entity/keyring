@@ -42,17 +42,21 @@ trait HasKeyring
         });
 
         // Signed out, and reset links ended, either way. A soft deleted user
-        // keeps their sign-in methods in case they're restored; once really
-        // gone, they go too, so a passkey can be registered again on a new
+        // keeps their sign-in methods in case they're restored, but nothing
+        // that was signed in before gets back in afterwards: "remember me"
+        // cookies and trusted devices end too. Once really gone, the sign-in
+        // methods go as well, so a passkey can be registered again on a new
         // account.
         static::deleted(function (self $user) {
-            app(Sessions::class)->registry()->revokeAll($user);
             app(ResetTokens::class)->forget($user);
 
             if (method_exists($user, 'isForceDeleting') && ! $user->isForceDeleting()) {
+                app(Sessions::class)->signOutEverywhere($user);
+
                 return;
             }
 
+            app(Sessions::class)->registry()->revokeAll($user);
             $user->authenticators()->delete();
             $user->devices()->delete();
             Keyring::pendingChangeModel()::query()->ownedBy($user)->delete();
