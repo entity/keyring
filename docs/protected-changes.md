@@ -138,7 +138,7 @@ The user is then redirected to the forgot password page (or the login page, when
 
 ### The Old Address Is Reserved
 
-While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. Another account asking to move to it gets the same "address in use" email as for any taken address. `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()` wherever users are created. The published `CreateNewUser` action does:
+While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. That goes for lookalikes too: an address that differs only in case, accents, letter width or characters that don't show is held back with it, because MySQL's and MariaDB's default collations take those for the same address and their unique index would refuse to give it back. Another account asking to move to it gets the same "address in use" email as for any taken address. `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()` wherever users are created. The published `CreateNewUser` action does:
 
 ```php
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],

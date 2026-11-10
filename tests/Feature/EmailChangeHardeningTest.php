@@ -489,6 +489,43 @@ describe('the address a change replaced', function () {
             ->and($this->user->fresh()->email)->toBe('taylor@example.com');
     });
 
+    // MySQL's default collations take these for the reserved address, so
+    // its unique index would refuse to give the address back to its owner.
+    it('cannot be registered under a spelling a database would take for it', function (string $lookalike) {
+        $this->post('/logout');
+
+        $this->post('/register', [
+            'name' => 'Someone',
+            'email' => $lookalike,
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ])->assertSessionHasErrors(['email' => 'The email has already been taken.']);
+
+        expect(User::count())->toBe(1)
+            ->and(app(EmailChanges::class)->revert($this->change, $this->tokens['revert']))->toBeTrue()
+            ->and($this->user->fresh()->email)->toBe('taylor@example.com');
+    })->with([
+        'an accent' => 'tàylor@example.com',
+        'an accent in the domain' => 'taylor@exámple.com',
+        'a combining accent' => "ta\u{0301}ylor@example.com",
+        'full-width letters' => 'ｔａｙｌｏｒ@example.com',
+        'a styled letter' => '𝐭aylor@example.com',
+        'a character that does not show' => "tay\u{00AD}lor@example.com",
+    ]);
+
+    it('still lets a different address be registered', function (string $address) {
+        $this->post('/logout');
+
+        $this->post('/register', [
+            'name' => 'Someone',
+            'email' => $address,
+            'password' => 'correct horse battery staple',
+            'password_confirmation' => 'correct horse battery staple',
+        ])->assertSessionHasNoErrors();
+
+        expect(User::count())->toBe(2);
+    })->with(['tailor@example.com', 'taylor@example.org', 'tay.lor@example.com', 'taylor+news@example.com']);
+
     it('is free again once the change can no longer be reverted', function () {
         $this->travel(8)->days();
 
