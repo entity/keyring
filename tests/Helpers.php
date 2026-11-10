@@ -3,7 +3,9 @@
 use Illuminate\Mail\Markdown;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Str;
 use Keyring\Factors\Totp;
+use Keyring\KeyringManager;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
@@ -42,6 +44,22 @@ function staff(): Staff
 function totpCode(string $secret, int $step = 0): string
 {
     return app(Google2FA::class)->oathTotp($secret, Totp::timestep($step));
+}
+
+/**
+ * Register the published notification for each type, or for every one, as
+ * an app's KeyringServiceProvider would.
+ *
+ * @param  list<string>|null  $types
+ */
+function sendNotifications(?array $types = null): void
+{
+    $types ??= KeyringManager::NOTIFICATIONS;
+
+    Keyring\Facades\Keyring::notifications(array_combine($types, array_map(
+        fn (string $type) => 'App\\Notifications\\Keyring\\'.Str::studly($type),
+        $types,
+    )));
 }
 
 /**

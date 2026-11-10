@@ -1,5 +1,6 @@
 <?php
 
+use App\Notifications\Keyring\ConfirmEmailChange;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -23,15 +24,18 @@ use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Exceptions\MissingAction;
+use Keyring\Exceptions\MissingNotification;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\Password as PasswordFactor;
+use Keyring\KeyringManager;
 use Keyring\KeyringServiceProvider;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
-use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
 use Keyring\Pipeline\Steps;
@@ -91,9 +95,9 @@ it('answers unknown factors with a 404', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->postJson('/user/authenticators/sms')->assertNotFound();
 });
 
-it('lets apps swap a notification through the container', function () {
+it('sends the app\'s own notification for an email a flow needs', function () {
     Notification::fake();
-    app()->bind(ConfirmEmailChange::class, CustomConfirmEmailChange::class);
+    Keyring::notifications(['confirm_email_change' => CustomConfirmEmailChange::class]);
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
         ->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])
@@ -102,10 +106,20 @@ it('lets apps swap a notification through the container', function () {
     Notification::assertSentOnDemand(CustomConfirmEmailChange::class);
 });
 
-it('refuses security email types it does not know', function () {
-    expect(fn () => Keyring::sendSecurityNotices(['new_device', 'new_devise']))
-        ->toThrow(InvalidArgumentException::class, 'Unknown security notice types: new_devise.');
-});
+it('says which notification is missing before starting a flow that needs it', function () {
+    Keyring::notifications(['email_change_notice' => null]);
+
+    $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.email.store'), ['email' => 'new@example.com']);
+})->throws(MissingNotification::class, 'No notification is registered for [email_change_notice]');
+
+it('says so when an email code has no notification to go out in', function () {
+    Keyring::factors([PasswordFactor::class, EmailCode::asSecondFactor()]);
+    Keyring::notifications(['verification_code' => null]);
+
+    $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.authenticators.store', 'email-code'));
+})->throws(MissingNotification::class, 'No notification is registered for [verification_code]');
 
 class CustomConfirmEmailChange extends ConfirmEmailChange
 {
@@ -342,3 +356,18 @@ class SymbolsRequired implements UpdatesUserPasswords
         $user->forceFill(['password' => Hash::make($input['password'])])->save();
     }
 }
+
+it('publishes a notification for every type, that builds from what keyring passes and renders', function (string $type) {
+    sendNotifications();
+
+    $notification = Keyring::requiredNotification($type, [
+        'when' => 'Monday', 'device' => 'Firefox on Windows', 'ip' => '127.0.0.1',
+        'name' => 'YubiKey', 'remaining' => 7, 'reasons' => 'A new country.',
+        'url' => 'https://example.com/link', 'expiresAt' => now()->addDay(),
+        'code' => '12345678', 'minutes' => 10, 'enrolling' => false,
+        'email' => 'n•••@example.com', 'revertUrl' => 'https://example.com/revert', 'confirmUrl' => null,
+    ]);
+
+    expect($notification->via($this->user))->toBe(['mail'])
+        ->and(renderedMail($notification->toMail($this->user))['text'])->not->toBeEmpty()->not->toContain(':name')->not->toContain(':remaining')->not->toContain(':reasons');
+})->with(KeyringManager::NOTIFICATIONS);

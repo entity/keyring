@@ -6,6 +6,7 @@ use App\Actions\Keyring\CreateNewUser;
 use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
+use App\Notifications\Keyring as Notifications;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -42,6 +43,26 @@ class KeyringServiceProvider extends ServiceProvider
         Keyring::resetUserPasswordsUsing(ResetUserPassword::class);
         Keyring::updateUserPasswordsUsing(UpdateUserPassword::class);
         Keyring::validateEmailChangesUsing(ValidateEmailChange::class);
+
+        // The emails Keyring sends, in app/Notifications/Keyring. They're
+        // yours to restyle or send another way, and a security notice that
+        // isn't listed here isn't sent. See "Security Log & Emails".
+        Keyring::notifications([
+            'verification_code' => Notifications\VerificationCode::class,
+            'confirm_email_change' => Notifications\ConfirmEmailChange::class,
+            'email_change_notice' => Notifications\EmailChangeNotice::class,
+            'email_address_in_use' => Notifications\EmailAddressInUse::class,
+            'password_changed' => Notifications\PasswordChanged::class,
+            'authenticator_added' => Notifications\AuthenticatorAdded::class,
+            'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
+            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
+            // 'new_device' => Notifications\NewDevice::class,
+            // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
+            // 'suspicious_activity' => Notifications\SuspiciousActivity::class,
+            // 'clone_suspected' => Notifications\CloneSuspected::class,
+            // 'email_changed' => Notifications\EmailChanged::class,
+            // 'email_change_reverted' => Notifications\EmailChangeReverted::class,
+        ]);
 
         // The limit on registration, password resets and changes, enrollment
         // and emailed links. Sign in attempts use the "limits" config instead.

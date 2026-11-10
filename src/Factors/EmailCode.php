@@ -6,8 +6,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Notification;
 use InvalidArgumentException;
+use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
-use Keyring\Notifications\VerificationCode;
 use Keyring\Support\MailText;
 
 /**
@@ -59,7 +59,11 @@ class EmailCode extends CodeFactor
     protected function deliver(Authenticatable&Model $user, Authenticator $authenticator, string $code): void
     {
         // An authenticator that isn't saved yet means this code confirms enrollment.
-        Notification::send($user, app(VerificationCode::class, ['code' => $code, 'ttl' => $this->ttl, 'enrolling' => ! $authenticator->exists]));
+        Notification::send($user, Keyring::requiredNotification('verification_code', [
+            'code' => $code,
+            'minutes' => intdiv($this->ttl, 60),
+            'enrolling' => ! $authenticator->exists,
+        ]));
     }
 
     protected function defaultName(Authenticatable&Model $user): string

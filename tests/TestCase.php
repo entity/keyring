@@ -42,7 +42,6 @@ abstract class TestCase extends Orchestra
         // Every feature, so the suite covers them all. Tests of a feature
         // being off turn it off themselves.
         $app['config']->set('keyring.features', Features::all());
-        $app['config']->set('keyring.security_notices', ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used']);
         // What a new Laravel app uses, so nothing relies on PHP serialization.
         $app['config']->set('session.serialization', 'json');
     }
@@ -58,6 +57,13 @@ abstract class TestCase extends Orchestra
             ->resetUserPasswordsUsing(ResetUserPassword::class)
             ->updateUserPasswordsUsing(UpdateUserPassword::class)
             ->validateEmailChangesUsing(ValidateEmailChange::class);
+
+        // And the emails it registers: the ones a flow needs, and the four
+        // security notices keyring:install turns on.
+        sendNotifications([
+            'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use',
+            'password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used',
+        ]);
     }
 
     protected function defineDatabaseMigrations(): void

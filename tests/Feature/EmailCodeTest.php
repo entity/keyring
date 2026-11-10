@@ -1,5 +1,6 @@
 <?php
 
+use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Support\Facades\Notification;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
@@ -8,7 +9,6 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Models\Authenticator;
-use Keyring\Notifications\VerificationCode;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {

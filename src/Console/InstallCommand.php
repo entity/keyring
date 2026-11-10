@@ -23,8 +23,8 @@ use function Laravel\Prompts\multiselect;
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
         {--feature=* : A feature to turn on, replacing the defaults (registration and reset-passwords): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
-        {--emails : Email users when their password or sign-in methods change (the default with a second sign-in method)}
-        {--no-emails : Send no security emails}
+        {--emails : Register the emails that tell users their password or sign-in methods changed (the default with a second sign-in method)}
+        {--no-emails : Register no security emails, only the ones a flow needs}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
 {
@@ -65,7 +65,7 @@ class InstallCommand extends Command
             $features = config('keyring.features');
         } else {
             $features = $this->features($factors);
-            $files->put(config_path('keyring.php'), $this->config($files, $features, $this->emails($factors)));
+            $files->put(config_path('keyring.php'), $this->config($files, $features));
         }
 
         // Publishing again would add the migrations twice, under new timestamps.
@@ -73,12 +73,21 @@ class InstallCommand extends Command
             $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations']);
         }
 
-        // The provider and actions are your code from here on. Every action is
-        // published and registered, so turning a feature on later just works.
-        $this->write($files, app_path('Providers/KeyringServiceProvider.php'), $this->provider($files, $factors));
+        // The provider, actions and notifications are your code from here on.
+        // Every one is published, so turning a feature on later just works.
+        $provider = app_path('Providers/KeyringServiceProvider.php');
 
-        foreach ($files->files(self::STUBS.'/app/Actions/Keyring') as $action) {
-            $this->write($files, app_path('Actions/Keyring/'.$action->getFilename()), $action->getContents());
+        if ($files->exists($provider) && ! $this->option('force')) {
+            $this->components->warn("Skipped {$provider}, it already exists.");
+        } else {
+            $files->ensureDirectoryExists(dirname($provider));
+            $files->put($provider, $this->provider($files, $factors, $this->emails($factors)));
+        }
+
+        foreach (['Actions/Keyring', 'Notifications/Keyring'] as $directory) {
+            foreach ($files->files(self::STUBS.'/app/'.$directory) as $file) {
+                $this->write($files, app_path($directory.'/'.$file->getFilename()), $file->getContents());
+            }
         }
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
@@ -89,7 +98,7 @@ class InstallCommand extends Command
             in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
             $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
             'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
-            'Add features later in <comment>config/keyring.php</comment>, and sign-in methods in your KeyringServiceProvider',
+            'Add features later in <comment>config/keyring.php</comment>, and sign-in methods and emails in your KeyringServiceProvider',
         ]));
 
         return self::SUCCESS;
@@ -192,26 +201,25 @@ class InstallCommand extends Command
      *
      * @param  list<string>  $features
      */
-    protected function config(Filesystem $files, array $features, bool $emails): string
+    protected function config(Filesystem $files, array $features): string
     {
         $config = $files->get(self::STUBS.'/config/keyring.php');
 
-        foreach (Features::all() as $feature) {
-            if (! in_array($feature, $features, true)) {
-                $method = Str::camel($feature);
-                $config = str_replace("        Features::{$method}(),", "        // Features::{$method}(),", $config);
-            }
+        foreach (array_diff(Features::all(), $features) as $feature) {
+            $method = Str::camel($feature);
+            $config = str_replace("        Features::{$method}(),", "        // Features::{$method}(),", $config);
         }
 
-        return $emails ? $config : (string) preg_replace("/'security_notices' => \\[.*?\\],/s", "'security_notices' => [],", $config);
+        return $config;
     }
 
     /**
-     * The provider with only the chosen sign-in methods.
+     * The provider with only the chosen sign-in methods, and the security
+     * notices left commented when they weren't wanted.
      *
      * @param  list<string>  $factors
      */
-    protected function provider(Filesystem $files, array $factors): string
+    protected function provider(Filesystem $files, array $factors, bool $emails): string
     {
         $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
 
@@ -227,7 +235,9 @@ class InstallCommand extends Command
         );
         $lines = array_filter($lines, fn (string $line) => array_all($remove, fn (string $needle) => ! str_ends_with(trim($line), $needle)));
 
-        return $this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines)));
+        $provider = $this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines)));
+
+        return $emails ? $provider : (string) preg_replace("/^( +)('(?:password_changed|authenticator_added|authenticator_removed|recovery_code_used)' =>)/m", '$1// $2', $provider);
     }
 
     /**

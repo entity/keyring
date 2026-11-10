@@ -17,17 +17,17 @@ use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EmailChanged;
 use Keyring\Events\EmailChangeRequested;
 use Keyring\Events\EmailChangeReverted;
+use Keyring\Exceptions\MissingNotification;
 use Keyring\KeyringManager;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
-use Keyring\Notifications\ConfirmEmailChange;
-use Keyring\Notifications\EmailAddressInUse;
-use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Keyring\Support\MailText;
 use Keyring\Support\RowLock;
+use Keyring\Support\Url;
 
 use function Illuminate\Support\defer;
 
@@ -70,6 +70,12 @@ class EmailChanges
             return null;
         }
 
+        // Before anything is saved: a change whose emails can't be sent could
+        // never be confirmed.
+        foreach (['confirm_email_change', 'email_change_notice', 'email_address_in_use'] as $type) {
+            throw_unless($this->keyring->hasNotification($type), MissingNotification::for($type));
+        }
+
         $taken = $this->taken($user, $email);
         $tokens = ['confirm' => Str::random(48), 'current' => Str::random(48), 'revert' => Str::random(48)];
 
@@ -95,14 +101,19 @@ class EmailChanges
 
         // After the response, so timing doesn't give away which case it was.
         defer(function () use ($change, $email, $current, $tokens, $needsCurrent, $taken) {
-            Notification::route('mail', $email)->notify($taken
-                ? app(EmailAddressInUse::class)
-                : app(ConfirmEmailChange::class, ['change' => $change, 'token' => $tokens['confirm']]));
+            $link = fn (string $route, string $token) => Url::route($route, ['change' => $change->id, 'token' => $token]);
 
-            Notification::route('mail', $current)->notify(app(EmailChangeNotice::class, [
-                'change' => $change,
-                'revertToken' => $tokens['revert'],
-                'confirmToken' => $needsCurrent ? $tokens['current'] : null,
+            Notification::route('mail', $email)->notify($taken
+                ? $this->keyring->requiredNotification('email_address_in_use')
+                : $this->keyring->requiredNotification('confirm_email_change', [
+                    'url' => $link('keyring.email.confirm', $tokens['confirm']),
+                    'expiresAt' => $change->expires_at,
+                ]));
+
+            Notification::route('mail', $current)->notify($this->keyring->requiredNotification('email_change_notice', [
+                'email' => MailText::maskAddress($email),
+                'revertUrl' => $link('keyring.email.revert', $tokens['revert']),
+                'confirmUrl' => $needsCurrent ? $link('keyring.email.confirm', $tokens['current']) : null,
             ]));
         });
 

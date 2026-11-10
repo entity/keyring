@@ -1,5 +1,10 @@
 <?php
 
+use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
+use App\Notifications\Keyring\NewDevice as NewDeviceNotice;
+use App\Notifications\Keyring\PasswordChanged;
+use App\Notifications\Keyring\SecondFactorFailed;
+use App\Notifications\Keyring\SuspiciousActivity;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -21,7 +26,6 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
-use Keyring\Notifications\SecurityNotice;
 use Keyring\Risk\Action;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
@@ -148,7 +152,7 @@ function expectOwnerStillSignedIn(string $session): void
 }
 
 it('refuses critical risk with the usual error, tells the owner and leaves them signed in', function () {
-    Keyring::sendSecurityNotices();
+    sendNotifications();
     $existing = liveOwnerSession();
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
@@ -165,7 +169,7 @@ it('refuses critical risk with the usual error, tells the owner and leaves them 
         ->and($assessed->action->deny)->toBeTrue()
         ->and($assessed->action->revokeSessions)->toBeFalse()
         ->and(SecurityEvent::where('type', 'risk_denied')->exists())->toBeTrue();
-    Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'suspicious_activity');
+    Notification::assertSentTo($this->user, SuspiciousActivity::class);
 });
 
 it('does not let a custom responder sign the owner out from a login attempt', function () {
@@ -319,35 +323,41 @@ it('sends security emails only when asked to', function () {
     Notification::assertNothingSent();
     $this->post('/logout');
 
-    Keyring::sendSecurityNotices(['new_device']);
+    sendNotifications(['new_device']);
     $this->user->devices()->delete();
     signInAs();
 
-    Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'new_device' && $notice->actionUrl !== null);
+    Notification::assertSentTo($this->user, NewDeviceNotice::class, fn (NewDeviceNotice $notice) => $notice->url !== null);
 });
 
-it('sends security notices through any channel the app chooses', function () {
-    Keyring::sendSecurityNotices(['new_device'])->securityNoticesUsing(DatabaseSecurityNotice::class);
+it('sends whatever notification the app registers, with what the notice has to say', function () {
+    Keyring::notifications(['new_device' => OwnNewDevice::class]);
     $this->user->devices()->delete();
 
     signInAs();
 
-    Notification::assertSentTo($this->user, DatabaseSecurityNotice::class, function (DatabaseSecurityNotice $notice, array $channels) {
-        $data = $notice->toArray($this->user);
-
-        return $channels === ['database']
-            && $data['type'] === 'new_device'
-            && $data['subject'] === 'New sign-in to your account'
-            && $data['action']['text'] === "This wasn't me"
-            && array_key_exists('IP address', $data['details']);
-    });
+    Notification::assertSentTo($this->user, OwnNewDevice::class, fn (OwnNewDevice $notice, array $channels) => $channels === ['database']
+        && str_contains($notice->url, '/report')
+        && $notice->device === 'Firefox on Windows'
+        && $notice->ip === '127.0.0.1');
 });
+
+it('stops sending a notice the app takes out again', function () {
+    sendNotifications(['new_device']);
+    Keyring::notifications(['new_device' => null]);
+    $this->user->devices()->delete();
+
+    signInAs();
+
+    Notification::assertNothingSent();
+});
+
+it('refuses a notification type it doesn\'t send', function () {
+    Keyring::notifications(['new_devise' => OwnNewDevice::class]);
+})->throws(InvalidArgumentException::class, 'Unknown notification types: new_devise');
 
 it('shows a device and IP address as plain text in the email', function () {
-    $notice = new SecurityNotice('password_changed', details: [
-        'device' => '[Firefox](https://evil.example/d)',
-        'ip' => '<https://evil.example/i>',
-    ]);
+    $notice = new PasswordChanged(when: 'now', device: '[Firefox](https://evil.example/d)', ip: '<https://evil.example/i>');
 
     $mail = renderedMail($notice->toMail($this->user));
 
@@ -359,7 +369,8 @@ it('shows a device and IP address as plain text in the email', function () {
 });
 
 it('shows a location from the locator as plain text in the email', function () {
-    Keyring::sendSecurityNotices()->risk()->signals([new NewCountry(95)]);
+    sendNotifications();
+    Keyring::risk()->signals([new NewCountry(95)]);
     $this->locator->location = ['country' => 'GB'];
     signInAs()->assertRedirect('/dashboard');
     $this->post('/logout');
@@ -367,7 +378,7 @@ it('shows a location from the locator as plain text in the email', function () {
     $this->locator->location = ['country' => '[Amsterdam](https://evil.example/l)'];
     signInAs()->assertSessionHasErrors('email');
 
-    $notice = Notification::sent($this->user, SecurityNotice::class)->firstWhere('type', 'suspicious_activity');
+    $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
     $mail = renderedMail($notice->toMail($this->user));
 
     expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
@@ -375,50 +386,39 @@ it('shows a location from the locator as plain text in the email', function () {
         ->and($mail['text'])->toContain('Signing in from a new country ([Amsterdam](https://evil.example/l)).');
 });
 
-it('still renders the email when a value is not valid UTF-8', function () {
-    $notice = new SecurityNotice('authenticator_added', details: ['device' => "Firefox\xFF"], replace: ['name' => "Key\xFF"]);
-
-    expect(renderedMail($notice->toMail($this->user))['text'])->toContain('was added as a way to sign in')
-        ->toContain('Device: Firefox');
-});
-
-it('keeps an app\'s own notice class safe, and gives its other channels plain text', function () {
-    Keyring::sendSecurityNotices(['authenticator_added'])->securityNoticesUsing(DatabaseSecurityNotice::class);
-    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create([
-        'name' => "[Not you?](https://evil.example/x)\n\nRobert's key",
-    ]);
+it('hands the app\'s notification one clean, capped line, whatever was sent', function (string $name, string $expected) {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->make(['name' => $name]);
 
     AuthenticatorAdded::dispatch($this->user, $totp);
 
-    $notice = Notification::sent($this->user, DatabaseSecurityNotice::class)->sole();
+    $notice = Notification::sent($this->user, AuthenticatorAddedNotice::class)->sole();
+
+    expect($notice->name)->toBe($expected)
+        ->and(renderedMail($notice->toMail($this->user))['text'])->toContain('was added as a way to sign in');
+})->with([
+    'invalid utf-8' => ["Key\xFF", 'Key?'],
+    'mostly whitespace' => ['Fire'.str_repeat(' ', 10000).'fox', 'Fire...'],
+    'very long' => [str_repeat('a', 1000), str_repeat('a', 500).'...'],
+    'several lines' => ["[Not you?](https://evil.example/x)\n\nRobert's key", "[Not you?](https://evil.example/x) Robert's key"],
+]);
+
+it('shows a name someone typed as plain text in the published email', function () {
+    $notice = new AuthenticatorAddedNotice(when: 'now', name: "[Not you?](https://evil.example/x) Robert's key");
     $mail = renderedMail($notice->toMail($this->user));
 
     expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
         ->toContain("[Not you?](https://evil.example/x) Robert's key")
-        ->and($mail['text'])->toContain("[Not you?](https://evil.example/x) Robert's key")
-        ->and($notice->toArray($this->user)['intro'])->toBe("\"[Not you?](https://evil.example/x) Robert's key\" was added as a way to sign in to your account.");
-});
-
-it('still builds the notice when a value is mostly whitespace', function () {
-    $notice = new SecurityNotice('password_changed', details: ['device' => 'Fire'.str_repeat(' ', 10000).'fox']);
-
-    expect($notice->content()['details']['Device'])->toBe('Fire...');
-});
-
-it('caps a value in a notice for every channel', function () {
-    $notice = new SecurityNotice('password_changed', details: ['device' => str_repeat('a', 1000)]);
-
-    expect($notice->content()['details']['Device'])->toBe(str_repeat('a', 500).'...');
+        ->and($mail['text'])->toContain("[Not you?](https://evil.example/x) Robert's key");
 });
 
 it('tells the user when someone gets their password but not the second factor', function () {
-    Keyring::sendSecurityNotices();
+    sendNotifications();
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
     signInAs();
     $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
 
-    Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'second_factor_failed');
+    Notification::assertSentTo($this->user, SecondFactorFailed::class);
 });
 
 it('signs in without a location when the locator throws, and reports it once', function () {
@@ -452,13 +452,13 @@ it('stores a user agent with broken bytes as valid text', function () {
 
 it('signs in and still sends the new device email when the security log is down', function () {
     Exceptions::fake();
-    Keyring::sendSecurityNotices();
+    sendNotifications();
     Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
 
     signInAs()->assertRedirect('/dashboard');
 
     $this->get('/home')->assertOk();
-    Notification::assertSentTo($this->user, SecurityNotice::class, fn ($notice) => $notice->type === 'new_device');
+    Notification::assertSentTo($this->user, NewDeviceNotice::class);
     Exceptions::assertReported(QueryException::class);
 });
 
@@ -539,8 +539,13 @@ it('does not swallow a failure in something that decides the sign in', function 
 #[Table('keyring_events_unavailable')]
 class UnavailableSecurityEvent extends SecurityEvent {}
 
-class DatabaseSecurityNotice extends SecurityNotice
+/**
+ * An app's own notification, taking only what it wants of what Keyring passes.
+ */
+class OwnNewDevice extends Illuminate\Notifications\Notification
 {
+    public function __construct(public string $url, public ?string $device = null, public ?string $ip = null) {}
+
     public function via(object $notifiable): array
     {
         return ['database'];
