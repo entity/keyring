@@ -1,11 +1,13 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
 use Keyring\Features;
+use Keyring\KeyringManager;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
@@ -84,6 +86,6 @@ it('starts with the password, registration, password resets and no emails', func
 
     expect(new FactorRegistry(app())->all()->keys()->all())->toBe(['password'])
         ->and($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
-        ->and($config['security_notices'])->toBe([])
+        ->and(new KeyringManager(app(), new FactorRegistry(app()), app(ProtectedAttributes::class))->hasNotification('password_changed'))->toBeFalse()
         ->and($config['protected'])->toBe([]);
 });

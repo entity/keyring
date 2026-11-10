@@ -9,8 +9,8 @@ Keyring has no tagged release yet, so there's nothing to upgrade between. This s
 | Was | Now |
 |---|---|
 | `Keyring::risk([...])` | `Keyring::risk()->signals([...])` |
-| `Keyring::notify([...])` | `Keyring::sendSecurityNotices([...])` |
-| `Keyring::notifies($type)` | `Keyring::sendsSecurityNotice($type)` |
+| `Keyring::notify([...])`, `Keyring::sendSecurityNotices([...])`, `Keyring::securityNoticesUsing()` | `Keyring::notifications([...])`, with your own class per type. See [Emails](#emails). |
+| `Keyring::notifies($type)`, `Keyring::sendsSecurityNotice($type)` | `Keyring::hasNotification($type)` |
 | `Keyring::changing()`, `Keyring::guardProtectedAttributes()` | Removed. They were internal. Use [`Keyring::withoutProtection()`](docs/protected-changes.md#bypassing-protection) to change a protected attribute. |
 | `Totp::engine()`, `WebAuthn::profile()` | Removed. Nothing used them. |
 
@@ -18,7 +18,7 @@ Keyring has no tagged release yet, so there's nothing to upgrade between. This s
 
 | Was | Now |
 |---|---|
-| `notifications` | `security_notices` |
+| `notifications`, `security_notices` | Removed. Register notifications in your provider. See [Emails](#emails). |
 | `events` | `security_log` |
 | `pending_login_ttl` | `pending_logins.keep_for` |
 | `email_changes.expire` | `email_changes.confirmable_for` |
@@ -27,6 +27,16 @@ Keyring has no tagged release yet, so there's nothing to upgrade between. This s
 | `webauthn.timeout` in milliseconds (`60_000`) | A duration (`'60s'`) |
 
 A bare number for `timebox` or `webauthn.timeout` now throws, since guessing the unit could be a thousand times out. An old key is ignored without an error, so check your published `config/keyring.php` for each one.
+
+### Emails
+
+Keyring no longer has notification classes or email wording of its own. `Keyring\Notifications\SecurityNotice`, `VerificationCode`, `ConfirmEmailChange`, `EmailChangeNotice` and `EmailAddressInUse` are gone, and so is `lang/en/notifications.php`.
+
+1. Run `php artisan keyring:install`. It publishes the classes to `app/Notifications/Keyring` and leaves your existing provider and config alone.
+2. Register them in your `KeyringServiceProvider` with `Keyring::notifications([...])`, as [Security Emails](docs/security-log-and-emails.md#security-emails) shows. List the security notices you had in `security_notices`.
+3. Move any wording you'd changed in a published `notifications.php`, and anything a subclass of the old classes did, into the published classes.
+
+Until `verification_code` is registered, email codes throw `Keyring\Exceptions\MissingNotification`, and so do email changes without their three.
 
 ### Migrations
 

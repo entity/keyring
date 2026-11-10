@@ -1,5 +1,8 @@
 <?php
 
+use App\Notifications\Keyring\ConfirmEmailChange;
+use App\Notifications\Keyring\EmailAddressInUse;
+use App\Notifications\Keyring\EmailChangeNotice;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Event;
@@ -16,9 +19,6 @@ use Keyring\Events\ProtectionBypassed;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
-use Keyring\Notifications\ConfirmEmailChange;
-use Keyring\Notifications\EmailAddressInUse;
-use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 
@@ -125,7 +125,7 @@ describe('changing email', function () {
         $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
 
         $notice = sentTo('taylor@example.com', EmailChangeNotice::class);
-        expect($notice->confirmToken)->toBeNull();
+        expect($notice->confirmUrl)->toBeNull();
 
         follow(linkIn(sentTo('new@example.com', ConfirmEmailChange::class), 'Confirm email address'));
         expect($this->user->fresh()->email)->toBe('new@example.com');

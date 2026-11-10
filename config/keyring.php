@@ -246,22 +246,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Security Emails
-    |--------------------------------------------------------------------------
-    |
-    | The emails Keyring sends users about their account, none by default:
-    | password_changed, authenticator_added, authenticator_removed,
-    | recovery_code_used, new_device, second_factor_failed,
-    | suspicious_activity, clone_suspected, email_changed and
-    | email_change_reverted. Keyring::sendSecurityNotices() with no types
-    | sends them all.
-    |
-    */
-
-    'security_notices' => [],
-
-    /*
-    |--------------------------------------------------------------------------
     | Pending Logins
     |--------------------------------------------------------------------------
     |

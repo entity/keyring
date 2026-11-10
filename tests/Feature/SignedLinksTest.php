@@ -1,16 +1,15 @@
 <?php
 
+use App\Notifications\Keyring\NewDevice;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Notification;
-use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
-use Keyring\Notifications\SecurityNotice;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
     config(['app.url' => 'https://app.example.com']);
     Notification::fake();
-    Keyring::sendSecurityNotices(['new_device']);
+    sendNotifications(['new_device']);
 });
 
 it('builds the "this wasn\'t me" link from APP_URL, not the Host header', function () {
@@ -20,8 +19,8 @@ it('builds the "this wasn\'t me" link from APP_URL, not the Host header', functi
         ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
     $url = null;
-    Notification::assertSentTo($user, SecurityNotice::class, function (SecurityNotice $notice) use (&$url) {
-        $url = $notice->actionUrl;
+    Notification::assertSentTo($user, NewDevice::class, function (NewDevice $notice) use (&$url) {
+        $url = $notice->url;
 
         return true;
     });

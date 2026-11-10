@@ -55,8 +55,12 @@ describe('keyring:install', function () {
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
         expect($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
-            ->and($config['security_notices'])->toBe([])
             ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
+            // The emails a flow needs are registered, the security notices left for later.
+            ->and($provider)->toContain("            'verification_code' => Notifications\VerificationCode::class,")
+            ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
+            ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
+            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(15)
             ->and($provider)->toContain('Password::class,')
             ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
             // Every action, so turning a feature on later works.
@@ -81,8 +85,9 @@ describe('keyring:install', function () {
 
         expect($config['features'])->toBe([Features::updatePasswords(), Features::manageAuthenticators(), Features::devices()])
             // With a second sign-in method, the security emails come too.
-            ->and($config['security_notices'])->toContain('recovery_code_used')
-            ->and($provider)->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
+            ->and($provider)->toContain("            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,")
+            ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
+            ->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
             ->not->toContain('securityKeys')->not->toContain('EmailCode');
 
         expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
@@ -116,7 +121,9 @@ describe('keyring:install', function () {
     it('can leave out the security emails', function () {
         $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-emails' => true, '--no-interaction' => true])->assertSuccessful();
 
-        expect((require config_path('keyring.php'))['security_notices'])->toBe([]);
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->toContain("            // 'authenticator_added' => Notifications\AuthenticatorAdded::class,")
+            ->toContain("            'email_change_notice' => Notifications\EmailChangeNotice::class,");
     });
 
     it('asks which sign-in methods and features to set up', function () {

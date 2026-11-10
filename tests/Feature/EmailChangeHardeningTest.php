@@ -1,5 +1,10 @@
 <?php
 
+use App\Notifications\Keyring\ConfirmEmailChange;
+use App\Notifications\Keyring\EmailAddressInUse;
+use App\Notifications\Keyring\EmailChanged;
+use App\Notifications\Keyring\EmailChangeNotice;
+use App\Notifications\Keyring\EmailChangeReverted;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -9,6 +14,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -20,13 +26,10 @@ use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
-use Keyring\Notifications\ConfirmEmailChange;
-use Keyring\Notifications\EmailAddressInUse;
-use Keyring\Notifications\EmailChangeNotice;
-use Keyring\Notifications\SecurityNotice;
 use Keyring\Rules\UnreservedAddress;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\MailText;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -42,13 +45,17 @@ function tokensFor(string $newAddress, string $currentAddress): array
     $confirm = $notice = null;
 
     Notification::assertSentTo(new AnonymousNotifiable, ConfirmEmailChange::class, function ($n, $c, $to) use ($newAddress, &$confirm) {
-        return $to->routes['mail'] === $newAddress && ($confirm = $n->token);
+        return $to->routes['mail'] === $newAddress && ($confirm = Str::afterLast($n->url, '/'));
     });
     Notification::assertSentTo(new AnonymousNotifiable, EmailChangeNotice::class, function ($n, $c, $to) use ($currentAddress, &$notice) {
         return $to->routes['mail'] === $currentAddress && ($notice = $n);
     });
 
-    return ['confirm' => $confirm, 'revert' => $notice->revertToken, 'current' => $notice->confirmToken];
+    return [
+        'confirm' => $confirm,
+        'revert' => Str::afterLast($notice->revertUrl, '/'),
+        'current' => $notice->confirmUrl === null ? null : Str::afterLast($notice->confirmUrl, '/'),
+    ];
 }
 
 function requestChange(User $user, string $to, Assurance $as = Assurance::AAL1): PendingChange
@@ -70,10 +77,7 @@ function confirmBoth(PendingChange $change, array $tokens): EmailConfirmation
 }
 
 it('shows the address in the change notice as plain text', function (string $value, string $shown) {
-    $change = requestChange($this->user, 'new@example.com');
-    $change->value = $value;
-
-    $mail = renderedMail(new EmailChangeNotice($change, 'revert-token')->toMail(new AnonymousNotifiable));
+    $mail = renderedMail(new EmailChangeNotice(MailText::maskAddress($value), 'https://example.com/revert')->toMail(new AnonymousNotifiable));
 
     expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
         ->toContain($shown)
@@ -562,14 +566,14 @@ describe('applying a change', function () {
     });
 
     it('tells both addresses when the app has opted in', function () {
-        Keyring::sendSecurityNotices();
+        sendNotifications();
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
 
         confirmBoth($change, $tokens);
 
-        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_changed');
-        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com' && $notice->type === 'email_changed');
+        Notification::assertSentTo($this->user, EmailChanged::class);
+        Notification::assertSentTo(new AnonymousNotifiable, EmailChanged::class, fn ($notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com');
     });
 
     it('sends no notice unless the app opted in', function () {
@@ -578,58 +582,57 @@ describe('applying a change', function () {
 
         confirmBoth($change, $tokens);
 
-        Notification::assertNotSentTo($this->user, SecurityNotice::class);
-        Notification::assertNotSentTo(new AnonymousNotifiable, SecurityNotice::class);
+        Notification::assertNotSentTo($this->user, EmailChanged::class);
+        Notification::assertNotSentTo(new AnonymousNotifiable, EmailChanged::class);
     });
 
     it('tells both addresses when an applied change is reverted', function () {
-        Keyring::sendSecurityNotices();
+        sendNotifications();
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
         confirmBoth($change, $tokens);
 
         app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
 
-        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted' && isset($notice->details['ip']));
-        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com'
-            && $notice->type === 'email_change_reverted'
-            && array_keys($notice->details) === ['when']);
+        Notification::assertSentTo($this->user, EmailChangeReverted::class, fn (EmailChangeReverted $notice) => $notice->ip !== null);
+        Notification::assertSentTo(new AnonymousNotifiable, EmailChangeReverted::class, fn (EmailChangeReverted $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com'
+            && $notice->ip === null
+            && $notice->device === null);
     });
 
-    it('keeps an app\'s own via() away from an address that has no user', function () {
-        Keyring::sendSecurityNotices();
-        Keyring::securityNoticesUsing(PerUserChannelsNotice::class);
+    it('sends the app\'s own notice to the address that has no user, too', function () {
+        Keyring::notifications(['email_changed' => OwnEmailChanged::class, 'email_change_reverted' => null]);
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
 
         $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
         $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]))->assertSessionHas('status', 'email-changed');
-        $this->post(route('keyring.email.revert.store', [$change->id, $tokens['revert']]))->assertSessionHas('status', 'email-change-reverted');
 
-        Notification::assertSentTo($this->user, PerUserChannelsNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_changed');
-        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com' && $notice->type === 'email_changed' && $channels === ['mail']);
-        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com' && $notice->type === 'email_change_reverted' && $channels === ['mail']);
+        Notification::assertSentTo($this->user, OwnEmailChanged::class);
+        Notification::assertSentTo(new AnonymousNotifiable, OwnEmailChanged::class, fn ($notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com');
     });
 
     it('does not mail the address that never confirmed when a pending change is reverted', function () {
-        Keyring::sendSecurityNotices();
+        sendNotifications();
         $change = requestChange($this->user, 'attacker@example.com');
         $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
 
         app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
 
-        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted');
-        Notification::assertNotSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'attacker@example.com');
+        Notification::assertSentTo($this->user, EmailChangeReverted::class);
+        Notification::assertNotSentTo(new AnonymousNotifiable, EmailChangeReverted::class);
     });
 });
 
 /**
- * The per-user via() that docs/security-log-and-emails.md suggests.
+ * An app's own notification, nothing to do with the published one.
  */
-class PerUserChannelsNotice extends SecurityNotice
+class OwnEmailChanged extends Illuminate\Notifications\Notification
 {
+    public function __construct(public string $when) {}
+
     public function via(object $notifiable): array
     {
-        return $notifiable->slack_webhook ? ['mail', 'slack'] : ['mail'];
+        return ['mail'];
     }
 }

@@ -6,22 +6,17 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
 use Keyring\Devices\UserAgent;
 use Keyring\Events;
 use Keyring\Facades\Keyring;
 
 /**
- * Sends the security emails the app has opted into with Keyring::sendSecurityNotices().
+ * Sends the app's notification for each security notice it has registered
+ * with Keyring::notifications(). One with none registered isn't sent.
  */
 class SendSecurityNotifications
 {
-    /** Every type Keyring::sendSecurityNotices() accepts. */
-    public const array TYPES = [
-        'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
-        'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
-        'email_changed', 'email_change_reverted',
-    ];
-
     /**
      * @return array<class-string, string>
      */
@@ -44,7 +39,7 @@ class SendSecurityNotifications
 
     public function newDevice(Events\NewDeviceSignedIn $event): void
     {
-        $this->send($event->user, 'new_device', actionUrl: $event->revokeUrl());
+        $this->send($event->user, 'new_device', ['url' => $event->revokeUrl()]);
     }
 
     public function passwordChanged(Events\PasswordChanged $event): void
@@ -115,34 +110,37 @@ class SendSecurityNotifications
     }
 
     /**
-     * @param  array<string, string|int>  $replace
+     * @param  array<string, string|int>  $with  what this notice has beyond when, device and IP
      */
-    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $replace = [], ?string $actionUrl = null, bool $describeRequest = true): void
+    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $with = [], bool $describeRequest = true): void
     {
         // A model without Notifiable (say, staff that sign in through
         // another guard) has nowhere to send it, so it's skipped rather than
         // failing the request or the queued job.
-        if (! Keyring::sendsSecurityNotice($type) || ! method_exists($user, 'routeNotificationFor')) {
+        if (! method_exists($user, 'routeNotificationFor')) {
             return;
         }
 
         // The current request, not one captured at boot (Octane).
         $request = request();
 
-        $arguments = [
-            'type' => $type,
-            'details' => ['when' => now()->toDayDateTimeString(), ...$describeRequest ? [
-                'device' => UserAgent::describe($request->userAgent()),
-                'ip' => $request->ip(),
-            ] : []],
-            'replace' => $replace,
-            'actionUrl' => $actionUrl,
-        ];
+        $notification = Keyring::notification($type, [
+            'when' => now()->toDayDateTimeString(),
+            ...$describeRequest ? ['device' => $this->clean(UserAgent::describe($request->userAgent())), 'ip' => $request->ip()] : [],
+            ...array_map(fn (string|int $value) => is_string($value) ? $this->clean($value) : $value, $with),
+        ]);
 
-        // An app's own class may read the user in via() or toMail(), and a
-        // bare address hasn't got one, so that copy is always ours, by mail.
-        Notification::send($user, $user instanceof AnonymousNotifiable
-            ? new SecurityNotice(...$arguments)
-            : app(SecurityNotice::class, $arguments));
+        if ($notification !== null) {
+            Notification::send($user, $notification);
+        }
+    }
+
+    /**
+     * One capped line, whatever the app does with it: a key's name and a
+     * user agent are whatever was sent.
+     */
+    protected function clean(?string $value): ?string
+    {
+        return $value === null ? null : Str::squish(Str::limit(mb_scrub($value), 500));
     }
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Support\Facades\Event;
@@ -15,7 +16,6 @@ use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
-use Keyring\Notifications\SecurityNotice;
 use Keyring\Support\PasswordRules;
 use Keyring\Tests\Fixtures\User;
 
@@ -265,17 +265,17 @@ it('tells the user when a sign-in method is added', function () {
     $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
-    Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'authenticator_added');
+    Notification::assertSentTo($this->user, AuthenticatorAddedNotice::class);
 });
 
 it('shows a name someone typed as plain text in the email, never as a link', function (string $name, string $html, string $text) {
     Notification::fake();
-    Keyring::sendSecurityNotices();
+    sendNotifications();
 
     $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => $name])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
-    $notice = Notification::sent($this->user, SecurityNotice::class)->firstWhere('type', 'authenticator_added');
+    $notice = Notification::sent($this->user, AuthenticatorAddedNotice::class)->sole();
     $mail = renderedMail($notice->toMail($this->user));
 
     expect($mail['html'])->not->toMatch('/<[^>]*(href|src)="[^"]*evil\.example/')
@@ -296,9 +296,12 @@ it('skips the notice for a model that can\'t be notified, instead of failing', f
     $account = UnnotifiableAccount::query()->findOrFail($this->user->getKey());
     $totp = Authenticator::factory()->totp()->for($account, 'authenticatable')->create();
 
+    Notification::fake();
+
     AuthenticatorAdded::dispatch($account, $totp);
 
-    expect(Keyring::sendsSecurityNotice('authenticator_added'))->toBeTrue();
+    expect(Keyring::hasNotification('authenticator_added'))->toBeTrue();
+    Notification::assertNothingSent();
 });
 
 /**

@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Lang;
@@ -28,6 +29,7 @@ use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\Category;
+use Keyring\Exceptions\MissingNotification;
 use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
@@ -39,8 +41,6 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
-use Keyring\Notifications\SecurityNotice;
-use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Pipeline\Steps;
 use Keyring\Risk\RiskEngine;
 use Keyring\Testing\KeyringFake;
@@ -48,6 +48,17 @@ use LogicException;
 
 class KeyringManager
 {
+    /**
+     * Every notification Keyring can send: the security notices, which are
+     * only sent once the app registers one, then the emails a flow needs.
+     */
+    public const array NOTIFICATIONS = [
+        'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
+        'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
+        'email_changed', 'email_change_reverted',
+        'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use',
+    ];
+
     /** @var Closure(Authenticatable&Model, Attempt): Requirement|Requirement */
     protected Closure|Requirement $policy;
 
@@ -78,8 +89,8 @@ class KeyringManager
     /** @var bool|(Closure(Authenticatable&Model, Request): bool) */
     protected bool|Closure $signInAfterRegistering = true;
 
-    /** @var list<string>|null Security notices to send, null for the config value. */
-    protected ?array $securityNotices = null;
+    /** @var array<string, class-string<Notification>> The app's notification for each type it sends. */
+    protected array $notifications = [];
 
     /** @var array<class-string, bool> Whether each user model has the HasKeyring trait. */
     protected array $usesKeyring = [];
@@ -301,27 +312,50 @@ class KeyringManager
     }
 
     /**
-     * Send security notices: new sign ins, password changes, failed second
-     * factors and so on. Pass types to pick, or nothing for all of them.
+     * The app's notification for each type Keyring sends, added to any set
+     * before. A security notice with none isn't sent, and null takes one out
+     * again. Keyring builds each through the container, passing what it has
+     * to say as named constructor arguments.
      *
-     * @param  list<string>|null  $types
+     * @param  array<string, class-string<Notification>|null>  $notifications
      */
-    public function sendSecurityNotices(?array $types = null): static
+    public function notifications(array $notifications): static
     {
-        $types ??= SendSecurityNotifications::TYPES;
-
-        if ($unknown = array_diff($types, SendSecurityNotifications::TYPES)) {
-            throw new InvalidArgumentException('Unknown security notice types: '.implode(', ', $unknown).'.');
+        if ($unknown = array_diff(array_keys($notifications), self::NOTIFICATIONS)) {
+            throw new InvalidArgumentException('Unknown notification types: '.implode(', ', $unknown).'. Keyring sends: '.implode(', ', self::NOTIFICATIONS).'.');
         }
 
-        $this->securityNotices = $types;
+        $this->notifications = array_filter([...$this->notifications, ...$notifications]);
 
         return $this;
     }
 
-    public function sendsSecurityNotice(string $type): bool
+    public function hasNotification(string $type): bool
     {
-        return in_array($type, $this->securityNotices ?? config('keyring.security_notices'), true);
+        return isset($this->notifications[$type]);
+    }
+
+    /**
+     * The app's notification of a type, or null when it hasn't one.
+     *
+     * @param  array<string, mixed>  $arguments
+     */
+    public function notification(string $type, array $arguments = []): ?Notification
+    {
+        return $this->hasNotification($type)
+            ? $this->container->make($this->notifications[$type], $arguments)
+            : null;
+    }
+
+    /**
+     * For the emails a flow can't work without, like the code for an email
+     * code: the app's notification, or an exception saying which is missing.
+     *
+     * @param  array<string, mixed>  $arguments
+     */
+    public function requiredNotification(string $type, array $arguments = []): Notification
+    {
+        return $this->notification($type, $arguments) ?? throw MissingNotification::for($type);
     }
 
     /**
@@ -334,19 +368,6 @@ class KeyringManager
         $this->container->singletonIf(KeyringFake::class);
 
         return $this->container->make(KeyringFake::class);
-    }
-
-    /**
-     * Send security notices with your own notification, e.g. one that extends
-     * Keyring's and adds Slack or the database to via().
-     *
-     * @param  class-string<SecurityNotice>  $notification
-     */
-    public function securityNoticesUsing(string $notification): static
-    {
-        $this->container->bind(SecurityNotice::class, $notification);
-
-        return $this;
     }
 
     /**

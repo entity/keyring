@@ -7,10 +7,10 @@
 - ["Was This You?" Alerts](#was-this-you-alerts)
 - [Security Emails](#security-emails)
     - [Email Types](#email-types)
-    - [Customising the Copy](#customising-the-copy)
-    - [Emails Keyring Always Sends](#emails-keyring-always-sends)
+    - [Emails a Flow Needs](#emails-a-flow-needs)
+    - [Your Own Templates](#your-own-templates)
     - [Slack, SMS and Other Channels](#slack-sms-and-other-channels)
-    - [Using Your Own Notification Classes](#using-your-own-notification-classes)
+    - [Sending Something Else Entirely](#sending-something-else-entirely)
 - [Laravel's Auth Events](#laravels-auth-events)
 
 ## The Security Log
@@ -119,66 +119,106 @@ public function share(Request $request): array
 
 ## Security Emails
 
-Keyring can tell users about security events. It sends none until you list them in the `security_notices` config option. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on:
+Keyring writes no emails of its own. Every email it sends is a notification class in your app, published to `app/Notifications/Keyring` by `keyring:install` and registered in your `KeyringServiceProvider`:
 
 ```php
-'security_notices' => ['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used'],
+use App\Notifications\Keyring as Notifications;
+
+Keyring::notifications([
+    'verification_code' => Notifications\VerificationCode::class,
+    'confirm_email_change' => Notifications\ConfirmEmailChange::class,
+    'email_change_notice' => Notifications\EmailChangeNotice::class,
+    'email_address_in_use' => Notifications\EmailAddressInUse::class,
+    'password_changed' => Notifications\PasswordChanged::class,
+    'authenticator_added' => Notifications\AuthenticatorAdded::class,
+    'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
+    'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
+    // 'new_device' => Notifications\NewDevice::class,
+    // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
+    // ...
+]);
 ```
 
-Or turn them all on in `KeyringServiceProvider`:
+A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on; the rest are there commented out. Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
-```php
-Keyring::sendSecurityNotices();
-```
-
-Or pick the ones you want:
-
-```php
-Keyring::sendSecurityNotices(['new_device', 'second_factor_failed']);
-```
-
-An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off. You can also list types in the `security_notices` config option. `Keyring::sendSecurityNotices()` takes precedence over it.
-
-Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless you [choose other channels](#slack-sms-and-other-channels), and queued once any open database transaction commits. Each one includes when it happened, the device and the IP address of the request that caused it.
+The classes are ordinary Laravel notifications and they're yours: change the wording, the channels or the whole template, or register a different class altogether. Keyring builds each one through the container and passes what it has to say as named constructor arguments, so a class takes only the ones it wants.
 
 ### Email Types
 
-| Type | Sent when |
-|---|---|
-| `new_device` | A sign in from a new device. Includes the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link). |
-| `password_changed` | The password was changed or reset. |
-| `authenticator_added` | A sign-in method was added. |
-| `authenticator_removed` | A sign-in method was removed. |
-| `second_factor_failed` | Someone got the password right but failed the next factor. |
-| `recovery_code_used` | A recovery code was used. Says how many are left. |
-| `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. Lists the reasons. |
-| `clone_suspected` | A passkey or security key looked cloned. |
-| `email_changed` | An email change applied. Sent to both the old and the new address. |
-| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied, without the device and IP that undid it. |
+The security notices, each sent to the user:
 
-To send your own instead, listen for the matching [events](sign-in-flow.md#events) and leave the type off.
+| Type | Sent when | Passes |
+|---|---|---|
+| `new_device` | A sign in from a new device. | `url`, the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
+| `password_changed` | The password was changed or reset. | |
+| `authenticator_added` | A sign-in method was added. | `name` |
+| `authenticator_removed` | A sign-in method was removed. | `name` |
+| `second_factor_failed` | Someone got the password right but failed the next factor. | |
+| `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
+| `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. | `reasons` |
+| `clone_suspected` | A passkey or security key looked cloned. | `name` |
+| `email_changed` | An email change applied. Sent to both the old and the new address. | |
+| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. | |
 
-### Customising the Copy
+Every notice is also passed `when`, and the `device` and `ip` of the request that caused it. The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
 
-All the wording for Keyring's emails lives in `lang/en/notifications.php`. Security notices are keyed by type, with `subject`, `intro` and, for `new_device`, `action`; `details` holds the labels for the when, device and IP address lines, and `footer` the closing line. The emails below that Keyring always sends have their own keys (`verification_code`, `confirm_email_change`, `email_change_notice` and `email_address_in_use`). Publish the file to change it:
+`name`, `device` and `reasons` can hold what a user or browser sent: a key's name is whatever was typed. Keyring cuts each to one line of at most 500 characters, and it's still text to escape for wherever you show it. The published classes pass it through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown and a name could otherwise add a link to a genuine security email.
 
-```bash
-php artisan vendor:publish --tag=keyring-lang
+The published notices share an abstract `SecurityNotice` in the same folder, which holds the constructor, `via()` and `toMail()`. Each notice only says its subject and intro. They're queued once any open database transaction commits, so a change that's rolled back is never announced.
+
+### Emails a Flow Needs
+
+Four emails are part of a flow rather than a notice. The flow can't work without one, so it throws `Keyring\Exceptions\MissingNotification`, naming the type, when none is registered:
+
+| Type | Sent to | Passes |
+|---|---|---|
+| `verification_code` | The user, with an [email code](factors.md#email-codes). | `code`, `minutes` until it expires, and `enrolling`, true when the code confirms a new email code sign-in method |
+| `confirm_email_change` | The new address, during an email change. | `url` and `expiresAt` |
+| `email_change_notice` | The current address, during an email change. | `email` (the new address, with most of its name hidden), `revertUrl`, and `confirmUrl` when this address must confirm too |
+| `email_address_in_use` | An address someone tried to change their email to, when it already has an account. | |
+
+`verification_code` sends straight away; the three email change emails are sent after the response, so timing doesn't reveal whether an address has an account. An email change is refused before anything is saved when one of its three is missing.
+
+The email change emails, and the copies of `email_changed` and `email_change_reverted` that go to an address the account no longer has, are sent to a bare address: the `$notifiable` is an `AnonymousNotifiable` routed to mail, not your user. Keep `via()` and `toMail()` from reading user attributes in those classes.
+
+Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. You change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response.
+
+### Your Own Templates
+
+To use your own views, such as templates built with Maizzle, return them from `toMail()`. For one notice:
+
+```php
+namespace App\Notifications\Keyring;
+
+use Illuminate\Notifications\Messages\MailMessage;
+
+class PasswordChanged extends SecurityNotice
+{
+    public function toMail(object $notifiable): MailMessage
+    {
+        return (new MailMessage)
+            ->subject(__('Your password was changed'))
+            ->view('emails.keyring.password-changed', [
+                'when' => $this->when,
+                'device' => $this->device,
+                'ip' => $this->ip,
+            ]);
+    }
+}
 ```
 
-Anything a user or client can influence, such as an authenticator name, a device or a location, can't add links, images or other formatting to an email: it shows as plain text. So the `intro` of a security notice and its detail lines are always plain text, even if you add Markdown to them. `footer` has no such values and is still Markdown.
+Blade's `{{ }}` escapes those values for HTML. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
 
 ### Slack, SMS and Other Channels
 
-Security notices use Laravel's notification channels, so they can go anywhere Laravel can send. Extend `SecurityNotice`, choose the channels in `via()` (per user if you like), and add the matching method. `content()` gives you the translated subject, intro, detail lines and action to build from:
+Notifications can go anywhere Laravel can send. Choose the channels in `via()`, per user if you like, and add the matching method:
 
 ```php
-namespace App\Notifications;
+namespace App\Notifications\Keyring;
 
 use Illuminate\Notifications\Slack\SlackMessage;
-use Keyring\Notifications\SecurityNotice as KeyringSecurityNotice;
 
-class SecurityNotice extends KeyringSecurityNotice
+class NewDevice extends SecurityNotice
 {
     public function via(object $notifiable): array
     {
@@ -187,53 +227,19 @@ class SecurityNotice extends KeyringSecurityNotice
 
     public function toSlack(object $notifiable): SlackMessage
     {
-        $content = $this->content();
-
-        // Slack reads <...> as a link, and an authenticator's name is whatever the user typed.
-        return new SlackMessage()->text(htmlspecialchars($content['subject'].': '.$content['intro'], ENT_NOQUOTES));
+        // Slack reads <...> as a link, and a user agent is whatever the browser sent.
+        return (new SlackMessage)->text(htmlspecialchars($this->subject().': '.$this->device, ENT_NOQUOTES));
     }
+
+    // subject(), intro() and action() as published.
 }
 ```
 
-`content()` is plain text that can include what users and clients sent, on one line and capped in length, so escape it for the channel you send it to. To change the email, start from `parent::toMail($notifiable)`, which is already escaped. If you build your own `MailMessage` from `content()`, pass each line through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown.
+Slack needs Laravel's `laravel/slack-notification-channel` package; see [Laravel's notification docs](https://laravel.com/docs/notifications#slack-notifications) for it and the other channels. For the `database` or `broadcast` channels, add a `toArray()`.
 
-Slack needs Laravel's `laravel/slack-notification-channel` package; see [Laravel's notification docs](https://laravel.com/docs/notifications#slack-notifications) for it and the other channels. Then register the class in your `KeyringServiceProvider`:
+### Sending Something Else Entirely
 
-```php
-Keyring::securityNoticesUsing(\App\Notifications\SecurityNotice::class);
-```
-
-`toArray()` is already there, so adding `database` or `broadcast` to `via()` works without more code. Keep the parent's constructor, since Keyring passes its arguments by name.
-
-The copies of `email_changed` and `email_change_reverted` sent to an address that isn't the account's current one have no user to pass to your class, so they're always Keyring's own `SecurityNotice`, by mail.
-
-### Emails Keyring Always Sends
-
-Some emails are part of a flow rather than a notice, so `Keyring::sendSecurityNotices()` doesn't control them. They prove the person controls an inbox, so they're always email:
-
-| Notification | Sent to |
-|---|---|
-| `VerificationCode` | The user, with an [email code](factors.md#email-codes). The last line differs when the code confirms a new email code sign-in method. |
-| `ConfirmEmailChange` | The new address, during an email change. |
-| `EmailChangeNotice` | The current address, during an email change. |
-| `EmailAddressInUse` | An address someone tried to change their email to, when it already has an account. |
-
-These live in `Keyring\Notifications`. `VerificationCode` sends straight away; the three email change emails are sent after the response, so timing doesn't reveal whether an address has an account.
-
-Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. Their copy comes from Laravel's translations, and you change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response.
-
-### Using Your Own Notification Classes
-
-Keyring resolves every notification above, and `SecurityNotice`, through the container, with named constructor arguments. To change one beyond its copy, extend it and bind your class in a service provider's `register()` method:
-
-```php
-use App\Notifications\BrandedVerificationCode;
-use Keyring\Notifications\VerificationCode;
-
-$this->app->bind(VerificationCode::class, BrandedVerificationCode::class);
-```
-
-Keep the parent's constructor parameters, since Keyring passes them by name.
+Keyring dispatches an [event](events.md) for everything it sends a notice about, whether or not a notification is registered. To do something other than notify the user, leave the type out of `Keyring::notifications()` and listen for the event.
 
 ## Laravel's Auth Events
 
