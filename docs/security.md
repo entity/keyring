@@ -33,7 +33,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 - The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
-- Keyring's responses send `Cache-Control: no-store, private` and `Referrer-Policy: no-referrer`, and signing out sends `Clear-Site-Data`.
+- Keyring's responses send `Cache-Control: no-store, private` and `Referrer-Policy: same-origin`, and signing out sends `Clear-Site-Data`.
 
 ### Rate Limiting
 
@@ -107,7 +107,7 @@ Factors can set their own limits by overriding `limits()`. A reset only clears t
 
 - Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request's `Host` header.
 - Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
-- Pages opened from emailed links (password resets, email changes, "this wasn't me") keep their token out of the `Referer` header, like every Keyring response.
+- Pages opened from emailed links (password resets, email changes, "this wasn't me") keep their token out of the `Referer` header other sites see, like every Keyring response. Your own app still receives it, so a failed form finds its way back.
 
 #### Emailed Links
 

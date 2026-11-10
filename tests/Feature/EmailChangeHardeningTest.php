@@ -98,7 +98,7 @@ it('does not change anything when an emailed link is only opened', function () {
     $this->inertia()->get(route('keyring.email.confirm', [$change->id, $tokens['confirm']]))
         ->assertOk()
         ->assertJsonPath('component', 'auth/email-change')
-        ->assertHeader('Referrer-Policy', 'no-referrer');
+        ->assertHeader('Referrer-Policy', 'same-origin');
     $this->inertia()->get(route('keyring.email.revert', [$change->id, $tokens['revert']]))->assertOk()->assertJsonPath('props.action', 'revert');
 
     expect($this->user->fresh()->email)->toBe('taylor@example.com')

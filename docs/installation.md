@@ -96,7 +96,7 @@ The trait does three things:
 - Once Keyring handles changing them (`Features::updatePasswords()` and `Features::emailChanges()`), it stops the `password` and `email` attributes from changing outside Keyring's own flows. See [Protected Changes](protected-changes.md).
 - When the user is deleted, it revokes their sessions and ends their reset links, and deletes their authenticators, devices and pending changes. With soft deletes, the sessions and reset links go straight away, along with "remember me" cookies, device trust and any pending email change, and the rest waits for a force delete. A restored user keeps their sign-in methods and signs in again.
 
-The published `CreateNewUser` action passes the plain password to `User::create()`, so it relies on the `hashed` cast shown above. The password actions hash it themselves.
+The published actions hash the password themselves, so they work with or without the `hashed` cast shown above. With it, a password that's already hashed isn't hashed again.
 
 Implement `MustVerifyEmail` together with `Features::emailVerification()`; one doesn't work without the other. With the interface but not the feature, registering throws an exception saying so, before anything is saved. Users who implement it must verify their address before they can add a sign-in method. With registration and sign-in methods both on, that's required: see [Managing Authenticators](authenticators.md#email-verification).
 

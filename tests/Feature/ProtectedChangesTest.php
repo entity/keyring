@@ -286,7 +286,7 @@ describe('resetting password', function () {
         });
 
         $this->inertia()->get(route('password.reset', ['token' => $token, 'email' => 'taylor@example.com']))
-            ->assertHeader('Referrer-Policy', 'no-referrer');
+            ->assertHeader('Referrer-Policy', 'same-origin');
 
         $this->post(route('password.update'), [
             'token' => $token,

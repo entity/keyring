@@ -90,7 +90,7 @@ Signed-out users are sent to the route named `login`.
 'middleware' => ['web', PreventCaching::class],
 ```
 
-Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\PreventCaching` sends `Cache-Control: no-store, private` and `Referrer-Policy: no-referrer` on every Keyring response. Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
+Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\PreventCaching` sends `Cache-Control: no-store, private` and `Referrer-Policy: same-origin` on every Keyring response. Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
 
 If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring::routes()` where you want them, for example inside your own group:
 
