@@ -20,6 +20,9 @@ return new class extends Migration
             $table->text('public_key')->nullable();
             $table->unsignedBigInteger('sign_count')->default(0);
             $table->uuid('aaguid')->nullable();
+            // How the AAGUID was checked against a trusted root: the
+            // attestation type. Null when it's only what the key reported.
+            $table->string('attestation', 16)->nullable();
             $table->json('transports')->nullable();
             $table->json('meta')->nullable();
             $table->boolean('is_default')->default(false);

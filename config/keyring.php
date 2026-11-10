@@ -84,6 +84,10 @@ return [
     | The relying party ID defaults to your APP_URL host, and the allowed
     | origins to your APP_URL. The timeout is how long the browser waits.
     |
+    | "attestation_roots" are the root certificates a key's attestation has
+    | to chain to, for a factor set up with requireAttestation(): PEM
+    | certificates, or paths to PEM files.
+    |
     */
 
     'webauthn' => [
@@ -93,6 +97,7 @@ return [
         ],
         'origins' => [],
         'timeout' => '60s',
+        'attestation_roots' => [],
     ],
 
     /*

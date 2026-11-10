@@ -19,6 +19,7 @@
         "paragonie/constant_time_encoding": "^3.0",
         "pragmarx/google2fa": "^9.0",
         "spomky-labs/cbor-php": "^3.4",
+        "spomky-labs/pki-framework": "^1.6.2",
         "symfony/polyfill-intl-normalizer": "^1.31",
         "symfony/serializer": "^6.4|^7.0|^8.0",
         "web-auth/cose-lib": "^4.8",

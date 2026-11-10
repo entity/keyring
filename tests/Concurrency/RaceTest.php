@@ -52,7 +52,7 @@ it('lets one of two assertions with the same count through, and keeps that count
     $key = new VirtualAuthenticator;
 
     $creation = $ceremonies->creationOptions($user, Profile::passkeys(), []);
-    $record = $ceremonies->register(json_encode($key->register($ceremonies->toBrowser($creation))), $ceremonies->toJson($creation));
+    $record = $ceremonies->register(json_encode($key->register($ceremonies->toBrowser($creation))), $ceremonies->toJson($creation), Profile::passkeys());
 
     $passkey = Authenticator::factory()->passkey()->for($user, 'authenticatable')->create([
         'credential_id' => Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId),

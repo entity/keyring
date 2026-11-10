@@ -6,6 +6,10 @@
 - [Relying Party and Origins](#relying-party-and-origins)
 - [Signature Algorithms](#signature-algorithms)
 - [Attestation and AAGUIDs](#attestation-and-aaguids)
+    - [Requiring Attestation](#requiring-attestation)
+    - [Allowing Only Certain Models](#allowing-only-certain-models)
+    - [Trusting Each Model Separately](#trusting-each-model-separately)
+    - [What Is Kept](#what-is-kept)
 - [Counters and Cloned Keys](#counters-and-cloned-keys)
 - [Signing In Without a Username](#signing-in-without-a-username)
 - [Laravel's Passkeys Client](#laravels-passkeys-client)
@@ -62,6 +66,7 @@ When planning what to offer, Keyring assumes a security key will verify the user
     ],
     'origins' => [],
     'timeout' => '60s',
+    'attestation_roots' => [],
 ],
 ```
 
@@ -69,6 +74,7 @@ When planning what to offer, Keyring assumes a security key will verify the user
 - **`relying_party.name`** is shown by some browsers when creating a key. It defaults to `APP_NAME`.
 - **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL: if none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If you set a relying party ID that covers several subdomains, list each origin here.
 - **`timeout`** is how long the browser waits, as a [duration](configuration.md#durations).
+- **`attestation_roots`** are the certificates a key's attestation has to chain to, for a factor that [requires attestation](#requiring-attestation).
 
 For local development, `APP_URL` must match the address in your browser, for example `http://localhost:8000`. Browsers only allow WebAuthn on `https` origins and on `localhost`.
 
@@ -82,9 +88,94 @@ Keyring offers the browser these algorithms, in order of preference, and accepts
 
 ## Attestation and AAGUIDs
 
-Keyring registers keys without attestation. It asks the browser for `none` attestation and only accepts `none` attestation statements. That means any authenticator is accepted, including passkeys synced through a password manager or a platform account.
+By default Keyring registers keys without attestation. It asks the browser for `none` attestation and only accepts `none` attestation statements. That means any authenticator is accepted, including passkeys synced through a password manager or a platform account.
 
-Each key's AAGUID (its model identifier) is stored in the `aaguid` column. Without attestation, the AAGUID is only what the key says about itself, and nothing checks it. It's fine for showing a friendly model name. It isn't a way to allow only certain models: a key, or software pretending to be one, can report any AAGUID. Restricting models would need attestation checked against the FIDO Metadata Service, which Keyring doesn't do.
+Each key's AAGUID (its model identifier) is stored in the `aaguid` column. Without attestation, the AAGUID is only what the key says about itself, and nothing checks it. It's fine for showing a friendly model name. It isn't a way to allow only certain models: a key, or software pretending to be one, can report any AAGUID.
+
+### Requiring Attestation
+
+An app that only accepts certain hardware keys can ask each new key to prove who made it. The key sends a statement signed with a certificate its maker put on it, and Keyring only adds the key when that certificate chains to a root you trust:
+
+```php
+Keyring::factors([
+    Password::class,
+    WebAuthn::passkeys(),
+    WebAuthn::securityKeys()->requireAttestation(),
+]);
+```
+
+List the makers' root certificates in `config/keyring.php`, as PEM text or as paths to PEM files. A file can hold several. Makers publish theirs, and Keyring never downloads anything:
+
+```php
+'webauthn' => [
+    'attestation_roots' => [
+        storage_path('attestation/yubico-fido-root-ca.pem'),
+    ],
+],
+```
+
+With that set, for this factor:
+
+- Keyring asks the browser for `direct` attestation. Some browsers ask the user before they pass it on, and a user who says no sends `none`.
+- A key is added only when its statement is valid and its certificates chain to one of the roots, each within its dates, each signed by a certificate that is allowed to sign others, with no SHA-1 signature or RSA key under 2048 bits on the way.
+- `none`, a key that attests for itself, a chain to any other root and a statement that doesn't match the response are refused with the same error as any other invalid key, and nothing is added.
+- If no root is listed, or one can't be read, every key is refused and Keyring reports an exception saying which.
+
+Two formats are read: `packed`, which FIDO2 keys use, and `fido-u2f`, which older keys use. Those are what hardware security keys send. The formats platforms use (`tpm`, `android-key`, `apple`) and `compound` are refused, as is any other.
+
+Each setting belongs to one factor, so passkeys carry on as before. That matters: passkeys that sync between devices send no attestation worth checking, and requiring it on `WebAuthn::passkeys()` would turn nearly all of them away. Keep it for security keys, or for a second key of its own:
+
+```php
+WebAuthn::securityKeys()->as('staff-key')->requireAttestation(),
+```
+
+Certificates aren't looked up for revocation, since that needs the network. If a maker withdraws a root, take it out of the list. Keys added before then stay: attestation is checked once, when a key is added.
+
+### Allowing Only Certain Models
+
+Give the AAGUIDs of the models you accept. Their makers publish them:
+
+```php
+WebAuthn::securityKeys()
+    ->requireAttestation()
+    ->allowOnly([
+        '2fc0579f-8113-47ea-b116-bb5a8db9202a',
+        'ee882879-721c-4913-9775-3dfcce97072a',
+    ]),
+```
+
+The list only works with `requireAttestation()`. Without it, Keyring throws a `LogicException` when a user starts adding a key, since the list would accept anything that claims an AAGUID on it.
+
+Keys that only speak U2F have no AAGUID (they report all zeros), so a list leaves them out.
+
+Every root in `attestation_roots` is trusted for every model. If you trust more than one maker, any of them could issue a certificate for another's AAGUID. When that matters, [trust each model separately](#trusting-each-model-separately).
+
+### Trusting Each Model Separately
+
+Keyring asks `Keyring\Contracts\TrustsAuthenticators` for the roots a model's attestation may chain to. The default reads `attestation_roots` and answers the same for every model. Bind your own to answer per AAGUID. That's also how to use the FIDO Metadata Service: download its blob, verify it and keep it up to date yourself, and answer with each model's roots from it, leaving out the models it reports as compromised.
+
+```php
+use Keyring\Contracts\TrustsAuthenticators;
+
+class ModelRoots implements TrustsAuthenticators
+{
+    public function roots(string $aaguid): array
+    {
+        return match ($aaguid) {
+            '2fc0579f-8113-47ea-b116-bb5a8db9202a' => [file_get_contents(storage_path('attestation/yubico-fido-root-ca.pem'))],
+            default => [],
+        };
+    }
+}
+
+$this->app->bind(TrustsAuthenticators::class, ModelRoots::class);
+```
+
+Return PEM certificates, or the bare base64 a metadata statement lists in `attestationRootCertificates`. A model with no roots is refused. U2F keys ask with an AAGUID of all zeros.
+
+### What Is Kept
+
+When a key passes, its `attestation` column holds the kind of attestation that was checked (`basic`, a certificate its maker shares across a batch of keys), and the certificates it sent are kept with the credential record in `public_key`. The column is `null` for every key added without the check, and then `aaguid` is still only what the key reported.
 
 ## Counters and Cloned Keys
 
@@ -136,7 +227,13 @@ Require user verification for security keys:
 WebAuthn::securityKeys()->requireUserVerification(),
 ```
 
-Both return new instances. A factor key other than `passkey` or `security-key` needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment()` decides whether to run the WebAuthn ceremony from the options the server sends, so it works for any key:
+Only accept keys whose maker vouches for them, or only certain models (see [Attestation and AAGUIDs](#attestation-and-aaguids)):
+
+```php
+WebAuthn::securityKeys()->requireAttestation()->allowOnly([$aaguid]),
+```
+
+Each returns a new instance. A factor key other than `passkey` or `security-key` needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment()` decides whether to run the WebAuthn ceremony from the options the server sends, so it works for any key:
 
 ```ts
 import { enroll } from '@entity/keyring'
@@ -167,6 +264,7 @@ Each key is a row in `keyring_authenticators` with:
 | `public_key` | The full credential record as JSON, including the public key and counter. |
 | `sign_count` | The last counter seen. |
 | `aaguid` | The model identifier the key reported. |
+| `attestation` | The kind of attestation that was checked against your roots when the key was added (`basic`), which is what vouches for `aaguid`. `null` when none was. |
 | `transports` | How the browser can reach the key (`usb`, `nfc`, `internal`...). |
 | `meta.user_verified` | Whether the key verified the user when registered. |
 | `meta.backup_eligible` | Whether the key said it can be synced. |

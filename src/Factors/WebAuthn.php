@@ -65,6 +65,26 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         return clone ($this, ['profile' => $this->profile->requireUserVerification($required)]);
     }
 
+    /**
+     * Only enroll keys whose attestation chains to a root the app trusts.
+     */
+    #[\NoDiscard]
+    public function requireAttestation(bool $required = true): static
+    {
+        return clone ($this, ['profile' => $this->profile->requireAttestation($required)]);
+    }
+
+    /**
+     * Only enroll these models, by AAGUID. It needs requireAttestation() too.
+     *
+     * @param  list<string>  $aaguids
+     */
+    #[\NoDiscard]
+    public function allowOnly(array $aaguids): static
+    {
+        return clone ($this, ['profile' => $this->profile->allowOnly($aaguids)]);
+    }
+
     public function key(): string
     {
         return $this->profile->key;
@@ -234,7 +254,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         // A registration challenge is single use too, whether or not this works.
         app(EnrollmentStore::class)->forget($this->key());
 
-        $record = $this->ceremonies()->register($this->credential($request), $enrollment->state('options'));
+        $record = $this->ceremonies()->register($this->credential($request), $enrollment->state('options'), $this->profile);
 
         if ($record === null) {
             return null;
@@ -253,6 +273,8 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             'public_key' => $this->ceremonies()->toJson($record),
             'sign_count' => $record->counter,
             'aaguid' => $record->aaguid->toRfc4122(),
+            // Only a type that was checked against the app's roots is kept.
+            'attestation' => $this->profile->attestation ? $record->attestationType : null,
             'transports' => $record->transports,
             'meta' => [
                 'user_verified' => (bool) $record->uvInitialized,

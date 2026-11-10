@@ -3,6 +3,7 @@
 namespace Keyring\Testing;
 
 use CBOR\ByteStringObject;
+use CBOR\ListObject;
 use CBOR\MapItem;
 use CBOR\MapObject;
 use CBOR\NegativeIntegerObject;
@@ -33,6 +34,18 @@ class VirtualAuthenticator
 
     protected ?string $userHandle = null;
 
+    /**
+     * How it attests when registered: "none", "self", "packed" or "fido-u2f".
+     */
+    protected string $attestation = 'none';
+
+    /**
+     * Its maker's certificate for the model, and the key that signs with it.
+     *
+     * @var array{key: OpenSSLAsymmetricKey, certificates: list<string>}|null
+     */
+    protected ?array $certified = null;
+
     public function __construct(
         // Where it claims to be. Null: the first origin Keyring accepts, from APP_URL.
         public ?string $origin = null,
@@ -59,6 +72,34 @@ class VirtualAuthenticator
     }
 
     /**
+     * Attest registrations as a key this maker made would, in the "packed"
+     * format of FIDO2 keys or the "fido-u2f" one of older keys.
+     */
+    public function attestedBy(VirtualManufacturer $maker, string $format = 'packed'): static
+    {
+        // A U2F key has no AAGUID.
+        if ($format === 'fido-u2f') {
+            $this->aaguid = str_repeat("\0", 16);
+        }
+
+        $this->attestation = $format;
+        $this->certified = $maker->certify($this->aaguid);
+
+        return $this;
+    }
+
+    /**
+     * Attest registrations with the key's own key pair, which says nothing
+     * about who made it.
+     */
+    public function selfAttested(): static
+    {
+        $this->attestation = 'self';
+
+        return $this;
+    }
+
+    /**
      * Answer navigator.credentials.create().
      *
      * @param  array<string, mixed>  $options
@@ -73,8 +114,8 @@ class VirtualAuthenticator
         $authData = $this->authenticatorData($options['rp']['id'], attested: true);
 
         $attestation = MapObject::create()
-            ->add(TextStringObject::create('fmt'), TextStringObject::create('none'))
-            ->add(TextStringObject::create('attStmt'), MapObject::create())
+            ->add(TextStringObject::create('fmt'), TextStringObject::create($this->attestation === 'self' ? 'packed' : $this->attestation))
+            ->add(TextStringObject::create('attStmt'), $this->attestationStatement($options['rp']['id'], $authData, hash('sha256', $clientData, true)))
             ->add(TextStringObject::create('authData'), ByteStringObject::create($authData));
 
         return [
@@ -150,13 +191,47 @@ class VirtualAuthenticator
         return $data;
     }
 
-    protected function sign(string $data): string
+    /**
+     * What vouches for the new credential, signed by the key itself or with
+     * its maker's certificate.
+     */
+    protected function attestationStatement(string $rpId, string $authData, string $clientDataHash): MapObject
     {
-        if (is_string($this->key)) {
-            return sodium_crypto_sign_detached($data, sodium_crypto_sign_secretkey($this->key));
+        $statement = MapObject::create();
+
+        if ($this->attestation === 'none') {
+            return $statement;
         }
 
-        openssl_sign($data, $signature, $this->key, OPENSSL_ALGO_SHA256);
+        if ($this->attestation !== 'fido-u2f') {
+            $statement->add(TextStringObject::create('alg'), NegativeIntegerObject::create($this->attestation === 'self' && is_string($this->key) ? -8 : -7));
+        }
+
+        $statement->add(TextStringObject::create('sig'), ByteStringObject::create(match ($this->attestation) {
+            'self' => $this->sign($authData.$clientDataHash),
+            'fido-u2f' => $this->sign("\0".hash('sha256', $rpId, true).$clientDataHash.$this->credentialId."\x04".implode('', $this->point()), $this->certified['key'] ?? null),
+            default => $this->sign($authData.$clientDataHash, $this->certified['key'] ?? null),
+        }));
+
+        if ($this->attestation !== 'self') {
+            $statement->add(TextStringObject::create('x5c'), ListObject::create(array_map(ByteStringObject::create(...), $this->certified['certificates'] ?? [])));
+        }
+
+        return $statement;
+    }
+
+    /**
+     * Sign with the credential's key, or with the one given.
+     */
+    protected function sign(string $data, ?OpenSSLAsymmetricKey $key = null): string
+    {
+        $key ??= $this->key;
+
+        if (is_string($key)) {
+            return sodium_crypto_sign_detached($data, sodium_crypto_sign_secretkey($key));
+        }
+
+        openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256);
 
         return $signature;
     }
@@ -172,14 +247,30 @@ class VirtualAuthenticator
             ]);
         }
 
-        $ec = (openssl_pkey_get_details($this->key) ?: throw new RuntimeException('OpenSSL could not read the key pair.'))['ec'];
+        [$x, $y] = $this->point();
 
         return (string) MapObject::create([
             MapItem::create(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(2)),        // kty: EC2
             MapItem::create(UnsignedIntegerObject::create(3), NegativeIntegerObject::create(-7)),       // alg: ES256
             MapItem::create(NegativeIntegerObject::create(-1), UnsignedIntegerObject::create(1)),       // crv: P-256
-            MapItem::create(NegativeIntegerObject::create(-2), ByteStringObject::create(str_pad($ec['x'], 32, "\0", STR_PAD_LEFT))),
-            MapItem::create(NegativeIntegerObject::create(-3), ByteStringObject::create(str_pad($ec['y'], 32, "\0", STR_PAD_LEFT))),
+            MapItem::create(NegativeIntegerObject::create(-2), ByteStringObject::create($x)),
+            MapItem::create(NegativeIntegerObject::create(-3), ByteStringObject::create($y)),
         ]);
+    }
+
+    /**
+     * The P-256 public key's coordinates.
+     *
+     * @return array{string, string}
+     */
+    protected function point(): array
+    {
+        if (is_string($this->key)) {
+            throw new RuntimeException('Only a P-256 key has a point on the curve.');
+        }
+
+        $ec = (openssl_pkey_get_details($this->key) ?: throw new RuntimeException('OpenSSL could not read the key pair.'))['ec'];
+
+        return [str_pad($ec['x'], 32, "\0", STR_PAD_LEFT), str_pad($ec['y'], 32, "\0", STR_PAD_LEFT)];
     }
 }

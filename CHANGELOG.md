@@ -6,6 +6,7 @@ The first release. Nothing is tagged yet.
 
 - Sign in, sign out, registration, password resets and email verification, with your own actions and pages.
 - Factors behind one contract: password, authenticator apps, passkeys, security keys, email codes and recovery codes, plus your own.
+- `WebAuthn::securityKeys()->requireAttestation()` to only add hardware keys whose attestation chains to root certificates you list, and `allowOnly()` to limit them to certain models by AAGUID.
 - Many authenticators per user, with a default and "try another way".
 - Policies built from assurance levels, with `ifEnrolled()` and `noDowngrade()`.
 - Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`.

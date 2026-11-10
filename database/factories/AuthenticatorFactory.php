@@ -60,6 +60,14 @@ class AuthenticatorFactory extends Factory
         return $this->webauthn('security-key', 'Security key', $userVerified, synced: false);
     }
 
+    /**
+     * A key whose model was checked against a trusted root when it was added.
+     */
+    public function attested(string $aaguid, string $type = 'basic'): static
+    {
+        return $this->state(['aaguid' => $aaguid, 'attestation' => $type]);
+    }
+
     public function emailCode(): static
     {
         return $this->state(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]);

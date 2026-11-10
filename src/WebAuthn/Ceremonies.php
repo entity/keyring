@@ -21,8 +21,12 @@ use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 use Symfony\Component\Serializer\SerializerInterface;
 use Throwable;
 use Uri\WhatWg\Url;
+use Webauthn\AttestationStatement\AttestationObject;
+use Webauthn\AttestationStatement\AttestationStatementSupport;
 use Webauthn\AttestationStatement\AttestationStatementSupportManager;
+use Webauthn\AttestationStatement\FidoU2FAttestationStatementSupport;
 use Webauthn\AttestationStatement\NoneAttestationStatementSupport;
+use Webauthn\AttestationStatement\PackedAttestationStatementSupport;
 use Webauthn\AuthenticatorAssertionResponse;
 use Webauthn\AuthenticatorAssertionResponseValidator;
 use Webauthn\AuthenticatorAttestationResponse;
@@ -50,7 +54,11 @@ class Ceremonies
 {
     protected ?SerializerInterface $serializer = null;
 
+    protected ?SerializerInterface $attestedSerializer = null;
+
     protected ?AttestationStatementSupportManager $attestation = null;
+
+    protected ?AttestationStatementSupportManager $attestedSupport = null;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -78,8 +86,11 @@ class Ceremonies
                 userVerification: $profile->userVerification,
                 residentKey: $profile->residentKey,
             ),
-            // No attestation: any authenticator is accepted, like Fortify.
-            attestation: PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
+            // No attestation unless the profile wants it: any authenticator
+            // is accepted, like Fortify.
+            attestation: $this->attests($profile)
+                ? PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_DIRECT
+                : PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,
             excludeCredentials: $exclude,
             timeout: $this->timeout(),
         );
@@ -122,19 +133,27 @@ class Ceremonies
     }
 
     /**
-     * Check a registration response. Returns null when it isn't valid.
+     * Check a registration response. Returns null when it isn't valid, or
+     * when the profile wants attestation and the key's doesn't show it to be
+     * a model the profile takes.
      */
-    public function register(string $credential, string $options): ?CredentialRecord
+    public function register(string $credential, string $options, Profile $profile): ?CredentialRecord
     {
         try {
-            $credential = $this->fromJson($credential, PublicKeyCredential::class);
+            $attested = $this->attests($profile);
+
+            $credential = $this->fromJson($credential, PublicKeyCredential::class, $attested);
             $options = $this->fromJson($options, PublicKeyCredentialCreationOptions::class);
 
             if (! $credential->response instanceof AuthenticatorAttestationResponse) {
                 return null;
             }
 
-            return AuthenticatorAttestationResponseValidator::create($this->steps()->creationCeremony())
+            if ($attested && ! $this->vouchedFor($credential->response->attestationObject, $profile)) {
+                return null;
+            }
+
+            return AuthenticatorAttestationResponseValidator::create($this->steps($attested)->creationCeremony())
                 ->check($credential->response, $options, $this->relyingPartyId());
         } catch (Throwable $e) {
             report_if(! $this->isRejection($e), $e);
@@ -273,11 +292,12 @@ class Ceremonies
      * @template T of object
      *
      * @param  class-string<T>  $class
+     * @param  bool  $attested  whether to read attestation other than "none" too
      * @return T
      */
-    public function fromJson(string $json, string $class): object
+    public function fromJson(string $json, string $class, bool $attested = false): object
     {
-        return $this->serializer()->deserialize($json, $class, 'json');
+        return $this->serializer($attested)->deserialize($json, $class, 'json');
     }
 
     /**
@@ -294,7 +314,33 @@ class Ceremonies
         ]));
     }
 
-    protected function steps(): CeremonyStepManagerFactory
+    /**
+     * Whether a profile's keys have to show who made them.
+     */
+    protected function attests(Profile $profile): bool
+    {
+        // Without attestation an AAGUID is only what the key says about
+        // itself, and the list would take anything that claims to be on it.
+        throw_if($profile->aaguids !== null && ! $profile->attestation, LogicException::class, "Keyring can't limit the [{$profile->key}] factor to certain AAGUIDs without checking attestation: nothing vouches for the AAGUID a key reports. Add requireAttestation() to it.");
+
+        return $profile->attestation;
+    }
+
+    /**
+     * Whether the attestation shows the key to be a model the profile takes:
+     * one of those it lists, if it lists any, with certificates that chain to
+     * a root the app trusts for it.
+     */
+    protected function vouchedFor(AttestationObject $attestation, Profile $profile): bool
+    {
+        $aaguid = $attestation->authData->attestedCredentialData?->aaguid;
+
+        return $aaguid !== null
+            && ($profile->aaguids === null || in_array($aaguid->toRfc4122(), $profile->aaguids, true))
+            && app(Attestation::class)->verifies($attestation->attStmt, $aaguid);
+    }
+
+    protected function steps(bool $attested = false): CeremonyStepManagerFactory
     {
         $origins = $this->origins();
 
@@ -305,18 +351,47 @@ class Ceremonies
         $factory = new CeremonyStepManagerFactory;
         $factory->setAlgorithmManager($this->algorithms());
         $factory->setAllowedOrigins($origins);
-        $factory->setAttestationStatementSupportManager($this->attestationSupport());
+        $factory->setAttestationStatementSupportManager($this->attestationSupport($attested));
+
+        if ($attested) {
+            $trust = app(Attestation::class);
+            $factory->enableMetadataStatementSupport($trust, $trust, $trust);
+        }
 
         return $factory;
     }
 
-    protected function attestationSupport(): AttestationStatementSupportManager
+    protected function attestationSupport(bool $attested = false): AttestationStatementSupportManager
     {
+        if ($attested) {
+            return $this->attestedSupport ??= AttestationStatementSupportManager::create($this->attestationFormats());
+        }
+
         return $this->attestation ??= tap(AttestationStatementSupportManager::create())->add(NoneAttestationStatementSupport::create());
     }
 
-    protected function serializer(): SerializerInterface
+    /**
+     * The formats a key may attest in when a profile wants attestation, each
+     * only taken when its certificates chain to a trusted root: "packed" from
+     * FIDO2 keys and "fido-u2f" from older ones. Without that, "none" is the
+     * only format read at all.
+     *
+     * @return list<AttestationStatementSupport>
+     */
+    protected function attestationFormats(): array
     {
+        return [
+            PackedAttestationStatementSupport::create($this->algorithms()),
+            FidoU2FAttestationStatementSupport::create(),
+        ];
+    }
+
+    protected function serializer(bool $attested = false): SerializerInterface
+    {
+        if ($attested) {
+            return $this->attestedSerializer ??= new WebauthnSerializerFactory($this->attestationSupport(true))->create();
+        }
+
         return $this->serializer ??= new WebauthnSerializerFactory($this->attestationSupport())->create();
     }
 
