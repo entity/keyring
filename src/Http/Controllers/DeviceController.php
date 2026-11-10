@@ -27,7 +27,7 @@ class DeviceController
 
     public function index(Request $request): JsonResponse
     {
-        return new JsonResponse(['devices' => $this->devices->list($request, $request->user())]);
+        return new JsonResponse(['devices' => $this->devices->list($request, $this->keyring->user())]);
     }
 
     /**
@@ -35,8 +35,8 @@ class DeviceController
      */
     public function destroy(Request $request, SignIn $signIn, string $device): StatusResponse
     {
-        $device = $this->keyring->deviceModel()::query()->ownedBy($request->user())->active()->findOrFail($device);
-        $current = $this->devices->find($request, $request->user())?->is($device);
+        $device = $this->keyring->deviceModel()::query()->ownedBy($this->keyring->user())->active()->findOrFail($device);
+        $current = $this->devices->find($request, $this->keyring->user())?->is($device);
 
         $this->devices->revoke($device);
 
@@ -54,12 +54,12 @@ class DeviceController
      */
     public function destroyOthers(Request $request): StatusResponse
     {
-        $count = $this->sessions->signOutEverywhere($request->user(), except: $this->sessions->current($request)?->id);
+        $count = $this->sessions->signOutEverywhere($this->keyring->user(), except: $this->sessions->current($request)?->id);
 
         // Someone who copied this session's cookie doesn't get to stay either.
         $this->sessions->rotate($request);
 
-        SessionsRevoked::dispatch($request->user(), $count);
+        SessionsRevoked::dispatch($this->keyring->user(), $count);
 
         return $this->status('sessions-revoked');
     }

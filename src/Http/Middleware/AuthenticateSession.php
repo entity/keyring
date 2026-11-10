@@ -58,7 +58,7 @@ class AuthenticateSession
             });
         }
 
-        $user = $guard->user();
+        $user = $this->keyring->user();
         $session = $this->sessions->current($request);
 
         if ($session === null) {

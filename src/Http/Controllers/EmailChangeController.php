@@ -28,16 +28,16 @@ class EmailChangeController
      */
     public function store(Request $request, ValidatesEmailChanges $validator): StatusResponse
     {
-        $email = $validator->validate($request->user(), $request->all());
+        $email = $validator->validate($this->keyring->user(), $request->all());
 
-        $this->changes->request($request->user(), $email, $request);
+        $this->changes->request($this->keyring->user(), $email, $request);
 
         return $this->status('email-change-requested');
     }
 
     public function show(Request $request): JsonResponse
     {
-        $change = $this->changes->pending($request->user());
+        $change = $this->changes->pending($this->keyring->user());
 
         return new JsonResponse(['pending' => $change === null ? null : [
             'email' => $change->value,
@@ -49,7 +49,7 @@ class EmailChangeController
 
     public function destroy(Request $request): StatusResponse
     {
-        $this->changes->cancel($request->user());
+        $this->changes->cancel($this->keyring->user());
 
         return $this->status('email-change-cancelled');
     }

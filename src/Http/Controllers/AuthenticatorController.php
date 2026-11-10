@@ -39,10 +39,10 @@ class AuthenticatorController
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
-            $this->throttle->sending($factor->key(), $request->user()->getAuthIdentifier());
+            $this->throttle->sending($factor->key(), $this->keyring->user()->getAuthIdentifier());
         }
 
-        $enrollment = $factor->beginEnrollment($request->user(), $request);
+        $enrollment = $factor->beginEnrollment($this->keyring->user(), $request);
 
         $this->enrollments->put($enrollment);
 
@@ -61,10 +61,10 @@ class AuthenticatorController
 
         $request->validate($factor->enrollmentRules());
 
-        $authenticator = $factor->confirmEnrollment($request->user(), $enrollment, $request)
+        $authenticator = $factor->confirmEnrollment($this->keyring->user(), $enrollment, $request)
             ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.invalid')]);
 
-        $recoveryCodes = $this->changes->add($request->user(), $factor, $authenticator);
+        $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
 
         $this->enrollments->forget($factor->key());
 
@@ -76,7 +76,7 @@ class AuthenticatorController
 
     public function update(Request $request, string $authenticator): StatusResponse
     {
-        $authenticator = $this->changes->find($request->user(), $authenticator);
+        $authenticator = $this->changes->find($this->keyring->user(), $authenticator);
 
         $this->changes->update($authenticator, $request->validate([
             'name' => ['sometimes', 'string', 'max:64'],
@@ -92,7 +92,7 @@ class AuthenticatorController
         // Only asked for when this is the last second factor.
         $request->validate(['password' => ['nullable', 'string']]);
 
-        $this->changes->remove($request->user(), $authenticator, $request->input('password'));
+        $this->changes->remove($this->keyring->user(), $authenticator, $request->input('password'));
 
         return $this->status('authenticator-removed');
     }
@@ -104,7 +104,7 @@ class AuthenticatorController
      */
     protected function enrollable(Request $request, string $key): Enrollable
     {
-        abort_unless($this->keyring->allowsEnrollment($request->user()), 403, __('keyring::keyring.verify_email_first'));
+        abort_unless($this->keyring->allowsEnrollment($this->keyring->user()), 403, __('keyring::keyring.verify_email_first'));
 
         $factor = $this->keyring->factor($key);
 
