@@ -108,7 +108,7 @@ Build an action with one of the static constructors and chain extras:
 | `->lockFor('1h')` | Refuse sign ins for that long. Trusted devices stay trusted, for the same reason sessions aren't revoked. | Refuse sign ins for that long, from now, and stop trusting the user's devices. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 
-Locks are kept in the cache store named in `risk.store`. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
+Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
 
 ## Checkpoints
 
