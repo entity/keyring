@@ -15,6 +15,8 @@ use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
+use Keyring\Http\Controllers\AuthenticatedSessionController;
+use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\ConsecutiveLimit;
@@ -147,4 +149,16 @@ it('names the issuer an authenticator app shows, when the app gives one', functi
         ->json('enrollment.url');
 
     expect($url)->toContain('issuer=Acme%20Staff');
+});
+
+it('lets an app replace a controller through the container', function () {
+    app()->bind(AuthenticatedSessionController::class, fn ($app) => new class($app->make(KeyringManager::class)) extends AuthenticatedSessionController
+    {
+        public function create(Request $request): mixed
+        {
+            return 'our own login page';
+        }
+    });
+
+    $this->get('/login')->assertOk()->assertSee('our own login page');
 });
