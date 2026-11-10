@@ -23,7 +23,7 @@ Everything beyond signing in is opt-in. See [Adding Features](docs/quick-start.m
 ## Requirements
 
 - PHP 8.5+
-- Laravel 13+
+- Laravel 13.30+
 - Inertia v3 (optional; without it, Keyring renders Blade views named `auth.*` that you provide)
 
 ## Installation

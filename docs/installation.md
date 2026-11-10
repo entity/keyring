@@ -13,7 +13,7 @@ The [Quick Start](quick-start.md) is the short version. This page has the detail
 ## Requirements
 
 - PHP 8.5 or later
-- Laravel 13 or later
+- Laravel 13.30 or later
 - Inertia v3 (optional). Without Inertia, Keyring renders Blade views instead (see [Pages](sign-in-flow.md#pages)).
 - The `sodium` PHP extension, if you want passkeys and security keys that sign with Ed25519. Without it, Keyring only offers ES256 and RS256 keys.
 
