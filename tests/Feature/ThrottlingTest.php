@@ -1,7 +1,6 @@
 <?php
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
@@ -115,7 +114,7 @@ it('does not let signing in to a lookalike account clear another account\'s limi
 
     // Five a minute, whoever else signs in between them.
     expect(array_count_values($statuses))->toBe([422 => 5, 429 => 7]);
-})->skip(fn () => in_array(DB::connection()->getDriverName(), ['mysql', 'mariadb'], true), 'MySQL\'s default collation treats the two addresses as one, so both accounts can\'t exist.');
+})->skip(fn () => databaseIgnoresAccents(), 'The database treats the two addresses as one, so both accounts can\'t exist.');
 
 it('limits guesses at a username nobody has like guesses at a real one', function () {
     config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 100]);
@@ -345,7 +344,7 @@ describe('a shared address', function () {
         $this->withCookie('keyring_device', $device)
             ->post('/login', ['email' => ' VICTIM@EXÄMPLE.COM ', 'password' => 'password'])
             ->assertRedirect('/dashboard');
-    });
+    })->skip(fn () => databaseIgnoresAccents(), 'The database treats the two addresses as one account, whose device this is.');
 
     it('treats another model\'s device with the same id as unknown on the second factor', function () {
         $user = account('taylor@example.com');
