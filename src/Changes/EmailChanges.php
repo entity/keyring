@@ -26,6 +26,7 @@ use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use Keyring\Support\MailText;
 use Keyring\Support\RowLock;
+use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 
 use function Illuminate\Support\defer;
@@ -53,6 +54,7 @@ class EmailChanges
         protected SessionAssurance $assurance,
         protected ReservedAddresses $reserved,
         protected PendingEmailChanges $pending,
+        protected Throttle $throttle,
     ) {}
 
     /**
@@ -103,12 +105,17 @@ class EmailChanges
         defer(function () use ($change, $email, $current, $tokens, $needsCurrent, $taken) {
             $link = fn (string $route, string $token) => Url::route($route, ['change' => $change->id, 'token' => $token]);
 
-            Notification::route('mail', $email)->notify($taken
-                ? $this->keyring->requiredNotification('email_address_in_use')
-                : $this->keyring->requiredNotification('confirm_email_change', [
-                    'url' => $link('keyring.email.confirm', $tokens['confirm']),
-                    'expiresAt' => $change->expires_at,
-                ]));
+            // The typed address is anyone's until it confirms, so it's only
+            // mailed so often, whichever accounts ask. Skipped out of sight,
+            // like the rest of what happens to it.
+            if ($this->throttle->notifying('email_change', 'mail:'.$this->keyring->normalizeUsername($email)) === null) {
+                Notification::route('mail', $email)->notify($taken
+                    ? $this->keyring->requiredNotification('email_address_in_use')
+                    : $this->keyring->requiredNotification('confirm_email_change', [
+                        'url' => $link('keyring.email.confirm', $tokens['confirm']),
+                        'expiresAt' => $change->expires_at,
+                    ]));
+            }
 
             Notification::route('mail', $current)->notify($this->keyring->requiredNotification('email_change_notice', [
                 'email' => MailText::maskAddress($email),

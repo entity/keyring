@@ -106,6 +106,8 @@ If the new address belongs to another account, everything the account can see is
 
 All of these emails are sent after the response (with Laravel's `defer()`), so how long the request takes doesn't give away which case it was.
 
+Each request mails two addresses, so an account can ask five times an hour (`limits.notices` every `limits.notices_per`), and then gets a `429`. An address someone types is mailed that often at most, whichever accounts ask. Once it has had its share the request is answered the same and stored the same, and nothing more is sent to it.
+
 ### Confirming
 
 The new address must always confirm. The current address must confirm too, unless this session proved a possession factor the account has had for `email_changes.established_after` (7 days by default), and since before this session signed in. A newer factor doesn't count, so whoever got in can't add one, use it and skip the check, in the same session or by signing in again with it. Neither does another account's factor, so an impersonated or switched session can't skip it with the admin's.

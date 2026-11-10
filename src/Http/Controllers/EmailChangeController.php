@@ -11,6 +11,7 @@ use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 
 class EmailChangeController
@@ -26,11 +27,18 @@ class EmailChangeController
      * Ask to change the email. Always answers the same way, whether or not
      * the address belongs to someone else.
      */
-    public function store(Request $request, ValidatesEmailChanges $validator): StatusResponse
+    public function store(Request $request, ValidatesEmailChanges $validator, Throttle $throttle): StatusResponse
     {
-        $email = $validator->validate($this->keyring->user(), $request->all());
+        $user = $this->keyring->user();
+        $email = $validator->validate($user, $request->all());
 
-        $this->changes->request($this->keyring->user(), $email, $request);
+        // Every request mails two addresses, so they're counted like the
+        // notices they are, not just by the form's own limit.
+        if (($wait = $throttle->notifying('email_change', $user::class.':'.$user->getAuthIdentifier())) !== null) {
+            throw Throttle::exception($this->keyring->email(), $wait);
+        }
+
+        $this->changes->request($user, $email, $request);
 
         return $this->status('email-change-requested');
     }

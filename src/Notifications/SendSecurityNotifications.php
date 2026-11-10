@@ -3,12 +3,14 @@
 namespace Keyring\Notifications;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Keyring\Events;
 use Keyring\KeyringManager;
+use Keyring\Support\Throttle;
 
 /**
  * Sends the app's notification for each security notice it has registered
@@ -18,6 +20,7 @@ class SendSecurityNotifications
 {
     public function __construct(
         protected KeyringManager $keyring,
+        protected Throttle $throttle,
     ) {}
 
     /**
@@ -124,6 +127,18 @@ class SendSecurityNotifications
             return;
         }
 
+        // An address nobody has verified may be anyone's: whoever registered
+        // typed it. It hears about the account once it's proved to be theirs.
+        if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
+            return;
+        }
+
+        // A few of each kind, however often the event comes. The security
+        // log still has every one.
+        if ($this->throttle->notifying($type, $this->recipient($user)) !== null) {
+            return;
+        }
+
         // The current request, not one captured at boot (Octane).
         $request = request();
 
@@ -137,6 +152,16 @@ class SendSecurityNotifications
         if ($notification !== null) {
             Notification::send($user, $notification);
         }
+    }
+
+    /**
+     * Who a notice is counted against: the account, or the bare address.
+     */
+    protected function recipient(Authenticatable|AnonymousNotifiable $user): string
+    {
+        return $user instanceof AnonymousNotifiable
+            ? 'mail:'.Str::lower((string) ($user->routes['mail'] ?? ''))
+            : $user::class.':'.$user->getAuthIdentifier();
     }
 
     /**
