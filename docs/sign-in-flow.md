@@ -105,11 +105,11 @@ Keyring asks wherever a session starts or carries on:
 
 - Every way of starting a sign in: the password, a passkey, and any factor of your own.
 - A sign in that's waiting for its second factor.
-- A "remember me" cookie.
+- A "remember me" cookie. The session it would have carried on is ended, so the same cookies don't sign the account back in once it's allowed again.
 - Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`.
 - Registration, which doesn't sign the new user in.
 
-An account that's turned away gets the same answer as one that doesn't exist. Password reset still works for it, since a reset doesn't sign anyone in.
+An account that's turned away gets the same answer as one that doesn't exist. What doesn't sign anyone in still works for it: a password reset, and the emailed links that confirm or undo an email change or report a device.
 
 The callback runs on every signed-in request, so answer from the user it's given rather than with a query.
 

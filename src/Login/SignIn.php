@@ -63,6 +63,9 @@ class SignIn
         // checked, and is only registered now, so look again: with the new
         // password or address saved, it ends here.
         if ($this->changedMeanwhile($user)) {
+            // The change stopped trusting every device before this one was
+            // recorded, so whatever trust it was just given goes too.
+            $this->sessions->distrustDevices($user);
             $this->out($request, onlyThisBrowser: true);
 
             throw ValidationException::withMessages([$this->keyring->username() => __('auth.failed')]);

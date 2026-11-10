@@ -232,6 +232,13 @@ class AuthenticateSession
      */
     protected function signOut(Request $request, string $reason): Response
     {
+        // An account that's kept out or locked loses the session its
+        // "remember me" would carry on, too. Otherwise the same cookies
+        // would sign it in again the moment it's let back.
+        if (in_array($reason, ['not_allowed', 'risk'], true) && ($remembered = $this->sessions->remembered($request)) !== null) {
+            $this->sessions->registry()->revoke($remembered->id);
+        }
+
         if ($user = $this->signIn->out($request, onlyThisBrowser: true)) {
             SessionEnded::dispatch($user, $reason);
         }
