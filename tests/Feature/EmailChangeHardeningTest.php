@@ -5,6 +5,7 @@ use App\Notifications\Keyring\EmailAddressInUse;
 use App\Notifications\Keyring\EmailChanged;
 use App\Notifications\Keyring\EmailChangeNotice;
 use App\Notifications\Keyring\EmailChangeReverted;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Keyring\Changes\EmailChanges;
@@ -30,6 +32,8 @@ use Keyring\Rules\UnreservedAddress;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\MailText;
+use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\SoftDeletingUser;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -162,7 +166,7 @@ it('cannot be confirmed twice from stale copies', function () {
 
 it('removes sign-in methods added since the change when it is reverted', function () {
     Event::fake([AuthenticatorRemoved::class]);
-    $before = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+    $before = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
     $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);
     $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
 
@@ -178,7 +182,7 @@ it('removes sign-in methods added since the change when it is reverted', functio
 });
 
 it('removes sign-in methods added earlier in the session that asked for the change', function () {
-    $before = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+    $before = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($before->secret)]);
 
@@ -262,7 +266,7 @@ it('asks the current address to confirm when the second factor was only just add
 });
 
 it('waives the current address confirmation for a second factor that predates the session', function () {
-    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
@@ -272,8 +276,77 @@ it('waives the current address confirmation for a second factor that predates th
     expect(PendingChange::query()->latest('id')->first()->current_token)->toBeNull();
 });
 
+it('still asks the current address when the second factor is too new to be the owner\'s for certain', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDays(6)]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+    $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+
+    expect(PendingChange::sole()->current_token)->not->toBeNull();
+});
+
+it('does not let a factor planted in one session count as established in the next', function () {
+    // Whoever has the password adds an authenticator app of their own...
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+    $this->post('/logout');
+
+    // ...signs in again with it, so it predates the session, and asks.
+    $this->travel(2)->minutes();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($secret)])->assertRedirect('/dashboard');
+    $this->travel(1)->minutes();
+    $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com'])->assertOk();
+
+    $change = PendingChange::sole();
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+
+    // The owner's address still has to confirm, so the change can't apply.
+    expect($tokens['current'])->not->toBeNull()
+        ->and(app(EmailChanges::class)->confirm($change, $tokens['confirm']))->toBe(EmailConfirmation::NeedsOtherAddress)
+        ->and($this->user->fresh()->email)->toBe('taylor@example.com');
+
+    // And "this wasn't me" takes the planted app with it.
+    expect(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeTrue()
+        ->and(Authenticator::query()->where('factor', 'totp')->exists())->toBeFalse();
+});
+
+it('removes a passkey planted before the session that asked, so it can not sign back in after a revert', function () {
+    $key = new VirtualAuthenticator;
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+    $this->post('/logout');
+
+    $this->travel(2)->minutes();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+    $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com'])->assertOk();
+
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+
+    expect($tokens['current'])->not->toBeNull()
+        ->and(app(EmailChanges::class)->revert(PendingChange::sole(), $tokens['revert']))->toBeTrue()
+        ->and(Authenticator::query()->where('factor', 'passkey')->exists())->toBeFalse();
+});
+
+it('treats an address a soft deleted account still holds as taken', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    config(['auth.providers.users.model' => SoftDeletingUser::class]);
+    SoftDeletingUser::create(['name' => 'Gone', 'email' => 'gone@example.com', 'password' => 'password', 'email_verified_at' => now()])->delete();
+    $user = SoftDeletingUser::query()->findOrFail($this->user->id);
+
+    $this->actingAs($user)->withAssurance(Assurance::AAL1)->postJson(route('keyring.email.store'), ['email' => 'gone@example.com'])->assertOk();
+
+    Notification::assertSentTo(new AnonymousNotifiable, EmailAddressInUse::class, fn ($n, $c, $to) => $to->routes['mail'] === 'gone@example.com');
+    Notification::assertNotSentTo(new AnonymousNotifiable, ConfirmEmailChange::class);
+});
+
 it('waives it in a test acting as a session verified with that second factor', function () {
-    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
 
     $this->actingAs($this->user)->verifiedWith($totp)->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
     expect(PendingChange::query()->latest('id')->first()->current_token)->toBeNull();
@@ -449,7 +522,7 @@ function otherSession(User $user, string $id = 'other-session'): string
 describe('whose verification waives the current address', function () {
     it('still asks the current address when the session verified someone else\'s factor', function () {
         $admin = taylor(['email' => 'admin@example.com']);
-        $totp = Authenticator::factory()->totp()->for($admin, 'authenticatable')->create(['created_at' => now()->subDay()]);
+        $totp = Authenticator::factory()->totp()->for($admin, 'authenticatable')->create(['created_at' => now()->subMonth()]);
 
         $this->post('/login', ['email' => 'admin@example.com', 'password' => 'password']);
         $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
