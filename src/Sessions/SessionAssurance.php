@@ -2,10 +2,12 @@
 
 namespace Keyring\Sessions;
 
+use Illuminate\Container\Attributes\Scoped;
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
+use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
@@ -141,10 +143,7 @@ class SessionAssurance
      */
     public function level(): Assurance
     {
-        return array_find(
-            [Assurance::AAL3, Assurance::AAL2, Assurance::AAL1],
-            fn (Assurance $level) => Requirement::for($level)->isMetBy($this->countingToward($level)),
-        ) ?? Assurance::None;
+        return Assurance::highest($this->countingToward(...));
     }
 
     /**

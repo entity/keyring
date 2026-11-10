@@ -2,6 +2,7 @@
 
 namespace Keyring\Enums;
 
+use Closure;
 use InvalidArgumentException;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
@@ -30,9 +31,20 @@ enum Assurance: int
      */
     public static function of(array $verifications): self
     {
+        return self::highest(fn () => $verifications);
+    }
+
+    /**
+     * The highest level reached when each level counts verifications of its
+     * own: a session lets each level's lapse on a different clock.
+     *
+     * @param  Closure(self): list<Verification>  $countingToward
+     */
+    public static function highest(Closure $countingToward): self
+    {
         return array_find(
             [self::AAL3, self::AAL2, self::AAL1],
-            fn (self $level) => Requirement::for($level)->isMetBy($verifications),
+            fn (self $level) => Requirement::for($level)->isMetBy($countingToward($level)),
         ) ?? self::None;
     }
 
