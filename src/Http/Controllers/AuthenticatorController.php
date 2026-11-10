@@ -88,6 +88,9 @@ class AuthenticatorController
 
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
+        // Only asked for when this is the last second factor.
+        $request->validate(['password' => ['nullable', 'string']]);
+
         $this->changes->remove($request->user(), $authenticator, $request->input('password'));
 
         return $this->status('authenticator-removed');
