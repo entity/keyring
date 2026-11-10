@@ -13,7 +13,9 @@ final class RowLock
 {
     /**
      * Run the callback in a transaction on the model's own connection, with a
-     * fresh copy of its row locked for update (null if the row is gone).
+     * fresh copy of its row locked for update (null if the row is gone). The
+     * row is found whatever scopes the model has: a soft deleted one is
+     * still there to lock.
      *
      * @template TModel of Model
      * @template TResult
@@ -25,7 +27,7 @@ final class RowLock
     public static function hold(Model $model, Closure $callback): mixed
     {
         return $model->getConnection()->transaction(
-            fn () => $callback($model->newQuery()->lockForUpdate()->whereKey($model->getKey())->first()),
+            fn () => $callback($model->newQueryWithoutScopes()->lockForUpdate()->whereKey($model->getKey())->first()),
         );
     }
 }

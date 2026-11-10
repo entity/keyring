@@ -174,18 +174,24 @@ class EmailChanges
                 return false;
             }
 
-            $user = $change->user();
+            // Whatever state the account is in: one that was deactivated
+            // since still gets its address back, ready for when it's
+            // restored. With no account left there's nothing to undo, and
+            // the link isn't spent on saying there was.
+            $user = $change->owner();
+
+            if ($user === null) {
+                return false;
+            }
 
             // Later changes are closed first. That waits for one being
             // confirmed right now, so whether the address moved is read
             // after it has, and none can move it once this has looked.
-            if ($user !== null) {
-                $this->closeLaterChanges($user, $change);
-            }
+            $this->closeLaterChanges($user, $change);
 
             // On a fresh copy of the user: the one loaded above may be from
             // before that confirmation, and would see nothing to put back.
-            if ($user !== null && $this->movedAddress($user, $change)) {
+            if ($this->movedAddress($user, $change)) {
                 RowLock::hold($user, fn (?Model $user) => $user !== null && $this->protection->changing(
                     fn () => $user->forceFill([$change->attribute => $change->previous_value])->save(),
                 ));
@@ -193,16 +199,14 @@ class EmailChanges
 
             $change->forceFill(['reverted_at' => now()])->save();
 
-            if ($user !== null) {
-                $this->removeAuthenticatorsAddedSince($user, $this->unestablishedSince($change));
-            }
+            $this->removeAuthenticatorsAddedSince($user, $this->unestablishedSince($change));
 
             return true;
         });
 
         $change = $change->fresh();
 
-        if ($reverted && ($user = $change?->user())) {
+        if ($reverted && ($user = $change?->owner())) {
             $this->sessions->signOutEverywhere($user);
 
             EmailChangeReverted::dispatch($user, $change);
