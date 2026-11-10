@@ -133,7 +133,7 @@ Once every code is used, the set no longer counts as a factor, so policies and s
 
 ### Passkeys and Security Keys
 
-One WebAuthn driver with two profiles. Passkeys are discoverable and always verify the user, so they can sign in on their own. Security keys are a second factor. See [Passkeys & Security Keys](passkeys.md).
+One WebAuthn driver with two profiles. Passkeys are discoverable and always verify the user, so they can sign in on their own. Security keys are a second factor, and can be limited to keys whose maker vouches for them with `requireAttestation()`. See [Passkeys & Security Keys](passkeys.md).
 
 ## Categories
 

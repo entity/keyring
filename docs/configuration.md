@@ -112,10 +112,13 @@ The browser package uses Keyring's default paths. If you change the prefix, tell
     ],
     'origins' => [],
     'timeout' => '60s',
+    'attestation_roots' => [],
 ],
 ```
 
 See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout` is a [duration](#durations).
+
+`attestation_roots` lists the root certificates a new key's attestation has to chain to, as PEM text or paths to PEM files. It's only read for a factor set up with [`requireAttestation()`](passkeys.md#requiring-attestation), which refuses every key while the list is empty.
 
 ## Account Changes and Enrollment
 

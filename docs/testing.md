@@ -150,6 +150,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | `emailCode()` | Email codes. |
 | `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. Only one that isn't synced reaches AAL3. |
 | `securityKey($userVerified = false)` | A security key. |
+| `attested($aaguid, $type = 'basic')` | Add to either of those: a key whose model was checked by attestation. |
 | `default()` | Marks it as the default. |
 | `unconfirmed()` | Not yet confirmed, so it doesn't count. |
 
@@ -211,6 +212,26 @@ The constructor options:
 `VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys.
 
 `$key->assert($options, $origin)` can answer from another origin, to test that Keyring rejects it. `$key->rewindCounter()` makes the next response reuse an old counter, as a cloned key would.
+
+### Keys That Attest
+
+A factor that [requires attestation](passkeys.md#requiring-attestation) refuses a plain virtual authenticator, as it would any key that doesn't say who made it. `Keyring\Testing\VirtualManufacturer` is a maker of keys with a throwaway root certificate. Trust its root, and its keys attest the way hardware does:
+
+```php
+use Keyring\Testing\VirtualManufacturer;
+
+$maker = new VirtualManufacturer;
+config(['keyring.webauthn.attestation_roots' => [$maker->root]]);
+
+$key = $maker->key('2fc0579f-8113-47ea-b116-bb5a8db9202a');
+
+$options = $this->postJson(route('keyring.authenticators.store', 'security-key'))->json('enrollment.options');
+$this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $key->register($options)])->assertOk();
+```
+
+`key()` takes the model's AAGUID, the format (`packed` by default, or `fido-u2f`, which has no AAGUID) and whether the key verifies the user. `new VirtualManufacturer(intermediate: true)` signs its keys' certificates with an intermediate certificate instead of the root, and `days:` sets how long its certificates last.
+
+To check that your app turns keys away, use a key from a second `VirtualManufacturer` you don't trust, or `new VirtualAuthenticator()->selfAttested()`, which attests with its own key pair.
 
 ## The Conformance Suite
 

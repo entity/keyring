@@ -37,6 +37,7 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | Whether registering signs the user in | `Keyring::signInAfterRegistering()` | [Registration](sign-in-flow.md#registration) |
 | Risk signals and what they do | `Keyring::risk()`, your own `Signal` | [Risk](risk.md) |
 | Where a request is located | `devices.locator`, your own `LocatesIps` | [Devices & Sessions](devices-and-sessions.md) |
+| Whose key attestation is trusted | `webauthn.attestation_roots`, your own `TrustsAuthenticators` | [Passkeys & Security Keys](passkeys.md#trusting-each-model-separately) |
 | How a browser is described | `Keyring::describeDevicesUsing()` | [Devices & Sessions](devices-and-sessions.md) |
 | Where sessions are registered | `sessions.driver`, your own `SessionRegistry` | [The Session Registry](devices-and-sessions.md#the-session-registry) |
 | Whether Keyring checks sessions on the `web` group | `sessions.middleware` | [The Session Middleware](devices-and-sessions.md#the-session-middleware) |
