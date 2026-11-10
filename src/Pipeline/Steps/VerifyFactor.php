@@ -68,17 +68,21 @@ class VerifyFactor
             return $context->fail();
         }
 
-        $context->attempt->record($context->verification);
+        $attempt = $context->attempt();
+        $attempt->record($context->verification);
 
         // A factor may verify a different authenticator than the one shown
         // (e.g. the user tapped another of their security keys).
-        if ($context->verification->authenticator !== null && $context->verification->authenticator !== $context->authenticator->id) {
-            $context->authenticator = $context->attempt->keyring()->find($context->verification->authenticator) ?? $context->authenticator;
+        $authenticator = $context->authenticator();
+
+        if ($context->verification->authenticator !== null && $context->verification->authenticator !== $authenticator->id) {
+            $authenticator = $attempt->keyring()->find($context->verification->authenticator) ?? $authenticator;
         }
 
-        $context->authenticator->markAsUsed();
+        $context->authenticator = $authenticator;
+        $authenticator->markAsUsed();
 
-        FactorVerified::dispatch($context->attempt, $context->authenticator, $context->verification);
+        FactorVerified::dispatch($attempt, $authenticator, $context->verification);
 
         return $next($context);
     }
@@ -88,7 +92,7 @@ class VerifyFactor
      */
     protected function check(Context $context): ?Verification
     {
-        return $context->factor->verify($context->attempt, $context->authenticator, $context->request);
+        return $context->factor->verify($context->attempt(), $context->authenticator(), $context->request);
     }
 
     /**

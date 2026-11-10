@@ -81,7 +81,7 @@ final class Steps
     {
         $this->ensureNotMandatory($existing);
 
-        $this->steps[$this->indexOf($existing)] = $replacement;
+        array_splice($this->steps, $this->indexOf($existing), 1, [$replacement]);
 
         return $this;
     }
@@ -107,7 +107,7 @@ final class Steps
      */
     public function dangerouslyReplace(string $existing, string $replacement): self
     {
-        $this->steps[$this->indexOf($existing)] = $replacement;
+        array_splice($this->steps, $this->indexOf($existing), 1, [$replacement]);
         $this->dangerouslyChanged[] = $existing;
 
         return $this;

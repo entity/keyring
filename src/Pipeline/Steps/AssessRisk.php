@@ -21,7 +21,7 @@ class AssessRisk
 
     public function handle(Context $context, Closure $next): Context
     {
-        $attempt = $context->attempt;
+        $attempt = $context->attempt();
 
         if ($attempt->purpose !== Purpose::Login) {
             return $next($context);

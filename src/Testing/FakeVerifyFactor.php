@@ -27,7 +27,7 @@ class FakeVerifyFactor extends VerifyFactor
     {
         $verification = match ($this->decision($context)) {
             null => parent::check($context),
-            true => Verification::of($context->authenticator),
+            true => Verification::of($context->authenticator()),
             false => null,
         };
 
