@@ -20,7 +20,6 @@ class SendSecurityNotifications
 {
     public function __construct(
         protected KeyringManager $keyring,
-        protected Throttle $throttle,
     ) {}
 
     /**
@@ -135,7 +134,9 @@ class SendSecurityNotifications
 
         // A few of each kind, however often the event comes. The security
         // log still has every one.
-        if ($this->throttle->notifying($type, $this->recipient($user)) !== null) {
+        // Asked for here, not when the app boots and subscribes this class:
+        // the rate limiter's cache store may not be registered by then.
+        if (app(Throttle::class)->notifying($type, $this->recipient($user)) !== null) {
             return;
         }
 
