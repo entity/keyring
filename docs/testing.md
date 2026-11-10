@@ -130,7 +130,7 @@ $fake->assertNotChecked('recovery');
 | `assertNotChecked($factor)` | The factor was never checked. |
 | `assertNothingChecked()` | No factor was checked. |
 
-`Keyring::fake()` throws a `LogicException` when the app environment is `production`, and a `KeyringFake` you bind in the container yourself is ignored there. Other environments can use it, so a browser suite running against `local` or `staging` keeps working.
+`Keyring::fake()` throws a `LogicException` when the app environment is `production`, and nothing bound in the container by hand fakes a check there. Other environments can use it, so a browser suite running against `local` or `staging` keeps working.
 
 ## Factories
 

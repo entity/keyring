@@ -9,7 +9,9 @@ use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Pipeline\Steps\VerifyFactor;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Testing\FakeVerifyFactor;
 use Keyring\Testing\KeyringFake;
 use PHPUnit\Framework\ExpectationFailedException;
 
@@ -44,6 +46,7 @@ it('refuses to fake in production', function () {
 it('does not pass a factor for a fake bound by hand in production', function () {
     runningIn('production');
     app()->instance(KeyringFake::class, (new KeyringFake)->pass('password'));
+    app()->bind(VerifyFactor::class, FakeVerifyFactor::class);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
     $this->post('/login', ['email' => 'taylor@example.com'])->assertSessionHasErrors('password');
@@ -53,9 +56,17 @@ it('does not pass a factor for a fake bound by hand in production', function () 
 it('does not fail a factor for a fake bound by hand in production', function () {
     runningIn('production');
     app()->instance(KeyringFake::class, (new KeyringFake)->fail('password'));
+    app()->bind(VerifyFactor::class, FakeVerifyFactor::class);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
     $this->assertAuthenticatedAs($this->user);
+});
+
+it('checks for real when a fake is in the container but nothing asked to fake', function () {
+    app()->instance(KeyringFake::class, (new KeyringFake)->pass('password'));
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
+    $this->assertGuest();
 });
 
 it('still fakes outside production, so browser suites keep working', function (string $environment) {
