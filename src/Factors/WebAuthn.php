@@ -146,7 +146,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     public function challenge(Attempt $attempt, Authenticator $authenticator): array
     {
         $options = $this->ceremonies()->requestOptions(
-            $attempt->keyring()->of($this->key())->map(fn (Authenticator $each) => $this->descriptor($each))->all(),
+            array_values($attempt->keyring()->of($this->key())->map($this->descriptor(...))->all()),
             $this->profile->userVerification,
         );
 
@@ -180,6 +180,11 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             // Against the locked row, so parallel assertions can't both pass
             // one stored count and a slower write can't lower it.
             $this->consume($actual, function (Authenticator $locked) use (&$result, $credential, $options) {
+                // Nothing to check a signature against.
+                if ($locked->public_key === null) {
+                    return false;
+                }
+
                 $result = $this->ceremonies()->assert(
                     $credential,
                     $options,
@@ -219,10 +224,10 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             ->ownedBy($user)
             ->whereNotNull('credential_id')
             ->get()
-            ->map(fn (Authenticator $each) => $this->descriptor($each))
+            ->map($this->descriptor(...))
             ->all();
 
-        $options = $this->ceremonies()->creationOptions($user, $this->profile, $exclude);
+        $options = $this->ceremonies()->creationOptions($user, $this->profile, array_values($exclude));
 
         return Enrollment::make($this->key(), [
             'options' => $this->ceremonies()->toBrowser($options),
@@ -275,7 +280,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     protected function descriptor(Authenticator $authenticator): PublicKeyCredentialDescriptor
     {
-        return $this->ceremonies()->descriptor($authenticator->credential_id, $authenticator->transports ?? []);
+        return $this->ceremonies()->descriptor((string) $authenticator->credential_id, $authenticator->transports ?? []);
     }
 
     /**
