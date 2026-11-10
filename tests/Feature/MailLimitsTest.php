@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Events\PasswordChanged as PasswordChangedEvent;
+use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Tests\Fixtures\User;
 
@@ -113,6 +114,17 @@ describe('email change requests', function () {
         $this->travel(61)->minutes();
 
         askToMoveTo($this->user, 'new6@example.com')->assertOk();
+    });
+
+    it('refuses an account whose own address is unverified, which could never confirm the change', function () {
+        $this->user->forceFill(['email_verified_at' => null])->save();
+
+        askToMoveTo($this->user->fresh(), 'someone@example.com')
+            ->assertStatus(422)
+            ->assertJsonPath('errors.email.0', __('keyring::keyring.verify_email_to_change'));
+
+        Notification::assertNothingSent();
+        expect(PendingChange::count())->toBe(0);
     });
 
     it('mails a typed address five times an hour at most, whichever accounts ask, without saying so', function () {

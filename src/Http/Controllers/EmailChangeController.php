@@ -2,9 +2,11 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\ValidatesEmailChanges;
@@ -30,6 +32,14 @@ class EmailChangeController
     public function store(Request $request, ValidatesEmailChanges $validator, Throttle $throttle): StatusResponse
     {
         $user = $this->keyring->user();
+
+        // A change waits for the current address to confirm, and one nobody
+        // has verified never has. Asking would only send mail, to whoever
+        // was typed at registration and whoever is typed now.
+        if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
+            throw ValidationException::withMessages([$this->keyring->email() => __('keyring::keyring.verify_email_to_change')]);
+        }
+
         $email = $validator->validate($user, $request->all());
 
         // Every request mails two addresses, so they're counted like the

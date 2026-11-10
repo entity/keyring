@@ -106,7 +106,7 @@ If the new address belongs to another account, everything the account can see is
 
 All of these emails are sent after the response (with Laravel's `defer()`), so how long the request takes doesn't give away which case it was.
 
-Each request mails two addresses, so an account can ask five times an hour (`limits.notices` every `limits.notices_per`), and then gets a `429`. An address someone types is mailed that often at most, whichever accounts ask. Once it has had its share the request is answered the same and stored the same, and nothing more is sent to it.
+A `MustVerifyEmail` user whose address isn't verified yet is refused with `keyring::keyring.verify_email_to_change`: the change would wait on a confirmation from that address, which nobody has shown they can read. Each request mails two addresses, so an account can ask five times an hour (`limits.notices` every `limits.notices_per`), and then gets a `429`. An address someone types is mailed that often at most, whichever accounts ask. Once it has had its share the request is answered the same and stored the same, and nothing more is sent to it.
 
 ### Confirming
 
