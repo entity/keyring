@@ -484,7 +484,7 @@ Keyring::findUsersUsing(fn (Request $request) => User::query()
     ->first());
 ```
 
-Guesses at either one count against the same account. See [Finding the User](sign-in-flow.md#finding-the-user).
+Guesses at either one count against the same account, without the sign-in form showing that the two belong together. See [Rate Limiting](security.md#rate-limiting) and [Finding the User](sign-in-flow.md#finding-the-user).
 
 ## Links for Apps on Several Domains
 

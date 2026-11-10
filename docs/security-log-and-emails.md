@@ -43,7 +43,7 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `confirmed` | A step-up completed. | `factors` |
 | `factor_failed` | A factor failed. | |
 | `second_factor_failed` | A factor failed during a login after a correct password. | |
-| `locked_out` | A rate limit was hit. Not linked to a user. | `retry_after` |
+| `locked_out` | A rate limit was hit, whether the answer said so or was that of a wrong password. Not linked to a user. | `retry_after` |
 | `signed_out` | The user signed out. | |
 | `authenticator_added`, `authenticator_removed` | | `name` |
 | `recovery_codes_generated` | | |
