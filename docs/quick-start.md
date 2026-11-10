@@ -219,7 +219,7 @@ These are part of the foundation. You don't need to set them up, but you can cha
 | Rate limits on signing in | 5 a minute per account, 20 per IP, and a factor refused after 100 failures in a row | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Failed checks take the same time | 250ms | `timebox` |
 | Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
-| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and the "remember me" cookie lasts no longer | `sessions` in [Configuration](configuration.md#sessions) |
+| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and "remember me" only brings back a session that hasn't ended | `sessions` in [Configuration](configuration.md#sessions) |
 | Assurance levels lapse, as NIST asks | AAL2 after an hour idle or 24 hours, AAL3 after 15 minutes or 12 hours | `sessions.levels` |
 | Browsers are told to clear their cache and storage on sign out | On | A custom [`LogoutResponse`](sign-in-flow.md#responses) |
 | Step-up middleware | `keyring:aal2` and `keyring.fresh:15m`, for your routes | [Step-Up](step-up.md) |

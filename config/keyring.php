@@ -160,7 +160,8 @@ return [
     | session ("idle" null leaves inactivity to Laravel's session lifetime).
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
-    | again.
+    | again. "remember_cookie" names the cookie that ties "remember me" to
+    | the session it was ticked for.
     |
     */
 
@@ -176,6 +177,7 @@ return [
             'aal3' => ['idle' => '15m', 'absolute' => '12h'],
         ],
         'middleware' => true,
+        'remember_cookie' => 'keyring_remember',
     ],
 
     /*

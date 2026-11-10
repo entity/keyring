@@ -251,34 +251,43 @@ describe('coming back with a "remember me" cookie', function () {
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
 
         $this->device = deviceCookie($response);
+        $this->registered = session(Sessions::KEY);
         $user = $this->user->fresh();
-        $recaller = [Auth::guard()->getRecallerName() => $user->id.'|'.$user->remember_token.'|'.$user->password];
+
+        // "Remember me" is Laravel's cookie and the one naming its session.
+        $remembered = [
+            Auth::guard()->getRecallerName() => $user->id.'|'.$user->remember_token.'|'.$user->password,
+            'keyring_remember' => $this->registered,
+        ];
 
         // The session is gone and only the cookies are left.
         $this->flushSession();
         Auth::forgetGuards();
 
         $this->comeBack = fn (array $cookies = []) => $this->withHeader('User-Agent', FIREFOX)
-            ->withCookies([...$recaller, ...$cookies])
+            ->withCookies([...$remembered, ...$cookies])
             ->get('/home');
     });
 
-    it('registers the session on the device it was remembered on', function () {
+    it('carries the session on, on the device it was remembered on', function () {
         Event::fake([NewDeviceSignedIn::class]);
 
         ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
 
         expect(Device::count())->toBe(1)
-            ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->deviceId)->toBe(Device::sole()->id);
+            ->and(session(Sessions::KEY))->toBe($this->registered)
+            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe(Device::sole()->id);
         Event::assertNotDispatched(NewDeviceSignedIn::class);
     });
 
     it('announces a browser the account has not used as a new device', function () {
         Event::fake([NewDeviceSignedIn::class]);
+        $first = Device::sole();
 
         ($this->comeBack)()->assertOk()->assertCookie('keyring_device');
 
-        expect(Device::count())->toBe(2);
+        expect(Device::count())->toBe(2)
+            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe(Device::query()->whereKeyNot($first->id)->sole()->id);
         Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
     });
 

@@ -176,6 +176,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
         'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
     'middleware' => true,
+    'remember_cookie' => 'keyring_remember',
 ],
 ```
 
@@ -188,6 +189,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `absolute` | The longest a session can last, however active it is. |
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
+| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
