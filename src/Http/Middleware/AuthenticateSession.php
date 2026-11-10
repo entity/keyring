@@ -116,14 +116,14 @@ class AuthenticateSession
      */
     protected function register(Request $request, Authenticatable&Model $user, bool $remembered): void
     {
-        [$device, $new] = $remembered
+        $device = $remembered
             ? $this->devices->signIn($request, $user)
-            : [$this->devices->find($request, $user), false];
+            : $this->devices->find($request, $user);
 
         $this->sessions->start($request, $user, $device, $this->assurance->level());
         $this->assurance->touch();
 
-        if ($new) {
+        if ($device?->wasRecentlyCreated) {
             NewDeviceSignedIn::dispatch($user, $device);
         }
     }

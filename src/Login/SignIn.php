@@ -47,7 +47,15 @@ class SignIn
         $request->session()->regenerate(true);
         $this->assurance->reset($attempt->verifications);
 
-        [$device, $new] = $this->devices->signIn($request, $user, $this->earnedTrust($attempt), Requirement::aal2()->isMetBy($attempt->verifications));
+        $device = $this->devices->signIn(
+            $request,
+            $user,
+            provedSecondFactor: Requirement::aal2()->isMetBy($attempt->verifications),
+            trust: $this->earnedTrust($attempt),
+        );
+
+        $new = $device?->wasRecentlyCreated === true;
+
         $this->sessions->start($request, $user, $device, $this->assurance->level());
 
         Authenticated::dispatch($user, $attempt, $device);
