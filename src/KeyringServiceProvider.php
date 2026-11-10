@@ -2,6 +2,7 @@
 
 namespace Keyring;
 
+use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -32,6 +33,7 @@ use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionRegistryManager;
+use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use Keyring\Support\Url;
 
@@ -163,6 +165,7 @@ class KeyringServiceProvider extends ServiceProvider
         Event::subscribe(RecordSecurityEvents::class);
         Event::subscribe(SendSecurityNotifications::class);
         Event::subscribe(DispatchLaravelEvents::class);
+        Event::listen(Login::class, [Sessions::class, 'markRecalled']);
     }
 
     /**
@@ -204,8 +207,11 @@ class KeyringServiceProvider extends ServiceProvider
     }
 
     /**
-     * "Remember me" can't outlast a session: Laravel's cookie lasts 400 days
-     * otherwise. An app that sets its guard's "remember" keeps its own.
+     * Ask the browser to keep the "remember me" cookie no longer than a
+     * session lasts: Laravel's default is 400 days. An app that sets its
+     * guard's "remember" keeps its own. This is only how long the browser
+     * holds it. What stops it working is the session it was issued with
+     * ending (AuthenticateSession).
      */
     protected function configureRememberMe(): void
     {

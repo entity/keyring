@@ -56,7 +56,7 @@ class SignIn
 
         $new = $device?->wasRecentlyCreated === true;
 
-        $this->sessions->start($request, $user, $device, $this->assurance->level());
+        $this->sessions->start($request, $user, $device, $this->assurance->level(), remembered: $attempt->remember);
 
         Authenticated::dispatch($user, $attempt, $device);
 
@@ -103,8 +103,10 @@ class SignIn
      * Sign the current user out of this session. Returns who it was.
      *
      * Signing out on purpose changes the "remember me" token, as Laravel
-     * does. A session that ends on its own (a timeout, say) only forgets
-     * this browser's, or one ending would sign out every remembered browser.
+     * does. A session that ends on its own (a timeout, say) leaves the token
+     * alone, or one ending would sign out every remembered browser: its
+     * record is revoked, and that is what stops this browser's cookies
+     * bringing it back (Sessions::end).
      */
     public function out(Request $request, bool $onlyThisBrowser = false): ?Authenticatable
     {

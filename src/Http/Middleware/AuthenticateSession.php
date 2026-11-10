@@ -49,11 +49,12 @@ class AuthenticateSession
 
         // An app's own Auth::login() (Socialite, impersonation) is registered
         // on the response that signs in, so every copy of that session's
-        // cookie can be revoked, on the cookie driver too.
+        // cookie can be revoked, on the cookie driver too. One that ticked
+        // "remember me" gets Keyring's cookie next to Laravel's.
         if (! $guard->check()) {
             return tap($next($request), function () use ($request, $guard) {
                 if (($user = $guard->user()) !== null && ! $request->session()->has(Sessions::KEY)) {
-                    $this->register($request, $user, remembered: false);
+                    $this->register($request, $user, remembered: $this->sessions->recallerQueued());
                 }
             });
         }
@@ -69,29 +70,18 @@ class AuthenticateSession
                 return $this->signOut($request, 'revoked');
             }
 
-            // A "remember me" cookie signs in with nothing proved, so a risk
-            // lock refuses it like any other sign in.
-            if ($guard->viaRemember() && $this->locks->locked($user)) {
-                return $this->signOut($request, 'risk');
+            if ($this->recalled($request)) {
+                return $this->resume($request, $user) ?? $next($request);
             }
 
-            $this->register($request, $user, $guard->viaRemember());
+            $this->register($request, $user);
 
             return $next($request);
         }
 
         $now = now()->getTimestamp();
-        $idle = $this->sessions->idle();
 
-        $ended = match (true) {
-            $session->revokedAt !== null => 'revoked',
-            ! $session->isActive($now) => 'expired',
-            $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
-            $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
-            default => null,
-        };
-
-        if ($ended !== null) {
+        if (($ended = $this->ended($session, $user, $now)) !== null) {
             return $this->signOut($request, $ended);
         }
 
@@ -110,22 +100,89 @@ class AuthenticateSession
     }
 
     /**
-     * Register a session that started some other way. A "remember me" cookie
-     * is recorded like a sign in, so one turning up in a browser the account
-     * hasn't used is announced as a new device.
+     * Why this user can't carry on with a record, if they can't.
+     *
+     * @return 'revoked'|'expired'|'idle'|'other_user'|null
      */
-    protected function register(Request $request, Authenticatable&Model $user, bool $remembered): void
+    protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
-        $device = $remembered
-            ? $this->devices->signIn($request, $user)
-            : $this->devices->find($request, $user);
+        $idle = $this->sessions->idle();
 
-        $this->sessions->start($request, $user, $device, $this->assurance->level());
+        return match (true) {
+            $session->revokedAt !== null => 'revoked',
+            ! $session->isActive($now) => 'expired',
+            $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
+            $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
+            default => null,
+        };
+    }
+
+    /**
+     * Register a session that started some other way, like an app's own
+     * Auth::login().
+     */
+    protected function register(Request $request, Authenticatable&Model $user, bool $remembered = false): void
+    {
+        $this->sessions->start($request, $user, $this->devices->find($request, $user), $this->assurance->level(), $remembered);
+        $this->assurance->touch();
+    }
+
+    /**
+     * Whether a "remember me" cookie signed this session in: on this request,
+     * or earlier on a route this middleware isn't on (Sessions::markRecalled).
+     */
+    protected function recalled(Request $request): bool
+    {
+        return $this->keyring->guard()->viaRemember() || $request->session()->get(Sessions::REMEMBERED) === true;
+    }
+
+    /**
+     * Let a "remember me" cookie carry on the session it was issued with, and
+     * nothing else. Laravel's cookie works for as long as the browser sends
+     * it, so on its own a copy kept after a timeout or a risk response would
+     * start a new session with a whole new window. The browser's Keyring
+     * cookie names the record it goes with, and the record has to still be
+     * good. Returns a response when it isn't.
+     */
+    protected function resume(Request $request, Authenticatable&Model $user): ?Response
+    {
+        // The cookie signs in with nothing proved, so a risk lock refuses it
+        // like any other sign in.
+        if ($this->locks->locked($user)) {
+            return $this->signOut($request, 'risk');
+        }
+
+        $session = $this->sessions->remembered($request);
+
+        // No cookie, or no record left for it: both are kept for as long as
+        // the session could last, so it has run out.
+        if ($session === null) {
+            return $this->signOut($request, 'expired');
+        }
+
+        if (($ended = $this->ended($session, $user, now()->getTimestamp())) !== null) {
+            // An idle session ends for good, as when its own request shows it.
+            if ($ended === 'idle') {
+                $this->sessions->registry()->revoke($session->id);
+            }
+
+            return $this->signOut($request, $ended);
+        }
+
+        // Recorded like a sign in, so a browser the account hasn't used is
+        // announced as a new device.
+        $device = $this->devices->signIn($request, $user);
+
+        // Whatever this session held, the cookie proved none of it.
+        $this->assurance->flush();
+        $this->sessions->resume($request, $session, $device);
         $this->assurance->touch();
 
         if ($device?->wasRecentlyCreated) {
             NewDeviceSignedIn::dispatch($user, $device);
         }
+
+        return null;
     }
 
     /**

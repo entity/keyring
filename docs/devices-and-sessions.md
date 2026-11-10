@@ -14,6 +14,7 @@
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
     - [The Session Middleware](#the-session-middleware)
+    - ["Remember Me"](#remember-me)
 - [Timeouts](#timeouts)
 - [Pruning](#pruning)
 - [Events](#events)
@@ -195,7 +196,7 @@ app(Sessions::class)->rotate($request);
 
 `rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one.
 
-Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (an idle or absolute timeout, a risk response, or a revoked record) only forgets that browser's cookie, so other remembered browsers stay signed in.
+Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (an idle or absolute timeout, a risk response, or a revoked record) leaves the token alone, so other remembered browsers stay signed in. That browser's cookies stop working because its record has ended: see ["Remember Me"](#remember-me).
 
 ## The Session Registry
 
@@ -260,13 +261,31 @@ It only checks routes it runs on. If signed-in sessions reach other groups, add 
 On each signed-in request it:
 
 - signs the user out if their registry record was revoked, has expired, belongs to someone else, or has been idle too long,
-- registers sessions that started some other way, such as your own `Auth::login()` (on the response that signs in) or a "remember me" cookie. A remembered browser is recorded like a sign in, so one the account hasn't used before is announced as a [new device](#new-device-sign-ins), and it's refused while the account is [risk locked](risk.md#actions),
+- registers sessions that started some other way, such as your own `Auth::login()` (on the response that signs in),
+- carries a remembered session on when a ["remember me" cookie](#remember-me) signs its browser back in, or signs it out if that session has ended,
 - runs the cheap [risk signals](risk.md#checkpoints),
 - updates the last activity time, at most once a minute.
 
 A session whose record has gone missing is signed out rather than registered again, so clearing records can't restart a session's window.
 
 A signed-out request is sent to the login page with the `signed-out` status, and comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, and `Keyring\Events\SessionEnded` is dispatched with the reason, logged as `session_ended`.
+
+### "Remember Me"
+
+Laravel's "remember me" cookie holds a token that is the same in every browser the user ticked it in, and nothing on the server makes it run out. On its own it would sign a browser back in for as long as the browser kept sending it, whatever had happened to the session it came with.
+
+So a remembered sign in also sets a Keyring cookie (`keyring_remember`, named in `sessions.remember_cookie`) holding that session's registry ID. It's httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts as long as the record does. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
+
+- If the record is the user's, hasn't been revoked, and is inside its `absolute` limit and its `idle` limit (when you set one), the new session carries it on. It's the same record with the same expiry, so coming back never starts the `absolute` limit again. The record's IP address, browser and last activity are updated, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
+- Otherwise the request is signed out like any other ended session, with both cookies cleared: there was no Keyring cookie, its record is gone (`expired`), or the record was revoked, timed out or belongs to someone else. A client that kept the cookies after a timeout or a risk response gets nowhere with them.
+
+It's also refused while the account is [risk locked](risk.md#actions).
+
+Your own `Auth::login($user, remember: true)` gets the Keyring cookie too, on the response that signs in, as long as that route has the middleware. A session given a new registry record (a mid-session [step-up](risk.md#actions), or `rotate()` on the `cookie` session driver) gets a new cookie for it.
+
+If Laravel's cookie first reaches a route without the middleware, Laravel signs it in there and Keyring notes that in the session. The next request the middleware sees is checked the same way.
+
+With an `idle` limit set, a remembered browser that stays away for longer than it has to sign in again, because its session idled out. Leave `idle` as `null` if "remember me" should last the whole `absolute` limit.
 
 ## Timeouts
 
@@ -282,7 +301,7 @@ A signed-out request is sent to the login page with the `signed-out` status, and
 ```
 
 - **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
-- **`absolute`** ends a session this long after sign in, however active it is. The "remember me" cookie lasts no longer either, unless you set your guard's `remember` (in minutes) yourself. A browser that comes back on that cookie starts a new session, whose own `absolute` counts from then.
+- **`absolute`** ends a session this long after sign in, however active it is. A browser that comes back on ["remember me"](#remember-me) carries the same session on, so that doesn't start the limit again. The browser is asked to keep Laravel's "remember me" cookie no longer either, unless you set your guard's `remember` (in minutes) yourself. That only changes how long the browser holds it: it still stops working when its session ends.
 - **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
 
 A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.

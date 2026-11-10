@@ -2,11 +2,14 @@
 
 namespace Keyring\Sessions;
 
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Session\CookieSessionHandler;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Changes\PendingEmailChanges;
 use Keyring\Contracts\SessionRegistry;
@@ -24,13 +27,20 @@ class Sessions
 {
     public const string KEY = 'keyring.session';
 
+    /**
+     * Set on a session "remember me" may bring back. On one with no record
+     * yet, a "remember me" cookie signed it in and the record it goes with
+     * is still to be found (AuthenticateSession).
+     */
+    public const string REMEMBERED = 'keyring.remembered';
+
     public function __construct(
         protected SessionRegistry $registry,
         protected KeyringManager $keyring,
         protected PendingEmailChanges $emailChanges,
     ) {}
 
-    public function start(Request $request, Authenticatable $user, ?Device $device, Assurance $assurance): RegisteredSession
+    public function start(Request $request, Authenticatable $user, ?Device $device, Assurance $assurance, bool $remembered = false): RegisteredSession
     {
         $now = now()->getTimestamp();
 
@@ -48,9 +58,46 @@ class Sessions
         );
 
         $this->registry->save($session);
-        $request->session()->put(self::KEY, $session->id);
+        $this->bind($request, $session, $remembered);
 
         return $session;
+    }
+
+    /**
+     * Carry a remembered session on in the new session its "remember me"
+     * cookie signed in. It's the same record, so it keeps the limits it
+     * started with. The cookie proved nothing, so the level starts again.
+     */
+    public function resume(Request $request, RegisteredSession $session, ?Device $device): void
+    {
+        $this->registry->update($session->id, [
+            'deviceId' => $device->id ?? $session->deviceId,
+            'assurance' => Assurance::None,
+            'ip' => $this->keyring->recordedIp($request),
+            'userAgent' => UserAgent::from($request),
+            'lastActivityAt' => now()->getTimestamp(),
+        ]);
+
+        // The browser already holds the cookie for this record.
+        $request->session()->put([self::KEY => $session->id, self::REMEMBERED => true]);
+    }
+
+    /**
+     * Point the request's session at its record. A remembered one also gets
+     * the cookie that lets "remember me" bring it back.
+     */
+    protected function bind(Request $request, RegisteredSession $session, bool $remembered): void
+    {
+        $request->session()->put(self::KEY, $session->id);
+
+        if (! $remembered) {
+            $request->session()->forget(self::REMEMBERED);
+
+            return;
+        }
+
+        $request->session()->put(self::REMEMBERED, true);
+        $this->queueRememberCookie($session);
     }
 
     public function current(Request $request): ?RegisteredSession
@@ -80,6 +127,9 @@ class Sessions
         if (is_string($id)) {
             $this->registry->revoke($id);
         }
+
+        $request->session()->forget(self::REMEMBERED);
+        $this->forgetRememberCookie($request);
     }
 
     /**
@@ -116,7 +166,85 @@ class Sessions
         $this->registry->save($current = $session->with(['id' => Str::random(40), ...$changes]));
         $this->registry->revoke($session->id);
 
-        $request->session()->put(self::KEY, $current->id);
+        // The browser's "remember me" moves to the new record with it.
+        $this->bind($request, $current, $request->session()->get(self::REMEMBERED) === true);
+    }
+
+    /**
+     * The record this browser's "remember me" belongs to, if there still is
+     * one. Another guard's record doesn't count: its users can have the same
+     * IDs as this one's.
+     */
+    public function remembered(Request $request): ?RegisteredSession
+    {
+        $id = $request->cookie($this->rememberCookie());
+        $session = is_string($id) && strlen($id) === 40 ? $this->registry->find($id) : null;
+
+        return $session?->guard === config('keyring.guard') ? $session : null;
+    }
+
+    /**
+     * Whether this response gives the browser Laravel's "remember me" cookie,
+     * as an app's own Auth::login($user, remember: true) does. Signing out
+     * queues one too, with nothing in it.
+     */
+    public function recallerQueued(): bool
+    {
+        $guard = $this->keyring->guard();
+
+        return $guard instanceof SessionGuard && filled(Cookie::queued($guard->getRecallerName())?->getValue());
+    }
+
+    /**
+     * Note that a "remember me" cookie signed the session in, as it happens.
+     * The guard only knows for the rest of that request, and on a route
+     * without Keyring's middleware the next one would find a signed-in
+     * session with nothing to say how it started.
+     *
+     * The guard announces the cookie as a login that ticked "remember me",
+     * and it can say it came by the cookie when the cookie was refused and
+     * someone then signed in. A real login that ticked it has a new cookie
+     * queued by now.
+     */
+    public function markRecalled(Login $event): void
+    {
+        $guard = $this->keyring->guard();
+
+        if ($event->guard === config('keyring.guard') && $event->remember && $guard instanceof SessionGuard && $guard->viaRemember() && ! $this->recallerQueued()) {
+            $guard->getSession()->put(self::REMEMBERED, true);
+        }
+    }
+
+    public function rememberCookie(): string
+    {
+        return config('keyring.sessions.remember_cookie');
+    }
+
+    /**
+     * Laravel's "remember me" cookie is the same in every browser a user
+     * ticked it in, and nothing on the server makes it run out. This one
+     * names the record it was issued with, so "remember me" can only bring
+     * that session back, and only for as long as the record lasts.
+     */
+    protected function queueRememberCookie(RegisteredSession $session): void
+    {
+        Cookie::queue(Cookie::make(
+            $this->rememberCookie(),
+            $session->id,
+            minutes: max(1, (int) ceil(($session->expiresAt - now()->getTimestamp()) / 60)),
+            secure: config('session.secure'),
+            httpOnly: true,
+            sameSite: 'lax',
+        ));
+    }
+
+    protected function forgetRememberCookie(Request $request): void
+    {
+        Cookie::unqueue($this->rememberCookie());
+
+        if ($request->cookies->has($this->rememberCookie())) {
+            Cookie::queue(Cookie::forget($this->rememberCookie()));
+        }
     }
 
     /**

@@ -218,6 +218,7 @@ Keyring's other form routes (registration, password resets, email changes, enrol
 - **Profile updates can't change the email.** With `Features::emailChanges()` on, `$user->update(['email' => ...])` throws. Use the [email change flow](protected-changes.md#changing-the-email-address), or `Keyring::withoutProtection()` for admin tooling.
 - **Password resets don't sign users in.** They go back to the login page, so their second factor still applies.
 - **Password resets sign out every session**, and password changes sign out other sessions unless the request sends `sign_out_others: false`. Signing out also changes the "remember me" token.
+- **Remembered browsers sign in once more.** ["Remember me"](devices-and-sessions.md#remember-me) only brings back a session Keyring registered, so a "remember me" cookie from before the switch is refused the first time it's used.
 - **Adding a factor needs a fresh verification**, with a second factor when the user has one, and a verified email when your user model implements `MustVerifyEmail`.
 - **Recovery codes can't be viewed again.** They're stored hashed. Users generate a new set instead.
 - **Recovery codes come automatically** with a user's first extra factor.
