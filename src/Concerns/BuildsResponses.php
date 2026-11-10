@@ -30,7 +30,7 @@ trait BuildsResponses
             $this->ensureBuildable($contract, $implementation);
         }
 
-        $this->container->bind($contract, $implementation);
+        app()->bind($contract, $implementation);
 
         return $this;
     }
@@ -47,7 +47,7 @@ trait BuildsResponses
      */
     public function response(string $contract, mixed ...$with): Responsable
     {
-        return $this->container->make($contract, $with);
+        return app($contract, $with);
     }
 
     /**

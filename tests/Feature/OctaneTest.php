@@ -4,6 +4,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
+use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
@@ -101,4 +102,20 @@ it('leaves nothing of one request\'s sign in for the next request to find', func
         ->and($next->session()->all())->not->toHaveKey(AttemptStore::key(Purpose::Login))
         ->and($sandbox->make(AttemptStore::class)->current(Purpose::Login))->toBeNull()
         ->and($this->booted->make(AttemptStore::class)->current(Purpose::Login))->toBeNull();
+});
+
+it('builds what a request needs in the app handling it', function () {
+    Keyring::respondWith(LogoutResponse::class, fn (Application $app) => new class($app) implements LogoutResponse
+    {
+        public function __construct(public Application $app) {}
+
+        public function toResponse($request)
+        {
+            return response()->noContent();
+        }
+    });
+
+    [$sandbox] = octaneRequest($this->booted, []);
+
+    expect(Keyring::response(LogoutResponse::class)->app)->toBe($sandbox);
 });

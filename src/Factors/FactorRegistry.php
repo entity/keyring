@@ -21,19 +21,13 @@ class FactorRegistry
      *
      * @var list<class-string<Factor>|Factor|Closure(Container): Factor>
      */
-    protected array $definitions;
+    protected array $definitions = [Password::class];
 
     /** @var array<string, Closure(Container): Factor> */
     protected array $extensions = [];
 
     /** @var array<string, Factor>|null */
     protected ?array $resolved = null;
-
-    public function __construct(
-        protected Container $container,
-    ) {
-        $this->definitions = [Password::class];
-    }
 
     /**
      * @param  list<class-string<Factor>|Factor|Closure(Container): Factor>  $factors
@@ -97,8 +91,8 @@ class FactorRegistry
     {
         return match (true) {
             $definition instanceof Factor => $definition,
-            $definition instanceof Closure => $definition($this->container),
-            default => $this->container->make($definition),
+            $definition instanceof Closure => $definition(app()),
+            default => app($definition),
         };
     }
 }

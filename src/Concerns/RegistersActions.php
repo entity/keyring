@@ -59,7 +59,7 @@ trait RegistersActions
      */
     protected function useAction(string $contract, string $action): static
     {
-        $this->container->singleton($contract, $action);
+        app()->singleton($contract, $action);
 
         return $this;
     }
