@@ -3,6 +3,8 @@
 namespace Keyring\Changes;
 
 use Closure;
+use Illuminate\Container\Attributes\Singleton;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Events\ProtectionBypassed;
 use Keyring\Exceptions\ProtectedAttributeException;
@@ -25,14 +27,17 @@ class ProtectedAttributes
 
     /**
      * The password once Keyring handles changing it, the email once Keyring
-     * handles changing that, plus any the app lists.
+     * handles changing that, plus any the app lists. The password goes by
+     * the model's own name for it, when it has another.
      *
      * @return list<string>
      */
-    public function all(): array
+    public function all(?Model $user = null): array
     {
+        $password = $user instanceof Authenticatable ? $user->getAuthPasswordName() : 'password';
+
         return array_values(array_unique([
-            ...Features::enabled(Features::updatePasswords()) ? ['password'] : [],
+            ...Features::enabled(Features::updatePasswords()) ? [$password] : [],
             ...Features::enabled(Features::emailChanges()) ? [config('keyring.email')] : [],
             ...config('keyring.protected'),
         ]));
@@ -87,10 +92,10 @@ class ProtectedAttributes
             return;
         }
 
-        $changed = array_values(array_diff(array_filter($this->all(), $model->isDirty(...)), $allowed));
+        $changed = array_filter($this->all($model), fn (string $attribute) => $model->isDirty($attribute) && ! in_array($attribute, $allowed, true));
 
         if ($changed !== []) {
-            throw ProtectedAttributeException::for($model, $changed);
+            throw ProtectedAttributeException::for($model, array_values($changed));
         }
     }
 }

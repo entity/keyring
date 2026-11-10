@@ -52,7 +52,7 @@ use Keyring\KeyringManager;
  * @method static (\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model)|null findUser(\Illuminate\Http\Request $request)
  * @method static \Keyring\KeyringManager signInAfterRegistering(\Closure|bool $when)
  * @method static bool signsInAfterRegistering(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user, \Illuminate\Http\Request $request)
- * @method static list<string> protectedAttributes()
+ * @method static list<string> protectedAttributes(\Illuminate\Database\Eloquent\Model|null $user = null)
  * @method static mixed withoutProtection(\Closure $callback, string|null $reason = null)
  * @method static \Keyring\KeyringManager useAuthenticatorModel(string $model)
  * @method static class-string<\Keyring\Models\Authenticator> authenticatorModel()

@@ -695,13 +695,14 @@ class KeyringManager
     }
 
     /**
-     * Attributes that may only change through Keyring's flows.
+     * Attributes that may only change through Keyring's flows. Pass a user
+     * whose model keeps its password under another name to get that name.
      *
      * @return list<string>
      */
-    public function protectedAttributes(): array
+    public function protectedAttributes(?Model $user = null): array
     {
-        return $this->protection->all();
+        return $this->protection->all($user);
     }
 
     /**
