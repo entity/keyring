@@ -103,14 +103,15 @@ class VerifyFactor
 
     /**
      * Who the request is for, when they can be signed in here. Someone the
-     * app keeps out costs what checking their proof would have, and the
-     * attempt carries on as if nobody was found.
+     * app keeps out, or whose account can't be loaded (a global scope of the
+     * app's hides it, say), costs what checking their proof would have, and
+     * the attempt carries on as if nobody was found.
      */
     protected function identify(PrimaryFactor $factor, Request $request): ?Authenticator
     {
         $authenticator = $factor->identify($request);
 
-        if ($authenticator === null || $this->maySignIn($authenticator->user())) {
+        if ($authenticator === null || $this->maySignIn($authenticator->authenticatable)) {
             return $authenticator;
         }
 
@@ -122,9 +123,9 @@ class VerifyFactor
     /**
      * Whether whoever the factor found can be signed in here.
      */
-    protected function maySignIn(?Authenticatable $user): bool
+    protected function maySignIn(mixed $user): bool
     {
-        return $user instanceof Model && $this->keyring->belongsToGuard($user) && $this->keyring->allowsSignIn($user);
+        return $user instanceof Authenticatable && $user instanceof Model && $this->keyring->belongsToGuard($user) && $this->keyring->allowsSignIn($user);
     }
 
     /**

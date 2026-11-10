@@ -135,7 +135,10 @@ class EmailChanges
     public function confirm(PendingChange $change, #[\SensitiveParameter] string $token): EmailConfirmation
     {
         $result = RowLock::hold($change, function (?PendingChange $change) use ($token) {
-            if ($change === null || ! $change->isPending()) {
+            // An account that can't be loaded can't have the change applied,
+            // so the press isn't recorded either: a link answered as no good
+            // has done nothing.
+            if ($change === null || ! $change->isPending() || $change->user() === null) {
                 return EmailConfirmation::Invalid;
             }
 

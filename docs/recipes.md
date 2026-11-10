@@ -498,6 +498,8 @@ The callback runs when a link is built, which is while handling the request or i
 
 Return something the server knows. The request's `Host` header is whatever the sender wrote, and a reset link built from it would deliver a real token to their site.
 
+If a tenant scope on your user model hides every user on the central domain, this matters more: a confirmation link opened there finds no account and answers as invalid, so each tenant's links have to open on that tenant's domain.
+
 Passkeys are tied to a domain too. Set `webauthn.relying_party.id` and `webauthn.origins` per tenant if each one registers its own. See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
 
 ## Storing Less About Requests
