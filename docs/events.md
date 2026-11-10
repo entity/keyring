@@ -33,7 +33,7 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `FactorChallenged` | The challenge page showed a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (null when the user wasn't found), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit. | `request`, `factor`, `retryAfter` (seconds) |
+| `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. | `request`, `factor`, `retryAfter` (seconds) |
 | `Authenticated` | A login completed and the user was signed in. | `user`, `attempt`, `device` (null without `Features::devices()`) |
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |

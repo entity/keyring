@@ -62,6 +62,14 @@ abstract class Factor implements FactorContract
         return app(Throttle::class)->limitsFor($this, $request, $attempt);
     }
 
+    /**
+     * Nothing to spend: see PrimaryFactor::stall().
+     */
+    public function stall(): void
+    {
+        //
+    }
+
     public function errorKey(): string
     {
         return 'code';

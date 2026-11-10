@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -44,6 +45,17 @@ it('answers the right password like a wrong one', function () {
         ->assertSessionHasErrors(['email' => __('auth.failed')]);
 
     $this->assertGuest();
+});
+
+it('spends a hash on a banned account, as checking its password would', function () {
+    ban($this->user);
+
+    Hash::spy();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    Hash::shouldNotHaveReceived('check');
+    Hash::shouldHaveReceived('make')->once();
 });
 
 it('refuses a passkey', function () {

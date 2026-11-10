@@ -74,15 +74,22 @@ class Password extends Factor implements PrimaryFactor
         $user = Keyring::findUser($request);
 
         if ($user === null || blank($user->getAuthPassword())) {
-            // Spend the time a real check would: one hash, on every request.
-            // Keeping a hash to check against would only save its cost where
-            // the process outlives the request, and show which those are.
-            Hash::make(Str::random(32));
+            $this->stall();
 
             return null;
         }
 
         return Authenticator::virtual($this, $user, __('Password'));
+    }
+
+    /**
+     * One hash, as checking a password costs, made on every request.
+     * Keeping a hash to check against would only save its cost where the
+     * process outlives the request, and show which those are.
+     */
+    public function stall(): void
+    {
+        Hash::make(Str::random(32));
     }
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification

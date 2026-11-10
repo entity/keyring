@@ -25,6 +25,11 @@ class CompleteAttempt
 
     public function handle(Context $context, Closure $next): Context
     {
+        // Refused by a rate limit, whatever a step in between made of it.
+        if ($context->refused) {
+            return $context->fail();
+        }
+
         $attempt = $context->attempt();
 
         if (! $attempt->complete) {

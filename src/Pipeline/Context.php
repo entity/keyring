@@ -25,6 +25,9 @@ final class Context
     /** Whether the rate limits were checked for this request. */
     public bool $throttleChecked = false;
 
+    /** Whether a rate limit refused this request without saying so. */
+    public bool $refused = false;
+
     /** Whether the risk lock was checked for this request. */
     public bool $riskLockChecked = false;
 
@@ -68,6 +71,18 @@ final class Context
     public function lockout(int $retryAfter): self
     {
         $this->outcome = Outcome::LockedOut;
+        $this->retryAfter = $retryAfter;
+
+        return $this;
+    }
+
+    /**
+     * A rate limit refused the request without saying so. It carries on down
+     * the pipeline and fails like a wrong proof, which is never looked at.
+     */
+    public function refuse(int $retryAfter): self
+    {
+        $this->refused = true;
         $this->retryAfter = $retryAfter;
 
         return $this;

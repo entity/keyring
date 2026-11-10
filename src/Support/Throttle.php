@@ -7,14 +7,15 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Devices\DeviceManager;
-use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Device;
+use Keyring\Pipeline\AccountLimit;
 use Keyring\Pipeline\ConsecutiveLimit;
 use Keyring\Pipeline\SharedLimit;
 
@@ -45,6 +46,12 @@ class Throttle
      * the counts of whoever signed in. A username that finds nobody counts
      * under what was typed.
      *
+     * A sign in that names its account also counts under the name as it was
+     * typed, whoever that finds, and those are the only per-account limits
+     * that say so when they refuse. The account's own refuse quietly, like a
+     * wrong password. Otherwise locking an account under one name would show
+     * which other names are the same account's, and which have one at all.
+     *
      * A browser the account has signed in from before gets a bucket and an
      * in-a-row count of its own, so someone guessing elsewhere can't lock the
      * owner out. Per IP it counts for that account alone, so others on a
@@ -58,23 +65,43 @@ class Throttle
      */
     public function limitsFor(Factor $factor, Request $request, ?Attempt $attempt): array
     {
-        $user = $this->user($factor, $request, $attempt);
-        $account = $user === null ? $this->unknownAccount($request) : $this->accountOf($user);
-        $device = $account === '' ? null : $this->knownDevice($request, $user);
-        $consecutive = config('keyring.limits.consecutive');
+        $typed = $attempt === null && $factor instanceof PrimaryFactor ? $this->typedUsername($request) : '';
+        $user = $attempt?->user() ?? ($typed === '' ? null : $this->keyring->findUser($request));
 
+        $account = match (true) {
+            $user !== null => $this->accountOf($user),
+            $typed !== '' => 'name:'.$typed,
+            default => '',
+        };
+
+        $device = $account === '' ? null : $this->knownDevice($request, $user);
         $ip = $factor->key().'|ip|'.$request->ip().($device === null ? '' : '|account|'.$account);
         $limits = [SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($ip)];
 
-        if ($account !== '') {
-            $limits[] = Limit::perMinute(config('keyring.limits.per_account'))->by($this->bucket($factor->key(), $account, $device));
+        if ($account === '') {
+            return $limits;
         }
 
-        if ($account !== '' && $consecutive !== null) {
-            $limits[] = ConsecutiveLimit::of($consecutive, $factor->key(), $account, $device);
-        }
+        $cleared = $this->timesCleared($factor, $account);
 
-        return $limits;
+        return [
+            ...$limits,
+            ...($typed === '' ? [] : $this->accountLimits($factor, 'typed:'.$typed.$cleared, $device)),
+            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== ''), $this->accountLimits($factor, $account.$cleared, $device)),
+        ];
+    }
+
+    /**
+     * The limits that refuse without saying so, then the rest.
+     *
+     * @param  list<Limit>  $limits
+     * @return array{list<Limit>, list<Limit>}
+     */
+    public function split(array $limits): array
+    {
+        [$quiet, $announced] = Arr::partition($limits, fn (Limit $limit) => $limit instanceof AccountLimit && $limit->quiet);
+
+        return [array_values($quiet), array_values($announced)];
     }
 
     /**
@@ -161,31 +188,30 @@ class Throttle
     }
 
     /**
-     * Clear the user's per-account limits on the factors that can start a
-     * sign in: the in-a-row count, and the counts, locks and escalation, with
-     * those of each known device. The per-IP limits stay, or a reset would
-     * be a way around them. A second factor's counts and locks stay too: a
-     * reset only proves control of the mailbox, which is what they defend
-     * against, and it could be repeated to keep guessing.
+     * Start the user's limits over on the factors that can start a sign in:
+     * the per-minute and in-a-row counts, the locks and how long the next
+     * lock would be, on every known device and under every name they were
+     * typed with. They're counted under how many times this has been done,
+     * so the old ones are left behind to run out.
+     *
+     * The per-IP limits stay, or a reset would be a way around them. A
+     * second factor's counts and locks stay too: a reset only proves control
+     * of the mailbox, which is what they defend against, and it could be
+     * repeated to keep guessing.
      */
     public function clearAccount(Authenticatable&Model $user): void
     {
-        $devices = Features::enabled(Features::devices())
-            ? $this->keyring->deviceModel()::query()->ownedBy($user)->active()->pluck('id')->all()
-            : [];
+        $key = $this->cleared($this->accountOf($user));
+        $times = (int) $this->limiter->attempts($key);
 
-        $factors = $this->keyring->registered()->filter(fn (Factor $factor) => $factor instanceof PrimaryFactor)->keys();
-
-        foreach ($factors as $factor) {
-            foreach ([null, ...$devices] as $device) {
-                $key = $this->key(new Limit($this->bucket($factor, $this->accountOf($user), $device)));
-
-                $this->limiter->clear($key);
-                $this->limiter->clear($key.':locked');
-                $this->limiter->clear($key.':lockouts');
-                $this->limiter->clear($this->key(new Limit(ConsecutiveLimit::keyFor($factor, $this->accountOf($user), $device))));
-            }
-        }
+        // Kept from now for as long as anything counted before could last,
+        // so a number is never used twice while its counts are still there.
+        $this->limiter->clear($key);
+        $this->limiter->increment($key, max(
+            Duration::seconds(config('keyring.limits.remember_failures_for')),
+            Duration::seconds(config('keyring.limits.longest_lock')),
+            86400,
+        ), $times + 1);
     }
 
     /**
@@ -219,20 +245,6 @@ class Throttle
     }
 
     /**
-     * Whose attempt this is: the user once there's an attempt, and before
-     * that whoever the typed username finds, for a factor that can start a
-     * sign in. Null when it names nobody Keyring knows.
-     */
-    protected function user(Factor $factor, Request $request, ?Attempt $attempt): (Authenticatable&Model)|null
-    {
-        return match (true) {
-            $attempt !== null => $attempt->user(),
-            $factor instanceof PrimaryFactor && $this->typedUsername($request) !== '' => $this->keyring->findUser($request),
-            default => null,
-        };
-    }
-
-    /**
      * How a user is named in rate limits. By model as well as ID, so two
      * kinds of account with the same ID don't share a count.
      */
@@ -242,15 +254,30 @@ class Throttle
     }
 
     /**
-     * How a username that finds nobody is named, so guesses at it are still
-     * limited, and answered like guesses at a real account. Empty when the
-     * request names no account at all.
+     * How many times the account's limits on the factor have been cleared,
+     * as its limits are keyed. Only kept for a factor that can start a sign
+     * in, and read for a name nobody has too, so it costs what a real one
+     * does.
      */
-    protected function unknownAccount(Request $request): string
+    protected function timesCleared(Factor $factor, string $account): string
     {
-        $username = $this->typedUsername($request);
+        return $factor instanceof PrimaryFactor ? '|cleared|'.(int) $this->limiter->attempts($this->cleared($account)) : '';
+    }
 
-        return $username === '' ? '' : 'name:'.$username;
+    /**
+     * An account's per-minute limit and its failures in a row, or those of
+     * one of its known devices.
+     *
+     * @return list<AccountLimit>
+     */
+    protected function accountLimits(Factor $factor, string $account, ?string $device): array
+    {
+        $consecutive = config('keyring.limits.consecutive');
+
+        return [
+            AccountLimit::perMinute(config('keyring.limits.per_account'))->by($this->bucket($factor->key(), $account, $device)),
+            ...($consecutive === null ? [] : [ConsecutiveLimit::of($consecutive, $factor->key(), $account, $device)]),
+        ];
     }
 
     protected function typedUsername(Request $request): string
@@ -290,5 +317,13 @@ class Throttle
     protected function lock(Limit $limit): string
     {
         return $this->key($limit).':locked';
+    }
+
+    /**
+     * Where the number of times an account's limits were cleared is kept.
+     */
+    protected function cleared(string $account): string
+    {
+        return $this->key(new Limit($account.'|cleared'));
     }
 }

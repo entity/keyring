@@ -2,10 +2,14 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
+use Keyring\Events\FactorFailed;
+use Keyring\Events\Lockout;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -695,5 +699,115 @@ describe('a completed password reset', function () {
         completeReset($this->user);
 
         signInFrom('198.51.100.7')->assertRedirect('/dashboard');
+    });
+});
+
+describe('an account with more than one name', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 3, 'keyring.limits.per_ip' => 100]);
+
+        $this->dana = account('dana@example.com');
+        $this->dana->update(['name' => 'dana']);
+        account('other@example.com')->update(['name' => 'other']);
+
+        // An email address or a handle, as the recipe has it.
+        Keyring::findUsersUsing(fn (Request $request) => User::query()
+            ->where('email', $request->string('email')->lower()->value())
+            ->orWhere('name', $request->string('email')->lower()->value())
+            ->first());
+    });
+
+    function guess(string $name, string $password = 'nope'): int
+    {
+        return test()->postJson('/login', ['email' => $name, 'password' => $password])->status();
+    }
+
+    it('answers a name from that name\'s own attempts, whoever else it belongs to', function (string $locked) {
+        foreach (range(1, 3) as $attempt) {
+            guess($locked);
+        }
+
+        expect(guess($locked))->toBe(429);
+
+        // Dana's other name, another account's and nobody's all answer alike,
+        // each for as long as a name with no history would.
+        $other = $locked === 'dana' ? 'dana@example.com' : 'dana';
+
+        foreach ([$other, 'other@example.com', 'nobody@example.com'] as $name) {
+            expect(array_map(fn () => guess($name), range(1, 4)))->toBe([422, 422, 422, 429]);
+        }
+    })->with(['dana', 'dana@example.com']);
+
+    it('still refuses the account under its other name, without saying so', function () {
+        foreach (range(1, 3) as $attempt) {
+            guess('dana');
+        }
+
+        Event::fake([FactorFailed::class, Lockout::class]);
+
+        $this->postJson('/login', ['email' => 'dana@example.com', 'password' => 'password'])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.email.0', __('auth.failed'));
+
+        $this->assertGuest();
+        Event::assertDispatched(Lockout::class);
+        Event::assertNotDispatched(FactorFailed::class);
+
+        $this->travel(61)->seconds();
+
+        $this->postJson('/login', ['email' => 'dana@example.com', 'password' => 'password'])->assertOk();
+        $this->assertAuthenticatedAs($this->dana);
+    });
+
+    it('never looks at the password of an attempt it refuses quietly, and spends a hash as a check would', function () {
+        foreach (range(1, 3) as $attempt) {
+            guess('dana');
+        }
+
+        Hash::spy();
+
+        guess('dana@example.com', 'password');
+
+        Hash::shouldNotHaveReceived('check');
+        Hash::shouldHaveReceived('make')->once();
+    });
+
+    it('counts an attempt it refuses quietly against the address', function () {
+        config(['keyring.limits.per_ip' => 6]);
+
+        foreach (range(1, 3) as $attempt) {
+            guess('dana');
+        }
+
+        expect(array_map(fn () => guess('dana@example.com'), range(1, 3)))->toBe([422, 422, 422])
+            ->and(guess('other@example.com'))->toBe(429);
+    });
+
+    it('shares one count between spellings a finder tells apart and Keyring does not', function (string $email) {
+        // Compares what was typed as it came, like the finder in the docs.
+        Keyring::findUsersUsing(fn (Request $request) => User::query()->where('email', $request->input('email'))->first());
+
+        foreach (range(1, 3) as $attempt) {
+            guess(strtoupper($email));
+        }
+
+        expect(guess($email))->toBe(429);
+    })->with(['dana@example.com', 'nobody@example.com']);
+
+    it('keeps the owner\'s known browser working under any of the names', function () {
+        $device = $this->post('/login', ['email' => 'dana', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        $this->post('/logout');
+        $this->flushSession();
+
+        foreach (range(1, 4) as $attempt) {
+            $this->withUnencryptedCookies([])->post('/login', ['email' => 'dana', 'password' => 'nope']);
+        }
+
+        $this->post('/login', ['email' => 'dana@example.com', 'password' => 'password'])->assertSessionHasErrors('email');
+        $this->assertGuest();
+
+        $this->withCookie('keyring_device', $device)
+            ->post('/login', ['email' => 'dana@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
     });
 });

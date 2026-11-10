@@ -20,7 +20,7 @@ class EnsureNotThrottled
 
     public function handle(Context $context, Closure $next): Context
     {
-        $limits = $context->factor->limits($context->request, $context->attempt);
+        [$quiet, $limits] = $this->throttle->split($context->factor->limits($context->request, $context->attempt));
 
         if (($retryAfter = $this->throttle->hit($limits)) !== null) {
             Lockout::dispatch($context->request, $context->factor->key(), $retryAfter);
@@ -29,6 +29,15 @@ class EnsureNotThrottled
         }
 
         $context->throttleChecked = true;
+
+        // A quiet limit's refusal isn't answered here. The attempt carries
+        // on, to fail like a wrong proof and count like one against the
+        // limits that let it through.
+        if (($retryAfter = $this->throttle->hit($quiet)) !== null) {
+            $context->refuse($retryAfter);
+        } else {
+            $limits = [...$limits, ...$quiet];
+        }
 
         $context = $next($context);
 
