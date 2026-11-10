@@ -18,6 +18,7 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Support\Throttle;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
@@ -183,6 +184,27 @@ it('does not count successful sign-ins against the ip limit', function () {
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])
         ->assertSessionHasErrors(['email' => __('auth.failed')]);
+});
+
+it('does not start the next minute below zero when a sign in outlasts its count', function () {
+    config(['keyring.limits.per_ip' => 2, 'keyring.limits.per_account' => 100]);
+    account('taylor@example.com');
+
+    foreach (range(1, 3) as $signIn) {
+        $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => 'taylor@example.com']), null);
+        app(Throttle::class)->hit($limits);
+
+        // The minute ends while the password is being checked.
+        $this->travel(61)->seconds();
+        app(Throttle::class)->succeeded($limits);
+    }
+
+    foreach (range(1, 2) as $guess) {
+        $this->post('/login', ['email' => "someone{$guess}@example.com", 'password' => 'nope'])->assertSessionHasErrors(['email' => __('auth.failed')]);
+    }
+
+    $this->post('/login', ['email' => 'someone3@example.com', 'password' => 'nope'])->assertSessionHasErrors('email');
+    expect(session('errors')->first('email'))->toContain('Too many');
 });
 
 it('lets the owner sign in from a known device while someone else is locked out', function () {
