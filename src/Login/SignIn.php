@@ -2,6 +2,7 @@
 
 namespace Keyring\Login;
 
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Model;
@@ -52,7 +53,9 @@ class SignIn
         Authenticated::dispatch($user, $attempt, $device);
 
         // "Was this you?" for anything suspicious since they last signed in.
-        $request->session()->flash('keyring.alerts', $this->log->pullAlerts($user)->map(fn (SecurityEvent $event) => [
+        // A browser the account hasn't used before could be whoever caused
+        // them, so they wait for one it has.
+        $request->session()->flash('keyring.alerts', $new ? [] : $this->log->pullAlerts($user)->map(fn (SecurityEvent $event) => [
             'type' => $event->type,
             'factor' => $event->factor,
             'at' => $event->created_at->toIso8601String(),
@@ -90,13 +93,18 @@ class SignIn
 
     /**
      * Sign the current user out of this session. Returns who it was.
+     *
+     * Signing out on purpose changes the "remember me" token, as Laravel
+     * does. A session that ends on its own (a timeout, say) only forgets
+     * this browser's, or one ending would sign out every remembered browser.
      */
-    public function out(Request $request): ?Authenticatable
+    public function out(Request $request, bool $onlyThisBrowser = false): ?Authenticatable
     {
-        $user = $this->keyring->guard()->user();
+        $guard = $this->keyring->guard();
+        $user = $guard->user();
 
         $this->sessions->end($request);
-        $this->keyring->guard()->logout();
+        $onlyThisBrowser && $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
         $this->assurance->flush();
 
         $request->session()->invalidate();

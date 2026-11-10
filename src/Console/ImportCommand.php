@@ -20,8 +20,10 @@ use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
  * Copies Fortify's two factor columns and laravel/passkeys' passkeys table
- * into Keyring's authenticators. Safe to run more than once; it never
- * deletes Fortify's data, so drop its columns yourself when you're happy.
+ * into Keyring's authenticators. Safe to run more than once: it only fills
+ * in users with no sign-in methods in Keyring yet, so a later run can't
+ * bring back one a user removed. It never deletes Fortify's data, so drop
+ * its columns yourself when you're happy.
  */
 #[AsCommand(name: 'keyring:import')]
 #[Description('Import authenticators from Fortify (TOTP, recovery codes and passkeys)')]
@@ -32,8 +34,26 @@ use Symfony\Component\Console\Attribute\AsCommand;
         {--fortify-confirm= : Whether Fortify has its "confirm" option "on" or "off", when its config can not tell}')]
 class ImportCommand extends Command
 {
+    /**
+     * Whether each user already had sign-in methods in Keyring when this run
+     * first came to them, keyed by morph class and key.
+     *
+     * @var array<string, bool>
+     */
+    protected array $inKeyring = [];
+
+    /** @var array{totp: int, recovery: int, passkey: int, already_imported: int} */
+    protected array $counts;
+
+    /** @var array{skipped: list<string>, failed: list<string>} */
+    protected array $issues;
+
     public function handle(): int
     {
+        $this->inKeyring = [];
+        $this->counts = ['totp' => 0, 'recovery' => 0, 'passkey' => 0, 'already_imported' => 0];
+        $this->issues = ['skipped' => [], 'failed' => []];
+
         if ($this->argument('source') !== 'fortify') {
             $this->components->error('Only "fortify" can be imported for now.');
 
@@ -71,39 +91,36 @@ class ImportCommand extends Command
             return self::FAILURE;
         }
 
-        $counts = ['totp' => 0, 'recovery' => 0, 'passkey' => 0, 'already_imported' => 0];
-        $issues = ['skipped' => [], 'failed' => []];
-
         if ($hasTwoFactor) {
             // Without global scopes: a soft deleted user can be restored later.
             $model::query()->withoutGlobalScopes()->whereNotNull('two_factor_secret')
-                ->chunkById(200, function ($users) use (&$counts, &$issues) {
+                ->chunkById(200, function ($users) {
                     foreach ($users as $user) {
-                        $this->importTwoFactor($user, $counts, $issues);
+                        $this->importTwoFactor($user);
                     }
                 });
         }
 
         if ($hasPasskeys) {
-            DB::table('passkeys')->orderBy('id')->chunk(200, function ($passkeys) use ($model, &$counts, &$issues) {
+            DB::table('passkeys')->orderBy('id')->chunk(200, function ($passkeys) use ($model) {
                 foreach ($passkeys as $passkey) {
-                    $this->importPasskey($model, $passkey, $counts, $issues);
+                    $this->importPasskey($model, $passkey);
                 }
             });
         }
 
-        $this->components->twoColumnDetail('Authenticator apps', (string) $counts['totp']);
-        $this->components->twoColumnDetail('Recovery code sets', (string) $counts['recovery']);
-        $this->components->twoColumnDetail('Passkeys', (string) $counts['passkey']);
-        $this->components->twoColumnDetail('Already imported', (string) $counts['already_imported']);
-        $this->components->twoColumnDetail('Skipped', (string) count($issues['skipped']));
-        $this->components->twoColumnDetail('Failed', (string) count($issues['failed']));
+        $this->components->twoColumnDetail('Authenticator apps', (string) $this->counts['totp']);
+        $this->components->twoColumnDetail('Recovery code sets', (string) $this->counts['recovery']);
+        $this->components->twoColumnDetail('Passkeys', (string) $this->counts['passkey']);
+        $this->components->twoColumnDetail('Already imported', (string) $this->counts['already_imported']);
+        $this->components->twoColumnDetail('Skipped', (string) count($this->issues['skipped']));
+        $this->components->twoColumnDetail('Failed', (string) count($this->issues['failed']));
 
-        foreach ($issues['skipped'] as $issue) {
+        foreach ($this->issues['skipped'] as $issue) {
             $this->warn("Skipped {$issue}");
         }
 
-        foreach ($issues['failed'] as $issue) {
+        foreach ($this->issues['failed'] as $issue) {
             $this->error("Failed {$issue}");
         }
 
@@ -111,7 +128,7 @@ class ImportCommand extends Command
             $this->components->warn('Dry run: nothing was written.');
         }
 
-        if ($issues['failed'] !== []) {
+        if ($this->issues['failed'] !== []) {
             $this->components->error('Some factors could not be imported. Sort them out before removing Fortify.');
 
             return self::FAILURE;
@@ -120,15 +137,9 @@ class ImportCommand extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * @param  array<string, int>  $counts
-     * @param  array{skipped: list<string>, failed: list<string>}  $issues
-     */
-    protected function importTwoFactor(Model $user, array &$counts, array &$issues): void
+    protected function importTwoFactor(Model $user): void
     {
-        if ($this->imported($user, 'totp', 'fortify')) {
-            $counts['already_imported']++;
-
+        if ($this->alreadyInKeyring($user)) {
             return;
         }
 
@@ -136,13 +147,13 @@ class ImportCommand extends Command
             $confirms = $this->fortifyConfirms();
 
             if ($confirms === null) {
-                $issues['failed'][] = "user {$user->getKey()}: its secret was never confirmed and Fortify's confirm option can't be read. Pass --fortify-confirm=on or --fortify-confirm=off.";
+                $this->issues['failed'][] = "user {$user->getKey()}: its secret was never confirmed and Fortify's confirm option can't be read. Pass --fortify-confirm=on or --fortify-confirm=off.";
 
                 return;
             }
 
             if ($confirms) {
-                $issues['skipped'][] = "user {$user->getKey()}: its secret was never confirmed, so Fortify wasn't enforcing it. Pass --unconfirmed to import it anyway.";
+                $this->issues['skipped'][] = "user {$user->getKey()}: its secret was never confirmed, so Fortify wasn't enforcing it. Pass --unconfirmed to import it anyway.";
 
                 return;
             }
@@ -155,19 +166,19 @@ class ImportCommand extends Command
             $encrypted = $user->getAttribute('two_factor_recovery_codes');
             $codes = $encrypted === null ? [] : json_decode((string) $encrypter->decrypt($encrypted), true);
         } catch (DecryptException|ErrorException) {
-            $this->failTwoFactor($user, $issues, "its two factor secret or recovery codes can't be decrypted");
+            $this->failTwoFactor($user, "its two factor secret or recovery codes can't be decrypted");
 
             return;
         }
 
         if (! is_string($secret) || $secret === '' || ! is_array($codes) || ! array_is_list($codes) || ! array_all($codes, fn ($code) => is_string($code))) {
-            $this->failTwoFactor($user, $issues, 'its two factor secret or recovery codes are in an unexpected format');
+            $this->failTwoFactor($user, 'its two factor secret or recovery codes are in an unexpected format');
 
             return;
         }
 
-        $counts['totp']++;
-        $counts['recovery'] += $codes === [] ? 0 : 1;
+        $this->counts['totp']++;
+        $this->counts['recovery'] += $codes === [] ? 0 : 1;
 
         if ($this->option('dry-run')) {
             return;
@@ -211,12 +222,10 @@ class ImportCommand extends Command
      * A confirmed authenticator without a secret can never be verified, so
      * the user stays challenged instead of falling back to a password alone.
      * A later import that can read the secret replaces it.
-     *
-     * @param  array{skipped: list<string>, failed: list<string>}  $issues
      */
-    protected function failTwoFactor(Model $user, array &$issues, string $reason): void
+    protected function failTwoFactor(Model $user, string $reason): void
     {
-        $issues['failed'][] = "user {$user->getKey()}: {$reason}";
+        $this->issues['failed'][] = "user {$user->getKey()}: {$reason}";
 
         if ($this->option('dry-run') || $this->unusable($user)->exists()) {
             return;
@@ -247,7 +256,7 @@ class ImportCommand extends Command
             'factor' => 'totp',
             'name' => __('Authenticator app'),
             'secret' => $secret,
-            'is_default' => ! $this->hasDefault($user),
+            'is_default' => true,
             'confirmed_at' => $user->getAttribute('two_factor_confirmed_at') ?? now(),
             'meta' => ['imported_from' => 'fortify'],
         ]);
@@ -267,13 +276,11 @@ class ImportCommand extends Command
      * laravel/passkeys stores the same CredentialRecord format Keyring uses.
      *
      * @param  class-string<Model>  $model
-     * @param  array<string, int>  $counts
-     * @param  array{skipped: list<string>, failed: list<string>}  $issues
      */
-    protected function importPasskey(string $model, object $passkey, array &$counts, array &$issues): void
+    protected function importPasskey(string $model, object $passkey): void
     {
         if (Keyring::authenticatorModel()::query()->where('credential_id', $passkey->credential_id)->exists()) {
-            $counts['already_imported']++;
+            $this->counts['already_imported']++;
 
             return;
         }
@@ -281,20 +288,24 @@ class ImportCommand extends Command
         $user = $model::query()->withoutGlobalScopes()->find($passkey->user_id);
 
         if ($user === null) {
-            $issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: that user doesn't exist";
+            $this->issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: that user doesn't exist";
 
+            return;
+        }
+
+        if ($this->alreadyInKeyring($user)) {
             return;
         }
 
         $credential = is_string($passkey->credential) ? json_decode($passkey->credential, true) : (array) $passkey->credential;
 
         if (! is_array($credential) || $credential === []) {
-            $issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: its credential is in an unexpected format";
+            $this->issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: its credential is in an unexpected format";
 
             return;
         }
 
-        $counts['passkey']++;
+        $this->counts['passkey']++;
 
         if ($this->option('dry-run')) {
             return;
@@ -314,18 +325,28 @@ class ImportCommand extends Command
         ]);
     }
 
-    protected function hasDefault(Model $user): bool
+    /**
+     * Whether the user had sign-in methods in Keyring before this run, other
+     * than a failed import's stand-in. Once they have, what they have is
+     * theirs: importing again would bring back a factor they removed, or a
+     * second set of recovery codes, including ones already spent.
+     */
+    protected function alreadyInKeyring(Model $user): bool
     {
-        return Keyring::authenticatorModel()::query()->ownedBy($user)->where('is_default', true)->exists();
-    }
+        $authenticators = fn () => Keyring::authenticatorModel()::query()->ownedBy($user)->whereNull('meta->import_failed_from');
 
-    protected function imported(Model $user, string $factor, string $source): bool
-    {
-        return Keyring::authenticatorModel()::query()
-            ->ownedBy($user)
-            ->where('factor', $factor)
-            ->where('meta->imported_from', $source)
-            ->exists();
+        if (! ($this->inKeyring[$user->getMorphClass().':'.$user->getKey()] ??= $authenticators()->exists())) {
+            return false;
+        }
+
+        if ($authenticators()->whereNotNull('meta->imported_from')->exists()) {
+            $this->counts['already_imported']++;
+        } else {
+            $this->issues['skipped'][] = "user {$user->getKey()}: they already have sign-in methods in Keyring, so Fortify's are left out";
+            $this->issues['skipped'] = array_values(array_unique($this->issues['skipped']));
+        }
+
+        return true;
     }
 
     /**
@@ -333,9 +354,6 @@ class ImportCommand extends Command
      */
     protected function create(Model $user, array $attributes): void
     {
-        $model = Keyring::authenticatorModel();
-        $authenticator = new $model($attributes);
-        $authenticator->authenticatable()->associate($user);
-        $authenticator->save();
+        Keyring::authenticatorModel()::make($attributes)->authenticatable()->associate($user)->save();
     }
 }

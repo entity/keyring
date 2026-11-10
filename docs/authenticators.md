@@ -33,7 +33,7 @@ Without it, users can't set up any sign-in method besides the password themselve
 | `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begin: returns a QR code, WebAuthn options, recovery codes... |
 | `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finish: prove it works. Uses the `keyring` rate limiter and the session lock. |
 | `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Rename, or make it the default. |
-| `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. |
+| `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. Uses the `keyring` rate limiter, as it can check the password. |
 
 These routes need `auth:{guard}`, plus the `changes_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified, in the last 15 minutes, as much as signing in would ask of them. See [Fresh Verification](step-up.md#fresh-verification).
 

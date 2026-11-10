@@ -2,6 +2,7 @@
 
 namespace Keyring\Sessions;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Repository;
@@ -27,7 +28,7 @@ class CacheSessionRegistry implements SessionRegistry
         $this->cache->put($this->key($session->id), $session->with(['revokedAt' => null])->toArray(), $this->ttl($session));
 
         if ($session->revokedAt !== null) {
-            $this->cache->add($this->key($session->id).':revoked', $session->revokedAt, $this->ttl($session));
+            $this->cache->add($this->revokedKey($session->id), $session->revokedAt, $this->ttl($session));
         }
 
         $this->index($session->userId, function (array $ids) use ($session) {
@@ -46,7 +47,7 @@ class CacheSessionRegistry implements SessionRegistry
         }
 
         $session = RegisteredSession::fromArray($data);
-        $revokedAt = $this->cache->get($this->key($id).':revoked');
+        $revokedAt = $this->cache->get($this->revokedKey($id));
 
         return $revokedAt === null ? $session : $session->with(['revokedAt' => (int) $revokedAt]);
     }
@@ -84,22 +85,27 @@ class CacheSessionRegistry implements SessionRegistry
     public function revoke(string $id): void
     {
         if ($session = $this->find($id)) {
-            $this->cache->add($this->key($id).':revoked', now()->getTimestamp(), $this->ttl($session));
+            $this->cache->add($this->revokedKey($id), now()->getTimestamp(), $this->ttl($session));
         }
     }
 
     public function revokeAll(Authenticatable $user, ?string $except = null): int
     {
-        return $this->forUser($user)
-            ->reject(fn (RegisteredSession $session) => $session->id === $except)
-            ->each(fn (RegisteredSession $session) => $this->revoke($session->id))
-            ->count();
+        return $this->revokeWhere($user, fn (RegisteredSession $session) => $session->id !== $except);
     }
 
     public function revokeDevice(Authenticatable $user, string $deviceId): int
     {
+        return $this->revokeWhere($user, fn (RegisteredSession $session) => $session->deviceId === $deviceId);
+    }
+
+    /**
+     * @param  Closure(RegisteredSession): bool  $callback
+     */
+    protected function revokeWhere(Authenticatable $user, Closure $callback): int
+    {
         return $this->forUser($user)
-            ->filter(fn (RegisteredSession $session) => $session->deviceId === $deviceId)
+            ->filter($callback)
             ->each(fn (RegisteredSession $session) => $this->revoke($session->id))
             ->count();
     }
@@ -137,5 +143,14 @@ class CacheSessionRegistry implements SessionRegistry
     protected function key(string $id): string
     {
         return $this->prefix.$id;
+    }
+
+    /**
+     * Revocations live in their own key, so saving a stale copy of the
+     * record can never undo one.
+     */
+    protected function revokedKey(string $id): string
+    {
+        return $this->key($id).':revoked';
     }
 }

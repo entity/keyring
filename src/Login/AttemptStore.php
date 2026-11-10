@@ -34,13 +34,14 @@ class AttemptStore
 
     /**
      * The attempt in progress, unless it expired, it started under another
-     * guard, its user is gone, or their password changed since it was saved:
+     * guard, a confirmation isn't the signed-in user's, its user is gone, or
+     * their password changed since it was saved:
      * a reset or change elsewhere ends every half-finished sign in, including
      * one that already got past the old password.
      */
     public function current(Purpose $purpose): ?Attempt
     {
-        $payload = $this->session->get($this->key($purpose));
+        $payload = $this->session->get(static::key($purpose));
 
         if (! is_string($payload)) {
             return null;
@@ -51,6 +52,7 @@ class AttemptStore
             $attempt = Attempt::fromArray($data);
             $valid = ! $attempt->expired
                 && $attempt->guard === config('keyring.guard')
+                && ($purpose === Purpose::Login || $attempt->userId == auth()->guard($attempt->guard)->id())
                 && hash_equals($data['password'] ?? '', $this->passwordHash($attempt->user()));
         } catch (AttemptExpired|DecryptException|\JsonException|\TypeError|\ValueError) {
             $valid = false;
@@ -68,7 +70,7 @@ class AttemptStore
     public function save(Attempt $attempt): void
     {
         $this->session->put(
-            $this->key($attempt->purpose),
+            static::key($attempt->purpose),
             Crypt::encryptString(json_encode([
                 ...$attempt->toArray(),
                 'password' => $this->passwordHash($attempt->user()),
@@ -78,7 +80,7 @@ class AttemptStore
 
     public function forget(Purpose $purpose): void
     {
-        $this->session->forget($this->key($purpose));
+        $this->session->forget(static::key($purpose));
     }
 
     /**
@@ -91,7 +93,7 @@ class AttemptStore
         return hash('sha256', (string) $user->getAuthPassword());
     }
 
-    protected function key(Purpose $purpose): string
+    public static function key(Purpose $purpose): string
     {
         return 'keyring.attempt.'.$purpose->value;
     }

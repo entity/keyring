@@ -1,11 +1,14 @@
 <?php
 
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\WebAuthn;
+use Keyring\Login\AttemptStore;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\Staff;
@@ -70,6 +73,30 @@ it('drops a confirmation that started under another guard', function () {
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     expect($totp->fresh()->last_used_at)->toBeNull();
+});
+
+it('drops a confirmation that another user started in the same session', function () {
+    $attempts = app(AttemptStore::class);
+
+    $this->actingAs(taylor(['email' => 'abigail@example.com']));
+    $attempts->start(Purpose::Confirm, auth()->user());
+
+    $this->actingAs($this->user);
+
+    expect($attempts->current(Purpose::Confirm))->toBeNull();
+});
+
+it('stops counting an authenticator once it is removed, in every session it was used in', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    signIn();
+    $this->post(route('keyring.login.verify', 'totp'), ['authenticator' => $totp->id, 'code' => totpCode($totp->secret)]);
+    $this->get('/billing')->assertOk();
+
+    $totp->delete();
+
+    $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
 });
 
 it('needs a fresh verification after the window passes', function () {
@@ -178,6 +205,19 @@ it('does not send json callers to another site after confirming', function (stri
     'a lookalike host' => 'http://localhost.evil.example/phish',
     'userinfo before another host' => 'http://localhost@evil.example/phish',
 ]);
+
+it('does not send a form post to another site after confirming', function () {
+    Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->post('/account', fn () => 'danger zone');
+    signIn();
+    $this->travel(16)->minutes();
+
+    $this->withoutMiddleware(PreventRequestForgery::class)
+        ->post('/account', [], ['Referer' => 'https://evil.example/phish'])
+        ->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+        ->assertRedirect(config('keyring.home'));
+});
 
 it('lets the password through step-up when the only other factor is a used-up set of recovery codes', function () {
     Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();

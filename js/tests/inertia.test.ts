@@ -22,7 +22,7 @@ mock.module('@inertiajs/core', () => ({
   router: { post: (url: string, _data: object, callbacks: any) => posted.push({ url, callbacks }), get: () => {} },
 }))
 
-const { isAbort, keyPrompt, passkeyLogin } = await import('../src/challenge')
+const { isAbort, keyPrompt, passkeyLogin } = await import('../src/inertia')
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 const cancelled = () => new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError')

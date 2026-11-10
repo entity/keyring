@@ -43,7 +43,7 @@ Route::delete('/account', [AccountController::class, 'destroy'])
 
 It counts everything proved so far this session, so it only asks for what's missing. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL2, and at AAL3 if the passkey stays on its device.
 
-A level doesn't last the whole session. It lapses after its idle and overall limits (an hour without a request, or 24 hours, at AAL2 by default, as NIST SP 800-63B asks), and the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts). A [risk response](risk.md#checkpoints) can also clear it.
+A level doesn't last the whole session. It lapses after its idle and overall limits (an hour without a request, or 24 hours, at AAL2 by default, as NIST SP 800-63B asks), and the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts). The idle limit is tracked by the [session middleware](devices-and-sessions.md#the-session-registry), which Keyring adds to the `web` group; routes outside it, such as Sanctum's `api` group, need `keyring.session` too. A [risk response](risk.md#checkpoints) can also clear a level, and an authenticator that's removed stops counting in every session it was used in.
 
 Users who don't have the authenticators to reach the level can't be helped by confirming. They're sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) with the `enroll-first` status, the same as the [`keyring.enrolled`](policies.md#requiring-a-second-factor) middleware does. JSON requests get a `403` with that status and the URL. Without an `enrollment_url`, they get a plain `403`.
 

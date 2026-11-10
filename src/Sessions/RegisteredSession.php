@@ -67,13 +67,9 @@ final readonly class RegisteredSession
      */
     public static function columns(array $changes): array
     {
-        $columns = [];
-
-        foreach ($changes as $field => $value) {
-            $columns[Str::snake($field)] = $value instanceof Assurance ? $value->value : $value;
-        }
-
-        return $columns;
+        return collect($changes)
+            ->mapWithKeys(fn (mixed $value, string $field) => [Str::snake($field) => $value instanceof Assurance ? $value->value : $value])
+            ->all();
     }
 
     /**

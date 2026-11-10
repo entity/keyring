@@ -53,25 +53,14 @@ class Totp extends Factor implements Enrollable
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $code = $this->normalizeCode((string) $request->input('code'));
-
-        if ($authenticator->secret === null || ! ctype_digit($code)) {
-            return null;
-        }
-
-        $timestep = $this->engine->verifyKeyNewer(
-            $authenticator->secret,
-            $code,
-            (int) $authenticator->meta('last_timestep', 0),
-            $this->window,
-        );
+        $timestep = $authenticator->secret === null ? false : $this->check($authenticator->secret, $request, (int) $authenticator->meta('last_timestep', 0));
 
         $used = $timestep !== false && $this->consume($authenticator, function (Authenticator $locked) use ($timestep) {
-            if ((int) $timestep <= (int) $locked->meta('last_timestep', 0)) {
+            if ($timestep <= (int) $locked->meta('last_timestep', 0)) {
                 return false;
             }
 
-            $locked->withMeta('last_timestep', (int) $timestep);
+            $locked->withMeta('last_timestep', $timestep);
 
             return true;
         });
@@ -96,20 +85,28 @@ class Totp extends Factor implements Enrollable
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
-        $code = $this->normalizeCode((string) $request->input('code'));
-        $timestep = ctype_digit($code)
-            ? $this->engine->verifyKeyNewer($enrollment->state('secret'), $code, 0, $this->window)
-            : false;
-
-        if ($timestep === false) {
+        if (($timestep = $this->check($enrollment->state('secret'), $request)) === false) {
             return null;
         }
 
         return $this->makeAuthenticator([
             'name' => $this->nameFrom($request, $enrollment->state('name')),
             'secret' => $enrollment->state('secret'),
-            'meta' => ['last_timestep' => (int) $timestep],
+            'meta' => ['last_timestep' => $timestep],
         ]);
+    }
+
+    /**
+     * The time step the request's code is from, if it's a valid code for the
+     * secret newer than the given step.
+     */
+    protected function check(string $secret, Request $request, int $after = 0): int|false
+    {
+        $code = $this->normalizeCode((string) $request->input('code'));
+
+        return ctype_digit($code)
+            ? $this->engine->verifyKeyNewer($secret, $code, $after, $this->window, static::timestep())
+            : false;
     }
 
     protected function qr(string $url): string
@@ -119,8 +116,12 @@ class Totp extends Factor implements Enrollable
         return trim(substr($svg, strpos($svg, "\n") + 1));
     }
 
-    public function engine(): Google2FA
+    /**
+     * The current 30 second step, on Laravel's clock rather than the system
+     * one, so tests can travel through time.
+     */
+    public static function timestep(int $offset = 0): int
     {
-        return $this->engine;
+        return intdiv(now()->getTimestamp(), 30) + $offset;
     }
 }

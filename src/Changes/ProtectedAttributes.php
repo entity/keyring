@@ -34,7 +34,7 @@ class ProtectedAttributes
         return array_values(array_unique([
             ...Features::enabled(Features::updatePasswords()) ? ['password'] : [],
             ...Features::enabled(Features::emailChanges()) ? ['email'] : [],
-            ...config('keyring.protected', []),
+            ...config('keyring.protected'),
         ]));
     }
 

@@ -15,7 +15,7 @@ final class Features
 {
     public static function enabled(string $feature): bool
     {
-        return in_array($feature, config('keyring.features', []), true);
+        return in_array($feature, config('keyring.features'), true);
     }
 
     /**

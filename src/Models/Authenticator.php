@@ -66,18 +66,12 @@ class Authenticator extends Model
      */
     public static function virtual(Factor $factor, Authenticatable&Model $user, string $name): self
     {
-        $model = Keyring::authenticatorModel();
-
-        $authenticator = new $model([
+        return Keyring::authenticatorModel()::make([
             'id' => $factor->key(),
             'factor' => $factor->key(),
             'name' => $name,
             'confirmed_at' => $user->getAttribute('created_at'),
-        ]);
-
-        $authenticator->setRelation('authenticatable', $user);
-
-        return $authenticator;
+        ])->setRelation('authenticatable', $user);
     }
 
     /**

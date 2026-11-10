@@ -6,7 +6,6 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
 use Keyring\Events;
 use Keyring\Facades\Keyring;
-use Keyring\Login\Verification;
 
 /**
  * Turns Keyring's events into security log entries.
@@ -50,14 +49,14 @@ class RecordSecurityEvents
     public function authenticated(Events\Authenticated $event): void
     {
         $this->log->record('signed_in', $event->user, device: $event->device?->id, meta: [
-            'factors' => array_map(fn (Verification $verification) => $verification->factor, $event->attempt->verifications),
+            'factors' => array_column($event->attempt->verifications, 'factor'),
         ]);
     }
 
     public function confirmed(Events\Confirmed $event): void
     {
         $this->log->record('confirmed', $event->user, meta: [
-            'factors' => array_map(fn (Verification $verification) => $verification->factor, $event->attempt->verifications),
+            'factors' => array_column($event->attempt->verifications, 'factor'),
         ]);
     }
 

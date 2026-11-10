@@ -28,7 +28,6 @@ use Keyring\Rules\UnreservedAddress;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
-use PragmaRX\Google2FA\Google2FA;
 
 beforeEach(function () {
     Notification::fake();
@@ -88,7 +87,10 @@ it('does not change anything when an emailed link is only opened', function () {
     $change = requestChange($this->user, 'new@example.com');
     $tokens = tokensFor('new@example.com', 'taylor@example.com');
 
-    $this->inertia()->get(route('keyring.email.confirm', [$change->id, $tokens['confirm']]))->assertOk()->assertJsonPath('component', 'auth/email-change');
+    $this->inertia()->get(route('keyring.email.confirm', [$change->id, $tokens['confirm']]))
+        ->assertOk()
+        ->assertJsonPath('component', 'auth/email-change')
+        ->assertHeader('Referrer-Policy', 'no-referrer');
     $this->inertia()->get(route('keyring.email.revert', [$change->id, $tokens['revert']]))->assertOk()->assertJsonPath('props.action', 'revert');
 
     expect($this->user->fresh()->email)->toBe('taylor@example.com')
@@ -247,8 +249,7 @@ it('asks the current address to confirm when the second factor was only just add
     $this->travel(16)->minutes();
     $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertStatus(423);
     $this->get(route('keyring.confirm.challenge'));
-    $engine = app(Google2FA::class);
-    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => $engine->oathTotp($secret, $engine->getTimestamp() + 1)]);
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($secret)]);
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
 
     $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
@@ -589,8 +590,10 @@ describe('applying a change', function () {
 
         app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
 
-        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted');
-        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com' && $notice->type === 'email_change_reverted');
+        Notification::assertSentTo($this->user, SecurityNotice::class, fn (SecurityNotice $notice) => $notice->type === 'email_change_reverted' && isset($notice->details['ip']));
+        Notification::assertSentTo(new AnonymousNotifiable, SecurityNotice::class, fn (SecurityNotice $notice, $channels, $to) => $to->routes['mail'] === 'new@example.com'
+            && $notice->type === 'email_change_reverted'
+            && array_keys($notice->details) === ['when']);
     });
 
     it('keeps an app\'s own via() away from an address that has no user', function () {

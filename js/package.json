@@ -28,8 +28,8 @@
       "import": "./dist/index.js"
     },
     "./inertia": {
-      "types": "./dist/challenge.d.ts",
-      "import": "./dist/challenge.js"
+      "types": "./dist/inertia.d.ts",
+      "import": "./dist/inertia.js"
     },
     "./vue": {
       "types": "./dist/vue.d.ts",

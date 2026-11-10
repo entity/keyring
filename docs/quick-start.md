@@ -71,7 +71,7 @@ A login page posts `email`, `password` and, optionally, `remember` to `/login`:
 </form>
 ```
 
-Users land on `home` from `config/keyring.php` once they're in, `/dashboard` unless you change it. Every page and its data is listed in [Pages](sign-in-flow.md#pages). The [example app](https://github.com/entity/keyring-example) has all of them in React.
+Users land on `home` from `config/keyring.php` once they're in, `/dashboard` unless you change it. A new Laravel app has no `/dashboard` route, so add one or point `home` somewhere that exists. Every page and its data is listed in [Pages](sign-in-flow.md#pages). The [example app](https://github.com/entity/keyring-example) has all of them in React.
 
 ## Your Settings Page
 
@@ -119,7 +119,7 @@ class SecurityController
 | Prop | What it holds |
 |---|---|
 | `authenticators` | What the user has set up. `present()` gives each one's `factor`, `id` and `name`, plus `hint` (a masked address) for email codes and `remaining` for recovery codes. The password is a virtual authenticator with no row of its own, so it's left out. |
-| `enrollable` | The keys of the factors a user can add, such as `totp` and `passkey`, for your "add" buttons. |
+| `enrollable` | The keys of the factors a user can add, such as `totp` and `passkey`, for your "add" buttons. It includes `recovery`, which only works once the user has another second factor, so show it as "generate recovery codes" next to those rather than as a way to sign in. |
 | `devices` | Where the user is signed in, with `Features::devices()`. The same list as [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
 | `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, with `Features::securityLog()`. |
 
@@ -132,7 +132,7 @@ Route::get('/settings/security', [SecurityController::class, 'edit'])
     ->middleware(['auth', 'verified', 'keyring.fresh:15m']);
 ```
 
-A user who leaves the page open longer than that gets a `423` from the next JSON call, with a `redirect` to the confirm page:
+Signing in or registering counts as a verification, so right after either the page opens without asking. A user who leaves the page open longer than that gets a `423` from the next JSON call, with a `redirect` to the confirm page:
 
 1. Catch the `423` and send the browser to `redirect`.
 2. The user confirms on your `confirm` page.
@@ -219,7 +219,7 @@ These are part of the foundation. You don't need to set them up, but you can cha
 | Rate limits on signing in | 5 a minute per account, 20 per IP, and a factor refused after 100 failures in a row | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Failed checks take the same time | 250ms | `timebox` |
 | Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
-| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and "remember me" lasts no longer | `sessions` in [Configuration](configuration.md#sessions) |
+| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and the "remember me" cookie lasts no longer | `sessions` in [Configuration](configuration.md#sessions) |
 | Assurance levels lapse, as NIST asks | AAL2 after an hour idle or 24 hours, AAL3 after 15 minutes or 12 hours | `sessions.levels` |
 | Browsers are told to clear their cache and storage on sign out | On | A custom [`LogoutResponse`](sign-in-flow.md#responses) |
 | Step-up middleware | `keyring:aal2` and `keyring.fresh:15m`, for your routes | [Step-Up](step-up.md) |

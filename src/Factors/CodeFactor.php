@@ -81,14 +81,13 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $issued = $attempt->state($this->key(), 'code');
+        $sent = $attempt->state($this->key(), 'code');
 
-        // A code only proves the authenticator it was sent to.
-        if (($issued['authenticator'] ?? null) !== $authenticator->getKey()) {
-            $issued = null;
-        }
+        // A code only proves the authenticator it was sent to, and a guess
+        // aimed at another one leaves it be.
+        $ours = ($sent['authenticator'] ?? null) === $authenticator->getKey();
 
-        [$valid, $issued, $guesses] = $this->check($issued, (string) $request->input('code'), $attempt->state($this->key(), 'guesses', 0));
+        [$valid, $issued, $guesses] = $this->check($ours ? $sent : null, (string) $request->input('code'), $attempt->state($this->key(), 'guesses', 0));
 
         $attempt->put($this->key(), 'guesses', $guesses);
 
@@ -96,9 +95,11 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
             $attempt->exhausted = true;
         }
 
-        $issued === null
-            ? $attempt->forget($this->key(), 'code')
-            : $attempt->put($this->key(), 'code', $issued);
+        if ($ours) {
+            $issued === null
+                ? $attempt->forget($this->key(), 'code')
+                : $attempt->put($this->key(), 'code', $issued);
+        }
 
         return $valid ? $this->verified($authenticator) : null;
     }

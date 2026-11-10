@@ -11,6 +11,7 @@ use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Support\Url;
 
 class EmailChangeController
 {
@@ -65,7 +66,7 @@ class EmailChangeController
 
         return $this->keyring->render('email-change', [
             'action' => $action,
-            'url' => route("keyring.email.{$action}.store", ['change' => $change, 'token' => $token]),
+            'url' => Url::route("keyring.email.{$action}.store", ['change' => $change, 'token' => $token]),
         ]);
     }
 

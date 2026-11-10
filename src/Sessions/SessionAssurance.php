@@ -4,6 +4,9 @@ namespace Keyring\Sessions;
 
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Purpose;
+use Keyring\Facades\Keyring;
+use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
@@ -39,8 +42,7 @@ class SessionAssurance
      */
     public function reset(array $verifications): void
     {
-        $this->session->put(static::KEY, []);
-        $this->session->forget(static::LAPSED);
+        $this->flush();
         $this->record($verifications);
     }
 
@@ -104,11 +106,24 @@ class SessionAssurance
     }
 
     /**
+     * What still counts: an authenticator removed since, say a stolen key the
+     * owner took off their account, stops counting in every session it was
+     * used in.
+     *
      * @return list<Verification>
      */
     public function all(): array
     {
-        return array_values(array_map(Verification::fromArray(...), $this->session->get(static::KEY, [])));
+        $verifications = array_map(Verification::fromArray(...), array_values($this->session->get(static::KEY, [])));
+        $ids = array_values(array_filter(array_column($verifications, 'authenticator')));
+
+        if ($ids === []) {
+            return $verifications;
+        }
+
+        $kept = Keyring::authenticatorModel()::query()->whereKey($ids)->pluck('id')->all();
+
+        return array_values(array_filter($verifications, fn (Verification $verification) => $verification->authenticator === null || in_array($verification->authenticator, $kept, true)));
     }
 
     /**
@@ -147,11 +162,12 @@ class SessionAssurance
     }
 
     /**
-     * Forget everything proved this session, including the marker that keeps
-     * Laravel's own password.confirm middleware satisfied.
+     * Forget everything proved this session, including a confirmation in
+     * progress and the marker that keeps Laravel's own password.confirm
+     * middleware satisfied.
      */
     public function flush(): void
     {
-        $this->session->forget([static::KEY, static::LAPSED, 'auth.password_confirmed_at']);
+        $this->session->forget([static::KEY, static::LAPSED, AttemptStore::key(Purpose::Confirm), 'auth.password_confirmed_at']);
     }
 }

@@ -196,6 +196,17 @@ it('enforces the absolute timeout', function () {
     $this->get('/home')->assertRedirect('/login');
 });
 
+it('leaves other remembered browsers signed in when a session times out', function () {
+    config(['keyring.sessions.idle' => '10m']);
+    test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+    $token = $this->user->fresh()->remember_token;
+
+    $this->travel(11)->minutes();
+    $this->get('/home')->assertRedirect('/login');
+
+    expect($this->user->fresh()->remember_token)->toBe($token);
+});
+
 it('keeps "remember me" no longer than a session lasts', function () {
     $response = test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
 
@@ -216,6 +227,16 @@ it('enforces the idle timeout', function () {
     $this->get('/home')->assertRedirect('/login')->assertHeader('Clear-Site-Data', '"cache", "storage"');
 
     expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'idle']);
+});
+
+it('registers a session the app signs in itself on the response that signs it in', function () {
+    Route::middleware('web')->post('/oauth/callback', fn () => tap('welcome', fn () => Auth::login($this->user)));
+
+    $this->post('/oauth/callback')->assertOk();
+
+    $id = session(Sessions::KEY);
+    expect($id)->not->toBeNull()
+        ->and(app(SessionRegistry::class)->find($id)->userId)->toBe((string) $this->user->id);
 });
 
 it('registers sessions that started some other way', function () {

@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Factor as FactorContract;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
@@ -74,9 +75,14 @@ abstract class Factor implements FactorContract
      */
     public function limits(Request $request, ?Attempt $attempt): array
     {
-        $account = $attempt !== null
-            ? (string) $attempt->userId
-            : $this->normalizeAccount((string) $request->input(Keyring::username()));
+        // A factor that can start a sign in counts under the username wherever
+        // it's checked, as it must before the user is known. Confirming under
+        // the ID would be a second allowance of guesses.
+        $account = match (true) {
+            $attempt === null => static::accountKey((string) $request->input(Keyring::username())),
+            $this instanceof PrimaryFactor => static::accountKey((string) $attempt->user()->getAttribute(Keyring::username())),
+            default => (string) $attempt->userId,
+        };
 
         $device = $this->knownDevice($request, $attempt, $account);
         $consecutive = config('keyring.limits.consecutive');
@@ -113,11 +119,6 @@ abstract class Factor implements FactorContract
     public static function accountBucket(string $factor, string $account, ?string $device = null): string
     {
         return $factor.'|account|'.$account.($device === null ? '' : '|device|'.$device);
-    }
-
-    protected function normalizeAccount(string $account): string
-    {
-        return static::accountKey($account);
     }
 
     /**
@@ -182,9 +183,7 @@ abstract class Factor implements FactorContract
      */
     protected function makeAuthenticator(array $attributes): Authenticator
     {
-        $model = Keyring::authenticatorModel();
-
-        return new $model(['factor' => $this->key(), ...$attributes]);
+        return Keyring::authenticatorModel()::make(['factor' => $this->key(), ...$attributes]);
     }
 
     /**

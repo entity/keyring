@@ -41,9 +41,9 @@ The command asks which sign-in methods you want besides the password, which [fea
 php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --emails
 ```
 
-`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`, and `--feature` takes the feature names, such as `reset-passwords`. An unknown value stops the command before it writes anything. `--no-emails` leaves the security emails out.
+`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration` and `reset-passwords`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--no-emails` leaves the security emails out.
 
-Pass `--force` to overwrite files that already exist; without it, existing files are skipped. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
+Pass `--force` to overwrite files that already exist; without it, existing files are skipped, and with `config/keyring.php` already there it doesn't ask which features to turn on. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
 
 If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fortify.md) before migrating.
 
@@ -121,6 +121,7 @@ To change the prefix, domain or middleware, or to turn routes off, see [Configur
 
 - Set `APP_URL` to the address users actually visit. Keyring builds emailed links from it, and passkeys and security keys only work on that origin unless you configure others. See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
 - Build your [pages](quick-start.md#your-pages).
+- Run a queue worker if your queue isn't `sync`. [Security emails](security-log-and-emails.md#security-emails) are queued, so they wait for one, while sign-in codes go out straight away.
 - Add [features](quick-start.md#adding-features) and [sign-in methods](quick-start.md#adding-sign-in-methods) as you need them.
 - Schedule `keyring:prune`, which clears out old devices, finished email changes, old security log entries and ended sessions:
 

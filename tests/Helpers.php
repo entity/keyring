@@ -3,6 +3,7 @@
 use Illuminate\Mail\Markdown;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
+use Keyring\Factors\Totp;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
@@ -40,9 +41,7 @@ function staff(): Staff
  */
 function totpCode(string $secret, int $step = 0): string
 {
-    $engine = app(Google2FA::class);
-
-    return $engine->oathTotp($secret, $engine->getTimestamp() + $step);
+    return app(Google2FA::class)->oathTotp($secret, Totp::timestep($step));
 }
 
 /**

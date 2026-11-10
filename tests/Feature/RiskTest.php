@@ -244,6 +244,22 @@ it('asks again before sensitive pages when the session moves browser', function 
     $this->withHeader('User-Agent', CHROME)->get('/sensitive')->assertRedirect(route('keyring.confirm.challenge'));
 });
 
+it('does not let a confirmation started before the session moved browser keep its proofs', function () {
+    Keyring::risk()->signals([SessionFingerprintChanged::class]);
+    Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
+    signInAs();
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->withHeader('User-Agent', FIREFOX)->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertOk();
+    $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->withHeader('User-Agent', CHROME)->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+});
+
 it('can sign a hijacked session out', function () {
     Keyring::risk()->signals([SessionFingerprintChanged::class])->respond(fn ($risk, $at) => $risk->isElevated() ? Action::reauthenticate() : Action::allow());
     signInAs();
@@ -280,18 +296,22 @@ it('logs security events and shows recent activity', function () {
         ->and($types->all())->toContain('signed_in', 'new_device');
 });
 
-it('asks "was this you?" after someone fails the second factor', function () {
+it('keeps "was this you?" for a browser the account has used before', function () {
+    $device = signInAs()->getCookie('keyring_device')->getValue();
+    $this->post('/logout');
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-    signInAs();
+    signInAs(CHROME);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
-
-    signInAs();
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertSessionHas('keyring.alerts', []);
+    $this->post('/logout');
+
+    signInAs(cookies: ['keyring_device' => $device]);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret, 1)])
         ->assertSessionHas('keyring.alerts', fn ($alerts) => $alerts[0]['type'] === 'second_factor_failed');
 
-    signInAs();
-    expect(session('keyring.alerts'))->toBeNull();
+    expect(app(SecurityLog::class)->pullAlerts($this->user))->toBeEmpty();
 });
 
 it('sends security emails only when asked to', function () {

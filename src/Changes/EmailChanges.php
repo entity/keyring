@@ -79,8 +79,7 @@ class EmailChanges
         $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent, $signedInAt) {
             $this->cancel($user);
 
-            $model = $this->keyring->pendingChangeModel();
-            $change = new $model([
+            $change = $this->keyring->pendingChangeModel()::make([
                 'attribute' => $this->attribute(),
                 'value' => $email,
                 'previous_value' => $current,
@@ -88,12 +87,10 @@ class EmailChanges
                 'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
                 'revert_token' => PendingChange::hashToken($tokens['revert']),
                 'signed_in_at' => $signedInAt,
-                'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for', '24h')),
+                'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for')),
             ]);
-            $change->authenticatable()->associate($user);
-            $change->save();
 
-            return $change;
+            return tap($change->authenticatable()->associate($user))->save();
         });
 
         // After the response, so timing doesn't give away which case it was.
@@ -275,7 +272,7 @@ class EmailChanges
         $request = request();
         $here = $request->hasSession() && $this->signedInAs($user);
 
-        if (config('keyring.email_changes.sign_out_others', true)) {
+        if (config('keyring.email_changes.sign_out_others')) {
             $this->sessions->revokeAll($user, except: $here ? $this->sessions->current($request)?->id : null);
         }
 
@@ -317,7 +314,7 @@ class EmailChanges
 
             $change->forceFill([
                 'applied_at' => now(),
-                'revertable_until' => Duration::fromNow(config('keyring.email_changes.revertable_for', '7d')),
+                'revertable_until' => Duration::fromNow(config('keyring.email_changes.revertable_for')),
             ])->save();
 
             $this->sessions->distrustDevices($user);

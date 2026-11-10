@@ -22,6 +22,7 @@ use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\WebAuthn\Ceremonies;
+use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\CredentialRecord;
 
 beforeEach(function () {
@@ -60,6 +61,18 @@ it('registers a passkey', function () {
     expect($passkey->name)->toBe('MacBook')
         ->and($passkey->meta('user_verified'))->toBeTrue()
         ->and($passkey->factor()->categories($passkey))->toBe([Category::Possession, Category::Inherence]);
+});
+
+it('keeps the user handle a user\'s keys already have when app_key changes', function () {
+    enroll('passkey', new VirtualAuthenticator);
+    $handle = app(Ceremonies::class)->userHandle($this->user);
+
+    config(['app.key' => 'base64:'.base64_encode(random_bytes(32)), 'app.previous_keys' => [config('app.key')]]);
+
+    test()->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+
+    expect(Base64UrlSafe::decodeNoPadding($options['user']['id']))->toBe($handle);
 });
 
 it('signs in with a passkey alone, without a username', function (VirtualAuthenticator $key) {

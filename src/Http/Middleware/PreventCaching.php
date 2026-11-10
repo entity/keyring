@@ -7,7 +7,9 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Auth pages and responses should never be cached.
+ * Auth pages and responses are never cached, and never pass their URL on as
+ * a Referer: links from emails (resets, email changes, "this wasn't me")
+ * carry their token in it.
  */
 class PreventCaching
 {
@@ -16,6 +18,7 @@ class PreventCaching
         $response = $next($request);
 
         $response->headers->set('Cache-Control', 'no-store, private');
+        $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
     }

@@ -203,6 +203,16 @@ it('checks the password is long enough on its own before removing the last secon
     expect(Authenticator::find($tablet->id))->not->toBeNull();
 });
 
+it('limits password guesses when removing the last second factor', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    foreach (range(1, 6) as $guess) {
+        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => "guess {$guess}"])->assertUnprocessable();
+    }
+
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])->assertTooManyRequests();
+});
+
 it('refuses to remove the last factor the policy needs', function () {
     Keyring::require(Requirement::aal2());
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();

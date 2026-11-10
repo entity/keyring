@@ -92,7 +92,7 @@ See [Pruning](devices-and-sessions.md#pruning).
 
 ## "Was This You?" Alerts
 
-After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once.
+After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once. With `Features::devices()` on, a browser the account hasn't signed in on before gets none, since it could be whoever caused them; they wait for one it has.
 
 ```json
 [
@@ -154,7 +154,7 @@ Every notice is a `Keyring\Notifications\SecurityNotice`, sent by mail unless yo
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. Lists the reasons. |
 | `clone_suspected` | A passkey or security key looked cloned. |
 | `email_changed` | An email change applied. Sent to both the old and the new address. |
-| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. |
+| `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied, without the device and IP that undid it. |
 
 To send your own instead, listen for the matching [events](sign-in-flow.md#events) and leave the type off.
 

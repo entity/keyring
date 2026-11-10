@@ -9,6 +9,7 @@ use Illuminate\Support\Timebox;
 use Illuminate\Support\ViewErrorBag;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Factors\Totp;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
@@ -91,11 +92,12 @@ trait InteractsWithKeyring
 
     /**
      * The code an authenticator app would show right now for a TOTP
-     * authenticator, or for a secret.
+     * authenticator, or for a secret. Each code works once, so to use the
+     * same app again in a test, travel 30 seconds or pass a later step.
      */
-    public function totpCode(Authenticator|string $authenticator): string
+    public function totpCode(Authenticator|string $authenticator, int $step = 0): string
     {
-        return app(Google2FA::class)->getCurrentOtp($authenticator instanceof Authenticator ? $authenticator->secret : $authenticator);
+        return app(Google2FA::class)->oathTotp($authenticator instanceof Authenticator ? $authenticator->secret : $authenticator, Totp::timestep($step));
     }
 
     protected function withKeyringSession(): static
@@ -116,9 +118,9 @@ trait InteractsWithKeyring
             Assurance::AAL1 => [$password],
             Assurance::AAL2 => [
                 $password,
-                new Verification('totp', 'testing', [Category::Possession], at: $at),
+                new Verification('totp', null, [Category::Possession], at: $at),
             ],
-            Assurance::AAL3 => [new Verification('security-key', 'testing', [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
+            Assurance::AAL3 => [new Verification('security-key', null, [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
         };
 
         return $this->withSession([

@@ -195,7 +195,7 @@ app(Sessions::class)->rotate($request);
 
 `rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one.
 
-Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends.
+Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (an idle or absolute timeout, a risk response, or a revoked record) only forgets that browser's cookie, so other remembered browsers stay signed in.
 
 ## The Session Registry
 
@@ -239,7 +239,7 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 | `forUser($user)` | The user's sessions that haven't expired or been revoked, most recent first. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |
-| `revokeAll($user, $except = null)` | Revokes every session of the user but one, cycles the remember token and stops trusting the other devices. Returns how many. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. `Sessions::revokeAll()` calls it, then also changes the remember token and stops trusting the other devices, so call that one from your own code. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A store that expires records itself can return `0`. |
 
@@ -260,7 +260,7 @@ It only checks routes it runs on. If signed-in sessions reach other groups, add 
 On each signed-in request it:
 
 - signs the user out if their registry record was revoked, has expired, belongs to someone else, or has been idle too long,
-- registers sessions that started some other way, such as a "remember me" cookie. A remembered browser is recorded like a sign in, so one the account hasn't used before is announced as a [new device](#new-device-sign-ins), and it's refused while the account is [risk locked](risk.md#actions),
+- registers sessions that started some other way, such as your own `Auth::login()` (on the response that signs in) or a "remember me" cookie. A remembered browser is recorded like a sign in, so one the account hasn't used before is announced as a [new device](#new-device-sign-ins), and it's refused while the account is [risk locked](risk.md#actions),
 - runs the cheap [risk signals](risk.md#checkpoints),
 - updates the last activity time, at most once a minute.
 
@@ -282,7 +282,7 @@ A signed-out request is sent to the login page with the `signed-out` status, and
 ```
 
 - **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
-- **`absolute`** ends a session this long after sign in, however active it is. "Remember me" lasts no longer either, unless you set your guard's `remember` (in minutes) yourself.
+- **`absolute`** ends a session this long after sign in, however active it is. The "remember me" cookie lasts no longer either, unless you set your guard's `remember` (in minutes) yourself. A browser that comes back on that cookie starts a new session, whose own `absolute` counts from then.
 - **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
 
 A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.
@@ -291,7 +291,7 @@ A level lapses on its own clock without ending the session: after its `idle` wit
 
 `php artisan keyring:prune` deletes what Keyring no longer needs:
 
-- devices revoked more than 30 days ago,
+- devices revoked more than 30 days ago, or not seen for a year,
 - email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago, since they hold both addresses,
 - security log entries older than `security_log.keep_for`,
 - registered sessions that have expired or been revoked, through the registry's `prune()`. The cache driver's records expire on their own.

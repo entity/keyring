@@ -46,8 +46,19 @@ class AuthenticateSession
     {
         $guard = $this->keyring->guard();
 
-        if (! $request->hasSession() || ! $guard->check()) {
+        if (! $request->hasSession()) {
             return $next($request);
+        }
+
+        // An app's own Auth::login() (Socialite, impersonation) is registered
+        // on the response that signs in, so every copy of that session's
+        // cookie can be revoked, on the cookie driver too.
+        if (! $guard->check()) {
+            return tap($next($request), function () use ($request, $guard) {
+                if (($user = $guard->user()) !== null && ! $request->session()->has(Sessions::KEY)) {
+                    $this->register($request, $user, remembered: false);
+                }
+            });
         }
 
         $user = $guard->user();
@@ -154,15 +165,17 @@ class AuthenticateSession
      */
     protected function signOut(Request $request, string $reason): Response
     {
-        if ($user = $this->signIn->out($request)) {
+        if ($user = $this->signIn->out($request, onlyThisBrowser: true)) {
             SessionEnded::dispatch($user, $reason);
         }
 
         // Like Laravel's own auth middleware: 401 for JSON, otherwise back to
         // login, remembering where they were going.
+        redirect()->setIntendedUrl($this->intendedUrl($request));
+
         $response = $this->wantsJson($request)
             ? new JsonResponse(['status' => 'signed-out', 'message' => $this->keyring->statusMessage('signed-out')], 401)
-            : redirect()->guest(route('login'))->with('status', 'signed-out');
+            : to_route('login')->with('status', 'signed-out');
 
         // As on sign out: nothing the session cached stays in the browser.
         $response->headers->set('Clear-Site-Data', '"cache", "storage"');

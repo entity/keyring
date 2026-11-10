@@ -15,14 +15,14 @@ class SessionRegistryManager extends Manager
 {
     public function getDefaultDriver(): string
     {
-        return $this->config->get('keyring.sessions.driver', 'database');
+        return $this->config->get('keyring.sessions.driver');
     }
 
     protected function createDatabaseDriver(): SessionRegistry
     {
         return new DatabaseSessionRegistry(
             $this->container['db']->connection($this->config->get('keyring.sessions.connection')),
-            $this->config->get('keyring.sessions.table', 'keyring_sessions'),
+            $this->config->get('keyring.sessions.table'),
         );
     }
 

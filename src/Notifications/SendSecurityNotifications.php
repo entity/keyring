@@ -102,21 +102,22 @@ class SendSecurityNotifications
 
     /**
      * Only a change that applied ever gave the new address the account, so
-     * there's nothing to tell it otherwise.
+     * there's nothing to tell it otherwise. That address may be whoever took
+     * the account, so its copy leaves out the owner's device and IP.
      */
     public function emailChangeReverted(Events\EmailChangeReverted $event): void
     {
         $this->send($event->user, 'email_change_reverted');
 
         if ($event->change->applied_at !== null) {
-            $this->send(Notification::route('mail', $event->change->value), 'email_change_reverted');
+            $this->send(Notification::route('mail', $event->change->value), 'email_change_reverted', describeRequest: false);
         }
     }
 
     /**
      * @param  array<string, string|int>  $replace
      */
-    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $replace = [], ?string $actionUrl = null): void
+    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $replace = [], ?string $actionUrl = null, bool $describeRequest = true): void
     {
         // A model without Notifiable (say, staff that sign in through
         // another guard) has nowhere to send it, so it's skipped rather than
@@ -130,11 +131,10 @@ class SendSecurityNotifications
 
         $arguments = [
             'type' => $type,
-            'details' => [
-                'when' => now()->toDayDateTimeString(),
+            'details' => ['when' => now()->toDayDateTimeString(), ...$describeRequest ? [
                 'device' => UserAgent::describe($request->userAgent()),
                 'ip' => $request->ip(),
-            ],
+            ] : []],
             'replace' => $replace,
             'actionUrl' => $actionUrl,
         ];

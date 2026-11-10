@@ -167,19 +167,21 @@ class Ceremonies
      */
     public function credentialId(string $credential): ?string
     {
-        try {
-            return Base64UrlSafe::encodeUnpadded($this->fromJson($credential, PublicKeyCredential::class)->rawId);
-        } catch (Throwable) {
-            return null;
-        }
+        return rescue(fn () => Base64UrlSafe::encodeUnpadded($this->fromJson($credential, PublicKeyCredential::class)->rawId), report: false);
     }
 
     /**
      * An opaque, stable handle for the user. Never their real ID or email.
+     * Taken from a key they already have, so one added after APP_KEY was
+     * rotated doesn't show up as another account in their password manager.
      */
-    public function userHandle(Authenticatable $user): string
+    public function userHandle(Authenticatable&Model $user): string
     {
-        return KeyedHash::make('keyring|'.$user->getAuthIdentifier());
+        $existing = Keyring::authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
+
+        return $existing === null
+            ? KeyedHash::make('keyring|'.$user->getAuthIdentifier())
+            : $this->fromJson($existing, CredentialRecord::class)->userHandle;
     }
 
     public function relyingPartyId(): string
@@ -263,12 +265,7 @@ class Ceremonies
 
     protected function attestationSupport(): AttestationStatementSupportManager
     {
-        if ($this->attestation === null) {
-            $this->attestation = AttestationStatementSupportManager::create();
-            $this->attestation->add(NoneAttestationStatementSupport::create());
-        }
-
-        return $this->attestation;
+        return $this->attestation ??= tap(AttestationStatementSupportManager::create())->add(NoneAttestationStatementSupport::create());
     }
 
     protected function serializer(): SerializerInterface
