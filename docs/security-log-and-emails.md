@@ -4,6 +4,7 @@
     - [Entry Types](#entry-types)
     - [Showing Recent Activity](#showing-recent-activity)
     - [Pruning](#pruning)
+    - [What's Stored](#whats-stored)
 - ["Was This You?" Alerts](#was-this-you-alerts)
 - [Security Emails](#security-emails)
     - [Email Types](#email-types)
@@ -90,6 +91,18 @@ Schedule::command('keyring:prune')->daily();
 
 See [Pruning](devices-and-sessions.md#pruning).
 
+### What's Stored
+
+Each entry keeps the request's IP address and user agent, as devices and sessions do, and security notices pass the address on. To keep less, say what to store. Rate limits always use the real address:
+
+```php
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\IpUtils;
+
+// The network, not the machine. Or return null to keep none.
+Keyring::recordIpsUsing(fn (Request $request) => IpUtils::anonymize((string) $request->ip()));
+```
+
 ## "Was This You?" Alerts
 
 After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once. With `Features::devices()` on, a browser the account hasn't signed in on before gets none, since it could be whoever caused them; they wait for one it has.
@@ -160,7 +173,7 @@ The security notices, each sent to the user:
 | `email_changed` | An email change applied. Sent to both the old and the new address. | |
 | `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. | |
 
-Every notice is also passed `when`, and the `device` and `ip` of the request that caused it. The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
+Every notice is also passed `when` (the time as text, in the app's timezone), `at` (the same moment as a date, to format for the user's own timezone or language), and the `device` and `ip` of the request that caused it. The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
 
 `name`, `device` and `reasons` can hold what a user or browser sent: a key's name is whatever was typed. Keyring cuts each to one line of at most 500 characters, and it's still text to escape for wherever you show it. The published classes pass it through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown and a name could otherwise add a link to a genuine security email.
 

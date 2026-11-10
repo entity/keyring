@@ -49,7 +49,7 @@ The list accepts class names (resolved from the container), instances, and closu
 ```php
 Keyring::factors([
     Password::class,
-    fn ($app) => $app->make(Totp::class, ['window' => 2]),
+    fn ($app) => $app->make(Totp::class, ['window' => 2, 'issuer' => 'Acme Staff']),
     new RecoveryCodes(count: 10),
 ]);
 ```
@@ -97,6 +97,12 @@ An eight digit code sent to the user's current email address. It's opt-in, becau
 
 ```php
 Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor()]);
+```
+
+Codes are eight digits, last ten minutes and allow five wrong guesses. To change that:
+
+```php
+EmailCode::asSecondFactor(length: 6, expireAfter: '5m', maxGuesses: 3)
 ```
 
 The code goes out in your `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs), which `keyring:install` publishes and registers.

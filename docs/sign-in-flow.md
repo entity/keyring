@@ -190,7 +190,7 @@ Factors that send codes only send when asked:
 POST /login/challenge/email-code/send
 ```
 
-Viewing or prefetching the page never sends anything. Each account can be sent three codes per factor every 10 minutes, counted across sign ins, step-ups and enrollments, so starting again doesn't buy more; a fourth gets a `429` with Laravel's `auth.throttle` message on `code`. A new code replaces the previous one, and a code only verifies the authenticator it was sent to. The response is a [status response](#status-responses) with `code-sent`.
+Viewing or prefetching the page never sends anything. Each account can be sent three codes per factor every 10 minutes ([`limits.codes` and `limits.codes_per`](configuration.md#pending-logins-timebox-and-rate-limits)), counted across sign ins, step-ups and enrollments, so starting again doesn't buy more; a fourth gets a `429` with Laravel's `auth.throttle` message on `code`. A new code replaces the previous one, and a code only verifies the authenticator it was sent to. The response is a [status response](#status-responses) with `code-sent`.
 
 ## Finishing the Login
 
@@ -341,6 +341,10 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
 | `RegisterResponse` | A new user registered and was signed in. | The same as `AuthenticatedResponse`. |
 | `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
+| `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, coming back afterwards. JSON: `401`. Both send `Clear-Site-Data`. |
+| `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, coming back afterwards. JSON: `423` with `redirect`. |
+| `EnrollmentRequiredResponse` | A route needs a sign-in method the user hasn't set up. | Redirect to `enrollment_url` with the `enroll-first` status, or `403` without one. JSON: `403`. |
+| `VerifiedResponse` | The user's email address is verified. Built with `justNow`, true when the link they followed did it. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. |
 
 "JSON" here means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits.
 

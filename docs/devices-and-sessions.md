@@ -82,7 +82,7 @@ Event::listen(function (NewDeviceSignedIn $event) {
 
 ### The "This Wasn't Me" Link
 
-`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`, valid for 7 days by default. Opening it shows the `device-report` page (props: `device`, a description such as "Chrome on macOS", and `url`), whose button POSTs back to the same signed URL. That revokes the device without the user signing in: its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
+`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`, valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page (props: `device`, a description such as "Chrome on macOS", and `url`), whose button POSTs back to the same signed URL. That revokes the device without the user signing in: its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
 
 The link is built from `APP_URL`, and its signature covers only the path and query, so a forged `Host` header can't point it at another site. Like the email change links, opening it changes nothing, so mail scanners that open links can't sign anyone out.
 
@@ -291,8 +291,8 @@ A level lapses on its own clock without ending the session: after its `idle` wit
 
 `php artisan keyring:prune` deletes what Keyring no longer needs:
 
-- devices revoked more than 30 days ago, or not seen for a year,
-- email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago, since they hold both addresses,
+- devices revoked more than 30 days ago, or not seen for a year (`devices.keep_revoked_for` and `devices.keep_unseen_for`),
+- email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago (`email_changes.keep_ended_for`), since they hold both addresses,
 - security log entries older than `security_log.keep_for`,
 - registered sessions that have expired or been revoked, through the registry's `prune()`. The cache driver's records expire on their own.
 

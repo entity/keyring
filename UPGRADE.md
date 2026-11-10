@@ -74,3 +74,8 @@ The published `UpdateUserPassword` action now checks the current password with `
 - **Password and passkey guesses count under the username** at login and when confirming alike.
 - **TOTP reads Laravel's clock**, so `travel()` moves codes on in tests. `withAssurance()` no longer gives its pretend verifications an authenticator ID.
 - **The browser package's `@entity/keyring/inertia` entry** is built from `inertia.ts` (it was `challenge.ts`). Imports don't change.
+- **`PreventCaching` is in the `middleware` config option**, no longer added on top of it. A published config that sets `middleware` needs `Keyring\Http\Middleware\PreventCaching::class` added to keep the no-cache and no-referrer headers.
+- **Password resets, email changes and protection use the `email` config option**, not `username`. Nothing changes unless `username` isn't `email`.
+- **Registering a `MustVerifyEmail` user only needs a `verification.verify` route**, yours or Keyring's.
+- **`SharedLimit::LONGEST_LOCK` and `ConsecutiveLimit::REMEMBER_FOR` are config options** (`limits.longest_ip_lock`, `limits.remember_failures_for`), and `Device::revokeUrl()` defaults to `devices.report_link_for`.
+
