@@ -88,6 +88,7 @@ npm install @entity/keyring
 - [Recipes](docs/recipes.md)
 - [Testing](docs/testing.md)
 - [Security](docs/security.md)
+- [OWASP ASVS](docs/owasp-asvs.md)
 
 The [changelog](CHANGELOG.md) lists what each release changes, and the [upgrade guide](UPGRADE.md) covers anything you need to do when updating.
 

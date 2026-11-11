@@ -17,7 +17,7 @@
 
 Keyring follows OWASP's authentication, session management and forgot password guidance, and NIST SP 800-63B's assurance levels. This page lists what it promises, so you can check your setup against it, and where it stops.
 
-The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration.
+The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration. [OWASP ASVS](owasp-asvs.md) says what to turn on for each level of ASVS 5.0's authentication and session management chapters, requirement by requirement.
 
 Guarantees about a [feature](quick-start.md#adding-features), such as devices, email changes or the security log, apply once that feature is on.
 
