@@ -91,9 +91,13 @@ function tamper(array $credential, Closure $change): array
     return $credential;
 }
 
-function refused(TestResponse $response): void
+/**
+ * Refused, and told why: a factor that wants attestation says the key isn't
+ * one it takes, since "try again" would never work.
+ */
+function refused(TestResponse $response, string $message = 'key_not_accepted'): void
 {
-    $response->assertUnprocessable()->assertJsonValidationErrors(['credential' => __('keyring::keyring.invalid')]);
+    $response->assertUnprocessable()->assertJsonValidationErrors(['credential' => __("keyring::keyring.{$message}")]);
 
     expect(Authenticator::query()->exists())->toBeFalse();
 }
@@ -122,7 +126,7 @@ it('adds a key that does not attest, and keeps no attestation, when the factor d
 it('still takes nothing but "none" attestation when the factor does not require it', function (Closure $key) {
     Keyring::factors([Password::class, WebAuthn::securityKeys()]);
 
-    refused(attest($key($this->maker)));
+    refused(attest($key($this->maker)), 'invalid');
 })->with([
     'packed' => [fn (VirtualManufacturer $maker) => $maker->key(YUBIKEY)],
     'fido-u2f' => [fn (VirtualManufacturer $maker) => $maker->key(format: 'fido-u2f')],

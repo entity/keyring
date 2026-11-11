@@ -5,6 +5,7 @@ namespace Keyring\Factors;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\DiscoverableFactor;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\PrimaryFactor;
@@ -257,6 +258,12 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         $record = $this->ceremonies()->register($this->credential($request), $enrollment->state('options'), $this->profile);
 
         if ($record === null) {
+            // "Check it and try again" would send someone round in circles
+            // with a key this factor will never take.
+            throw_if($this->profile->attestation, ValidationException::withMessages([
+                $this->errorKey() => __('keyring::keyring.key_not_accepted'),
+            ]));
+
             return null;
         }
 
