@@ -167,14 +167,19 @@ final class PasswordRules
     }
 
     /**
-     * Not what the app is called or a word it listed, nor the user's name,
-     * their email username or the organisation their address is at. Characters
-     * that stand in for letters count as those letters.
+     * Not made up of what the app is called or a word it listed, the user's
+     * name, their email username or the organisation their address is at,
+     * with or without digits and punctuation around them. Characters that
+     * stand in for letters count as those letters.
      *
-     * Words under four characters turn up by chance too often to refuse,
+     * The password is compared whole, as NIST SP 800-63B asks: a passphrase
+     * that happens to have a name in it is as hard to guess as one without,
+     * and refusing it would be a composition rule by another name. "Taylor
+     * rides a blue bicycle" passes, and "taylor.otwell.2026" doesn't.
+     *
+     * Words under four characters turn up by chance too often to count,
      * except a whole name of the app's, which counts from three ("IBM").
-     * A name of several words also counts run together, however the password
-     * separates them: "My App" refuses myapp, my-app and my app.
+     * A name of several words also counts run together ("My App" as myapp).
      *
      * @param  array<array-key, mixed>  $site  the app's name, and the words it listed, however they're keyed
      * @param  array<array-key, mixed>  $personal  the user's names and addresses
@@ -188,29 +193,61 @@ final class PasswordRules
             ->flatMap(fn (string $value) => self::personal($value))
             ->merge($names->flatten())
             ->filter(fn (string $word) => mb_strlen($word) >= 4)
-            ->merge($names->filter(fn (array $name) => count($name) === 1)->flatten()->filter(fn (string $name) => mb_strlen($name) >= 3))
+            ->merge($names->map(fn (array $name) => implode('', $name))->filter(fn (string $name) => mb_strlen($name) >= 3))
+            ->map(fn (string $word) => self::letters($word))
+            ->filter()
             ->unique()
-            ->values();
+            ->values()
+            ->all();
 
-        $phrases = $names
-            ->filter(fn (array $name) => count($name) > 1)
-            ->map(fn (array $name) => implode('', $name))
-            ->filter(fn (string $phrase) => mb_strlen($phrase) >= 3)
-            ->unique()
-            ->values();
-
-        return function (string $attribute, mixed $value, Closure $fail) use ($words, $phrases) {
+        return function (string $attribute, mixed $value, Closure $fail) use ($words) {
             if (! is_string($value)) {
                 return;
             }
 
-            $typed = self::plain($value);
-            $joined = implode('', self::words($value));
+            // Read twice: with digits and punctuation as padding
+            // ("keyring2026" is the word and a year), and with them as the
+            // letters they look like ("k3yr1ng" is the word).
+            $readings = array_filter([self::plain(self::letters($value)), self::letters(self::plain($value))]);
 
-            if ($words->contains(fn (string $word) => str_contains($typed, $word)) || $phrases->contains(fn (string $phrase) => str_contains($joined, $phrase))) {
+            if (array_any($readings, fn (string $letters) => self::madeOf($letters, $words))) {
                 $fail(__('keyring::keyring.password_context'));
             }
         };
+    }
+
+    /**
+     * Whether a run of letters is nothing but the given words, one after
+     * another, in any order and any number of times.
+     *
+     * @param  list<string>  $words
+     */
+    private static function madeOf(string $letters, array $words): bool
+    {
+        $reached = [0 => true];
+
+        for ($at = 0, $length = strlen($letters); $at < $length; $at++) {
+            if (! isset($reached[$at])) {
+                continue;
+            }
+
+            foreach ($words as $word) {
+                if (substr_compare($letters, $word, $at, strlen($word)) === 0) {
+                    $reached[$at + strlen($word)] = true;
+                }
+            }
+        }
+
+        return isset($reached[strlen($letters)]);
+    }
+
+    /**
+     * Only the letters of a value: digits, spaces and punctuation are what
+     * people put around a word to make it look like more.
+     */
+    private static function letters(string $value): string
+    {
+        return preg_replace('/\P{L}+/u', '', $value) ?? '';
     }
 
     /**

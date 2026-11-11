@@ -120,88 +120,93 @@ it('refuses every password in its common list', function () {
     expect($missed)->toBeEmpty();
 });
 
-it('refuses passwords containing the user\'s name, their email username or the site\'s name', function () {
+// NIST SP 800-63B compares the whole password with the words it shouldn't
+// be, not the words inside it: a passphrase with a name in it is fine.
+it('refuses a password made up of the user\'s name, their email username or the site\'s name', function () {
+    config(['app.name' => 'Keyring Example']);
+    $user = taylor(['name' => 'Taylor Otwell', 'email' => 'tayotw@example.com']);
+
+    expect(passes('taylor otwell keyring', $user))->toBeFalse()
+        ->and(passes('TaylorOtwell-Taylor', $user))->toBeFalse()
+        ->and(passes('tayotw.keyring.example', $user))->toBeFalse()
+        ->and(passes('keyring example 2026!!', $user))->toBeFalse()
+        ->and(passes('keyringkeyringkeyring', $user))->toBeFalse();
+});
+
+it('takes a passphrase that only has one of those words in it', function () {
     config(['app.name' => 'Keyring Example']);
     $user = taylor(['name' => 'Taylor Otwell', 'email' => 'tayotw@example.com']);
 
     expect(passes('a long passphrase for me', $user))->toBeTrue()
-        ->and(passes('otwell is my long passphrase', $user))->toBeFalse()
-        ->and(passes('my long passphrase tayotw', $user))->toBeFalse()
-        ->and(passes('keyring was here for ages', $user))->toBeFalse();
+        ->and(passes('otwell is my long passphrase', $user))->toBeTrue()
+        ->and(passes('taylor rides a blue bicycle', $user))->toBeTrue()
+        ->and(passes('keyring was here for ages', $user))->toBeTrue()
+        ->and(passes('a tailor made long passphrase', $user))->toBeTrue();
 });
 
 it('checks the words it\'s given before there\'s a user, ignoring short ones', function () {
-    expect(passes('jordan rivers long phrase', context: ['Jordan Rivers', 'jr@example.com']))->toBeFalse()
-        ->and(passes('a long passphrase with jr in it', context: ['Jo', 'jr@example.com']))->toBeTrue();
+    expect(passes('jordan rivers jordan', context: ['Jordan Rivers', 'jr@example.com']))->toBeFalse()
+        ->and(passes('jordan rivers long phrase', context: ['Jordan Rivers', 'jr@example.com']))->toBeTrue()
+        // "jr" and "jo" are too short to count, so this is not made of the user's words.
+        ->and(passes('jr jo jr jo jr jo jr jo', context: ['Jo', 'jr@example.com']))->toBeTrue();
 });
 
 it('refuses the words the app lists as its own', function () {
-    expect(passes('the falcon lands at midnight'))->toBeTrue()
-        ->and(passes('acme pays for my long lunch'))->toBeTrue();
+    expect(passes('falcon project acme'))->toBeTrue();
 
     // Keyed or not, and whatever else ends up in the list.
     config(['keyring.passwords.context' => ['project' => 'Falcon Project', 'ACME', 42, null]]);
 
-    expect(passes('the falcon lands at midnight'))->toBeFalse()
-        ->and(passes('acme pays for my long lunch'))->toBeFalse()
-        ->and(passes('a long passphrase for me'))->toBeTrue()
+    expect(passes('falcon project acme'))->toBeFalse()
+        ->and(passes('Falcon-Project-2026!'))->toBeFalse()
+        ->and(passes('the falcon lands at midnight'))->toBeTrue()
         // And for a user, beside their own names.
-        ->and(passes('Falcon-Project forever more', taylor()))->toBeFalse();
+        ->and(passes('Falcon Project Taylor', taylor()))->toBeFalse();
 
     // One word on its own, or a config cached before the option existed.
     config(['keyring.passwords.context' => 'Roadrunner']);
-    expect(passes('the roadrunner always gets away'))->toBeFalse();
+    expect(passes('roadrunner roadrunner'))->toBeFalse();
 
     config(['keyring.passwords.context' => null]);
-    expect(passes('the roadrunner always gets away'))->toBeTrue();
+    expect(passes('roadrunner roadrunner'))->toBeTrue();
 });
 
-it('refuses the app\'s name as a whole, however the password separates its words', function () {
+it('counts the app\'s name as a whole, however the password separates its words', function () {
     config(['app.name' => 'My App']);
 
-    expect(passes('myapp is where i work'))->toBeFalse()
-        ->and(passes('MyApp2026 is the best'))->toBeFalse()
-        ->and(passes('my-app is where i work'))->toBeFalse()
-        ->and(passes('i work at My App now'))->toBeFalse()
+    expect(passes('myapp myapp myapp'))->toBeFalse()
+        ->and(passes('MyApp2026MyApp2026'))->toBeFalse()
+        ->and(passes('my-app my.app my app'))->toBeFalse()
         // Neither word counts on its own: each is under four characters.
-        ->and(passes('my long passphrase for the app'))->toBeTrue();
+        ->and(passes('my my my my app app app'))->toBeTrue()
+        ->and(passes('i work at My App now'))->toBeTrue();
 });
 
 it('counts a short name from three characters when it\'s a whole name, and not below', function () {
     config(['app.name' => 'IBM', 'keyring.passwords.context' => ['HP', 'Box Drive']]);
     $amy = taylor(['name' => 'Amy Lee', 'email' => 'amy@abc.example']);
 
-    expect(passes('ibm makes big mainframes'))->toBeFalse()
-        ->and(passes('I.B.M. makes big mainframes'))->toBeTrue()
-        ->and(passes('hp makes laser printers'))->toBeTrue()
+    expect(passes('ibm ibm ibm ibm ibm'))->toBeFalse()
+        ->and(passes('I.B.M. I.B.M. I.B.M.'))->toBeFalse()
+        ->and(passes('boxdrive boxdrive'))->toBeFalse()
+        ->and(passes('hp hp hp hp hp hp hp hp'))->toBeTrue()
         // "Box" is one word of a longer name, and the user's are never whole names.
-        ->and(passes('a box of long passphrases'))->toBeTrue()
-        ->and(passes('amy lee likes long walks, abc', $amy))->toBeTrue();
+        ->and(passes('box box box box box'))->toBeTrue()
+        ->and(passes('amy lee amy lee abc', $amy))->toBeTrue();
 });
 
-it('only joins words up for the app\'s own names', function () {
-    config(['app.name' => 'Keyring']);
-
-    // "thor" runs across "correct horse", and "bulb maker" reads as "buIBMaker".
-    expect(passes('correct horse battery staple', taylor(['name' => 'Thor'])))->toBeTrue();
-
-    config(['app.name' => 'IBM']);
-
-    expect(passes('bulb maker extraordinaire'))->toBeTrue();
-});
-
-it('refuses the organisation in the user\'s email address, unless anyone can have one there', function (string $email, string $password, bool $passes) {
+it('counts the organisation in the user\'s email address, unless anyone can have one there', function (string $email, string $password, bool $passes) {
     expect(passes($password, taylor(['email' => $email])))->toBe($passes)
         ->and(passes($password, context: ['Taylor', $email]))->toBe($passes);
 })->with([
-    'the company\'s domain' => ['taylor@megacorp.example', 'megacorp pays my bills', false],
-    'in any case' => ['taylor@MegaCorp.example', 'MEGACORP pays my bills', false],
-    'its first label only' => ['taylor@mail.megacorp.example', 'megacorp pays my bills', true],
-    'a hyphenated one, word by word' => ['taylor@mega-widgets.example', 'widgets pay my bills', false],
-    'the rest of the domain' => ['taylor@megacorp.example', 'an example of a long one', true],
-    'a public provider' => ['taylor@gmail.com', 'gmail is where mail goes', true],
-    'a public provider elsewhere' => ['taylor@yahoo.co.uk', 'yahoo is where mail goes', true],
-    'a short label' => ['taylor@abc.example', 'abc is as easy as it gets', true],
+    'the company\'s domain' => ['taylor@megacorp.example', 'megacorp megacorp', false],
+    'in any case' => ['taylor@MegaCorp.example', 'MEGACORP-TAYLOR-2026', false],
+    'its first label only' => ['taylor@mail.megacorp.example', 'megacorp megacorp', true],
+    'a hyphenated one, word by word' => ['taylor@mega-widgets.example', 'widgets mega widgets', false],
+    'the rest of the domain' => ['taylor@megacorp.example', 'example example example', true],
+    'a public provider' => ['taylor@gmail.com', 'gmail gmail gmail gmail', true],
+    'a public provider elsewhere' => ['taylor@yahoo.co.uk', 'yahoo yahoo yahoo yahoo', true],
+    'a short label' => ['taylor@abc.example', 'abc abc abc abc abc abc', true],
 ]);
 
 it('reads look-alike characters as the letters they stand for', function (string $password) {
@@ -210,24 +215,23 @@ it('reads look-alike characters as the letters they stand for', function (string
 
     expect(passes($password, $user))->toBeFalse();
 })->with([
-    'k3yr1ng was here for ages',
-    'K3YRLNG was here for ages',
-    'a long 3x4mpl3 of a phrase',
-    '0tw3ll is my long passphrase',
-    '7@yl0r is my long passphrase',
-    'my long passphrase 7ay07w',
-    'm3g4c0rp pays my bills',
-    'the ca$h is in the drawer',
-    'c4$hd35k is where i work',
+    'k3yr1ng 3x4mpl3 k3yr1ng',
+    'K3YRLNG-K3YRLNG-K3YRLNG',
+    '0tw3ll 7@yl0r 0tw3ll',
+    '7ay07w.m3g4c0rp.7ay07w',
+    'ca$h d35k c4$hd35k',
+    'keyring2026example1999',
 ]);
 
 it('still takes a password that only looks a little like a name', function () {
     config(['app.name' => 'Keyring Example']);
     $user = taylor(['name' => 'Taylor Otwell']);
 
-    expect(passes('k3y-r1ng was here for ages', $user))->toBeTrue()
+    expect(passes('k3yr1ng was here for ages', $user))->toBeTrue()
         ->and(passes('a tailor made long passphrase', $user))->toBeTrue()
-        ->and(passes('4 l0ng p455phr453 f0r m3', $user))->toBeTrue();
+        ->and(passes('4 l0ng p455phr453 f0r m3', $user))->toBeTrue()
+        // No longer a false alarm: "million" isn't made of anyone's name.
+        ->and(passes('a million reasons to stay', taylor(['name' => 'Lili', 'email' => 'lili@example.com'])))->toBeTrue();
 });
 
 it('takes passwords of any composition, and lets an app ask for more length instead', function () {

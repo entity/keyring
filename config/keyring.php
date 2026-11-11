@@ -254,8 +254,8 @@ return [
     | passwords that ships with Keyring. Set "refuse_unchecked" to refuse
     | the password instead, and ask the user to try again.
     |
-    | "context" is your list of words a password mustn't contain: names of
-    | your organisation, products, systems, projects and teams. Your app's
+    | "context" is your list of words a password mustn't be made up of: names
+    | of your organisation, products, systems, projects and teams. Your app's
     | name, and each user's name and address, are checked without listing.
     |
     */

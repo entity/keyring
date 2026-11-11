@@ -142,7 +142,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - A password change takes the current password as well as a fresh verification, checked by Keyring itself rather than by your action. A user with no password yet sets one with the fresh verification alone.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
 - New passwords need at least 8 characters with a second factor and 15 without, and neither minimum can be configured below 8. Any characters are accepted, with no composition rules.
-- New passwords are checked against the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, in every environment, and against your app's name, the words you list in `passwords.context` and the user's own name and email address, with look-alike characters read as letters.
+- New passwords are checked against the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, in every environment, and against your app's name, the words you list in `passwords.context` and the user's own name and email address, with look-alike characters read as letters. The whole password is compared, as NIST SP 800-63B-4 Sec. 3.1.1.2 requires: one made up of those words is refused, and a passphrase that only has one in it is not.
 - In production, new passwords are also checked against breach lists (Have I Been Pwned). That check lets a password through when the service can't be reached, unless you set `passwords.refuse_unchecked`.
 - New passwords are refused rather than silently cut short by bcrypt. With bcrypt that limit is 72 bytes, so hash with argon2id to accept every password up to `passwords.max`.
 
@@ -327,7 +327,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Refusing the most common passwords: the top 10,000 of 8 characters or more and the top 3,000 of 15 or more | OWASP ASVS 5.0.0, 6.2.4 (at least the top 3,000 that fit the policy) |
 | No composition rules, and any characters accepted | OWASP ASVS 5.0.0, 6.2.5, and NIST SP 800-63B |
 | Passwords of at least 64 characters allowed, never silently cut short: up to `passwords.max` with argon2id, 72 bytes with bcrypt | OWASP ASVS 5.0.0, 6.2.9, and NIST SP 800-63B. Met with `HASH_DRIVER=argon2id`, not with bcrypt |
-| Refusing passwords containing the app's name, the words in `passwords.context`, or the user's name and email address | OWASP ASVS 5.0.0, 6.2.11, with 6.1.2 for the list, which is yours to fill in |
+| Refusing passwords made up of the app's name, the words in `passwords.context`, or the user's name and email address, comparing the whole password | OWASP ASVS 5.0.0, 6.2.11, with 6.1.2 for the list, which is yours to fill in; NIST SP 800-63B-4 Sec. 3.1.1.2 for comparing the whole password |
 | Refusing breached passwords, in production by default | OWASP ASVS 5.0.0, 6.2.12, and NIST SP 800-63B |
 | Passwords of any Unicode characters, normalized to NFC before hashing | NIST SP 800-63B, password verifiers |
 | Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
