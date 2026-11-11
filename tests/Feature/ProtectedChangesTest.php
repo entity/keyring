@@ -60,14 +60,14 @@ function signInWithTotp(User $user): void
 
 /**
  * Open an emailed change link the way a person would: the GET shows a page,
- * and pressing its button POSTs back to the same URL.
+ * and pressing its button posts the link's token to the URL the page names.
  */
 function follow(string $url): TestResponse
 {
-    test()->inertia()->get($url)->assertOk();
+    $props = test()->inertia()->get($url)->assertOk()->json('props');
     test()->flushHeaders();
 
-    return test()->post($url);
+    return test()->post($props['url'], ['token' => $props['token']]);
 }
 
 function linkIn(object $notification, string $text): string

@@ -43,7 +43,7 @@ With devices on, Keyring sets its cookie on sign in, offers "don't ask again on 
 | `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
 | `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
 | `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
-| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, `keyring` limiter | Signs the device out. |
+| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signature in the body, `keyring` limiter | Signs the device out. |
 
 ## Devices
 
@@ -86,9 +86,20 @@ Event::listen(function (NewDeviceSignedIn $event) {
 
 ### The "This Wasn't Me" Link
 
-`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`, valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page (props: `device`, a description such as "Chrome on macOS", and `url`), whose button POSTs back to the same signed URL. That revokes the device without the user signing in: its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
+`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`, valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page. Its props are `device` (a description such as "Chrome on macOS"), `url`, `expires` and `signature`, and its button posts `expires` and `signature` in the body to `url`, which is the link's path without its query string. That revokes the device without the user signing in: its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
 
 The link is built from `APP_URL`, and its signature covers only the path and query, so a forged `Host` header can't point it at another site. Like the email change links, opening it changes nothing, so mail scanners that open links can't sign anyone out.
+
+The link has to carry its signature in the URL. The request that acts posts it instead, so it isn't written to access logs and proxies a second time. Keyring checks the posted fields as it checked the link: the same signature, over the same path, with the same expiry. A signature left in the `POST`'s URL is refused with a `403`.
+
+```html
+<form method="POST" action="{{ $url }}">
+    @csrf
+    <input type="hidden" name="expires" value="{{ $expires }}">
+    <input type="hidden" name="signature" value="{{ $signature }}">
+    <button>Sign {{ $device }} out</button>
+</form>
+```
 
 ### Locations
 

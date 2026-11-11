@@ -122,7 +122,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - An email change needs a fresh verification, confirmation from the new address, and confirmation from the current address unless the session proved a second factor the account has had for a week (`email_changes.established_after`) and since before it signed in.
 - An email change never reveals whether the new address has an account, in its answer, its timing or the pending change it shows: its emails, like the reset email, are sent after the response.
 - An email change only applies if the address is still the one it was requested from.
-- Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing.
+- Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing. The page posts the link's token or signature in the body to a URL without it, as the password reset does, so the request that acts doesn't leave it in access logs a second time.
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
 - Reverting an email change signs out every session, ends any sign in still waiting for its second factor, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.

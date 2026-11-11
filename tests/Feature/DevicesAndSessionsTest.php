@@ -186,7 +186,7 @@ it('gives new device events a working "this wasn\'t me" link', function () {
     $this->flushHeaders();
     expect(Device::sole()->isRevoked())->toBeFalse();
 
-    $this->post($url)->assertRedirect('/login');
+    postSignedLink($url)->assertRedirect('/login');
 
     $this->get('/home')->assertRedirect('/login');
     expect(Device::sole()->isRevoked())->toBeTrue();

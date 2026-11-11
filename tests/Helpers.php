@@ -5,6 +5,7 @@ use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Keyring\Factors\Totp;
 use Keyring\KeyringManager;
 use Keyring\Testing\VirtualAuthenticator;
@@ -121,6 +122,17 @@ function renderedMail(MailMessage $mail): array
         'html' => (string) $mail->render(),
         'text' => (string) app(Markdown::class)->renderText($mail->markdown, $mail->data()),
     ];
+}
+
+/**
+ * Press the button on the page a signed link opens: it posts the link's
+ * signature in the body, to the link's path.
+ */
+function postSignedLink(string $url): TestResponse
+{
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $fields);
+
+    return test()->post((string) parse_url($url, PHP_URL_PATH), $fields);
 }
 
 function expectValidPhp(string $path): void

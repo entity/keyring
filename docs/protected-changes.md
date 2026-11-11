@@ -40,9 +40,9 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `GET` | `/user/email` | `keyring.email.show` | `auth` |
 | `DELETE` | `/user/email` | `keyring.email.destroy` | `auth` |
 | `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | limited |
-| `POST` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm.store` | limited |
+| `POST` | `/email-changes/{change}/confirm` | `keyring.email.confirm.store` | limited |
 | `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited |
-| `POST` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert.store` | limited |
+| `POST` | `/email-changes/{change}/revert` | `keyring.email.revert.store` | limited |
 | `PUT` | `/user/password` | `user-password.update` | `auth`, `changes_middleware`, limited |
 | `GET` | `/forgot-password` | `password.request` | guest |
 | `POST` | `/forgot-password` | `password.email` | guest, limited |
@@ -120,8 +120,20 @@ Applying also signs out the account's other sessions and changes the "remember m
 
 Mail scanners open links on their own. So the emailed links open a page with a button, and only the button changes anything:
 
-- `GET /email-changes/{change}/confirm/{token}` and `.../revert/{token}` render the `email-change` page with `action` (`confirm` or `revert`) and `url` (where the button posts). They change nothing.
-- `POST` to the same URL makes the change.
+- `GET /email-changes/{change}/confirm/{token}` and `.../revert/{token}` render the `email-change` page with `action` (`confirm` or `revert`), `url` (where the button posts) and `token`. They change nothing.
+- `POST` to `url` with `token` in the body makes the change.
+
+The link has to carry its token in the URL. The request that acts doesn't, so `url` is `/email-changes/{change}/confirm` or `.../revert` without it, and the token isn't written to access logs and proxies a second time. Post it as a field:
+
+```html
+<form method="POST" action="{{ $url }}">
+    @csrf
+    <input type="hidden" name="token" value="{{ $token }}">
+    <button>{{ $action === 'confirm' ? 'Confirm the change' : 'Undo the change' }}</button>
+</form>
+```
+
+With Inertia, post `{ token }` to `url`. A token that's missing, wrong, used or expired answers with the `email-change-invalid` status.
 
 Links are built from `APP_URL`, never from the request's `Host` header. They work signed out, since they may open in another browser.
 
