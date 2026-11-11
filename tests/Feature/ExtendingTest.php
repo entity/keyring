@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
@@ -37,6 +38,7 @@ use Keyring\KeyringServiceProvider;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
+use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
@@ -450,6 +452,39 @@ it('publishes a notification for every type, that builds from what keyring passe
     expect($notification->via($this->user))->toBe(['mail'])
         ->and(renderedMail($notification->toMail($this->user))['text'])->not->toBeEmpty()->not->toContain(':name')->not->toContain(':remaining')->not->toContain(':reasons');
 })->with(KeyringManager::NOTIFICATIONS);
+
+// "Bot Checks" in docs/security.md: a check of the app's own goes before
+// the limits, so a request it turns away is nobody's failed attempt.
+it('lets a step of the app\'s own turn a request away before it counts against anyone', function () {
+    Keyring::pipeline(fn (Steps $steps) => $steps->before(EnsureNotThrottled::class, ChecksForBots::class));
+
+    foreach (range(1, 8) as $attempt) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('captcha');
+    }
+
+    expect(loggedTypes())->toBe([]);
+
+    // Past the check, the account has every guess it had.
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'human' => 'yes'])->assertRedirect('/dashboard');
+
+    // A challenge page comes after a right password, so it isn't asked again there.
+    $this->post('/logout');
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'human' => 'yes'])->assertRedirect(route('keyring.login.challenge'));
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+});
+
+class ChecksForBots
+{
+    public function handle(Context $context, Closure $next): Context
+    {
+        if ($context->identifying && $context->request->input('human') !== 'yes') {
+            throw ValidationException::withMessages(['captcha' => 'Please confirm you are not a robot.']);
+        }
+
+        return $next($context);
+    }
+}
 
 // NIST SP 800-63B-4, Sec. 4.6: a notice says who to contact when the
 // recipient says the event wasn't theirs.

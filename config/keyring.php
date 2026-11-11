@@ -346,9 +346,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Signal scores add up (0-100) into a level. Pick signals and what to do at
-    | each level with Keyring::risk()->signals([...])->respond(fn ...). By
-    | default: medium asks for another factor, high also notifies, critical
-    | refuses the sign in, or on a signed-in request signs out every session.
+    | each level with Keyring::risk()->signals([...])->respond(fn ...), in
+    | your KeyringServiceProvider: keyring:install starts it with the signals
+    | your features can feed. By default: medium asks for another factor, high
+    | also notifies, critical refuses the sign in, or on a signed-in request
+    | signs out every session. A password found in a breach also holds its
+    | user until they choose a new one.
     |
     */
 

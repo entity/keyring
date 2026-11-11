@@ -183,10 +183,11 @@ use Keyring\Features;
 | `emailChanges()` | Email changes confirmed by the new address and undoable from the old one. Changing the email elsewhere then throws. | [Protected Changes](protected-changes.md#changing-the-email-address) |
 | `securityLog()` | A log of sign ins, failures, refusals and changes in `keyring_events`, and "was this you?" alerts. On unless you take it out, and then the events go to your app's log instead. | [Security Log & Emails](security-log-and-emails.md) |
 
-A few more things are opt-in, but aren't in the features list:
+A few more things aren't in the features list. They're in your `KeyringServiceProvider`, where `keyring:install` wrote a starting set of each:
 
-- [Security emails](security-log-and-emails.md#security-emails): the `Keyring::notifications([...])` list in your `KeyringServiceProvider`, and the classes in `app/Notifications/Keyring`.
-- [Risk signals](risk.md): `Keyring::risk()->signals([...])` in your `KeyringServiceProvider`.
+- [Security emails](security-log-and-emails.md#security-emails): the `Keyring::notifications([...])` list, and the classes in `app/Notifications/Keyring`. The ones a feature needs are commented out until it's on.
+- [Risk signals](risk.md): the `Keyring::risk()->signals([...])` list. Turning on devices is when to uncomment `NewDevice` and `InactiveAccount`.
+- A [support contact](security-log-and-emails.md#a-support-contact) for those emails to name: `support_contact` in `config/keyring.php`.
 - [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. `keyring:install` sets both up when you answer yes to requiring one. Step-up sends users there too when they don't have what a route needs.
 
 ## Adding Sign-In Methods
