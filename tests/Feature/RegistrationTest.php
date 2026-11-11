@@ -8,6 +8,7 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Arr;
@@ -25,10 +26,12 @@ use Keyring\Exceptions\MissingNotification;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\KeyringServiceProvider;
+use Keyring\Login\Registration;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\PlainUser;
+use Keyring\Tests\Fixtures\RacedRegistration;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
@@ -389,24 +392,31 @@ describe('hiding who has an account', function () {
     ]);
 
     it('answers the same when another request took the address a moment before', function () {
-        // An action that finds the address gone when it comes to save, as
-        // the second of two identical forms sent at once does.
-        Keyring::createUsersUsing((new class extends CreateNewUser
-        {
-            public function create(array $input): App\Models\User
-            {
-                taylor(['email' => $input['email']]);
-
-                return parent::create($input);
-            }
-        })::class);
+        app()->bind(Registration::class, RacedRegistration::class);
+        $owner = taylor();
 
         $this->post('/register', registrationForm())
             ->assertRedirect(route('login'))
             ->assertSessionHas('status', 'registration-received');
 
+        // The insert the unique index refused left the database usable.
         Notification::assertSentOnDemandTimes(AlreadyRegistered::class, 1);
-        expect(User::count())->toBe(1);
+        expect(User::sole()->is($owner))->toBeTrue();
+    });
+
+    it('still fails when the users table refuses a new user for another reason', function () {
+        // A unique index on something else, which the action let through.
+        Keyring::createUsersUsing((new class extends CreateNewUser
+        {
+            public function create(array $input): User
+            {
+                throw new UniqueConstraintViolationException('testing', 'insert into users', [], new Exception('users_handle_unique'));
+            }
+        })::class);
+
+        $this->withoutExceptionHandling();
+
+        expect(fn () => $this->post('/register', registrationForm()))->toThrow(UniqueConstraintViolationException::class);
     });
 
     it('refuses the password alone until the address is verified, like an account that isn\'t there', function () {
@@ -655,18 +665,13 @@ describe('saying when an address is taken', function () {
     });
 
     it('says so when another request took the address a moment before', function () {
-        Keyring::createUsersUsing((new class extends CreateNewUser
-        {
-            public function create(array $input): App\Models\User
-            {
-                taylor(['email' => $input['email']]);
-
-                return parent::create($input);
-            }
-        })::class);
+        app()->bind(Registration::class, RacedRegistration::class);
+        taylor();
 
         $this->post('/register', registrationForm())
             ->assertSessionHasErrors(['email' => 'The email has already been taken.']);
+
+        expect(User::count())->toBe(1);
     });
 
     it('can leave new users signed out, for everyone or per user', function (bool|Closure $when) {

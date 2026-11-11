@@ -163,7 +163,9 @@ class Registration
     protected function create(CreatesNewUsers $creator, array $input, string $email): (Authenticatable&Model)|null
     {
         try {
-            return $creator->create($input);
+            // In a transaction of its own, so the refused insert doesn't
+            // leave one the caller has open unusable, as PostgreSQL would.
+            return $this->model()->getConnection()->transaction(fn () => $creator->create($input));
         } catch (UniqueConstraintViolationException $e) {
             return $this->taken($email) ? null : throw $e;
         }
@@ -235,10 +237,15 @@ class Registration
      */
     protected function users(): Builder
     {
+        return $this->model()->newQuery();
+    }
+
+    protected function model(): Authenticatable&Model
+    {
         $provider = $this->keyring->provider();
 
         throw_unless($provider instanceof EloquentUserProvider, LogicException::class, 'Keyring checks whether an address is taken through the guard\'s Eloquent user provider. Check the "guard" option in config/keyring.php against config/auth.php.');
 
-        return $provider->createModel()->newQuery();
+        return $provider->createModel();
     }
 }
