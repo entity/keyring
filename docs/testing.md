@@ -206,10 +206,11 @@ The constructor options:
 | `origin` | Your `APP_URL`'s origin | The origin it claims to be on. By default, the first origin Keyring accepts. |
 | `userVerification` | `true` | Whether it reports verifying the user. Use `false` for a basic security key. |
 | `aaguid` | 16 zero bytes | The AAGUID it reports, as raw bytes. |
-| `algorithm` | `ES256` | `ES256` or `EdDSA`. |
+| `algorithm` | `ES256` | `ES256`, `EdDSA` or `RS256`. |
+| `bits` | `2048` | How long an `RS256` key is. |
 | `synced` | `false` | Whether it reports being a passkey that syncs between devices. |
 
-`VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys.
+`VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys. `VirtualAuthenticator::rsa()` makes one that signs with RS256, which Keyring only takes once [`webauthn.algorithms`](passkeys.md#signature-algorithms) lists it; `rsa(1024)` makes a key too short to be accepted.
 
 `$key->assert($options, $origin)` can answer from another origin, to test that Keyring rejects it. `$key->rewindCounter()` makes the next response reuse an old counter, as a cloned key would.
 

@@ -54,10 +54,14 @@ class VirtualAuthenticator
         public string $algorithm = 'ES256',
         // A passkey that syncs between devices (backup eligible and backed up).
         public bool $synced = false,
+        // How long an RS256 key is.
+        public int $bits = 2048,
     ) {
         $this->credentialId = random_bytes(32);
         $this->key = match ($algorithm) {
             'EdDSA' => sodium_crypto_sign_keypair(),
+            'RS256' => openssl_pkey_new(['private_key_bits' => $bits, 'private_key_type' => OPENSSL_KEYTYPE_RSA])
+                ?: throw new RuntimeException('OpenSSL could not make an RSA key pair.'),
             default => openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC])
                 ?: throw new RuntimeException('OpenSSL could not make a P-256 key pair.'),
         };
@@ -69,6 +73,15 @@ class VirtualAuthenticator
     public static function eddsa(): self
     {
         return new self(algorithm: 'EdDSA');
+    }
+
+    /**
+     * A key that signs with RS256, as Windows Hello does where it has
+     * nothing else. Keyring only takes one when the app lists RS256.
+     */
+    public static function rsa(int $bits = 2048): self
+    {
+        return new self(algorithm: 'RS256', bits: $bits);
     }
 
     /**
@@ -204,7 +217,7 @@ class VirtualAuthenticator
         }
 
         if ($this->attestation !== 'fido-u2f') {
-            $statement->add(TextStringObject::create('alg'), NegativeIntegerObject::create($this->attestation === 'self' && is_string($this->key) ? -8 : -7));
+            $statement->add(TextStringObject::create('alg'), NegativeIntegerObject::create($this->attestation === 'self' ? $this->identifier() : -7));
         }
 
         $statement->add(TextStringObject::create('sig'), ByteStringObject::create(match ($this->attestation) {
@@ -236,8 +249,31 @@ class VirtualAuthenticator
         return $signature;
     }
 
+    /**
+     * The COSE number of the algorithm the key signs with.
+     */
+    protected function identifier(): int
+    {
+        return match ($this->algorithm) {
+            'EdDSA' => -8,
+            'RS256' => -257,
+            default => -7,
+        };
+    }
+
     protected function publicKey(): string
     {
+        if ($this->algorithm === 'RS256' && ! is_string($this->key)) {
+            $rsa = (openssl_pkey_get_details($this->key) ?: throw new RuntimeException('OpenSSL could not read the key pair.'))['rsa'];
+
+            return (string) MapObject::create([
+                MapItem::create(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(3)),     // kty: RSA
+                MapItem::create(UnsignedIntegerObject::create(3), NegativeIntegerObject::create(-257)),  // alg: RS256
+                MapItem::create(NegativeIntegerObject::create(-1), ByteStringObject::create($rsa['n'])),
+                MapItem::create(NegativeIntegerObject::create(-2), ByteStringObject::create($rsa['e'])),
+            ]);
+        }
+
         if (is_string($this->key)) {
             return (string) MapObject::create([
                 MapItem::create(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(1)),     // kty: OKP
@@ -265,7 +301,7 @@ class VirtualAuthenticator
      */
     protected function point(): array
     {
-        if (is_string($this->key)) {
+        if (is_string($this->key) || $this->algorithm === 'RS256') {
             throw new RuntimeException('Only a P-256 key has a point on the curve.');
         }
 

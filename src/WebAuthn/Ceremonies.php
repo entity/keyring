@@ -2,11 +2,17 @@
 
 namespace Keyring\WebAuthn;
 
+use CBOR\Decoder;
+use CBOR\Normalizable;
+use CBOR\StringStream;
 use Cose\Algorithm\Algorithm;
 use Cose\Algorithm\Manager;
 use Cose\Algorithm\Signature\ECDSA\ES256;
 use Cose\Algorithm\Signature\EdDSA\Ed25519;
 use Cose\Algorithm\Signature\RSA\RS256;
+use Cose\Key\Key;
+use Cose\Key\RsaKey;
+use Cose\Key\RsaKeyValidator;
 use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
@@ -52,13 +58,15 @@ use Webauthn\PublicKeyCredentialUserEntity;
 #[Singleton]
 class Ceremonies
 {
+    /**
+     * The shortest RSA key an app can settle for, in bits: what RFC 8230
+     * asks of RS256, and the 112 bits of strength NIST SP 800-63B wants.
+     */
+    public const int SHORTEST_RSA_KEY = 2048;
+
     protected ?SerializerInterface $serializer = null;
 
-    protected ?SerializerInterface $attestedSerializer = null;
-
     protected ?AttestationStatementSupportManager $attestation = null;
-
-    protected ?AttestationStatementSupportManager $attestedSupport = null;
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -153,8 +161,10 @@ class Ceremonies
                 return null;
             }
 
-            return AuthenticatorAttestationResponseValidator::create($this->steps($attested)->creationCeremony())
+            $record = AuthenticatorAttestationResponseValidator::create($this->steps($attested)->creationCeremony())
                 ->check($credential->response, $options, $this->relyingPartyId());
+
+            return $this->canVerify($record) ? $record : null;
         } catch (Throwable $e) {
             report_if(! $this->isRejection($e), $e);
 
@@ -301,17 +311,58 @@ class Ceremonies
     }
 
     /**
-     * The signature algorithms keys may use, in order of preference. Only
-     * these are offered to the browser, so every key it creates can be
-     * checked.
+     * The signature algorithms keys may use, in the app's order of
+     * preference. Only these are offered to the browser, and a key that
+     * signs with anything else is refused, when it's added and at sign in.
+     *
+     * RS256 is off unless the app lists it: OWASP ASVS doesn't approve its
+     * padding (PKCS #1 v1.5), and the keys that need it are 2048 bit RSA,
+     * short of the 128 bits of strength ASVS asks for.
      */
     public function algorithms(): Manager
     {
-        return Manager::create()->add(...array_filter([
-            ES256::create(),
-            Ed25519::isSupported() ? Ed25519::create() : null,
-            RS256::create(), // older Windows Hello
-        ]));
+        $algorithms = array_filter(array_map(fn (mixed $name) => match ($name) {
+            'ES256' => ES256::create(),
+            'EdDSA' => Ed25519::isSupported() ? Ed25519::create() : null,
+            'RS256' => RS256::create($this->rsaKeys()),
+            default => throw new LogicException('Keyring only knows the WebAuthn algorithms ES256, EdDSA and RS256. Check keyring.webauthn.algorithms.'),
+        }, config('keyring.webauthn.algorithms') ?? ['ES256', 'EdDSA']));
+
+        throw_if($algorithms === [], LogicException::class, 'Keyring has no algorithm to check WebAuthn signatures with. List at least one this server supports in keyring.webauthn.algorithms: EdDSA on its own needs PHP\'s sodium extension.');
+
+        return Manager::create()->add(...$algorithms);
+    }
+
+    /**
+     * What an RS256 key has to be: "minimum_rsa_bits" long, and never under
+     * 2048 bits. Given to the library outright, which then refuses a
+     * shorter key itself. Left to its default it only raises a warning,
+     * and the key passes wherever warnings aren't turned into exceptions.
+     */
+    protected function rsaKeys(): RsaKeyValidator
+    {
+        return RsaKeyValidator::create(max(static::SHORTEST_RSA_KEY, (int) config('keyring.webauthn.minimum_rsa_bits')));
+    }
+
+    /**
+     * Whether signatures from a new key could be checked: its algorithm is
+     * one the app takes now, and an RSA key is long enough. The library
+     * only looks at a key when it verifies with it, at sign in, so without
+     * this a key could be added that would never work.
+     */
+    protected function canVerify(CredentialRecord $record): bool
+    {
+        $decoded = Decoder::create()->decode(StringStream::create($record->credentialPublicKey));
+        $data = $decoded instanceof Normalizable ? $decoded->normalize() : null;
+
+        if (! is_array($data)) {
+            return false;
+        }
+
+        $algorithm = Key::create($data)->alg();
+
+        return $this->algorithms()->has($algorithm)
+            && ($algorithm !== RS256::ID || $this->rsaKeys()->isValid(RsaKey::create($data)));
     }
 
     /**
@@ -363,8 +414,9 @@ class Ceremonies
 
     protected function attestationSupport(bool $attested = false): AttestationStatementSupportManager
     {
+        // Made each time: the formats hold the algorithms the app takes now.
         if ($attested) {
-            return $this->attestedSupport ??= AttestationStatementSupportManager::create($this->attestationFormats());
+            return AttestationStatementSupportManager::create($this->attestationFormats());
         }
 
         return $this->attestation ??= tap(AttestationStatementSupportManager::create())->add(NoneAttestationStatementSupport::create());
@@ -389,7 +441,7 @@ class Ceremonies
     protected function serializer(bool $attested = false): SerializerInterface
     {
         if ($attested) {
-            return $this->attestedSerializer ??= new WebauthnSerializerFactory($this->attestationSupport(true))->create();
+            return new WebauthnSerializerFactory($this->attestationSupport(true))->create();
         }
 
         return $this->serializer ??= new WebauthnSerializerFactory($this->attestationSupport())->create();

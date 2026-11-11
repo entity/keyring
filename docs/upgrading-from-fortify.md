@@ -112,6 +112,7 @@ Things to know:
 - One exception: a failed two factor import's stand-in is replaced by a later run that can read the secret, whatever else the user has by then. A passkey that failed has no stand-in. If the user's two factor came across in the meantime, a later run lists that passkey as skipped, since it can't tell a row that failed from one the user removed, and the user adds the passkey again in the app.
 - It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Drop them once the import is clean: a user who removes every sign-in method in Keyring has none left to tell a later run they were already imported.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
+- `laravel/passkeys` takes RS256 keys and Keyring doesn't by default, so a passkey made by Windows Hello may be imported and then refused at sign in. Add `RS256` to [`webauthn.algorithms`](passkeys.md#rs256-and-windows-hello) to keep those working.
 - Recovery codes become case-insensitive, and spaces and dashes in them are ignored.
 - `--dry-run` reports the same outcome and exit code without writing anything.
 
