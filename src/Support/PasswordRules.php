@@ -20,7 +20,12 @@ final class PasswordRules
     /** The shortest password any setting may allow (OWASP ASVS 6.2.1, NIST SP 800-63B). */
     public const int SHORTEST = 8;
 
-    /** The most common passwords long enough to pass the length rules (from SecLists, MIT). */
+    /**
+     * The most common passwords long enough to pass the length rules: the
+     * top 10,000 of 8 characters or more and the top 3,000 of 15 or more,
+     * trimmed and lowercased. The README beside it has the source (SecLists,
+     * MIT) and how it's built.
+     */
     private const string COMMON = __DIR__.'/../../resources/passwords/common.txt';
 
     /** @var array<string, int>|null */
@@ -80,14 +85,15 @@ final class PasswordRules
     /**
      * The breached-password check needs Have I Been Pwned, and lets
      * passwords through when it can't be reached. The most common ones are
-     * refused anyway.
+     * refused anyway, whatever their case and with or without spaces around
+     * them. The list is read once, into an array keyed by password.
      */
     private static function notCommon(): Closure
     {
         return function (string $attribute, mixed $value, Closure $fail) {
             self::$common ??= array_flip(file(self::COMMON, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []);
 
-            if (is_string($value) && isset(self::$common[Str::lower($value)])) {
+            if (is_string($value) && isset(self::$common[Str::lower(trim($value))])) {
                 $fail(__('keyring::keyring.password_common'));
             }
         };

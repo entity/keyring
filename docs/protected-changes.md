@@ -201,7 +201,7 @@ Keyring runs your action as one of its own flows, so it may change the protected
 - at most `max` characters (128),
 - no composition rules by default (no "one uppercase, one symbol"),
 - breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),
-- the most common passwords rejected always, from a list bundled with Keyring (the long-enough entries of SecLists' 10,000 most common, MIT licensed),
+- the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
 - no passwords containing the site's name, or the user's name or email username (words of four characters or more),
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.

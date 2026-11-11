@@ -57,6 +57,62 @@ it('refuses the most common passwords even when the breach check doesn\'t run', 
         ->and(passes('SunShine', $user))->toBeFalse();
 });
 
+it('refuses common passwords long enough to stand without a second factor', function () {
+    expect(passes('a long passphrase for me'))->toBeTrue()
+        ->and(passes('1qaz2wsx3edc4rfv'))->toBeFalse()
+        ->and(passes('123456789qwerty'))->toBeFalse()
+        ->and(passes('Qazwsxedcrfvtgb'))->toBeFalse();
+});
+
+it('refuses a common password whatever its case, and with spaces around it', function () {
+    $user = taylor();
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    // "Password1" in the source list, kept lowercased.
+    expect(passes('password1', $user))->toBeFalse()
+        ->and(passes('Password1', $user))->toBeFalse()
+        ->and(passes('PASSWORD1', $user))->toBeFalse()
+        ->and(passes(' password1 ', $user))->toBeFalse()
+        ->and(passes("\tPassword1\n", $user))->toBeFalse()
+        ->and(passes('      1qaz2wsx3edc4rfv      '))->toBeFalse();
+});
+
+it('keeps a common password list of the size and shape the rules rely on', function () {
+    $lines = explode("\n", file_get_contents(__DIR__.'/../../resources/passwords/common.txt'));
+
+    // One entry per line and a newline after the last.
+    expect(array_pop($lines))->toBe('');
+
+    $sorted = $lines;
+    sort($sorted, SORT_STRING);
+
+    // OWASP ASVS 6.2.4 asks for the top 3,000 that fit the policy, which
+    // has two minimum lengths. Rebuilding the list changes these on purpose.
+    expect($lines)->toHaveCount(13052)
+        ->and(array_filter($lines, fn (string $line) => mb_strlen($line) >= 15))->toHaveCount(3001)
+        ->and(array_filter($lines, fn (string $line) => mb_strlen($line) < PasswordRules::SHORTEST))->toBeEmpty()
+        // Looked up trimmed and lowercased, so stored that way, in plain ASCII.
+        ->and(array_filter($lines, fn (string $line) => preg_match('/^[\x21-\x7e]([\x20-\x7e]*[\x21-\x7e])?$/', $line) !== 1 || $line !== strtolower($line)))->toBeEmpty()
+        ->and(array_unique($lines))->toHaveCount(count($lines))
+        ->and($lines)->toBe($sorted);
+});
+
+it('refuses every password in its common list', function () {
+    $lines = file(__DIR__.'/../../resources/passwords/common.txt', FILE_IGNORE_NEW_LINES);
+    $rule = collect(PasswordRules::for())->first(fn (mixed $rule) => $rule instanceof Closure);
+
+    $missed = array_filter($lines, function (string $line) use ($rule) {
+        $refused = false;
+        $rule('password', strtoupper($line), function () use (&$refused) {
+            $refused = true;
+        });
+
+        return ! $refused;
+    });
+
+    expect($missed)->toBeEmpty();
+});
+
 it('refuses passwords containing the user\'s name, their email username or the site\'s name', function () {
     config(['app.name' => 'Keyring Example']);
     $user = taylor(['name' => 'Taylor Otwell', 'email' => 'tayotw@example.com']);
