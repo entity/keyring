@@ -11,6 +11,12 @@
     - [Links and Headers](#links-and-headers)
     - [Request Input](#request-input)
     - [Storage](#storage)
+- [What Your App Must Provide](#what-your-app-must-provide)
+    - [HTTPS and HSTS](#https-and-hsts)
+    - [Trusted Proxies](#trusted-proxies)
+    - [Secure Cookies](#secure-cookies)
+    - [A Content Security Policy](#a-content-security-policy)
+    - [Headers on Your Other Responses](#headers-on-your-other-responses)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
@@ -43,7 +49,7 @@ Every factor has its own limits, checked in the pipeline before the proof is loo
 
 - **Per account**: `limits.per_account` attempts a minute (5). The account is the user: Keyring finds who a typed username belongs to before it counts, so every way of typing it shares one limit, guesses at login and when confirming count together, and two accounts never share a count however alike their usernames look. Browsers the account has signed in from before (they carry one of its device cookies) count in a bucket of their own, so someone guessing from elsewhere can't lock the owner out (OWASP's "device cookies"). They share that one bucket between them: a device cookie is made at every sign in from a new browser, so someone who could once sign in may hold any number, and with a bucket each they'd get the account's allowance of guesses once per cookie. A browser stops counting as known when a password reset or change, or a sign-out everywhere, takes the account back, until it signs in again.
 - **Per typed username**: a sign in that names its account is counted under the name as typed as well, with the same numbers, whether or not anyone has it. Only this count says so when it refuses (the `429`). The account's own limit refuses quietly: the attempt is answered like a wrong password, in the same time, without the password being looked at. So a name is answered from its own history, and locking an account under one name doesn't show which other names belong to it, or which names have an account at all.
-- **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address. A browser carrying the account's device cookie counts per IP for that account alone, so others on a shared address can't hold it up, and an attacker holding several of the account's device cookies still gets one count. Behind a load balancer, configure Laravel's trusted proxies, or every user shares the balancer's address.
+- **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address. A browser carrying the account's device cookie counts per IP for that account alone, so others on a shared address can't hold it up, and an attacker holding several of the account's device cookies still gets one count. Behind a load balancer, configure Laravel's [trusted proxies](#trusted-proxies), or every user shares the balancer's address.
 - **In a row**: `limits.consecutive` failures (100, as NIST SP 800-63B caps them) on one account's factor, however slowly they come. Only a success clears the count, or a password reset for the factors that can start a sign in. At the cap that factor is refused for the account, though the user can still sign in with another factor; `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop. With `Features::devices()` on, browsers the account has signed in from before share a count of their own, so guesses made elsewhere can't use it up. A second factor at the cap stays refused for up to 30 days (`limits.remember_failures_for`). Until then it works from a known browser, or the user signs in with another factor or a recovery code.
 
 How they count:
@@ -168,6 +174,76 @@ A URL ends up in places a request's body doesn't: access logs, proxies, the brow
 - WebAuthn user handles are an HMAC of the user ID, never the ID or email.
 - The security log never holds passwords, codes, tokens or session IDs.
 
+## What Your App Must Provide
+
+Keyring sets the headers and cookies of its own responses. The rest of what a browser needs belongs to your app and your server, because it covers every response, not only Keyring's. This is what Keyring expects to be there, what it does about each, and what happens without it.
+
+| Your app provides | Keyring does | Keyring doesn't |
+|---|---|---|
+| HTTPS on every request, and HSTS | Builds emailed links from `APP_URL`, and keeps its own cookies to HTTPS once `APP_URL` is `https` | Redirect HTTP to HTTPS, or send `Strict-Transport-Security` |
+| Trusted proxies, behind a load balancer | Reads the client's address and scheme from the request Laravel gives it | Work out which proxies to trust |
+| `SESSION_SECURE_COOKIE=true` | Makes its own two cookies `Secure` and gives them the `__Host-` prefix | Change the flags or name of Laravel's session, CSRF or "remember me" cookies |
+| A `Content-Security-Policy` with `frame-ancestors` | Sends none: your layout and assets decide what a policy has to allow | Stop its pages being framed |
+| `X-Content-Type-Options: nosniff` on your own responses | Sends it, with `Cache-Control: no-store` and a `Referrer-Policy`, on every Keyring response | Add headers to routes that aren't Keyring's |
+
+### HTTPS and HSTS
+
+Serve the whole app over HTTPS, redirect plain HTTP to it, and send `Strict-Transport-Security` so a browser that has been once never tries HTTP again. That's your web server's or load balancer's job, for every response.
+
+Set `APP_URL` to the `https://` address. Keyring takes that as the sign the app is served over HTTPS: it's where emailed links start, the origin passkeys are bound to, and what decides whether [Keyring's cookies](devices-and-sessions.md#keyrings-cookies) are `Secure` and prefixed.
+
+Without HTTPS, passwords, codes and session cookies cross the network in the clear, and browsers refuse passkeys and security keys altogether except on `localhost`. Keyring still works over plain HTTP for local development, with unprefixed cookies that aren't forced `Secure`.
+
+### Trusted Proxies
+
+Behind a load balancer or CDN that ends TLS, tell Laravel which proxies to trust (`trustProxies()` in `bootstrap/app.php`). Until you do, every request looks like plain HTTP from the proxy's address. Then:
+
+- every user shares one address for the [per-IP rate limit](#rate-limiting), so one person's failures hold everyone up,
+- the IP addresses in the security log and on the devices page are the proxy's,
+- Laravel only marks its own cookies `Secure` on a request it knows came over HTTPS, so with `SESSION_SECURE_COOKIE` unset they're sent without it.
+
+Keyring's own cookies don't depend on this, since they go by `APP_URL`. Only trust proxies you run: a trusted proxy's `X-Forwarded-For` is believed, and a client that can reach the app directly could then choose its own address. `X-Forwarded-Prefix` and the `Host` header never reach an [emailed link](#links-and-headers) either way.
+
+### Secure Cookies
+
+Set `SESSION_SECURE_COOKIE=true` in production. Laravel then marks its session cookie, its CSRF cookie and its "remember me" cookie `Secure` on every response, whatever the request looked like. Keyring reads the same setting, as well as `APP_URL`, to decide about its own.
+
+Keyring's two cookies need nothing from you: over HTTPS they're `Secure`, httpOnly, `SameSite=Lax` and named `__Host-keyring_device` and `__Host-keyring_remember`, or `__Secure-` when `SESSION_DOMAIN` shares your cookies with subdomains. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). If you set your own names (`devices.cookie`, `sessions.remember_cookie`), they're used exactly as written and the prefix is yours to add.
+
+The session cookie is Laravel's, and its name is yours. Give it the prefix as well:
+
+```ini
+SESSION_SECURE_COOKIE=true
+SESSION_COOKIE=__Host-session
+```
+
+A `__Host-` cookie needs `SESSION_PATH=/` and no `SESSION_DOMAIN`, which are Laravel's defaults. With a `SESSION_DOMAIN`, use `__Secure-`. Laravel names its "remember me" cookie itself (`remember_web_...`), so that one can't be prefixed. It signs nobody in without Keyring's cookie beside it: see ["Remember Me"](devices-and-sessions.md#remember-me).
+
+Keep `SESSION_SAME_SITE` at `lax` or `strict`, and leave `SESSION_HTTP_ONLY` on. Keyring's routes use the `web` middleware group, so Laravel's CSRF check covers every one that changes anything. Don't except Keyring's paths from it, and keep it in the list if you replace `keyring.middleware`.
+
+### A Content Security Policy
+
+Keyring renders its pages through your app, as Inertia components or Blade views in your own layout. Which scripts, styles and fonts a policy has to allow depends on that layout, so Keyring sends no `Content-Security-Policy`, and your app must.
+
+Whatever else yours says, include `frame-ancestors`:
+
+```
+Content-Security-Policy: frame-ancestors 'none'
+```
+
+Use `'self'` if your app frames its own pages. Add `X-Frame-Options: DENY` (or `SAMEORIGIN`) for older browsers. It matters most on these pages:
+
+- the login, challenge and confirm pages, where someone types a password or a code,
+- the pages emailed links open (`reset-password`, `email-verification`, `email-change`, `device-report`). Three of those do their work with one press of a button, which is exactly what a hidden frame on another site can trick someone into.
+
+Send it on every HTML response rather than on those routes alone. Without it another site can load these pages in an invisible frame and line a button of its own up over yours. The CSRF token doesn't help there, because the press really does come from your page. `SameSite=Lax` cookies aren't sent to a framed page on another site, which stops the signed-in cases in current browsers, but the emailed-link pages work signed out.
+
+### Headers on Your Other Responses
+
+Keyring's middleware (`Keyring\Http\Middleware\AddSecurityHeaders`) is on Keyring's routes only. Send `X-Content-Type-Options: nosniff` on the rest of your app too, so a browser never treats a response as a type it doesn't say it is, and decide your own `Referrer-Policy` and `Cache-Control` for pages that show account details. A small middleware on your `web` and `api` groups, or your web server's config, covers all of it.
+
+If you take Keyring's middleware out of `keyring.middleware`, its responses lose `no-store`, `nosniff` and their referrer policy unless yours send them. The pages emailed links open have a token in their URL, so they need `Referrer-Policy: no-referrer`.
+
 ## Standards
 
 Keyring's code and config say what each thing does. This is where the choices come from:
@@ -191,6 +267,12 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
+| `X-Content-Type-Options: nosniff` on every response, and a referrer policy | OWASP ASVS 3.4.4 and 3.4.5 |
+| `Secure` cookies with the `__Host-` prefix | OWASP ASVS 3.3.1 and 3.3.3, and OWASP's Session Management Cheat Sheet |
+| No referrer from pages whose URL holds a token | OWASP's Forgot Password Cheat Sheet |
+| Emailed links that only act on a `POST`, with the token or signature in its body | OWASP ASVS 3.5.3 and 14.2.1, and OWASP's Cross-Site Request Forgery Prevention Cheat Sheet |
+| Passwords, codes, credentials and tokens read from the body, never the query string of a `POST` | OWASP ASVS 14.2.1 and 15.3.7 |
+| A passkey challenge that runs out on the server | OWASP's guidance on passkey challenges |
 
 ## Known Limitations
 
