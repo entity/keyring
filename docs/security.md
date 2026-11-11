@@ -96,7 +96,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - A passkey or security key only counts as inherence when it actually verified the user that time.
 - With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in. Recovery codes stay on offer as the way back in, unless you pass `except: []`.
 - With `ifEnrolled()`, a policy the user can't fully meet still asks for the strongest version they can give, so a user with a second factor never signs in with one factor.
-- Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification of everything signing in would ask for (NIST SP 800-63B's rule for binding authenticators). Users with a possession factor always use one, so a stolen session plus one phished factor isn't enough.
+- Adding, removing or changing sign-in methods, revoking devices, changing the password and starting an email change need a fresh verification with the strongest combination the account can give, and at least what signing in would ask (NIST SP 800-63B-4's rule for binding authenticators, Sec. 4.1.2.1). Users with a possession factor always use one, and users with a key that can't leave its device use that, so a stolen session plus a phished password and code isn't enough. A recovery code with the password stands in for a lost key, as NIST's account recovery allows.
 - The fresh window is fixed from the moment of verification and doesn't slide with activity.
 - Users can't add a sign-in method until their email is verified (with `MustVerifyEmail`), so someone who registers an address first can't plant a factor that survives the real owner's password reset. With registration on, a user model that can't verify its email can't add sign-in methods at all.
 - Users can't remove authenticators below what they need to sign in, even with several removals at once.
@@ -164,7 +164,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Assurance levels, and what reaches AAL2 and AAL3, as far as a library can check. AAL3 takes an attested key that can't leave its device, with its own user verification or a password. Validated authenticators and verifier cryptography, which NIST AAL3 also needs, are yours to supply | NIST SP 800-63B-4, Sec. 2 and Appendix B |
 | Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours) | NIST SP 800-63B, reauthentication |
 | A cap of 100 failures in a row on an account's factor | NIST SP 800-63B, rate limiting |
-| Proving the account's factors again before adding a sign-in method | NIST SP 800-63B, binding an authenticator |
+| Proving the strongest combination the account can give before adding a sign-in method, whatever the sign-in policy asks | NIST SP 800-63B-4, Sec. 4.1.2.1 |
 | Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
 | Email codes being opt-in, and counting toward no level: a password and an emailed code is AAL1 | NIST SP 800-63B-4, Sec. 3.1.3.1, which doesn't accept email as an authenticator |
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |

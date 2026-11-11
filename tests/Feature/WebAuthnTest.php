@@ -38,9 +38,21 @@ beforeEach(function () {
     $this->user = taylor();
 });
 
+/**
+ * A session that just proved the password and every key the account has,
+ * which is what adding another one takes.
+ */
+function provedEveryKey(): void
+{
+    $keys = Keyring::for(test()->user)->all()->reject->isVirtual()->all();
+
+    test()->actingAs(test()->user);
+    $keys === [] ? test()->withAssurance(Assurance::AAL2) : test()->verifiedWith(...$keys);
+}
+
 function enroll(string $factor, VirtualAuthenticator $key, string $name = 'My key'): void
 {
-    test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
+    provedEveryKey();
 
     $options = test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
 
@@ -70,7 +82,7 @@ it('keeps the user handle a user\'s keys already have when app_key changes', fun
 
     config(['app.key' => 'base64:'.base64_encode(random_bytes(32)), 'app.previous_keys' => [config('app.key')]]);
 
-    test()->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    provedEveryKey();
     $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect(Base64UrlSafe::decodeNoPadding($options['user']['id']))->toBe($handle);
@@ -118,9 +130,8 @@ it('fails a key whose stored record can not be read, and lets the user add anoth
     $this->postJson('/login/passkey', ['credential' => $key->assert($options)])->assertJsonValidationErrors('credential');
     $this->assertGuest();
 
-    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
-        ->postJson(route('keyring.authenticators.store', 'passkey'))
-        ->assertOk();
+    provedEveryKey();
+    $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk();
 });
 
 it('caps a passkey that syncs at aal2, as nist does', function () {
@@ -356,7 +367,7 @@ it('will not register the same key twice', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    provedEveryKey();
     $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect($options['excludeCredentials'])->toHaveCount(1);

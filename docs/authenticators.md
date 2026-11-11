@@ -36,7 +36,7 @@ Without it, users can't set up any sign-in method besides the password themselve
 | `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Rename, or make it the default. |
 | `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. Uses the `keyring` rate limiter, as it can check the password. |
 
-These routes need `auth:{guard}`, plus the `changes_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified, in the last 15 minutes, as much as signing in would ask of them. See [Fresh Verification](step-up.md#fresh-verification).
+These routes need `auth:{guard}`, plus the `changes_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified, in the last 15 minutes, the strongest combination their account can give: someone with a key that can't leave its device uses it before adding another, and someone with only a password uses that. See [Fresh Verification](step-up.md#fresh-verification).
 
 `{factor}` must be a registered factor that implements `Enrollable`; otherwise the route returns a 404. Users can only see and change their own authenticators; anyone else's ID returns a 404.
 

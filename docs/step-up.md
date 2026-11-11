@@ -60,13 +60,17 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 
 ## Fresh Verification
 
-`keyring.fresh:15m` lets the request through when the user verified, in the last 15 minutes, as much as signing in would ask of them. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
+`keyring.fresh:15m` lets the request through when the user verified, in the last 15 minutes, the strongest combination their account can give, and at least as much as signing in would ask of them. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
 
-- Users with only a password confirm with their password.
-- Users with two factors prove both again, as NIST SP 800-63B asks before binding a new authenticator. A stolen session plus one phished factor can't add, remove or change anything.
+NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new authenticator bound at the highest level the account can authenticate at, so what's asked here follows the account, not the sign-in policy:
+
+- Users with only a password confirm with their password, so an account can always add its first sign-in method.
+- Users with two factors prove both again, even where the policy would sign them in with one. A stolen session plus one phished factor can't add, remove or change anything.
+- Users with a key that can't leave its device use it, with its own user verification or their password beside it. A password and an authenticator app's code isn't enough for them, whatever the policy says. That goes for an attested key, which could reach AAL3, and for one nothing vouches for.
+- A recovery code stands in for a lost key, with the password, as it does at sign in. A policy that takes none there (`noDowngrade(except: [])`, or an explicit `phishingResistant()`) takes none here.
 - Users who have any possession factor (an authenticator app, a passkey or a security key) always use one. An [email code](factors.md#email-codes) isn't one, so it can't stand in. A user whose only other sign-in method it is proves the password and an emailed code, which is what lets them add a real second factor.
 - A policy the user can't fully meet yet (one that asks for a passkey they haven't added) counts as far as they can, so they can still add it.
-- A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about one nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
+- A policy that asks for more than that is heard. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about one nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is fresh for step-up too.
 

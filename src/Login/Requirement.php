@@ -20,7 +20,7 @@ final readonly class Requirement
     /**
      * @param  list<Category>  $categories
      * @param  list<string>  $downgradeExceptions  factors noDowngrade() still accepts instead of a key
-     * @param  list<string>  $phishingResistanceExceptions  factors accepted in place of a phishing-resistant one
+     * @param  list<string>  $phishingResistanceExceptions  factors accepted in place of the key this asks for
      */
     public function __construct(
         public int $factors = 1,
@@ -165,6 +165,20 @@ final readonly class Requirement
             'requiresPhishingResistance' => true,
             'phishingResistanceExceptions' => $this->downgradeExceptions,
         ]);
+    }
+
+    /**
+     * Accept these factors in place of the key this asks for: recovery
+     * codes, for someone whose key is lost.
+     *
+     * @internal
+     *
+     * @param  list<string>  $factors
+     */
+    #[\NoDiscard]
+    public function acceptingInstead(array $factors): static
+    {
+        return clone ($this, ['phishingResistanceExceptions' => $factors]);
     }
 
     /**
@@ -386,7 +400,17 @@ final readonly class Requirement
         }
 
         return array_values(array_filter($verifications, fn (Verification $verification) => $this->isAttestedKey($verification)
+            || $this->standsIn($verification)
             || ! in_array(Category::Possession, $verification->categories, true)));
+    }
+
+    /**
+     * Whether a verification is of a factor accepted in place of the key
+     * asked for. A used-up set of recovery codes proves nothing.
+     */
+    private function standsIn(Verification $verification): bool
+    {
+        return $verification->categories !== [] && in_array($verification->factor, $this->phishingResistanceExceptions, true);
     }
 
     private function isAttestedKey(Verification $verification): bool
@@ -411,7 +435,7 @@ final readonly class Requirement
      */
     private function hasDeviceBoundKey(array $verifications): bool
     {
-        return array_any($verifications, fn (Verification $verification) => $verification->phishingResistant && $verification->deviceBound);
+        return array_any($verifications, fn (Verification $verification) => ($verification->phishingResistant && $verification->deviceBound) || $this->standsIn($verification));
     }
 
     /**
@@ -419,7 +443,6 @@ final readonly class Requirement
      */
     private function hasPhishingResistant(array $verifications): bool
     {
-        return array_any($verifications, fn (Verification $verification) => $verification->phishingResistant
-            || ($verification->categories !== [] && in_array($verification->factor, $this->phishingResistanceExceptions, true)));
+        return array_any($verifications, fn (Verification $verification) => $verification->phishingResistant || $this->standsIn($verification));
     }
 }

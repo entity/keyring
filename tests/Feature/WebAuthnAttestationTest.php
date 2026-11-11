@@ -49,7 +49,11 @@ beforeEach(function () {
  */
 function attestationOptions(string $factor = 'security-key'): array
 {
-    test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
+    // Adding a key takes proving the ones the account already has.
+    $keys = Keyring::for(test()->user)->all()->reject->isVirtual()->all();
+
+    test()->actingAs(test()->user);
+    $keys === [] ? test()->withAssurance(Assurance::AAL2) : test()->verifiedWith(...$keys);
 
     return test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
 }

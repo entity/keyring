@@ -84,7 +84,7 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
 ```
 
-`verifiedWith(...$authenticators)` pretends the session verified the password and each authenticator you pass. The level is whatever those reach (a password and an authenticator app is AAL2), so it replaces `withAssurance()`. `freshAt()` chains with it as before.
+`verifiedWith(...$authenticators)` pretends the session verified the password and each authenticator you pass. The level is whatever those reach (a password and an authenticator app is AAL2), so it replaces `withAssurance()`. `freshAt()` chains with it as before. Reach for it when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method: that route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
 
 ## Faking Factors
 
