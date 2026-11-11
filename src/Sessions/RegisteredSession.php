@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Keyring\Sessions;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Keyring\Enums\Assurance;
 
@@ -17,12 +19,18 @@ use Keyring\Enums\Assurance;
  *
  * A remembered session is one "remember me" may bring back once Laravel's
  * own session has gone, so it's allowed to sit unused for longer.
+ *
+ * Whose it is takes more than the ID: two user models can have the same
+ * IDs. userType says which table the ID is one of. It's the table and not
+ * the class, so one account loaded as two classes (an Admin that extends
+ * User, on the users table) is still one account, as it is to the guard.
  */
 final readonly class RegisteredSession
 {
     public function __construct(
         public string $id,
         public string $userId,
+        public string $userType,
         public string $guard,
         public ?string $deviceId,
         public Assurance $assurance,
@@ -36,6 +44,23 @@ final readonly class RegisteredSession
         public ?int $replacedAt = null,
         public bool $remembered = false,
     ) {}
+
+    /**
+     * Whether this is a session of that user: the same model and the same ID.
+     */
+    public function belongsTo(Authenticatable $user): bool
+    {
+        return $this->userId === (string) $user->getAuthIdentifier() && $this->userType === self::typeOf($user);
+    }
+
+    /**
+     * What a user's records carry as userType: the connection and table
+     * their ID is unique in. A user that isn't a model has only its class.
+     */
+    public static function typeOf(Authenticatable $user): string
+    {
+        return $user instanceof Model ? $user->getConnection()->getName().':'.$user->getTable() : $user::class;
+    }
 
     public function isActive(int $now): bool
     {
@@ -59,6 +84,7 @@ final readonly class RegisteredSession
         return [
             'id' => $this->id,
             'user_id' => $this->userId,
+            'user_type' => $this->userType,
             'guard' => $this->guard,
             'device_id' => $this->deviceId,
             'assurance' => $this->assurance->value,
@@ -95,6 +121,7 @@ final readonly class RegisteredSession
         return new self(
             id: $data['id'],
             userId: (string) $data['user_id'],
+            userType: $data['user_type'],
             guard: $data['guard'],
             deviceId: $data['device_id'],
             assurance: Assurance::from((int) $data['assurance']),

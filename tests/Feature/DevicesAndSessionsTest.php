@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password as Broker;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Changes\AuthenticatorChanges;
@@ -36,8 +40,10 @@ use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\RiskLocks;
+use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -316,6 +322,49 @@ describe('an account signed in more times than it may be', function () {
     })->with('registries');
 });
 
+// The guard is signed in before the device is recorded and the session
+// registered. If one of those fails, nobody is left signed in: a session
+// that never had its closing checks isn't one to carry on with.
+describe('a sign in that fails after the guard is signed in', function () {
+    it('leaves nobody signed in, and nothing registered', function () {
+        // The session registry fails as the session is being stored.
+        app()->bind(SessionRegistry::class, fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function save(RegisteredSession $session): void
+            {
+                throw new RuntimeException('The database went away.');
+            }
+
+            // And is still away when the sign in is undone.
+            public function revoke(string $id): void
+            {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();
+
+        $this->assertGuest();
+        expect(DB::table('keyring_sessions')->count())->toBe(0);
+
+        app()->forgetInstance(SessionRegistry::class);
+        $this->get('/home')->assertRedirect('/login');
+        expect(DB::table('keyring_sessions')->count())->toBe(0);
+    });
+
+    it('does not fail on a device describer of the app\'s that throws, or names a browser at length', function (Closure $describer, ?string $name) {
+        Keyring::describeDevicesUsing($describer);
+
+        login()->assertRedirect('/dashboard');
+
+        $this->assertAuthenticatedAs($this->user);
+        expect(Device::query()->sole()->name)->toBe($name);
+    })->with([
+        'one that throws' => [fn () => throw new RuntimeException('No idea.'), null],
+        'a very long name' => [fn () => str_repeat('a', 400), str_repeat('a', 255)],
+    ]);
+});
+
 it('gives new device events a working "this wasn\'t me" link', function () {
     Event::fake([NewDeviceSignedIn::class, DeviceRevoked::class]);
     login();
@@ -387,6 +436,7 @@ it('signs out everywhere else', function (string $driver) {
     $other = new RegisteredSession(
         id: 'other',
         userId: (string) $this->user->id,
+        userType: RegisteredSession::typeOf($this->user),
         guard: 'web',
         deviceId: null,
         assurance: Assurance::AAL1,
@@ -709,16 +759,56 @@ it('keeps recognising two accounts that share a browser', function () {
     $abigail = fn (string $token) => test()->withHeader('User-Agent', FIREFOX)->withCookies(['known_device' => $token])
         ->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
 
-    $token = deviceCookie(login());
+    $first = deviceCookie(login());
     $this->post('/logout');
-    $abigail($token);
+
+    // A second account on the browser gives it a new cookie, and the first
+    // account's device moves to it too.
+    $shared = deviceCookie($abigail($first));
     $this->post('/logout');
-    $abigail($token);
+
+    expect($shared)->not->toBe($first);
+
+    $abigail($shared);
     $this->post('/logout');
-    login(['known_device' => $token]);
+    login(['known_device' => $shared]);
 
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 2);
-    expect(Device::count())->toBe(2);
+    expect(Device::count())->toBe(2)
+        ->and(Device::query()->withToken($shared)->count())->toBe(2);
+});
+
+// The server can't tell a cookie two accounts share from one that was put in
+// the browser, holding a value someone else's device has. So an account never
+// takes a value the browser sent: whoever placed it would be recognised as
+// that account's browser from their own, with no "new device" notice and
+// with whatever a policy allows a browser it knows.
+it('never recognises a browser by a device cookie that was planted in the account owner\'s', function () {
+    Keyring::require(fn (User $user, Attempt $attempt) => $attempt->isNewDevice() ? Requirement::aal2()->ifEnrolled() : Requirement::aal1());
+    User::create(['name' => 'Mallory', 'email' => 'mallory@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    // A real cookie, issued to someone else's own browser, then placed in
+    // the owner's.
+    $planted = deviceCookie($this->withHeader('User-Agent', CHROME)->post('/login', ['email' => 'mallory@example.com', 'password' => 'password']));
+    $this->post('/logout');
+
+    // The owner signs in with a password alone, before they have a second factor.
+    $owners = deviceCookie(login(['known_device' => $planted])->assertRedirect('/dashboard'));
+    $this->post('/logout');
+
+    expect($owners)->not->toBe($planted)
+        ->and($this->user->devices()->sole()->token_hash)->toBe(hash('sha256', $owners));
+
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    Event::fake([NewDeviceSignedIn::class]);
+
+    // The other browser still holds the planted value, and now the password.
+    login(['known_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
+    $this->assertGuest();
+
+    // The owner's own browser is the one that's known.
+    login(['known_device' => $owners])->assertRedirect('/dashboard');
+    Event::assertNotDispatched(NewDeviceSignedIn::class);
 });
 
 it('signs this session out when its own device is revoked', function () {
@@ -1032,6 +1122,79 @@ describe('ending trust', function () {
     });
 });
 
+// Two user models can have the same IDs. A session is its user's by the
+// model as well as the ID, like everything else Keyring keeps for a user.
+describe('an app with two kinds of account whose ids overlap', function () {
+    beforeEach(function () {
+        $this->staff = staff();
+
+        $now = now()->getTimestamp();
+        $session = fn (string $id, Model $user, ?string $device = null) => new RegisteredSession($id, (string) $user->getKey(), RegisteredSession::typeOf($user), 'web', $device, Assurance::AAL1, null, null, $now, $now, $now + 3600);
+
+        $this->seed = function () use ($session) {
+            app(SessionRegistry::class)->save($session('users', $this->user, 'device'));
+            app(SessionRegistry::class)->save($session('staffs', $this->staff, 'device'));
+        };
+    });
+
+    it('lists, counts and ends each account\'s sessions apart', function (string $driver, Closure $end) {
+        config(['keyring.sessions.driver' => $driver]);
+        ($this->seed)();
+        $registry = app(SessionRegistry::class);
+
+        expect($this->staff->getKey())->toBe($this->user->getKey())
+            ->and($registry->forUser($this->user)->pluck('id')->all())->toBe(['users'])
+            ->and($registry->forUser($this->staff)->pluck('id')->all())->toBe(['staffs']);
+
+        $end($this->staff);
+
+        expect($registry->find('staffs')->revokedAt)->not->toBeNull()
+            ->and($registry->find('users')->revokedAt)->toBeNull()
+            ->and($registry->forUser($this->user)->pluck('id')->all())->toBe(['users']);
+    })->with(['database', 'cache'])->with([
+        'signing out everywhere' => [fn (Model $user) => app(Sessions::class)->signOutEverywhere($user)],
+        'every session' => [fn (Model $user) => app(SessionRegistry::class)->revokeAll($user)],
+        'a device\'s sessions' => [fn (Model $user) => app(SessionRegistry::class)->revokeDevice($user, 'device')],
+        'deleting the account' => [fn (Model $user) => $user->delete()],
+    ]);
+
+    // One account loaded as two classes is still one account, as it is to
+    // the guard: an Admin that extends User, on the users table.
+    it('takes one account for itself whichever of its classes it is loaded as', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        $admin = AdminUser::query()->findOrFail($this->user->id);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect();
+
+        // Signed in as the one, found and signed out as the other.
+        expect(app(SessionRegistry::class)->forUser($admin))->toHaveCount(1)
+            ->and(app(Sessions::class)->signOutEverywhere($admin))->toBe(1);
+        $this->get('/home')->assertRedirect('/login');
+
+        // And a session the app starts for the other carries on as the one.
+        $this->flushSession();
+        $this->app['auth']->forgetGuards();
+        Auth::login($admin);
+        $this->get('/home')->assertOk();
+        $this->app['auth']->forgetGuards();
+        $this->get('/home')->assertOk();
+    })->with(['database', 'cache']);
+
+    it('does not carry one kind of account on with the other\'s session', function () {
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect();
+        $this->get('/home')->assertOk();
+
+        // The same guard handing back the other model, as an app that swaps
+        // its provider by domain would.
+        $this->actingAs($this->staff)->get('/home')->assertRedirect('/login');
+
+        expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta['reason'])->toBe('other_user');
+    });
+});
+
 describe('ending other sessions along with a change to how the user signs in', function () {
     beforeEach(function () {
         Event::fake([SessionsRevoked::class]);
@@ -1044,7 +1207,7 @@ describe('ending other sessions along with a change to how the user signs in', f
             $this->here = session(Sessions::KEY);
 
             $now = now()->getTimestamp();
-            app(SessionRegistry::class)->save(new RegisteredSession('elsewhere', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+            app(SessionRegistry::class)->save(new RegisteredSession('elsewhere', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
         };
 
         $this->expectOnlyThisSessionLeft = function () {
@@ -1162,7 +1325,7 @@ describe('signing out other sessions without the devices feature', function () {
         $here = session(Sessions::KEY);
         $id = session()->getId();
         $now = now()->getTimestamp();
-        $registry->save(new RegisteredSession('elsewhere', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+        $registry->save(new RegisteredSession('elsewhere', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
         $this->user->forceFill(['remember_token' => 'remembered'])->save();
 
         $this->deleteJson(route('keyring.sessions.destroy-others'))->assertOk()->assertJsonPath('status', 'sessions-revoked');
@@ -1194,7 +1357,7 @@ describe('the sessions a user can see and end', function () {
             $now = now()->getTimestamp();
 
             return tap(
-                new RegisteredSession($id, (string) ($user ?? $this->user)->id, 'web', null, Assurance::AAL1, '203.0.113.7', CHROME, $now - 600, $now - 300, $now + 3600)->with($with),
+                new RegisteredSession($id, (string) ($user ?? $this->user)->id, RegisteredSession::typeOf(($user ?? $this->user)), 'web', null, Assurance::AAL1, '203.0.113.7', CHROME, $now - 600, $now - 300, $now + 3600)->with($with),
                 fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
             );
         };
@@ -1451,7 +1614,48 @@ describe('the sessions a user can see and end', function () {
     });
 });
 
-it('never queries the devices table when devices are off', function () {
+// Trust given while devices were on doesn't outlive a change that should end
+// it, made while they were off: turning them back on would bring it back.
+it('ends device trust on a change made while devices are off', function (Closure $change) {
+    $this->user->forceFill(['password' => Hash::make('a much longer passphrase')])->saveQuietly();
+    $trusted = Device::query()->forceCreate([
+        'authenticatable_type' => $this->user->getMorphClass(), 'authenticatable_id' => $this->user->id,
+        'token_hash' => hash('sha256', 'a trusted browser'), 'name' => 'Firefox', 'trusted_until' => now()->addMonth(), 'last_seen_at' => now(),
+    ]);
+
+    withFeatures(array_values(array_diff(Features::all(), [Features::devices()])));
+    $change($this->user);
+
+    expect($trusted->fresh()->trusted_until)->toBeNull();
+})->with([
+    'a password reset' => [fn (User $user) => test()->post(route('password.update'), [
+        'token' => Broker::broker()->createToken($user), 'email' => $user->email,
+        'password' => 'another passphrase altogether', 'password_confirmation' => 'another passphrase altogether',
+    ])->assertSessionHasNoErrors()],
+    'a sign-out everywhere' => [fn (User $user) => app(Sessions::class)->signOutEverywhere($user)],
+]);
+
+/**
+ * The devices of an app that turned the feature off and never ran its migration.
+ */
+#[Table(name: 'keyring_devices_never_made')]
+class DeviceWithoutATable extends Device {}
+
+it('lets a change through on an app that never made the devices table', function () {
+    withFeatures(array_values(array_diff(Features::all(), [Features::devices()])));
+    Keyring::useDeviceModel(DeviceWithoutATable::class);
+
+    DB::transaction(function () {
+        app(Sessions::class)->signOutEverywhere($this->user);
+
+        // The caller's transaction is still good for what follows.
+        $this->user->forceFill(['name' => 'Still here'])->save();
+    });
+
+    expect($this->user->fresh()->name)->toBe('Still here');
+});
+
+it('never queries the devices table when devices are off, but to end trust', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $backup = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     withFeatures(array_values(array_diff(Features::all(), [Features::devices()])));
@@ -1467,8 +1671,11 @@ it('never queries the devices table when devices are off', function () {
     app(Sessions::class)->distrustDevices($this->user);
     app(Sessions::class)->signOutEverywhere($this->user);
 
+    $devices = array_values(array_unique(array_filter($queries, fn (string $sql) => str_contains($sql, 'keyring_devices'))));
+
     expect($queries)->not->toBeEmpty()
-        ->and(array_filter($queries, fn (string $sql) => str_contains($sql, 'keyring_devices')))->toBe([]);
+        ->and($devices)->toHaveCount(1)
+        ->and($devices[0])->toMatch('/^update .keyring_devices. set .trusted_until. = \?/');
 });
 
 function riskySignal(Checkpoint $checkpoint): Signal

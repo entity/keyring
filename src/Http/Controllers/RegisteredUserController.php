@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Responses\RegisterResponse;
@@ -15,6 +16,7 @@ use Keyring\KeyringManager;
 use Keyring\Login\Registration;
 use Keyring\Login\SignIn;
 use Keyring\Login\Verification;
+use Keyring\Support\Throttle;
 
 class RegisteredUserController
 {
@@ -29,7 +31,7 @@ class RegisteredUserController
         return $this->keyring->render('register');
     }
 
-    public function store(Request $request, CreatesNewUsers $creator, Registration $registration, SignIn $signIn): mixed
+    public function store(Request $request, CreatesNewUsers $creator, Registration $registration, SignIn $signIn, Throttle $throttle): mixed
     {
         // Before anything is saved, so a broken setup doesn't take the address.
         $registration->ensureReady();
@@ -43,6 +45,12 @@ class RegisteredUserController
         }
 
         $user = $registration->openly($request, $creator);
+
+        // Laravel's listener mails the verification link. Counted with what
+        // the address is sent if a new one is asked for.
+        if ($user instanceof MustVerifyEmail) {
+            $throttle->notifying('registration', 'mail:'.$this->keyring->normalizeUsername($user->getEmailForVerification()));
+        }
 
         event(new Registered($user));
 

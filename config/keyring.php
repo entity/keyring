@@ -438,12 +438,14 @@ return [
     | Timebox
     |--------------------------------------------------------------------------
     |
-    | Every failed factor verification takes at least this long, so response
-    | timing doesn't reveal whether an account exists.
+    | Every refused sign in, registration and password reset takes at least
+    | this long, so response timing doesn't reveal whether an account exists.
+    | It only hides what's shorter than it: keep it comfortably longer than
+    | one password hash takes on your servers.
     |
     */
 
-    'timebox' => '250ms',
+    'timebox' => '500ms',
 
     /*
     |--------------------------------------------------------------------------

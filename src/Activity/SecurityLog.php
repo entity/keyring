@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Activity;
 
 use Closure;
+use DateTimeInterface;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
@@ -114,15 +115,18 @@ class SecurityLog
 
     /**
      * Unseen events worth asking "was this you?" about. Marks them seen.
+     * With $since, only those logged after that moment: the rest stay unseen
+     * for whoever may see them.
      *
      * @return Collection<int, SecurityEvent>
      */
-    public function pullAlerts(Authenticatable&Model $user): Collection
+    public function pullAlerts(Authenticatable&Model $user, ?DateTimeInterface $since = null): Collection
     {
-        return $this->safely(function () use ($user) {
+        return $this->safely(function () use ($user, $since) {
             $alerts = $this->query($user)
                 ->whereIn('type', config('keyring.security_log.alerts'))
                 ->whereNull('seen_at')
+                ->when($since, fn (Builder $query) => $query->where('created_at', '>', $since))
                 ->latest('created_at')
                 ->get();
 

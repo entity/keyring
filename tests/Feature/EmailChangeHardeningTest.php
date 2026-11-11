@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\Request;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -186,6 +189,96 @@ it('removes sign-in methods added since the change when it is reverted', functio
     expect(Authenticator::find($planted->id))->toBeNull()
         ->and(Authenticator::find($before->id))->not->toBeNull();
     Event::assertDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->authenticator->is($planted));
+});
+
+// The removals are announced on the account as it is once the address is
+// back, whatever sends the notice: an event carrying the copy loaded before
+// that would have a notice that isn't queued go to the address taken off.
+it('announces what an undo removed to the address it put back', function () {
+    Event::fake([AuthenticatorRemoved::class]);
+    $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+
+    $this->travel(1)->minutes();
+    Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+    confirmBoth($change, $tokens);
+    expect($this->user->fresh()->email)->toBe('attacker@example.com');
+
+    app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+    Event::assertDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->user->email === 'taylor@example.com');
+    Event::assertNotDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->user->email === 'attacker@example.com');
+});
+
+// A request already past its middleware when the undo starts. It either
+// saves before the undo ends the sessions, where the undo's last look finds
+// what it saved, or after, where it's refused.
+describe('a request under way while a change is being undone', function () {
+    it('has what it saved in the meantime closed and removed by the undo', function () {
+        $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);
+        $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+        confirmBoth($change, $tokens);
+
+        // Saved once the undo has looked for later changes and for sign-in
+        // methods to remove, and before it has ended the sessions.
+        $late = [];
+        PendingChange::updated(function (PendingChange $saved) use ($change, &$late) {
+            if ($saved->is($change) && $saved->wasChanged('reverted_at') && $late === []) {
+                $late['change'] = tap(new PendingChange([
+                    'attribute' => 'email',
+                    'value' => 'again@example.com',
+                    'previous_value' => 'attacker@example.com',
+                    'confirm_token' => PendingChange::hashToken('confirm'),
+                    'revert_token' => PendingChange::hashToken('late'),
+                    'expires_at' => now()->addDay(),
+                ]), fn (PendingChange $late) => $late->authenticatable()->associate($this->user)->save());
+            }
+        });
+        Authenticator::deleted(function () use (&$late) {
+            $late['passkey'] ??= Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+        });
+
+        $this->travel(1)->minutes();
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        expect(app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']))->toBeTrue()
+            ->and($late)->toHaveKeys(['change', 'passkey'])
+            ->and($late['change']->fresh()->canRevert())->toBeFalse()
+            ->and(app(EmailChanges::class)->revert($late['change']->fresh(), 'late'))->toBeFalse()
+            ->and(app(EmailChanges::class)->confirm($late['change']->fresh(), 'confirm'))->toBe(EmailConfirmation::Invalid)
+            ->and(Authenticator::find($late['passkey']->id))->toBeNull()
+            ->and($this->user->fresh()->email)->toBe('taylor@example.com');
+    });
+
+    it('is refused once the undo has ended its session', function (Closure $save) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect();
+        $request = request();
+        $request->setLaravelSession(session()->driver());
+
+        // What an undo, a reset or "this wasn't me" does while this request runs.
+        app(Sessions::class)->signOutEverywhere($this->user);
+
+        expect(fn () => $save($this->user, $request))->toThrow(AuthenticationException::class)
+            ->and(PendingChange::query()->count())->toBe(0)
+            ->and(Authenticator::query()->count())->toBe(0);
+    })->with([
+        'an email change' => [fn (User $user, Request $request) => app(EmailChanges::class)->request($user, 'attacker@example.com', $request)],
+        'a sign-in method' => [fn (User $user, Request $request) => app(AuthenticatorChanges::class)->add(
+            $user,
+            Keyring::factor('totp'),
+            Authenticator::factory()->totp()->for($user, 'authenticatable')->make(),
+            $request,
+        )],
+    ]);
+
+    it('saves as usual while its session stands', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect();
+        $request = request();
+        $request->setLaravelSession(session()->driver());
+
+        expect(app(EmailChanges::class)->request($this->user, 'new@example.com', $request))->toBeInstanceOf(PendingChange::class);
+    });
 });
 
 it('removes sign-in methods added earlier in the session that asked for the change', function () {
@@ -574,6 +667,16 @@ describe('the address a change replaced', function () {
         'a character that does not show' => "tay\u{00AD}lor@example.com",
     ]);
 
+    // Asked of MySQL 8.4: utf8mb4_general_ci takes "ß" for "s", and
+    // utf8mb4_unicode_ci and utf8mb4_0900_ai_ci take it for "ss".
+    it('is found under every spelling of a sharp s that some collation takes for it', function () {
+        expect(PendingChange::fold('klauß@example.com'))
+            ->toBe(PendingChange::fold('klaus@example.com'))
+            ->toBe(PendingChange::fold('klauss@example.com'))
+            ->toBe(PendingChange::fold('KLAUẞ@example.com'))
+            ->not->toBe(PendingChange::fold('klaut@example.com'));
+    });
+
     it('still lets a different address be registered', function (string $address) {
         $this->post('/logout');
 
@@ -604,6 +707,7 @@ function otherSession(User $user, string $id = 'other-session'): string
     app(SessionRegistry::class)->save(new RegisteredSession(
         id: $id,
         userId: (string) $user->getKey(),
+        userType: RegisteredSession::typeOf($user),
         guard: 'web',
         deviceId: null,
         assurance: Assurance::AAL1,
@@ -724,7 +828,7 @@ describe('applying a change', function () {
         expect(app(SessionRegistry::class)->find($other)->revokedAt)->toBeNull();
     });
 
-    it('does not touch device tables when devices are off', function () {
+    it('does not touch device tables when devices are off, but to end trust given while they were on', function () {
         withFeatures([Features::emailChanges()]);
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
@@ -732,7 +836,7 @@ describe('applying a change', function () {
 
         confirmBoth($change, $tokens);
 
-        expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $query) => str_contains($query, 'keyring_devices')))->toBeEmpty()
+        expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $query) => str_contains($query, 'keyring_devices'))->reject(fn (string $query) => preg_match('/^update .keyring_devices. set .trusted_until. = \?/', $query) === 1)->all())->toBe([])
             ->and($this->user->fresh()->email)->toBe('new@example.com');
     });
 

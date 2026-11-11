@@ -22,8 +22,13 @@ class EmailChangeController
 {
     use RespondsWithStatus;
 
+    // A route keeps its controller once it has made one, and in a worker
+    // that serves many requests that can be longer than a request lasts.
+    // These hold the session they were made for, or reach something that
+    // does, so they're asked of the app handling the request each time.
+    protected EmailChanges $changes { get => app(EmailChanges::class); }
+
     public function __construct(
-        protected EmailChanges $changes,
         protected KeyringManager $keyring,
     ) {}
 

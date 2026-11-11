@@ -22,6 +22,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
+use Throwable;
 
 /**
  * The one place a user becomes signed in (after a login or registration)
@@ -47,25 +48,50 @@ class SignIn
         }
 
         $this->keyring->guard()->login($user, $attempt->remember);
-        $request->session()->regenerate(true);
-        $this->assurance->reset($attempt->verifications);
 
-        $device = $this->devices->signIn(
-            $request,
-            $user,
-            provedSecondFactor: Requirement::aal2()->isMetBy($attempt->verifications),
-            trust: $this->earnedTrust($attempt),
-        );
+        // All of it or none: the guard is signed in from here, and a sign
+        // in that failed before its session was registered and looked at
+        // again would otherwise be left signed in, for the session
+        // middleware to take up as one the app started itself.
+        try {
+            $request->session()->regenerate(true);
+            $this->assurance->reset($attempt->verifications);
 
-        $new = $device?->wasRecentlyCreated === true;
+            $device = $this->devices->signIn(
+                $request,
+                $user,
+                provedSecondFactor: Requirement::aal2()->isMetBy($attempt->verifications),
+                trust: $this->earnedTrust($attempt),
+            );
 
-        $this->sessions->start($request, $user, $device, $this->assurance->level(), remembered: $attempt->remember);
+            $new = $device?->wasRecentlyCreated === true;
 
-        // A password reset or change, or an email change or its undo, signs
-        // out the sessions registered by then. This one was still being
-        // checked, and is only registered now, so look again: with the new
-        // password or address saved, it ends here.
-        if ($this->changedMeanwhile($user)) {
+            $this->sessions->start($request, $user, $device, $this->assurance->level(), remembered: $attempt->remember);
+
+            $ended = $this->changedMeanwhile($user) || ! $attempt->keepsItsAuthenticators();
+        } catch (Throwable $e) {
+            // Whatever failed may fail again as the session is ended (the
+            // registry, say), and the guard has to be signed out all the
+            // same.
+            try {
+                $this->out($request, onlyThisBrowser: true);
+            } catch (Throwable) {
+                $guard = $this->keyring->guard();
+
+                $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
+                $request->session()->invalidate();
+            }
+
+            throw $e;
+        }
+
+        // A password reset or change, an email change or its undo, or a
+        // sign-in method taken off the account signs out the sessions
+        // registered by then. This one was still being checked, and is only
+        // registered now, so it was looked at again: with the new password
+        // or address saved, or a method this sign in proved gone, it ends
+        // here.
+        if ($ended) {
             // The change stopped trusting every device before this one was
             // recorded, so whatever trust it was just given goes too.
             $this->sessions->distrustDevices($user);
@@ -78,8 +104,10 @@ class SignIn
 
         // "Was this you?" for anything suspicious since they last signed in.
         // A browser the account hasn't used before could be whoever caused
-        // them, so they wait for one it has.
-        $request->session()->flash('keyring.alerts', $new ? [] : $this->log->pullAlerts($user)->map(fn (SecurityEvent $event) => [
+        // them, so they wait for one it has: one the account had already
+        // used when they happened. A browser first seen since could be
+        // whoever caused those, on its second visit.
+        $request->session()->flash('keyring.alerts', $new ? [] : $this->log->pullAlerts($user, since: $device?->created_at)->map(fn (SecurityEvent $event) => [
             'type' => $event->type,
             'factor' => $event->factor,
             'at' => $event->created_at->toIso8601String(),

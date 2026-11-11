@@ -34,7 +34,7 @@ Signing in is a short state machine:
 2. Keyring asks the [policy](policies.md) what they need. If that's met, they're signed in.
 3. Otherwise Keyring regenerates the session ID, saves a pending **attempt** in the session and sends them to the challenge page, which asks for the next factor. They repeat until the requirement is met.
 
-The pending attempt is encrypted JSON in the session. It lasts `pending_logins.keep_for` (10 minutes by default), and ends early if the user's password or email address changes meanwhile, so a reset also stops someone who already got past the old password, or if `keyring.guard` is no longer the guard it started under. After that, the user is sent back to the login page with `keyring::keyring.expired`.
+The pending attempt is encrypted JSON in the session. It lasts `pending_logins.keep_for` (10 minutes by default), and ends early if the user's password or email address changes meanwhile, so a reset also stops someone who already got past the old password, if a sign-in method it has already proved is taken off the account, or if `keyring.guard` is no longer the guard it started under. After that, the user is sent back to the login page with `keyring::keyring.expired`.
 
 [Step-up](step-up.md) uses the same challenge page and the same pipeline, with the purpose `confirm` instead of `login`.
 
@@ -279,7 +279,7 @@ By default (`registration.reveal_taken` is `false`), nobody can use the form to 
 - **A free address** gets its account, and Laravel's `Registered` event is dispatched once the response has been sent, which emails the verification link.
 - **A taken address** gets nothing created or changed. Once the response has been sent, Keyring emails it your `already_registered` [notification](security-log-and-emails.md#emails-a-flow-needs), which says someone tried to register and links to the login page and, with `Features::resetPasswords()`, the forgot password page. If the account there was never verified, it's sent another verification link instead, since the first may be lost or expired.
 - An address is mailed five times an hour at most by registration (`limits.notices` every `limits.notices_per`), verification links included, so the form can't be used to fill someone's inbox. Past that the answer stays the same and nothing is sent.
-- The whole request takes at least `timebox` (250ms), whether the form was refused, an account was created or the address was taken, and both of the last two hash one password. No email is sent before the response.
+- The whole request takes at least `timebox` (500ms), whether the form was refused, an account was created or the address was taken, and both of the last two hash one password. No email is sent before the response.
 - Registration keeps the `keyring` rate limiter: six a minute per IP address.
 
 A new user can't sign in until their address is verified. If they could, anyone could register an address with a password of their own and try to sign in with it: success would mean the address was free. So until then a correct password is answered like a wrong one, in the same time.

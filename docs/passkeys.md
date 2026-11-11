@@ -172,6 +172,11 @@ A key reaches [AAL3](policies.md#assurance-levels) only when its factor uses `re
 
 - Keys added before the factor asked for attestation have nothing in that column and stay at AAL2. Their owners add them again to reach AAL3.
 - Take `requireAttestation()` off a factor and its keys stop reaching AAL3, whatever the column says.
+- Narrowing [`allowOnly()`](#allowing-only-certain-models), or taking a root out of the list, only stops more of those keys being added. The ones already on accounts keep their level, so changing what you hand out doesn't lock out everyone holding the old model. When a model has to stop counting (it was found to be weak, say), clear the column for its keys, which leaves them as second factors at AAL2, or delete the rows to remove them:
+
+    ```php
+    Keyring::authenticatorModel()::query()->where('aaguid', $aaguid)->update(['attestation' => null]);
+    ```
 - The attestation is for the key. Its second factor still has to be its own user verification or a password: touching an attested key after signing in with a synced passkey is AAL2.
 
 NIST AAL3 also needs the authenticator validated to FIPS 140 (Sec. 2.3.2). Attestation says which model a key is, not whether that model was validated, so use `allowOnly()` to accept only the models you've checked.

@@ -180,9 +180,9 @@ class SessionAssurance
      */
     public function lapse(): ?string
     {
-        $level = Assurance::tryFrom((int) $this->session->get(static::SIGNED_IN, 0)) ?? Assurance::None;
+        $level = $this->signedInLevel();
 
-        if (! config('keyring.sessions.end_on_lapse') || $level === Assurance::None) {
+        if (! $this->endsOnLapse()) {
             return null;
         }
 
@@ -193,6 +193,24 @@ class SessionAssurance
         }
 
         return $from > now()->getTimestamp() - $this->sessions->absolute($level) ? 'idle' : 'expired';
+    }
+
+    /**
+     * The level this session signed in at. None for one Keyring didn't sign
+     * in itself, such as a session an app started with Auth::login().
+     */
+    public function signedInLevel(): Assurance
+    {
+        return Assurance::tryFrom((int) $this->session->get(static::SIGNED_IN, 0)) ?? Assurance::None;
+    }
+
+    /**
+     * Whether this session is one sessions.end_on_lapse ends once the level
+     * it signed in at has gone.
+     */
+    public function endsOnLapse(): bool
+    {
+        return config('keyring.sessions.end_on_lapse') && $this->signedInLevel() !== Assurance::None;
     }
 
     /**

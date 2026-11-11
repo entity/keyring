@@ -45,7 +45,7 @@ The first release. Nothing is tagged yet.
 ### Rate Limits and Risk
 
 - Rate limits per account, per typed username and per IP address, with locks that double, a count of their own for browsers the account has signed in from, a cap on failures in a row kept in the database, and `limits.lock_after` to keep an account locked until its password is reset.
-- A timebox around every verification, so a refusal takes the same time whatever the reason.
+- A timebox around every verification, registration and refused password reset, so a refusal takes the same time whatever the reason.
 - Risk signals with an action for each level: a new device, a new country, impossible travel, a session turning up in another browser, repeated failed second factors, a sign in after several failures or after a long quiet period, a recently changed email address and a password found in a breach. A new app starts with the ones its features can feed, and a password found in a breach holds its user until they choose another.
 
 ### Logging and Emails

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Timebox;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Events\FactorVerified;
@@ -32,6 +33,45 @@ it('answers a bad token the same way whether or not the account exists or has mf
 
     expect($errors->unique()->count())->toBe(1)
         ->and($errors->first())->toHaveKey('email')->not->toHaveKey('password');
+});
+
+// The broker hashes a token only for an address with a link outstanding, and
+// its own wait is 200ms on a timebox that a completed reset switches off for
+// as long as the broker lives. Every refusal waits out Keyring's instead.
+it('holds every refused reset for the timebox, and lets a good one straight through', function () {
+    config(['keyring.timebox' => '400ms']);
+
+    $timebox = new class extends Timebox
+    {
+        /** @var list<array{int, bool}> */
+        public static array $calls = [];
+
+        public function call(callable $callback, int $microseconds)
+        {
+            $result = parent::call($callback, 0);
+            self::$calls[] = [$microseconds, $this->earlyReturn];
+
+            return $result;
+        }
+    };
+    $this->app->bind(Timebox::class, $timebox::class);
+
+    $reset = fn (string $email, string $token) => $this->post(route('password.update'), [
+        'token' => $token, 'email' => $email, 'password' => 'a much longer passphrase', 'password_confirmation' => 'a much longer passphrase',
+    ]);
+
+    $good = Password::broker()->createToken($this->plain);
+    Password::broker()->createToken($this->mfa);
+
+    $reset('nobody@example.com', 'bogus');
+    $reset('mfa@example.com', 'bogus');
+    $reset('plain@example.com', $good)->assertSessionHasNoErrors();
+    // After a reset has gone through on the same broker.
+    $reset('plain@example.com', 'bogus');
+
+    $keyrings = array_values(array_filter($timebox::$calls, fn (array $call) => $call[0] === 400_000));
+
+    expect(array_column($keyrings, 1))->toBe([false, false, true, false]);
 });
 
 it('still applies the password rules once the token checks out', function () {

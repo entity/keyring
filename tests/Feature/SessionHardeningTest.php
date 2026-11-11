@@ -2,13 +2,17 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
+use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
@@ -20,6 +24,7 @@ use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SingleSignOn;
@@ -327,6 +332,69 @@ it('keeps a revoked session revoked after the cache is cleared', function () {
 
     $this->get('/home')->assertRedirect('/login');
 });
+
+// A store that evicts under memory pressure drops keys one at a time. That a
+// session ended is kept in its record and in a key beside it, so losing
+// either leaves it ended.
+it('keeps a session ended when the cache store loses one of the keys that say so', function (string $lost) {
+    config(['keyring.sessions.driver' => 'cache']);
+    signInWith();
+    $registry = app(SessionRegistry::class);
+    $id = session(Sessions::KEY);
+    $now = now()->getTimestamp();
+
+    $registry->revoke($id);
+    $next = new RegisteredSession('next', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600);
+    $registry->save($replaced = $next->with(['id' => 'replaced']));
+    $registry->replace('replaced', $next->with(['id' => 'successor']));
+
+    Cache::forget('keyring:sessions:'.$id.$lost);
+    Cache::forget('keyring:sessions:replaced'.$lost);
+
+    expect($registry->find($id)->revokedAt)->not->toBeNull()
+        ->and($registry->find('replaced')->replacedBy)->toBe('successor')
+        ->and($registry->find('replaced')->isActive($now))->toBeFalse()
+        // A stale copy saved over the record doesn't undo it either.
+        ->and(tap($registry, fn (SessionRegistry $registry) => $registry->save($replaced))->find('replaced')->replacedBy)->toBe('successor');
+
+    $this->get('/home')->assertRedirect('/login');
+})->with(['its revoked marker' => ':revoked', 'its replaced marker' => ':replaced']);
+
+// A record kept before records said whose table their ID is one of. It can't
+// be told from another model's, so its browser signs in again.
+it('signs out a session whose cache record is from before records said whose they are', function () {
+    config(['keyring.sessions.driver' => 'cache']);
+    signInWith();
+    $key = 'keyring:sessions:'.session(Sessions::KEY);
+
+    Cache::put($key, Arr::except(Cache::get($key), 'user_type'), 3600);
+
+    $this->get('/home')->assertRedirect('/login');
+    $this->assertGuest();
+});
+
+// A session with a record that has gone is an ended one, to a request under
+// way as it is to the session middleware.
+it('refuses a change from a session whose record has gone', function (string $driver) {
+    config(['keyring.sessions.driver' => $driver]);
+    signInWith();
+    $request = request();
+    $request->setLaravelSession(session()->driver());
+    $change = fn () => app(Sessions::class)->whileSignedIn($request, $this->user, fn () => 'saved');
+
+    expect($change())->toBe('saved');
+
+    $driver === 'database'
+        ? DB::table('keyring_sessions')->delete()
+        : Cache::forget('keyring:sessions:'.session(Sessions::KEY));
+
+    expect($change)->toThrow(AuthenticationException::class);
+
+    // One Keyring never registered isn't one it keeps track of.
+    session()->forget(Sessions::KEY);
+
+    expect($change())->toBe('saved');
+})->with('drivers');
 
 it('does not undo a revocation that lands while a request is being assessed', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);

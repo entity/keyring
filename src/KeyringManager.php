@@ -315,14 +315,25 @@ class KeyringManager
     /**
      * A user agent as a name people recognise, like "Firefox on Windows".
      * Also a weak risk signal (a session's browser changing), never a factor.
+     *
+     * A describer of the app's own is the app's code, run in the middle of
+     * a sign in. One that throws is reported and gives no name, and a name
+     * longer than a device's column holds is cut to fit, so neither fails
+     * the sign in it was only naming a browser for.
      */
     public function describeDevice(?string $userAgent): ?string
     {
-        return match (true) {
-            blank($userAgent) => null,
-            $this->deviceDescriber !== null => ($this->deviceDescriber)($userAgent),
-            default => UserAgent::describe($userAgent),
-        };
+        if (blank($userAgent)) {
+            return null;
+        }
+
+        if ($this->deviceDescriber === null) {
+            return UserAgent::describe($userAgent);
+        }
+
+        $name = rescue(fn () => ($this->deviceDescriber)($userAgent));
+
+        return is_string($name) ? mb_substr($name, 0, 255) : null;
     }
 
     /**

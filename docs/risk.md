@@ -216,6 +216,8 @@ Signals run at one or both checkpoints (`Keyring\Risk\Checkpoint`):
 
 When a request-time action does something without signing the session out (a step-up, say), Keyring updates the session's recorded IP and user agent, so the same change isn't acted on twice. A step-up also gives the session a new record and revokes the old one, so only the request that noticed the change carries on: an older copy of the session cookie, or a request that was already under way, is signed out instead of keeping what the session had proved.
 
+With [`sessions.end_on_lapse`](devices-and-sessions.md#ending-a-session-with-its-level) on, a request-time step-up signs the session out instead, as `Action::reauthenticate()` does: there, a session doesn't outlive what it signed in with.
+
 ## Configuring Signals
 
 `Keyring::risk()->signals([...])` replaces the signal list. To keep the ones already on and add to them, use `push()`:

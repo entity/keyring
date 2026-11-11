@@ -82,20 +82,29 @@ function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?
     // Long enough for an operation that ignores the lock to finish.
     Sleep::usleep(500_000);
 
-    $running = fn () => count(array_filter($workers, fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running()));
+    // Let go whatever happens: a failed expectation that kept the lock would
+    // leave every later test waiting for the tables it holds.
+    try {
+        $running = fn () => count(array_filter($workers, fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running()));
 
-    // Those turned away before the lock get time to finish. The rest can't.
-    for ($deadline = microtime(true) + 15; $waiting !== null && $running() > $waiting && microtime(true) < $deadline;) {
-        Sleep::usleep(50_000);
-    }
+        // Those turned away before the lock get time to finish. The rest can't.
+        for ($deadline = microtime(true) + 15; $waiting !== null && $running() > $waiting && microtime(true) < $deadline;) {
+            Sleep::usleep(50_000);
+        }
 
-    expect($running())->toBe($waiting ?? count($workers), 'An operation ran without waiting for the lock, or one that should have been turned away is waiting for it: '.implode('', array_map(
-        fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->output().$worker->errorOutput(),
-        $workers,
-    )));
+        expect($running())->toBe($waiting ?? count($workers), 'An operation ran without waiting for the lock, or one that should have been turned away is waiting for it: '.implode('', array_map(
+            fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->output().$worker->errorOutput(),
+            $workers,
+        )));
 
-    if ($meanwhile !== null) {
-        $meanwhile();
+        if ($meanwhile !== null) {
+            $meanwhile();
+        }
+    } catch (Throwable $e) {
+        $connection->rollBack();
+        array_map(fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running() && $worker->signal(SIGKILL), $workers);
+
+        throw $e;
     }
 
     $connection->commit();

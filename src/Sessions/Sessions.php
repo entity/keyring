@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Sessions;
 
 use Closure;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -56,6 +57,7 @@ class Sessions
         $session = new RegisteredSession(
             id: Str::random(40),
             userId: (string) $user->getAuthIdentifier(),
+            userType: RegisteredSession::typeOf($user),
             guard: config('keyring.guard'),
             deviceId: $device?->id,
             assurance: $assurance,
@@ -129,6 +131,53 @@ class Sessions
     protected function holding(Authenticatable $user, Closure $change): mixed
     {
         return $user instanceof Model ? RowLock::hold($user, fn () => $change()) : $change();
+    }
+
+    /**
+     * Make a change only a signed-in session may make, holding the user's
+     * row so it and a sign-out everywhere take turns, and refusing if this
+     * request's session has been ended since its middleware let it through
+     * (an email change undone, a password reset, a device reported).
+     * Without this a request already under way would still save its change
+     * after the account's owner had ended every session. The change is
+     * given the user as the locked row has it.
+     *
+     * A session whose record has gone is an ended one, as it is to the
+     * session middleware. A request with no session, or one Keyring never
+     * registered, isn't one Keyring keeps track of, and is let through.
+     *
+     * The row is held on the user's own connection. Where what's being
+     * changed is kept on another, the two can't commit as one, and the lock
+     * goes a moment before the change is saved. And on MySQL, a caller
+     * that has already read inside a transaction of its own reads the
+     * registry as it was then: Keyring's routes open none.
+     *
+     * @template TResult
+     *
+     * @param  Closure(Authenticatable&Model): TResult  $change
+     * @return TResult
+     *
+     * @throws AuthenticationException
+     */
+    public function whileSignedIn(Request $request, Authenticatable&Model $user, Closure $change): mixed
+    {
+        return RowLock::hold($user, function (?Model $fresh) use ($request, $change) {
+            if (! $fresh instanceof Authenticatable) {
+                throw new AuthenticationException;
+            }
+
+            $id = $request->hasSession() ? $request->session()->get(self::KEY) : null;
+
+            if (is_string($id)) {
+                $session = $this->registry->find($id);
+
+                if ($session === null || ! $session->isActive(now()->getTimestamp()) || ! $session->belongsTo($fresh)) {
+                    throw new AuthenticationException;
+                }
+            }
+
+            return $change($fresh);
+        });
     }
 
     /**
@@ -296,6 +345,28 @@ class Sessions
             if ($current = $this->latest($this->registry->find($session->id))) {
                 $this->registry->revoke($current->id);
             }
+        });
+    }
+
+    /**
+     * End the session a record has become by now, holding the user's row so
+     * a move to a new record can't slip in between finding it and ending
+     * it: the move either lands first and is followed, or waits and finds
+     * its record ended. Returns the record that was ended, or null when
+     * there was nothing left to end.
+     */
+    public function endLatest(Authenticatable $user, RegisteredSession $session): ?RegisteredSession
+    {
+        return $this->holding($user, function () use ($session) {
+            $current = $this->latest($this->registry->find($session->id));
+
+            if ($current === null || ! $current->isActive(now()->getTimestamp())) {
+                return null;
+            }
+
+            $this->registry->revoke($current->id);
+
+            return $current;
         });
     }
 
@@ -553,12 +624,20 @@ class Sessions
     /**
      * Stop trusting the user's devices, or all but one, and stop any of them
      * counting as a known browser for rate limits until it signs in again.
-     * Does nothing when devices are off, so a security change can't fail on
-     * tables never used.
+     *
+     * With devices off the trust is still ended, in case it was given while
+     * they were on and they're turned on again: a browser trusted before a
+     * password reset would otherwise skip the second factor after it. That
+     * one update is the only thing that reaches for the table then, and a
+     * security change doesn't fail on an app that never made it.
      */
     public function distrustDevices(Authenticatable $user, ?string $except = null): void
     {
-        if ($user instanceof Model && Features::enabled(Features::devices())) {
+        if (! $user instanceof Model) {
+            return;
+        }
+
+        $distrust = function () use ($user, $except) {
             app(Throttle::class)->forgetBrowsers($user);
 
             $this->keyring->deviceModel()::query()
@@ -566,7 +645,17 @@ class Sessions
                 ->whereNotNull('trusted_until')
                 ->when($except, fn (Builder $query) => $query->whereKeyNot($except))
                 ->update(['trusted_until' => null]);
+        };
+
+        if (Features::enabled(Features::devices())) {
+            $distrust();
+
+            return;
         }
+
+        // In a transaction of its own, so a table that isn't there leaves
+        // the caller's usable where a failed statement would end it.
+        rescue(fn () => $this->keyring->deviceModel()::query()->getConnection()->transaction($distrust), report: false);
     }
 
     public function registry(): SessionRegistry

@@ -215,7 +215,7 @@ Everything Keyring keeps, how it's protected and for how long is listed in [What
 
 ## "Was This You?" Alerts
 
-After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once. With `Features::devices()` on, a browser the account hasn't signed in on before gets none, since it could be whoever caused them; they wait for one it has.
+After a successful sign in, Keyring flashes `keyring.alerts` to the session: a list of log entries worth asking the user about, which they haven't seen yet. Each one is shown once. With `Features::devices()` on, a browser only gets the ones logged after the account first used it. A browser it hasn't signed in on before gets none, and one first used since they happened doesn't get those, since it could be whoever caused them; they wait for a browser the account already had.
 
 ```json
 [
@@ -225,7 +225,7 @@ After a successful sign in, Keyring flashes `keyring.alerts` to the session: a l
 
 The types that become alerts are listed in `security_log.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted`, `clone_suspected` and `remember_me_reused`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
 
-To read them yourself, call `Keyring\Activity\SecurityLog::pullAlerts($user)`. It returns the unseen alert entries, newest first, and marks them seen, so each comes back once.
+To read them yourself, call `Keyring\Activity\SecurityLog::pullAlerts($user)`. It returns the unseen alert entries, newest first, and marks them seen, so each comes back once. Pass a time as `since:` to take only those logged after it.
 
 Share them through your Inertia middleware to show a banner:
 

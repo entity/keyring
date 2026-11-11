@@ -288,6 +288,19 @@ describe('keyring:install', function () {
             ->not->toContain("\n        \$this->app->make(");
     });
 
+    // The config an app already has is left alone, so the provider written
+    // beside it can ask for something the config doesn't turn on.
+    it('says so when a config it kept leaves nobody able to set up the sign-in methods picked', function () {
+        file_put_contents(config_path('keyring.php'), "<?php\n\nreturn ['features' => ['registration', 'email-verification']];\n");
+        config(['keyring.features' => ['registration', 'email-verification']]);
+
+        $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-interaction' => true])
+            ->expectsOutputToContain('Add Features::manageAuthenticators() to the features in config/keyring.php')
+            ->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain("\n            Factors\\Totp::class,\n");
+    });
+
     it('can run again without duplicating migrations or overwriting customised files', function () {
         $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
         file_put_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php', '<?php // mine');
@@ -889,8 +902,8 @@ it('prunes old devices, email changes, security events and ended sessions', func
     $recent = $event(1);
 
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('ended', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
-    $registry->save(new RegisteredSession('live', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addDay()->getTimestamp()));
+    $registry->save(new RegisteredSession('ended', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
+    $registry->save(new RegisteredSession('live', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addDay()->getTimestamp()));
 
     $this->artisan('keyring:prune')->assertSuccessful();
 
@@ -911,7 +924,7 @@ describe('keyring:sign-out', function () {
             $now = now()->getTimestamp();
 
             return tap(
-                new RegisteredSession($id, (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->with($with),
+                new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->with($with),
                 fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
             );
         };
@@ -1067,7 +1080,7 @@ describe('keyring:sign-out', function () {
     it('ends more sessions than it revokes in one go', function () {
         $now = now()->getTimestamp();
 
-        DB::table('keyring_sessions')->insert(array_map(fn (int $n) => new RegisteredSession("session-{$n}", (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->toArray(), range(1, 1001)));
+        DB::table('keyring_sessions')->insert(array_map(fn (int $n) => new RegisteredSession("session-{$n}", (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->toArray(), range(1, 1001)));
 
         $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
 

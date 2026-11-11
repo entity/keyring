@@ -60,13 +60,14 @@ class VirtualManufacturer
 
     /**
      * One of its keys, of the model with this AAGUID, attesting as "packed"
-     * or "fido-u2f".
+     * or "fido-u2f". It verifies its user unless told otherwise, except as
+     * "fido-u2f": those keys only ever say that someone touched them.
      */
-    public function key(string $aaguid = '00000000-0000-0000-0000-000000000000', string $format = 'packed', bool $userVerification = true): VirtualAuthenticator
+    public function key(string $aaguid = '00000000-0000-0000-0000-000000000000', string $format = 'packed', ?bool $userVerification = null): VirtualAuthenticator
     {
         $aaguid = hex2bin(str_replace('-', '', $aaguid)) ?: throw new RuntimeException('An AAGUID is a UUID.');
 
-        return new VirtualAuthenticator(userVerification: $userVerification, aaguid: $aaguid)->attestedBy($this, $format);
+        return new VirtualAuthenticator(userVerification: $userVerification ?? $format !== 'fido-u2f', aaguid: $aaguid)->attestedBy($this, $format);
     }
 
     /**

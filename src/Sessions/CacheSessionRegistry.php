@@ -29,15 +29,29 @@ class CacheSessionRegistry implements SessionRegistry
         protected string $prefix = 'keyring:sessions:',
     ) {}
 
+    /**
+     * That a record was revoked or replaced is kept twice: in a key of its
+     * own, which a stale copy saved over the record can't undo, and in the
+     * record, so a store that drops one of the keys and keeps the other
+     * doesn't bring the session back. What the record already says is kept
+     * when the copy being saved doesn't know it.
+     */
     public function save(RegisteredSession $session): void
     {
-        $this->cache->put($this->key($session->id), $session->with(['revokedAt' => null, 'replacedBy' => null, 'replacedAt' => null])->toArray(), $this->ttl($session));
+        $stored = $this->cache->get($this->key($session->id));
+        $data = $session->toArray();
+
+        foreach (['revoked_at', 'replaced_by', 'replaced_at'] as $ended) {
+            $data[$ended] ??= is_array($stored) ? ($stored[$ended] ?? null) : null;
+        }
+
+        $this->cache->put($this->key($session->id), $data, $this->ttl($session));
 
         if ($session->revokedAt !== null) {
             $this->cache->add($this->revokedKey($session->id), $session->revokedAt, $this->ttl($session));
         }
 
-        $this->index($session->userId, function (array $ids) use ($session) {
+        $this->index($this->owner($session), function (array $ids) use ($session) {
             $ids[$session->id] = $session->expiresAt;
 
             return $ids;
@@ -49,7 +63,9 @@ class CacheSessionRegistry implements SessionRegistry
         $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id), $this->everyoneKey()]);
         $data = $found[$this->key($id)] ?? null;
 
-        if (! is_array($data)) {
+        // A record from before records said whose table their ID is one of
+        // can't be told apart from another model's, so it's no session.
+        if (! is_array($data) || ! is_string($data['user_type'] ?? null)) {
             return null;
         }
 
@@ -59,9 +75,9 @@ class CacheSessionRegistry implements SessionRegistry
 
         return RegisteredSession::fromArray([
             ...$data,
-            'revoked_at' => $found[$this->revokedKey($id)] ?? ($everyone !== null && $data['authenticated_at'] <= $everyone ? $everyone : null),
-            'replaced_by' => $found[$this->replacedKey($id)]['by'] ?? null,
-            'replaced_at' => $found[$this->replacedKey($id)]['at'] ?? null,
+            'revoked_at' => $found[$this->revokedKey($id)] ?? $data['revoked_at'] ?? ($everyone !== null && $data['authenticated_at'] <= $everyone ? $everyone : null),
+            'replaced_by' => $found[$this->replacedKey($id)]['by'] ?? $data['replaced_by'] ?? null,
+            'replaced_at' => $found[$this->replacedKey($id)]['at'] ?? $data['replaced_at'] ?? null,
         ]);
     }
 
@@ -69,9 +85,9 @@ class CacheSessionRegistry implements SessionRegistry
     {
         $now = now()->getTimestamp();
 
-        return new Collection(array_keys($this->ids((string) $user->getAuthIdentifier())))
+        return new Collection(array_keys($this->ids($this->ownerKey(RegisteredSession::typeOf($user), (string) $user->getAuthIdentifier()))))
             ->map(fn (string $id) => $this->find($id))
-            ->filter(fn (?RegisteredSession $session) => $session !== null && $session->isActive($now))
+            ->filter(fn (?RegisteredSession $session) => $session !== null && $session->belongsTo($user) && $session->isActive($now))
             ->sortByDesc(fn (RegisteredSession $session) => $session->lastActivityAt)
             ->values();
     }
@@ -98,7 +114,24 @@ class CacheSessionRegistry implements SessionRegistry
     public function revoke(string $id): void
     {
         if ($session = $this->find($id)) {
-            $this->cache->add($this->revokedKey($id), now()->getTimestamp(), $this->ttl($session));
+            $now = now()->getTimestamp();
+
+            $this->cache->add($this->revokedKey($id), $now, $this->ttl($session));
+            $this->stamp($session, ['revoked_at' => $session->revokedAt ?? $now]);
+        }
+    }
+
+    /**
+     * Write into the record what its own keys say ended it.
+     *
+     * @param  array<string, mixed>  $ended
+     */
+    protected function stamp(RegisteredSession $session, array $ended): void
+    {
+        $stored = $this->cache->get($this->key($session->id));
+
+        if (is_array($stored)) {
+            $this->cache->put($this->key($session->id), [...$stored, ...$ended], $this->ttl($session));
         }
     }
 
@@ -128,10 +161,12 @@ class CacheSessionRegistry implements SessionRegistry
 
         if (! $replaced) {
             $this->cache->forget($this->key($successor->id));
+        } else {
+            $this->stamp($session, ['replaced_by' => $successor->id, 'replaced_at' => $now, ...$revoke ? ['revoked_at' => $now] : []]);
         }
 
         // A replaced record is found by its ID, and never listed again.
-        $this->index($session->userId, fn (array $ids) => array_diff_key($ids, [($replaced ? $id : $successor->id) => true]));
+        $this->index($this->owner($session), fn (array $ids) => array_diff_key($ids, [($replaced ? $id : $successor->id) => true]));
 
         return $replaced;
     }
@@ -163,27 +198,41 @@ class CacheSessionRegistry implements SessionRegistry
     }
 
     /**
+     * What a user's list of sessions is kept under: the model and the ID,
+     * since two user models can have the same IDs.
+     */
+    protected function owner(RegisteredSession $session): string
+    {
+        return $this->ownerKey($session->userType, $session->userId);
+    }
+
+    protected function ownerKey(string $userType, string $userId): string
+    {
+        return sha1($userType.'|'.$userId);
+    }
+
+    /**
      * @return array<string, int>
      */
-    protected function ids(string $userId): array
+    protected function ids(string $owner): array
     {
-        return $this->cache->get($this->prefix.'user:'.$userId, []);
+        return $this->cache->get($this->prefix.'user:'.$owner, []);
     }
 
     /**
      * @param  callable(array<string, int>): array<string, int>  $change
      */
-    protected function index(string $userId, callable $change): void
+    protected function index(string $owner, callable $change): void
     {
-        $update = function () use ($userId, $change) {
+        $update = function () use ($owner, $change) {
             $now = now()->getTimestamp();
-            $ids = array_filter($change($this->ids($userId)), fn (int $expiresAt) => $expiresAt > $now);
+            $ids = array_filter($change($this->ids($owner)), fn (int $expiresAt) => $expiresAt > $now);
 
-            $this->cache->put($this->prefix.'user:'.$userId, $ids, max([0, ...$ids]) - $now + 60);
+            $this->cache->put($this->prefix.'user:'.$owner, $ids, max([0, ...$ids]) - $now + 60);
         };
 
         $this->cache->getStore() instanceof LockProvider
-            ? $this->cache->getStore()->lock($this->prefix.'lock:'.$userId, 5)->block(5, $update)
+            ? $this->cache->getStore()->lock($this->prefix.'lock:'.$owner, 5)->block(5, $update)
             : $update();
     }
 

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Timebox;
@@ -143,6 +144,30 @@ it('limits guesses at a username nobody has like guesses at a real one', functio
     expect($statuses)->toBe([422, 422, 429]);
 });
 
+// A request the account's own limit refuses on a challenge is counted against
+// nothing, the address included, or one person's retries would hold up
+// everyone behind that address.
+it('does not count a challenge the account\'s limit refuses against the address', function () {
+    config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 6]);
+    $user = account('taylor@example.com');
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+    $neighbour = account('abigail@example.com');
+    $theirs = Authenticator::factory()->totp()->for($neighbour, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+    foreach (range(1, 8) as $attempt) {
+        $this->postJson(route('keyring.login.verify', 'totp'), ['code' => '000000', 'authenticator' => $totp->id])
+            ->assertStatus($attempt <= 2 ? 422 : 429);
+    }
+
+    // Someone else at the same address, with a wrong code of their own.
+    $this->flushSession();
+    $this->app['auth']->forgetGuards();
+    $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+    $this->postJson(route('keyring.login.verify', 'totp'), ['code' => '000000', 'authenticator' => $theirs->id])->assertStatus(422);
+});
+
 it('counts overlapping attempts before verifying them', function () {
     config(['keyring.limits.per_account' => 5, 'keyring.limits.per_ip' => 100]);
     account('taylor@example.com');
@@ -155,7 +180,8 @@ it('counts overlapping attempts before verifying them', function () {
         static $depth = 0;
 
         return $step->handle(new Context($request, Purpose::Login, Keyring::factor('password')), function (Context $context) use (&$attempt, &$verified, &$depth) {
-            $verified++;
+            // One a limit refused quietly carries on, and has no proof checked.
+            $verified += $context->refused ? 0 : 1;
 
             // Simulate nine more requests arriving while this one is still being verified.
             if ($depth++ === 0) {
@@ -843,6 +869,64 @@ describe('an account locked out again and again', function () {
         }
     }
 
+    // The hold is the account's. A name is only told it's held for
+    // lockouts made under it, or one name would give away the others.
+    it('holds the account without telling its other name, which answers like anyone\'s', function () {
+        Event::fake([AccountLocked::class]);
+        $this->user->update(['name' => 'tay']);
+        account('other@example.com');
+        Keyring::findUsersUsing(fn (Request $request) => User::query()
+            ->where('email', $request->input('email'))
+            ->orWhere('name', $request->input('email'))
+            ->first());
+
+        lockOut(3, 'tay');
+        $this->travel(7)->days();
+
+        $answers = fn (string $name) => array_map(function () use ($name) {
+            $response = $this->postJson('/login', ['email' => $name, 'password' => 'nope']);
+
+            return [$response->status(), $response->json('errors.email.0')];
+        }, range(1, 3));
+
+        $nobody = $answers('nobody@example.com');
+
+        expect($nobody[0])->toBe([422, __('auth.failed')])
+            ->and($answers('taylor@example.com'))->toBe($nobody)
+            ->and($answers('other@example.com'))->toBe($nobody)
+            // The name the lockouts were made under says so.
+            ->and($this->postJson('/login', ['email' => 'tay', 'password' => 'nope'])->json('errors.email.0'))->toBe(__('keyring::keyring.locked'));
+
+        // The account is still held, under every name, until it's reset.
+        $this->travel(7)->days();
+        $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertStatus(422);
+        $this->assertGuest();
+        Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->user->is($this->user));
+    });
+
+    // A name's count outlasts a reset, so that what the name answers doesn't
+    // change with the account behind it. The account's hold goes by its
+    // own lockouts, which a reset starts over.
+    it('starts the count of lockouts over when the account\'s limits are cleared', function (Closure $clear, string $password) {
+        Event::fake([AccountLocked::class]);
+
+        lockOut(2);
+        $clear($this->user);
+        $this->travel(10)->minutes();
+
+        // The first lockout since: an old browser still trying the old password.
+        lockOut(1, password: 'the old password');
+        $this->travel(1)->hours();
+        $this->flushSession();
+        $this->app['auth']->forgetGuards();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => $password])->assertRedirect('/dashboard');
+        Event::assertNotDispatched(AccountLocked::class);
+    })->with([
+        'a reset' => [fn (User $user) => completeReset($user), 'a brand new passphrase'],
+        'an unlock' => [fn (User $user) => Keyring::unlock($user), 'password'],
+    ]);
+
     it('lifts each lock by itself until there have been that many in a day', function () {
         lockOut(2);
 
@@ -1118,6 +1202,33 @@ it('never holds a security key, which only ever comes second', function () {
         ->and(collect($limits)->pluck('key')->implode(' '))->not->toContain('|cleared|');
 });
 
+// The wait hides nothing longer than itself, and a password hash is as slow
+// as the server's settings make it. Where a refusal outran the wait, the
+// app's log says so, so whoever runs it learns the option is set too low.
+it('reports a refusal that took longer than the timebox, once an hour', function () {
+    config(['keyring.timebox' => '1ms']);
+    account('taylor@example.com');
+    Notification::fake();
+    Log::spy();
+
+    // Slower than a millisecond, as a real hash is.
+    Event::listen(FactorFailed::class, fn () => usleep(3000));
+
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])->assertStatus(422);
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])->assertStatus(422);
+
+    // One that goes through is never held, so there's nothing to outrun.
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertOk();
+
+    Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, 'every refusal is held for (keyring.timebox)'));
+
+    $this->travel(61)->minutes();
+    $this->post('/logout');
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])->assertStatus(422);
+
+    Log::shouldHaveReceived('warning')->twice();
+});
+
 it('holds every refusal for the timebox, whichever limit refused it', function () {
     config(['keyring.limits.per_account' => 1, 'keyring.limits.per_ip' => 100]);
     account('taylor@example.com');
@@ -1377,8 +1488,9 @@ describe('the cap on failures in a row', function () {
 
         $real = $statements('taylor@example.com');
 
-        // A first failure, more of them, then the name's own 429.
-        expect(array_map(count(...), $real))->toBe([3, 3, 3, 0])
+        // A first failure, more of them, then the name's own 429, which
+        // still asks whether the account behind the name is refused.
+        expect(array_map(count(...), $real))->toBe([3, 3, 3, 1])
             ->and(array_map(count(...), $statements('nobody@example.com')))->toBe(array_map(count(...), $real))
             ->and(FailureCount::query()->count())->toBe(1);
     });
@@ -1441,6 +1553,89 @@ describe('the cap on failures in a row', function () {
 
             $this->postJson('/login', ['email' => 'tay', 'password' => 'a brand new passphrase'])->assertOk();
             $this->assertAuthenticatedAs($this->user);
+        });
+
+        // What a name answers goes by what was tried under it, and by
+        // nothing that happens to the account behind it: a name with no
+        // account has no reset, unlock or new password to be cleared by.
+        it('keeps answering the name as refused once the account\'s limits are cleared, to anyone without the password', function (Closure $clear) {
+            foreach (range(1, 3) as $attempt) {
+                guess('nobody@example.com');
+            }
+
+            $answer = fn (string $name) => Arr::only($this->postJson('/login', ['email' => $name, 'password' => 'nope'])->json(), ['message', 'errors'])
+                + ['status' => guess($name)];
+
+            $before = $answer('tay');
+
+            expect($before['status'])->toBe(429)->and($answer('nobody@example.com'))->toBe($before);
+
+            $clear($this->user);
+            $this->flushSession();
+            $this->app['auth']->forgetGuards();
+
+            expect($answer('tay'))->toBe($before)
+                ->and($answer('nobody@example.com'))->toBe($before);
+            $this->assertGuest();
+        })->with([
+            'a reset' => [fn (User $user) => completeReset($user)],
+            'an unlock' => [fn (User $user) => Keyring::unlock($user)],
+        ]);
+
+        it('still lets the owner in under the refused name with the password, and leaves the name refused for everyone else', function () {
+            Keyring::unlock($this->user);
+
+            $this->postJson('/login', ['email' => 'tay', 'password' => 'password'])->assertOk();
+            $this->assertAuthenticatedAs($this->user);
+
+            $this->post('/logout');
+            $this->flushSession();
+            $this->app['auth']->forgetGuards();
+
+            expect(guess('tay'))->toBe(429);
+        });
+
+        // Whatever is behind the name: an account whose own limits refuse
+        // too, one they were cleared for, or nobody.
+        it('spends one password hash on every answer a refused name gives', function (string $name, Closure $before) {
+            foreach (range(1, 3) as $attempt) {
+                guess('nobody@example.com');
+            }
+            $before($this->user);
+
+            $hashes = 0;
+            Hash::partialMock()->shouldReceive('make')->andReturnUsing(function () use (&$hashes) {
+                $hashes++;
+
+                return 'hash';
+            })->getMock()->shouldReceive('check')->andReturnUsing(function () use (&$hashes) {
+                $hashes++;
+
+                return false;
+            });
+
+            expect(guess($name))->toBe(429)->and($hashes)->toBe(1);
+        })->with([
+            'an account whose own limits refuse too' => ['tay', fn () => null],
+            'an account whose limits were cleared' => ['tay', fn (User $user) => Keyring::unlock($user)],
+            'nobody' => ['nobody@example.com', fn () => null],
+        ]);
+
+        it('counts guesses behind a refused name against the account, which refuses in its turn', function () {
+            Keyring::unlock($this->user);
+            Hash::spy();
+
+            // Three more wrong ones use the account's allowance up again...
+            foreach (range(1, 3) as $attempt) {
+                expect(guess('tay'))->toBe(429);
+            }
+
+            Hash::shouldHaveReceived('check')->times(3);
+
+            // ...and then the right password isn't looked at either.
+            expect(guess('tay', 'password'))->toBe(429);
+            Hash::shouldHaveReceived('check')->times(3);
+            $this->assertGuest();
         });
     });
 });

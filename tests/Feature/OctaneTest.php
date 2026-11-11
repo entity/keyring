@@ -6,13 +6,23 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Facade;
+use Keyring\Changes\EmailChanges;
+use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\Responses\LogoutResponse;
+use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
+use Keyring\Http\Controllers\AuthenticatorController;
+use Keyring\Http\Controllers\ChallengeController;
+use Keyring\Http\Controllers\EmailChangeController;
+use Keyring\Http\Controllers\PasswordResetController;
 use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\SignIn;
+use Keyring\Login\StepUp;
 use Keyring\Models\Authenticator;
+use Keyring\Pipeline\Verifier;
 use Keyring\Sessions\SessionAssurance;
 
 // Octane boots the app once per worker and handles each request in a copy of
@@ -120,4 +130,45 @@ it('builds what a request needs in the app handling it', function () {
     [$sandbox] = octaneRequest($this->booted, []);
 
     expect(Keyring::response(LogoutResponse::class)->app)->toBe($sandbox);
+});
+
+// A route keeps the controller it made. Octane drops it after each request,
+// and another worker might not: a controller holding the session of the
+// request it was made for would then answer the next visitor from it.
+it('gives a controller that outlives its request the stores of the request it is handling', function (string $controller, string $property, string $service) {
+    [$first] = octaneRequest($this->booted, []);
+    $kept = $first->make($controller);
+    $held = fn () => (fn () => $this->{$property})->call($kept);
+    $before = $held();
+
+    expect($before)->toBeInstanceOf($service);
+
+    octaneRequest($this->booted, []);
+
+    // Never the one it had for the request before.
+    expect($held())->toBeInstanceOf($service)->not->toBe($before);
+})->with([
+    'a pending sign in' => [ChallengeController::class, 'attempts', AttemptStore::class],
+    'a step-up' => [ChallengeController::class, 'stepUp', StepUp::class],
+    'the pipeline' => [ChallengeController::class, 'verifier', Verifier::class],
+    'a pending enrollment' => [AuthenticatorController::class, 'enrollments', EnrollmentStore::class],
+    'signing in' => [AuthenticatorController::class, 'signIn', SignIn::class],
+    'email changes' => [EmailChangeController::class, 'changes', EmailChanges::class],
+    'password changes' => [PasswordResetController::class, 'passwords', PasswordChanges::class],
+]);
+
+it('does not show a visitor the sign in another left waiting, through a controller the route kept', function () {
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    [$sandbox, $request] = octaneRequest($this->booted, ['email' => 'taylor@example.com', 'password' => 'password']);
+    $sandbox->make(KeyringManager::class)->attempt($request);
+    $kept = $sandbox->make(ChallengeController::class);
+    $waiting = fn () => (fn () => $this->attempts->current(Purpose::Login))->call($kept);
+
+    expect($waiting()?->userId)->toBe($this->user->id);
+
+    // Someone else, with no session of their own yet.
+    octaneRequest($this->booted, []);
+
+    expect($waiting())->toBeNull();
 });

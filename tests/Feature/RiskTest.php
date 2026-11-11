@@ -285,6 +285,35 @@ it('asks again before sensitive pages when the session moves browser', function 
     $this->withHeader('User-Agent', CHROME)->get('/sensitive')->assertRedirect(route('keyring.confirm.challenge'));
 });
 
+// sessions.end_on_lapse ends a session when what it signed in with has gone,
+// and a step-up is what makes it go.
+it('ends the session instead where a session ends with the level it signed in at', function (bool $endOnLapse) {
+    config(['keyring.sessions.end_on_lapse' => $endOnLapse]);
+    Keyring::risk()->signals([SessionFingerprintChanged::class]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->withHeader('User-Agent', FIREFOX)->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+    $this->withHeader('User-Agent', FIREFOX)->get('/home')->assertOk();
+
+    $moved = $this->withHeader('User-Agent', CHROME)->get('/home');
+
+    if (! $endOnLapse) {
+        $moved->assertOk();
+        $this->assertAuthenticated();
+
+        return;
+    }
+
+    $moved->assertRedirect('/login');
+    $this->assertGuest();
+    expect(SecurityEvent::where('type', 'session_ended')->sole()->meta['reason'])->toBe('risk');
+
+    // Not left for the timeouts to find, a day later.
+    $this->travel(2)->hours();
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertRedirect('/login');
+})->with(['on' => true, 'off' => false]);
+
 it('does not let a confirmation started before the session moved browser keep its proofs', function () {
     Keyring::risk()->signals([SessionFingerprintChanged::class]);
     Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
@@ -342,14 +371,25 @@ it('keeps "was this you?" for a browser the account has used before', function (
     $this->post('/logout');
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
+    $this->travel(1)->minutes();
     signInAs(CHROME);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => '000000']);
+    $newcomer = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertSessionHas('keyring.alerts', [])
+        ->getCookie('known_device')->getValue();
+    $this->post('/logout');
+
+    // Nor on that browser's second visit: it was first seen after the
+    // failure, so it could be whoever made it.
+    $this->travel(1)->minutes();
+    signInAs(CHROME, cookies: ['known_device' => $newcomer]);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
         ->assertSessionHas('keyring.alerts', []);
     $this->post('/logout');
 
+    $this->travel(1)->minutes();
     signInAs(cookies: ['known_device' => $device]);
-    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret, 1)])
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
         ->assertSessionHas('keyring.alerts', fn ($alerts) => $alerts[0]['type'] === 'second_factor_failed');
 
     expect(app(SecurityLog::class)->pullAlerts($this->user))->toBeEmpty();

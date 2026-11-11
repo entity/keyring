@@ -32,12 +32,18 @@ class AuthenticatorController
 {
     use RespondsWithStatus;
 
+    // A route keeps its controller once it has made one, and in a worker
+    // that serves many requests that can be longer than a request lasts.
+    // These hold the session they were made for, or reach something that
+    // does, so they're asked of the app handling the request each time.
+    protected EnrollmentStore $enrollments { get => app(EnrollmentStore::class); }
+
+    protected SignIn $signIn { get => app(SignIn::class); }
+
     public function __construct(
         protected KeyringManager $keyring,
-        protected EnrollmentStore $enrollments,
         protected AuthenticatorChanges $changes,
         protected Throttle $throttle,
-        protected SignIn $signIn,
         protected Sessions $sessions,
     ) {}
 
@@ -50,7 +56,7 @@ class AuthenticatorController
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
-            $this->throttle->sending($factor->key(), $this->keyring->user()->getAuthIdentifier());
+            $this->throttle->sending($factor->key(), $this->keyring->user());
         }
 
         $enrollment = $factor->beginEnrollment($this->keyring->user(), $request);
@@ -80,7 +86,7 @@ class AuthenticatorController
             throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
         }
 
-        $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
+        $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator, $request);
 
         $this->enrollments->forget($factor->key());
         $this->signOutOthers($request);

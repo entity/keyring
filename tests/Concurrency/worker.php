@@ -8,6 +8,7 @@ declare(strict_types=1);
  * as JSON. Usage: php worker.php <operation> <arguments...>
  */
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
@@ -88,13 +89,42 @@ try {
 
             return app(Sessions::class)->start($request, User::findOrFail($id), null, Assurance::AAL1)->id;
         })(),
+        'add-authenticator' => (function () use ($id, $value) {
+            // A request its middleware let through as this session, saving
+            // a sign-in method it has just confirmed.
+            $request = Request::create('/user/authenticators/totp/confirm', 'POST');
+            $request->setLaravelSession(app('session.store'));
+            $request->session()->put(Sessions::KEY, $value);
+
+            $user = User::findOrFail($id);
+
+            app(AuthenticatorChanges::class)->add($user, Keyring::factor('totp'), Authenticator::factory()->totp()->for($user, 'authenticatable')->make(), $request);
+
+            return 'added';
+        })(),
         'sign-out' => app(Sessions::class)->signOutEverywhere(User::findOrFail($id)),
+        'end-latest' => (function () use ($id) {
+            // Read while the row is held, as a request that found the cookie used.
+            $session = app(SessionRegistry::class)->find($id);
+
+            return app(Sessions::class)->endLatest(User::findOrFail($session->userId), $session)?->id;
+        })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),
+        'request-email-change' => (function () use ($id, $value) {
+            // A request its middleware let through as this session.
+            $request = Request::create('/user/email', 'POST');
+            $request->setLaravelSession(app('session.store'));
+            $request->session()->put(Sessions::KEY, $value);
+
+            return app(EmailChanges::class)->request(User::findOrFail($id), 'new@example.com', $request)?->id !== null;
+        })(),
     };
 } catch (ValidationException) {
     $result = 'refused';
+} catch (AuthenticationException) {
+    $result = 'signed out';
 }
 
 echo json_encode(['result' => $result]), "\n";

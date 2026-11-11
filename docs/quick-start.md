@@ -226,7 +226,7 @@ These are part of the foundation. You don't need to set them up, but you can cha
 | What | Default | Change it with |
 |---|---|---|
 | Rate limits on signing in | 5 a minute per account, 20 per IP, and an authenticator refused after 100 failures in a row until it's set up again | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
-| Failed checks take the same time, and so does every registration | 250ms | `timebox` |
+| Failed checks take the same time, and so does every registration and refused password reset | 500ms | `timebox` |
 | Registration answers the same whether or not an address has an account | On | [`registration.reveal_taken`](sign-in-flow.md#registration) |
 | Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
 | A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after two hours unused and 30 days after sign in. "Remember me" brings a browser back for up to 14 days away, with nothing proved, and only to a session that hasn't ended | `sessions` in [Configuration](configuration.md#sessions) |

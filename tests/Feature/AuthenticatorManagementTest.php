@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Testing\TestResponse;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Concerns\HasKeyring;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -17,6 +18,7 @@ use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\FactorVerified;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Facades\Keyring;
@@ -25,7 +27,9 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Login\Attempt;
+use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
 use Keyring\Notifications\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
@@ -171,6 +175,70 @@ it('adds no recovery codes when that factor is not registered', function () {
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
         ->assertOk()
         ->assertJsonMissingPath('recoveryCodes');
+});
+
+// A sign-in method taken off the account stops counting in every session it
+// signed in. It counts for nothing in a sign in that hasn't finished either.
+describe('a sign-in method removed while a sign in that proved it is under way', function () {
+    beforeEach(function () {
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        // Nobody is signed in yet.
+        $this->app['auth']->forgetGuards();
+        $this->flushSession();
+    });
+
+    it('ends a sign in that is waiting for its next step', function (Closure $remove) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+        // One step further: the authenticator app proved, and more asked for.
+        $store = app(AttemptStore::class);
+        $attempt = $store->current(Purpose::Login);
+        $attempt->record(new Verification('totp', $this->totp->id, [Category::Possession], at: now()->getTimestamp()));
+        $store->save($attempt);
+
+        expect($store->current(Purpose::Login))->not->toBeNull();
+
+        $remove($this->totp);
+
+        $this->get(route('keyring.login.challenge'))->assertRedirect(route('login'));
+        expect(session()->has('keyring.attempt.login'))->toBeFalse();
+        $this->assertGuest();
+    })->with([
+        // With another second factor beside it, so it isn't the last.
+        'by its owner' => [function (Authenticator $totp) {
+            Authenticator::factory()->passkey()->for($totp->user(), 'authenticatable')->create();
+
+            app(AuthenticatorChanges::class)->remove($totp->user(), $totp->id);
+        }],
+        'however it went' => [fn (Authenticator $totp) => $totp->delete()],
+    ]);
+
+    it('ends a sign in it is removed in the middle of finishing', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+        // Between the code being checked and the session being registered.
+        Event::listen(function (FactorVerified $event) {
+            if ($event->verification->factor === 'totp') {
+                $this->totp->delete();
+            }
+        });
+
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])
+            ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+        $this->assertGuest();
+        expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+        $this->get('/home')->assertRedirect('/login');
+    });
+
+    it('still finishes a sign in whose methods are all there', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect('/dashboard');
+
+        $this->assertAuthenticatedAs($this->user);
+    });
 });
 
 it('renames and picks the default', function () {

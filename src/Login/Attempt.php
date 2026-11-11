@@ -110,6 +110,20 @@ final class Attempt
         return $this->resolvedUser;
     }
 
+    /**
+     * Whether every authenticator this attempt has proved is still on the
+     * account. One taken off since (a stolen key, a method an undone email
+     * change removed) stops counting in a signed-in session, and counts for
+     * nothing in a sign in that hasn't finished either.
+     */
+    public function keepsItsAuthenticators(): bool
+    {
+        $ids = array_values(array_unique(array_filter(array_column($this->verifications, 'authenticator'))));
+
+        return $ids === []
+            || Keyring::authenticatorModel()::query()->ownedBy($this->user())->whereKey($ids)->count() === count($ids);
+    }
+
     public function resolveDevice(?string $deviceId): void
     {
         $this->deviceId = $deviceId;

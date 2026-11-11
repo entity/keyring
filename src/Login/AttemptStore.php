@@ -86,6 +86,7 @@ class AttemptStore
                 && ($purpose === Purpose::Login || $this->isSignedIn($attempt))
                 && is_string($credentials)
                 && hash_equals($credentials, $this->credentials($attempt->user()))
+                && $attempt->keepsItsAuthenticators()
                 && Keyring::allowsSignIn($attempt->user());
         } catch (AttemptExpired) {
             return false;

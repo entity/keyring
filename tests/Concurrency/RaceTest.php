@@ -11,6 +11,7 @@ use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\User;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
 use ParagonIE\ConstantTime\Base64UrlSafe;
@@ -187,11 +188,43 @@ it('puts the address back when a later change is confirmed while an earlier one 
         ->and($second->fresh()->canRevert())->toBeFalse();
 });
 
+// An undo, a reset and "this wasn't me" end the sessions holding the user's
+// row. A request that was let through before waits there, and looks again.
+it('refuses an email change from a session that is signed out while its request waits', function (bool $signedOut, mixed $expected) {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    [$requested] = contend($user, [['request-email-change', $user->id, 'asking']], fn () => $signedOut && app(SessionRegistry::class)->revokeAll($user));
+
+    expect($requested)->toBe($expected)
+        ->and(PendingChange::query()->count())->toBe($signedOut ? 0 : 1);
+})->with([
+    'signed out meanwhile' => [true, 'signed out'],
+    'still signed in' => [false, true],
+]);
+
+// The same for a sign-in method: one saved by a request that was let through
+// before its session ended would be the one thing an undo left behind.
+it('refuses a sign-in method from a session that is signed out while its request waits', function (bool $signedOut, string $expected) {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    [$added] = contend($user, [['add-authenticator', $user->id, 'asking']], fn () => $signedOut && app(SessionRegistry::class)->revokeAll($user));
+
+    expect($added)->toBe($expected)
+        ->and(Authenticator::query()->where('factor', 'totp')->count())->toBe($signedOut ? 0 : 1);
+})->with([
+    'signed out meanwhile' => [true, 'signed out'],
+    'still signed in' => [false, 'added'],
+]);
+
 it('lets one of two requests use a "remember me" cookie, and starts one session between them', function () {
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
 
     // Both read the record before either can replace it.
     $results = contend(sessionRow('remembered'), [
@@ -215,7 +248,7 @@ it('keeps an account to its session limit when two sign ins land at once', funct
     $registry = app(SessionRegistry::class);
 
     foreach (['older' => 120, 'newer' => 60] as $id => $ago) {
-        $registry->save(new RegisteredSession($id, (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now - $ago, $now - $ago, $now + 3600));
+        $registry->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now - $ago, $now - $ago, $now + 3600));
     }
 
     // Each waits for the user's row, so the second counts the first's session.
@@ -233,7 +266,7 @@ it('leaves nothing signed in when a sign-out everywhere meets a "remember me" co
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
 
     // Both wait for the user's row. Whichever goes first, the session ends:
     // signed out and then refused, or carried on and then signed out.
@@ -247,11 +280,31 @@ it('leaves nothing signed in when a sign-out everywhere meets a "remember me" co
         ->and($registry->find($resumed ?? 'remembered')->revokedAt)->not->toBeNull();
 });
 
+// A used cookie means two browsers held it, and the session ends for both.
+// The one still on it may be carrying it on to a new record at that moment.
+it('ends a reused "remember me" session wherever it has moved to by the time it is ended', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+
+    // Both wait for the user's row. Carried on first, it's followed to the
+    // new record and ended there. Ended first, there's nothing to carry on.
+    [$resumed, $ended] = contend($user, [
+        ['resume-session', 'remembered'],
+        ['end-latest', 'remembered'],
+    ]);
+
+    expect($ended)->toBe($resumed ?? 'remembered')
+        ->and($registry->forUser($user))->toBeEmpty()
+        ->and($registry->find($ended)->revokedAt)->not->toBeNull();
+});
+
 it('signs out a session that moved to a new record while everyone was being signed out', function () {
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save($session = new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+    $registry->save($session = new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
 
     // The sign-out comes to the record while "remember me" is carrying its
     // session on, and waits. By the time it gets the record, the session is

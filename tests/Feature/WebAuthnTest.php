@@ -20,6 +20,7 @@ use Keyring\Features;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Models\FailureCount;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\KeyedHash;
 use Keyring\Testing\VirtualAuthenticator;
@@ -98,6 +99,7 @@ it('gives two kinds of account that share an id their own user handles', functio
     // Staff accounts are made by admins, not registered, so needn't verify an email.
     config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $staff = staff();
+    $this->flushSession();
     $this->actingAs($staff)->withAssurance(Assurance::AAL2);
     $forStaff = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.user.id');
 
@@ -152,6 +154,32 @@ it('signs in with a passkey alone, without a username', function (VirtualAuthent
     'P-256' => fn () => new VirtualAuthenticator,
     'Ed25519' => fn () => VirtualAuthenticator::eddsa(),
 ]);
+
+// A passkey names its account by the credential. A username sent with one
+// is nothing to count against whoever has that name.
+it('counts nothing against an account whose username is sent along with someone else\'s passkey', function () {
+    config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 1000, 'keyring.limits.consecutive' => 3]);
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+    $this->post('/logout');
+    $this->flushSession();
+    $this->app['auth']->forgetGuards();
+
+    // Anyone, with a key the app has never seen.
+    foreach (range(1, 6) as $attempt) {
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+
+        $this->postJson(route('keyring.login.factor', 'passkey'), ['email' => 'taylor@example.com', 'credential' => new VirtualAuthenticator()->assert($options)])
+            ->assertUnprocessable();
+    }
+
+    expect(FailureCount::query()->count())->toBe(0);
+
+    // The account's own passkey still signs in.
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+    $this->post(route('keyring.login.factor', 'passkey'), ['email' => 'taylor@example.com', 'credential' => $key->assert($options)])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+});
 
 it('fails a passkey that has no public key to check, like any other wrong proof', function () {
     $key = new VirtualAuthenticator;

@@ -21,6 +21,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Duration;
 
 /**
  * Checks that your Keyring setup (policy, factors, responses, pipeline
@@ -137,6 +138,49 @@ trait KeyringConformance
             'Passwords are hashed with bcrypt, which only reads the first 72 bytes, so Keyring refuses longer ones: 64 characters of accented or non-Latin text, for one. '
             .'Set HASH_DRIVER=argon2id to take every password up to keyring.passwords.max, with HASH_VERIFY=false while users still have bcrypt hashes. '
             .'If you mean to keep bcrypt, return true from keyringAcknowledgesBcryptLimit().',
+        );
+    }
+
+    /**
+     * The options production hashes passwords with, when your tests hash
+     * with less: Laravel's own phpunit.xml sets BCRYPT_ROUNDS=4. Bcrypt is
+     * timed at 12 rounds, a new app's setting, unless yours is higher.
+     * Return your own to time what production runs.
+     *
+     * @return array<string, mixed>
+     */
+    protected function keyringProductionHashOptions(): array
+    {
+        return Hash::getDefaultDriver() === 'bcrypt' ? ['rounds' => max(12, (int) config('hashing.bcrypt.rounds'))] : [];
+    }
+
+    /**
+     * A refused sign in or reset is held for keyring.timebox so that how
+     * long it took doesn't say whether the account exists. Nothing is held
+     * shorter than the work already done, and the slowest thing a refusal
+     * does is hash a password, at a cost that differs between accounts while
+     * old hashes are being moved to a new one. So the wait only hides the
+     * difference while it's longer than a hash.
+     *
+     * This times one on the machine the tests run on, which is a guide and
+     * not your servers: slower ones need a longer timebox.
+     */
+    public function test_keyring_holds_a_refusal_for_longer_than_a_password_hash_takes(): void
+    {
+        $timebox = Duration::milliseconds(config('keyring.timebox'));
+
+        $took = min(array_map(function () {
+            $started = hrtime(true);
+            Hash::make(Str::random(32), $this->keyringProductionHashOptions());
+
+            return (hrtime(true) - $started) / 1_000_000;
+        }, range(1, 3)));
+
+        $this->assertLessThan(
+            $timebox,
+            (int) ceil($took),
+            sprintf('One password hash took %dms here and keyring.timebox is %dms, so a refusal that hashes takes longer than one that doesn\'t, and shows which accounts exist. ', (int) ceil($took), $timebox)
+            .'Set keyring.timebox comfortably above what a hash takes on your servers, or return what production hashes with from keyringProductionHashOptions().',
         );
     }
 

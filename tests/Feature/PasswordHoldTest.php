@@ -3,12 +3,15 @@
 declare(strict_types=1);
 
 use Illuminate\Contracts\Validation\UncompromisedVerifier;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Severity;
+use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordChangeRequired;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
@@ -96,6 +99,94 @@ it('holds a user on the change-password page until they choose a new password', 
         ->and(PasswordHold::query()->exists())->toBeFalse();
     $this->get('/home')->assertOk();
 });
+
+// A new hash of the same password is a different string, so the hash
+// changing says nothing about the password.
+it('keeps the hold when the password they were held for is saved again as the new one', function () {
+    Event::fake([PasswordChanged::class]);
+    $this->user->forceFill(['password' => Hash::make('a much longer passphrase 1')])->saveQuietly();
+    Keyring::requirePasswordChange($this->user);
+    signInWithPassword('a much longer passphrase 1');
+
+    $this->putJson(route('user-password.update'), [
+        'current_password' => 'a much longer passphrase 1',
+        'password' => 'a much longer passphrase 1',
+        'password_confirmation' => 'a much longer passphrase 1',
+    ])->assertUnprocessable()->assertJsonValidationErrors(['password' => __('keyring::keyring.password_unchanged')]);
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeTrue();
+    Event::assertNotDispatched(PasswordChanged::class);
+    $this->get('/home')->assertRedirect('/settings/password');
+
+    chooseNewPassword('a much longer passphrase 1', 'another passphrase altogether');
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
+    Event::assertDispatchedTimes(PasswordChanged::class, 1);
+});
+
+it('keeps the hold through a reset to the same password, without telling the link\'s holder it was the same', function () {
+    $this->user->forceFill(['password' => Hash::make('a much longer passphrase 1')])->saveQuietly();
+    Keyring::requirePasswordChange($this->user);
+
+    $reset = fn (string $password) => $this->post(route('password.update'), [
+        'token' => Password::broker()->createToken($this->user),
+        'email' => 'taylor@example.com',
+        'password' => $password,
+        'password_confirmation' => $password,
+    ]);
+
+    // Answered like any reset: whoever holds the link learns nothing of the
+    // password it replaced.
+    $reset('a much longer passphrase 1')->assertSessionHasNoErrors()->assertRedirect(route('login'));
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeTrue();
+
+    $this->travel(2)->minutes();
+    $reset('another passphrase altogether')->assertSessionHasNoErrors();
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
+});
+
+// Nothing to be the same as: the field is only checked for an account that
+// has a password, so what it holds proves nothing for one that hasn't.
+it('sets a first password for an account that had none, whatever the current password field holds', function () {
+    Event::fake([PasswordChanged::class]);
+    $this->user->forceFill(['password' => null])->saveQuietly();
+    Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)->putJson(route('user-password.update'), [
+        'current_password' => 'a much longer passphrase 1',
+        'password' => 'a much longer passphrase 1',
+        'password_confirmation' => 'a much longer passphrase 1',
+    ])->assertOk();
+
+    expect(Hash::check('a much longer passphrase 1', $this->user->fresh()->password))->toBeTrue();
+    Event::assertDispatchedTimes(PasswordChanged::class, 1);
+});
+
+// The hasher throws for a stored value it won't check, and by then the new
+// password is saved: the reset has to finish, sessions, link and all.
+it('finishes a reset for an account whose stored password is not a hash the app checks', function (string $stored) {
+    config(['hashing.bcrypt.verify' => true]);
+    DB::table('users')->where('id', $this->user->id)->update(['password' => $stored]);
+    Keyring::requirePasswordChange($this->user->fresh());
+    $token = Password::broker()->createToken($this->user);
+
+    $this->post(route('password.update'), [
+        'token' => $token,
+        'email' => 'taylor@example.com',
+        'password' => 'a much longer passphrase',
+        'password_confirmation' => 'a much longer passphrase',
+    ])->assertSessionHasNoErrors()->assertRedirect(route('login'));
+
+    expect(Hash::check('a much longer passphrase', $this->user->fresh()->password))->toBeTrue()
+        ->and(Password::broker()->tokenExists($this->user->fresh(), $token))->toBeFalse()
+        ->and(Keyring::requiresPasswordChange($this->user))->toBeFalse();
+})->with([
+    'an imported md5' => [md5('password')],
+    'another algorithm\'s hash' => [password_hash('password', PASSWORD_ARGON2ID)],
+    'a placeholder' => ['!'],
+]);
 
 it('holds one hold per user however often evidence turns up', function () {
     Event::fake([PasswordChangeRequired::class]);

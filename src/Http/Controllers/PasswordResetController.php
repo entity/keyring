@@ -19,6 +19,7 @@ use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Support\Input;
 use Keyring\Support\PasswordRules;
+use Keyring\Support\Refusal;
 
 use function Illuminate\Support\defer;
 
@@ -32,9 +33,14 @@ class PasswordResetController
 {
     use RespondsWithStatus;
 
+    // A route keeps its controller once it has made one, and in a worker
+    // that serves many requests that can be longer than a request lasts.
+    // These hold the session they were made for, or reach something that
+    // does, so they're asked of the app handling the request each time.
+    protected PasswordChanges $passwords { get => app(PasswordChanges::class); }
+
     public function __construct(
         protected KeyringManager $keyring,
-        protected PasswordChanges $passwords,
     ) {}
 
     public function create(Request $request): mixed
@@ -73,13 +79,24 @@ class PasswordResetController
             'password' => ['required', 'string'],
         ]);
 
-        $status = $this->broker()->reset([
-            ...$this->credentials($request),
-            ...Arr::only($input, ['token', 'password']),
-        ], fn (Authenticatable&Model $user) => $this->passwords->reset(
-            $user,
-            fn () => $resetter->reset($user, PasswordRules::normalizeInput(Input::all($request))),
-        ));
+        // The broker only checks a token against a hash for an address that
+        // has a link outstanding, so how long a refusal takes would say
+        // which addresses do. Its own wait is Laravel's (200ms), and is
+        // switched off for good on a broker a reset has gone through, which
+        // a long-lived worker keeps. So every refusal is held for Keyring's
+        // timebox, like a refused sign in, on a timebox of its own.
+        $status = Refusal::timed(function () use ($request, $input, $resetter) {
+            $status = $this->broker()->reset([
+                ...$this->credentials($request),
+                ...Arr::only($input, ['token', 'password']),
+            ], fn (Authenticatable&Model $user) => $this->passwords->reset(
+                $user,
+                fn () => $resetter->reset($user, PasswordRules::normalizeInput(Input::all($request))),
+                new: $input['password'],
+            ));
+
+            return [$status, $status === PasswordBroker::PASSWORD_RESET];
+        });
 
         // Laravel says "no user with that address" for unknown accounts. Answer
         // every failure like a bad token instead.

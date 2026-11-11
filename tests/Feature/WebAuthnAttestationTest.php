@@ -196,12 +196,23 @@ it('signs in with an attested key afterwards', function () {
 });
 
 it('adds an older key that attests as fido-u2f', function () {
-    attest($this->maker->key(format: 'fido-u2f', userVerification: false))->assertOk();
+    attest($this->maker->key(format: 'fido-u2f'))->assertOk();
 
     expect(Authenticator::query()->sole())
         ->aaguid->toBe('00000000-0000-0000-0000-000000000000')
         ->attestation->toBe('basic');
 });
+
+// A fido-u2f statement signs the credential, not the flags beside it. A U2F
+// key sets none of them, so a registration that has one set says more than
+// its maker vouched for, and would be trusted for it from then on.
+it('refuses a fido-u2f key whose registration claims what its statement does not sign', function (int $flag) {
+    refused(attest($this->maker->key(format: 'fido-u2f'), answer: fn (array $credential) => tamper($credential, function (array $object) use ($flag) {
+        $object['authData'][32] = chr(ord($object['authData'][32]) | $flag);
+
+        return $object;
+    })));
+})->with(['user verified' => 0x04, 'backup eligible' => 0x08, 'backed up' => 0x18]);
 
 it('takes a root from a file of pem certificates', function () {
     $file = tempnam(sys_get_temp_dir(), 'keyring');
@@ -295,6 +306,22 @@ it('only adds the models on the list', function () {
     attest($this->maker->key(YUBIKEY))->assertOk();
 
     expect(Authenticator::query()->sole()->aaguid)->toBe(YUBIKEY);
+});
+
+// The list says which keys may be added. Narrowing it leaves the ones already
+// added as they are, and clearing the column is how one stops counting.
+it('keeps a key attested when its model leaves the list, until its column is cleared', function () {
+    attest($this->maker->key(YUBIKEY))->assertOk();
+    $key = Authenticator::query()->sole();
+
+    $attested = fn (WebAuthn $factor) => tap($factor, fn () => Keyring::factors([Password::class, $factor]))->attested($key->refresh());
+
+    expect($attested(WebAuthn::securityKeys()->requireAttestation()->allowOnly([TITAN])))->toBeTrue()
+        ->and($attested(WebAuthn::securityKeys()))->toBeFalse();
+
+    Keyring::authenticatorModel()::query()->where('aaguid', YUBIKEY)->update(['attestation' => null]);
+
+    expect($attested(WebAuthn::securityKeys()->requireAttestation()))->toBeFalse();
 });
 
 it('refuses a listed aaguid that nothing vouches for', function (Closure $key) {
