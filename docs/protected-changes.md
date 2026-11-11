@@ -50,7 +50,7 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `GET` | `/reset-password/{token}` | `password.reset` | guest |
 | `POST` | `/reset-password` | `password.update` | guest, limited |
 | `GET` | `/email/verify` | `verification.notice` | `auth` |
-| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, limited |
+| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | signed, limited |
 | `POST` | `/email/verify/{id}/{hash}` | `verification.verify.store` | `auth`, signature in the body, limited |
 | `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
@@ -154,7 +154,7 @@ The user is then redirected to the forgot password page (or the login page, when
 
 ### The Old Address Is Reserved
 
-While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. That goes for lookalikes too: an address that differs only in case, accents, letter width or characters that don't show is held back with it, because MySQL's and MariaDB's default collations take those for the same address and their unique index would refuse to give it back. Another account asking to move to it gets the same "address in use" email as for any taken address. `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()` wherever users are created. The published `CreateNewUser` action does:
+While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. That goes for lookalikes too: an address that differs only in case, accents, letter width or characters that don't show is held back with it, because MySQL's and MariaDB's default collations take those for the same address and their unique index would refuse to give it back. Another account asking to move to it gets the same "address in use" email as for any taken address. [Registration](sign-in-flow.md#registration) counts it as taken too, so it's answered like any address that has an account. Where your own code creates users or gives them a new address (an admin screen, an import), `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()`:
 
 ```php
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
@@ -260,7 +260,7 @@ $user->password = Hash::make(PasswordRules::normalize($password));
 
 A password hashed without it only matters when it has characters that aren't already in NFC: that hash then never matches, because Keyring only ever checks the NFC form. There's no second try with the password as typed. Keyring has had this from its first release, so no hash it made needs one.
 
-`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass theirs yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass theirs yourself, as the published `CreateNewUser` does in `validate()`: `PasswordRules::for(context: [$input['name'], $input['email']])`.
 
 ### Context-Specific Words
 
@@ -339,9 +339,11 @@ Laravel verifies the address as soon as the link is opened. Keyring doesn't: lik
 </form>
 ```
 
-Both need the user to be signed in, as the account the link was sent to: anyone else gets a `403`, and a signed-out browser goes to the login page and comes back. The link stops working when it expires (`auth.verification.expire`, 60 minutes) or the account's address changes. After verifying, users go to `home` with `?verified=1`, and Laravel's `Illuminate\Auth\Events\Verified` event is dispatched as usual.
+Both need the user to be signed in, as the account the link was sent to: anyone else gets a `403`. A signed-out browser that opens the link goes to the login page and comes back to it, and one that posts to `url` goes to the login page. The link stops working when it expires (`auth.verification.expire`, 60 minutes) or the account's address changes. After verifying, users go to `home` with `?verified=1`, and Laravel's `Illuminate\Auth\Events\Verified` event is dispatched as usual.
 
 Laravel's own `VerifyEmail` notification and the `MustVerifyEmail` contract work unchanged. Only what the link's `GET` does is different.
+
+With [registration that doesn't reveal who has an account](sign-in-flow.md#without-revealing-who-has-an-account), which is the default, nobody is signed in before their address is verified, so a new user never sees this page. They open the link signed out and are sent to sign in, and signing in from the browser that followed the link is what verifies their address: the link and the password together, never the link alone. A finished password reset verifies it too. You only need the `verify-email` and `email-verification` pages if you set `registration.reveal_taken`.
 
 If you've already set `VerifyEmail::createUrlUsing()` yourself, Keyring leaves it alone.
 

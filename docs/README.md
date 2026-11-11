@@ -26,6 +26,7 @@ Keyring is an authentication backend for Laravel. It handles sign in, registrati
 - [Security Log & Emails](security-log-and-emails.md): the activity log, "was this you?" alerts and security emails.
 - [Events](events.md): every event Keyring dispatches and what it carries.
 - [Security](security.md): what Keyring guarantees, and its known limitations.
+- [OWASP ASVS](owasp-asvs.md): what to turn on for each level of ASVS 5.0's authentication and session management chapters.
 
 ## Building Your App
 

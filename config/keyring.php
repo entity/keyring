@@ -44,12 +44,33 @@ return [
     'features' => [
         Features::registration(),
         Features::resetPasswords(),
+        Features::emailVerification(),
+        Features::updatePasswords(),
         Features::securityLog(),
-        // Features::emailVerification(),
-        // Features::updatePasswords(),
         // Features::manageAuthenticators(),
         // Features::devices(),
         // Features::emailChanges(),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Registration
+    |--------------------------------------------------------------------------
+    |
+    | Registering gives nothing away by default. The form answers the same
+    | whether or not the address has an account, a new user signs in once
+    | they've followed the link emailed to them, and an address that already
+    | has an account is emailed that someone tried to register with it. That
+    | needs Features::emailVerification() and a MustVerifyEmail user model.
+    |
+    | Set "reveal_taken" to true to answer "has already been taken" on the
+    | form instead and sign new users in straight away, which lets anyone
+    | check whether an address has an account.
+    |
+    */
+
+    'registration' => [
+        'reveal_taken' => false,
     ],
 
     /*
@@ -427,7 +448,8 @@ return [
     | the cache as well, for "remember_names_for". "codes" is how many codes
     | an account can be sent for one factor every "codes_per", and "notices"
     | how many security notices of one kind, or email change requests, an
-    | account or an address can be sent every "notices_per".
+    | account or an address can be sent every "notices_per". Registration
+    | mails an address that often too.
     |
     */
 

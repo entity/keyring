@@ -24,12 +24,20 @@ use function Laravel\Prompts\multiselect;
 #[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
-        {--feature=* : A feature to turn on, replacing the defaults (registration and reset-passwords): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
-        {--emails : Register the emails that tell users their password or sign-in methods changed (the default with a second sign-in method)}
+        {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords, email-verification, update-passwords and security-log): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
+        {--emails : Register the emails that tell users their password, sign-in methods or email address changed (the default)}
         {--no-emails : Register no security emails, only the ones a flow needs}
+        {--require-second-factor : Make every user set up a second factor (the default with an authenticator app, passkeys or security keys)}
+        {--optional-second-factor : Leave setting up a second factor to each user}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
 {
+    /**
+     * The features turned on unless others are picked. What config/keyring.php
+     * ships with says the same.
+     */
+    protected const array FEATURES = ['registration', 'reset-passwords', 'email-verification', 'update-passwords', 'security-log'];
+
     /**
      * Sign-in methods besides the password, and the line each adds to the
      * provider's Keyring::factors() call. Recovery codes come with any of
@@ -41,6 +49,34 @@ class InstallCommand extends Command
         'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
         'email-codes' => ['Email codes, as a second factor (the weakest option)', 'EmailCode::asSecondFactor(),'],
     ];
+
+    /**
+     * The sign-in methods that count as a second factor everyone can be made
+     * to set up. An emailed code doesn't: the inbox also resets the password.
+     */
+    protected const array SECOND_FACTORS = ['totp', 'passkeys', 'security-keys'];
+
+    /**
+     * The security notices registered unless the answer is no, and how the
+     * question names each. One is only offered once its notification is
+     * among the published ones, so a notice can be listed here before the
+     * release that brings its class.
+     */
+    protected const array NOTICES = [
+        'password_changed' => 'password changed',
+        'authenticator_added' => 'sign-in method added',
+        'authenticator_removed' => 'sign-in method removed',
+        'recovery_code_used' => 'recovery code used',
+        'recovery_codes_generated' => 'new recovery codes made',
+        'email_changed' => 'email address changed',
+        'account_locked' => 'account locked',
+    ];
+
+    /**
+     * Where users are sent to set up a second factor, as the Quick Start
+     * names the settings page.
+     */
+    protected const string ENROLLMENT_URL = '/settings/security';
 
     protected const string STUBS = __DIR__.'/../../stubs';
 
@@ -61,13 +97,29 @@ class InstallCommand extends Command
 
         $factors = $this->factors();
 
+        // Nobody could meet it, and every page would send them to set up
+        // a sign-in method the app doesn't offer.
+        if ($this->option('require-second-factor') && array_intersect($factors, self::SECOND_FACTORS) === []) {
+            $this->components->error('Requiring a second factor needs one users can set up. Add --factor='.implode(', --factor=', self::SECOND_FACTORS).'.');
+
+            return self::FAILURE;
+        }
+
+        // The provider, actions and notifications are your code from here on.
+        // Every one is published, so turning a feature on later just works.
+        $provider = app_path('Providers/KeyringServiceProvider.php');
+        $writesProvider = ! $files->exists($provider) || $this->option('force');
+
+        // The provider is what makes it so, so one that's kept isn't asked.
+        $enrolled = $writesProvider && $this->requiresSecondFactor($factors);
+
         // An existing config is the app's, so there's nothing to ask about it.
-        if ($files->exists(config_path('keyring.php')) && ! $this->option('force')) {
+        if ($writesConfig = ! $files->exists(config_path('keyring.php')) || $this->option('force')) {
+            $features = $this->features($factors);
+            $files->put(config_path('keyring.php'), $this->config($files, $features, $enrolled));
+        } else {
             $this->components->warn('Skipped '.config_path('keyring.php').', it already exists.');
             $features = config('keyring.features');
-        } else {
-            $features = $this->features($factors);
-            $files->put(config_path('keyring.php'), $this->config($files, $features));
         }
 
         // Publishing again would add the migrations twice, under new timestamps.
@@ -75,15 +127,11 @@ class InstallCommand extends Command
             $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations']);
         }
 
-        // The provider, actions and notifications are your code from here on.
-        // Every one is published, so turning a feature on later just works.
-        $provider = app_path('Providers/KeyringServiceProvider.php');
-
-        if ($files->exists($provider) && ! $this->option('force')) {
-            $this->components->warn("Skipped {$provider}, it already exists.");
-        } else {
+        if ($writesProvider) {
             $files->ensureDirectoryExists(dirname($provider));
-            $files->put($provider, $this->provider($files, $factors, $this->emails($factors)));
+            $files->put($provider, $this->provider($files, $factors, $this->emails($files), $enrolled));
+        } else {
+            $this->components->warn("Skipped {$provider}, it already exists.");
         }
 
         foreach (['Actions/Keyring', 'Notifications/Keyring'] as $directory) {
@@ -100,6 +148,12 @@ class InstallCommand extends Command
             in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
             $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
             'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
+            match (true) {
+                $enrolled && config('keyring.enrollment_url') === null && ! $writesConfig => 'Set <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> to your page for adding a sign-in method: users are sent there until they have a second factor',
+                $enrolled => 'Build your page for adding a sign-in method at <comment>'.self::ENROLLMENT_URL.'</comment>, or point <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> at yours: users are sent there until they have a second factor',
+                $writesProvider => 'Nothing makes users set up a second factor. To require one, see "Requiring a Second Factor" in the "Policies" docs',
+                default => null,
+            },
             'Add features later in <comment>config/keyring.php</comment>, and sign-in methods and emails in your KeyringServiceProvider',
         ]));
 
@@ -107,20 +161,51 @@ class InstallCommand extends Command
     }
 
     /**
+     * Whether every user must set up a second factor. Yes whenever there's
+     * one they could set up, unless told otherwise.
+     *
      * @param  list<string>  $factors
      */
-    protected function emails(array $factors): bool
+    protected function requiresSecondFactor(array $factors): bool
+    {
+        return match (true) {
+            array_intersect($factors, self::SECOND_FACTORS) === [] => false,
+            $this->option('require-second-factor') => true,
+            $this->option('optional-second-factor') => false,
+            $this->input->isInteractive() => confirm(
+                label: 'Require a second factor for everyone?',
+                default: true,
+                hint: 'Users sign in with their password, then must set one up at '.self::ENROLLMENT_URL.' before going further.',
+            ),
+            default => true,
+        };
+    }
+
+    protected function emails(Filesystem $files): bool
     {
         return match (true) {
             $this->option('emails') => true,
             $this->option('no-emails') => false,
             $this->input->isInteractive() => confirm(
-                label: 'Email users when their password or sign-in methods change?',
-                default: $factors !== [],
-                hint: 'Password changed, sign-in method added or removed, recovery code used.',
+                label: 'Email users when their password, sign-in methods or email address change?',
+                default: true,
+                hint: Str::ucfirst(implode(', ', array_map(fn (string $type) => self::NOTICES[$type], $this->notices($files)))).'.',
             ),
-            default => $factors !== [],
+            default => true,
         };
+    }
+
+    /**
+     * The security notices on offer: those whose notification is published.
+     *
+     * @return list<string>
+     */
+    protected function notices(Filesystem $files): array
+    {
+        return array_values(array_filter(
+            array_keys(self::NOTICES),
+            fn (string $type) => $files->exists(self::STUBS.'/app/Notifications/Keyring/'.Str::studly($type).'.php'),
+        ));
     }
 
     protected function userModelHasKeyring(): bool
@@ -174,10 +259,10 @@ class InstallCommand extends Command
                     Features::emailChanges() => 'Email changes, confirmed and undoable',
                     Features::securityLog() => 'Security log and "was this you?" alerts',
                 ],
-                default: [Features::registration(), Features::resetPasswords(), ...$factors === [] ? [] : [Features::manageAuthenticators()]],
+                default: [...self::FEATURES, ...$factors === [] ? [] : [Features::manageAuthenticators()]],
                 scroll: 8,
                 hint: 'Signing in and out, challenges and step-up are always on.',
-            ) : [Features::registration(), Features::resetPasswords()];
+            ) : self::FEATURES;
         }
 
         // Users can't set up the sign-in methods without it.
@@ -186,12 +271,12 @@ class InstallCommand extends Command
             $this->components->info('Turned on managing sign-in methods, so users can set up the ones you picked.');
         }
 
-        // Anyone can register someone else's address, so they must prove it
-        // before adding a sign-in method that would outlive a password reset.
-        if (array_all([Features::registration(), Features::manageAuthenticators()], fn (string $feature) => in_array($feature, $chosen, true))
-            && ! in_array(Features::emailVerification(), $chosen, true)) {
+        // Registering answers the same whether or not an address has an
+        // account, so a new user signs in once they've proved theirs. Anyone
+        // can register someone else's address, too.
+        if (in_array(Features::registration(), $chosen, true) && ! in_array(Features::emailVerification(), $chosen, true)) {
             $chosen[] = Features::emailVerification();
-            $this->components->info('Turned on email verification, so users prove their address before adding a sign-in method.');
+            $this->components->info('Turned on email verification, so users prove their address before they sign in. Registration needs it unless you set registration.reveal_taken in config/keyring.php.');
         }
 
         return array_values(array_intersect(Features::all(), $chosen));
@@ -203,7 +288,7 @@ class InstallCommand extends Command
      *
      * @param  list<string>  $features
      */
-    protected function config(Filesystem $files, array $features): string
+    protected function config(Filesystem $files, array $features, bool $enrolled): string
     {
         $config = $files->get(self::STUBS.'/config/keyring.php');
 
@@ -212,16 +297,19 @@ class InstallCommand extends Command
             $config = str_replace("        Features::{$method}(),", "        // Features::{$method}(),", $config);
         }
 
-        return $config;
+        return $enrolled
+            ? str_replace("'enrollment_url' => null,", "'enrollment_url' => '".self::ENROLLMENT_URL."',", $config)
+            : $config;
     }
 
     /**
-     * The provider with only the chosen sign-in methods, and the security
-     * notices left commented when they weren't wanted.
+     * The provider with only the chosen sign-in methods, the middleware that
+     * makes everyone set up a second factor when that was asked for, and the
+     * security notices left commented when they weren't wanted.
      *
      * @param  list<string>  $factors
      */
-    protected function provider(Filesystem $files, array $factors, bool $emails): string
+    protected function provider(Filesystem $files, array $factors, bool $emails, bool $enrolled): string
     {
         $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
 
@@ -233,13 +321,46 @@ class InstallCommand extends Command
 
         $lines = array_filter(
             explode("\n", $files->get(self::STUBS.'/app/Providers/KeyringServiceProvider.php')),
-            fn (string $line) => ! str_contains($line, 'Keyring::require(') || $factors !== [],
+            fn (string $line) => match (true) {
+                str_contains($line, 'Keyring::require(') => $factors !== [],
+                str_contains($line, "'keyring.enrolled'") => $enrolled,
+                default => array_all($remove, fn (string $needle) => ! str_ends_with(trim($line), $needle)),
+            },
         );
-        $lines = array_filter($lines, fn (string $line) => array_all($remove, fn (string $needle) => ! str_ends_with(trim($line), $needle)));
 
-        $provider = $this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines)));
+        return $this->withNotices($files, $this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $emails);
+    }
 
-        return $emails ? $provider : (string) preg_replace("/^( +)('(?:password_changed|authenticator_added|authenticator_removed|recovery_code_used)' =>)/m", '$1// $2', $provider);
+    /**
+     * List each security notice on offer in the provider, after the one
+     * before it when the stub doesn't have it yet, and commented out when
+     * the notices weren't wanted. One that isn't on offer is taken out.
+     */
+    protected function withNotices(Filesystem $files, string $provider, bool $emails): string
+    {
+        $offered = $this->notices($files);
+        $after = "'already_registered' => ";
+
+        foreach (array_keys(self::NOTICES) as $type) {
+            $entry = "'{$type}' => Notifications\\".Str::studly($type).'::class,';
+            $listed = '/^( +)(?:\/\/ )?'.preg_quote($entry, '/').'\n/m';
+
+            if (! in_array($type, $offered, true)) {
+                $provider = (string) preg_replace($listed, '', $provider);
+
+                continue;
+            }
+
+            $line = fn (array $match) => $match[1].($emails ? '' : '// ').$entry."\n";
+
+            $provider = (string) (preg_match($listed, $provider) === 1
+                ? preg_replace_callback($listed, $line, $provider)
+                : preg_replace_callback('/^( +)(?:\/\/ )?'.preg_quote($after, '/').'.*\n/m', fn (array $match) => $match[0].$line($match), $provider));
+
+            $after = "'{$type}' => ";
+        }
+
+        return $provider;
     }
 
     /**
@@ -247,7 +368,7 @@ class InstallCommand extends Command
      */
     protected function withoutOrphanedComments(string $code): string
     {
-        return (string) preg_replace('/\n\n(?: +\/\/[^\n]*\n)+(?=\n| *})/', "\n", $code);
+        return (string) preg_replace('/\n(?:\n(?: +\/\/[^\n]*\n)+)+(?=\n| *})/', "\n", $code);
     }
 
     protected function withoutUnusedImports(string $code): string

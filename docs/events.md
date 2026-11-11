@@ -102,7 +102,7 @@ None of these changes what the person who was refused sees. Each fires every tim
 
 ## Laravel's Auth Events
 
-Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. Like Fortify, it also dispatches these next to its own, so listeners and packages built for them keep working:
+Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on, so the verification email it sends doesn't show in how long a new address takes to answer. Like Fortify, it also dispatches these next to its own, so listeners and packages built for them keep working:
 
 | Laravel event | Dispatched with |
 |---|---|

@@ -208,6 +208,9 @@ describe('a "this wasn\'t me" link', function () {
 
 describe('an email verification link', function () {
     beforeEach(function () {
+        // Opened by a signed-in user who hasn't verified, as there only is
+        // where registration signs new users in.
+        revealTakenAddresses();
         withFeatures(Features::all());
         Route::middleware(['web', 'auth'])->get('/dashboard', fn () => 'dashboard');
 

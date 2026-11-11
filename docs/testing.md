@@ -272,6 +272,7 @@ The suite checks that:
 
 - a correct password either signs in or leads to the challenge page,
 - a wrong password and an unknown account give the same error,
+- registering with an address that has an account is answered like one that hasn't, and signs nobody in (skipped with `registration.reveal_taken`),
 - protected attributes can't change outside Keyring's flows,
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
@@ -280,7 +281,7 @@ The suite checks that:
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
-If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
+If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password` and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.
 
 The route check reads your app's routes as they're registered: `auth:{guard}` by name, plain `auth` when Keyring's guard is the default, and `auth:sanctum` on routes with Sanctum's `statefulApi()`, where a single-page app is signed in by its session. It fails with the URIs that are missing the middleware. Add `keyring.session` to their group, or, for a route you leave unchecked on purpose, return its URI from `keyringAcknowledgedUncheckedRoutes()`:
 

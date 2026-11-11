@@ -834,6 +834,8 @@ describe('earning trust', function () {
     });
 
     it('does not trust a device while the email address is unverified', function () {
+        // Only signed in at all where registration signs new users in.
+        revealTakenAddresses();
         $this->user->forceFill(['email_verified_at' => null])->save();
         $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
@@ -844,6 +846,7 @@ describe('earning trust', function () {
     });
 
     it('trusts a device with an unverified email when the app does not verify emails', function () {
+        revealTakenAddresses();
         withFeatures(array_values(array_diff(Features::all(), [Features::emailVerification()])));
         $this->user->forceFill(['email_verified_at' => null])->save();
         $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();

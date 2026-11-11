@@ -47,7 +47,7 @@ When your user model implements `MustVerifyEmail`, users must verify their email
 
 Until the address is verified, the account may belong to whoever typed that address first. Factors they added would survive the real owner's password reset.
 
-So with `Features::registration()` on, where anyone can type any address, users must be able to verify theirs: your user model must implement `MustVerifyEmail`, with `Features::emailVerification()` on. Otherwise enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` that says what to change. Without registration, accounts come from you (an admin, an import, an invitation), so this isn't required. `keyring:install` turns on email verification when you pick registration and a sign-in method.
+So with `Features::registration()` on, where anyone can type any address, users must be able to verify theirs: your user model must implement `MustVerifyEmail`, with `Features::emailVerification()` on. Otherwise enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` that says what to change. Without registration, accounts come from you (an admin, an import, an invitation), so this isn't required. `keyring:install` turns on email verification whenever you pick registration, which [needs it by default](sign-in-flow.md#without-revealing-who-has-an-account) for its own reasons: there, nobody is signed in at all until their address is verified.
 
 ### Who May Enroll
 

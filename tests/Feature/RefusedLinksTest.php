@@ -157,6 +157,8 @@ it('lets a signed link that is good through without a word', function () {
 });
 
 it('records an email verification link with a wrong signature', function () {
+    // Only signed in at all where registration signs new users in.
+    revealTakenAddresses();
     $user = User::create(['name' => 'New', 'email' => 'new@example.com', 'password' => 'password']);
 
     $this->actingAs($user)->get(route('verification.verify', [$user->id, sha1($user->email)]).'?expires=9999999999&signature=forged')->assertForbidden();

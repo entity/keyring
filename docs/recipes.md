@@ -539,7 +539,7 @@ use App\Models\User;
 
 // Only approved accounts can sign in, however they try: the password, a
 // passkey, "remember me". Everyone else gets the same answer as a wrong
-// password, and registering sends them to the login page.
+// password. Registering never signs them in.
 Keyring::allowSignInWhen(fn (User $user) => $user->approved_at !== null);
 ```
 

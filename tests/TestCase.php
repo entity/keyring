@@ -9,8 +9,11 @@ use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use Carbon\CarbonImmutable;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Event;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -60,10 +63,14 @@ abstract class TestCase extends Orchestra
             ->updateUserPasswordsUsing(UpdateUserPassword::class)
             ->validateEmailChangesUsing(ValidateEmailChange::class);
 
-        // And the emails it registers: the ones a flow needs, and the four
+        // Laravel's own listener for new users, which an app's event service
+        // provider registers and testbench leaves out.
+        Event::listen(Registered::class, SendEmailVerificationNotification::class);
+
+        // And the emails it registers: the ones a flow needs, and four of the
         // security notices keyring:install turns on.
         sendNotifications([
-            'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use',
+            'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use', 'already_registered',
             'password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used',
         ]);
     }

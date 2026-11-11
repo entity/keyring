@@ -21,6 +21,18 @@ class EmailVerificationRequired extends LogicException
     }
 
     /**
+     * Registration that hides who has an account leaves new users signed
+     * out until they follow the link sent to their address, so without
+     * verification nobody who registers could ever sign in.
+     */
+    public static function forHiddenRegistration(?string $model = null): self
+    {
+        $model = $model === null || $model === '' ? 'your user model' : "[{$model}]";
+
+        return new self("Registration answers the same whether or not an address has an account, and new users sign in once they've verified theirs. That needs email verification: implement MustVerifyEmail on {$model} and add Features::emailVerification() to the features in config/keyring.php. To tell visitors an address is taken and sign new users in straight away instead, set registration.reveal_taken to true there.");
+    }
+
+    /**
      * With registration on, anyone can sign up with someone else's address.
      * A sign-in method they add would survive the real owner's password reset.
      */

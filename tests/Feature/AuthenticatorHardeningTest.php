@@ -53,6 +53,8 @@ it('still lets password-only users confirm with their password', function () {
 });
 
 it('refuses to enroll authenticators until the email address is verified', function () {
+    // Only signed in at all where registration signs new users in.
+    revealTakenAddresses();
     $this->user->forceFill(['email_verified_at' => null])->save();
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)

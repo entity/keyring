@@ -132,6 +132,8 @@ it('records a key the factor refused with a message of its own', function () {
 });
 
 it('records an account that may not add a sign-in method yet, with the same 403', function () {
+    // Only signed in at all where registration signs new users in.
+    revealTakenAddresses();
     $unverified = User::create(['name' => 'New', 'email' => 'new@example.com', 'password' => 'password']);
 
     $this->actingAs($unverified)->withAssurance(Assurance::AAL1)
@@ -167,6 +169,8 @@ it('logs it, and still has the sign-in method', function () {
 });
 
 it('records an email verification link that was made for another account, with the same 403', function () {
+    // Only signed in at all where registration signs new users in.
+    revealTakenAddresses();
     $other = User::create(['name' => 'Also new', 'email' => 'also-new@example.com', 'password' => 'password']);
     $user = User::create(['name' => 'New', 'email' => 'new@example.com', 'password' => 'password']);
     $theirs = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $other->id, 'hash' => sha1($other->email)], absolute: false);

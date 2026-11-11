@@ -498,6 +498,7 @@ describe('the address a change replaced', function () {
     });
 
     it('cannot be registered while the change can be reverted', function () {
+        revealTakenAddresses();
         $this->post('/logout');
 
         $this->post('/register', [
@@ -551,6 +552,7 @@ describe('the address a change replaced', function () {
     // MySQL's default collations take these for the reserved address, so
     // its unique index would refuse to give the address back to its owner.
     it('cannot be registered under a spelling a database would take for it', function (string $lookalike) {
+        revealTakenAddresses();
         $this->post('/logout');
 
         $this->post('/register', [

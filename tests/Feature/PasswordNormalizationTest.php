@@ -36,6 +36,8 @@ it('puts a password in nfc, and leaves alone what is not utf-8', function () {
 });
 
 it('signs in with a password typed either way, whichever way it was set', function (string $set, string $typed) {
+    // Registering signs the new user in, which only happens where it says when an address is taken.
+    revealTakenAddresses();
     $this->post('/register', ['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => $set, 'password_confirmation' => $set])
         ->assertRedirect('/dashboard');
 

@@ -22,6 +22,7 @@ trait ManagesNotifications
         'second_factor_failed', 'recovery_code_used', 'recovery_codes_generated', 'suspicious_activity',
         'clone_suspected', 'account_locked', 'email_changed', 'email_change_reverted',
         'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use',
+        'already_registered',
     ];
 
     /** @var array<string, class-string<Notification>> The app's notification for each type it sends. */

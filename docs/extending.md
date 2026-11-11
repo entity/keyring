@@ -34,7 +34,8 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | The form rate limits | The `keyring` and `keyring-login-options` rate limiters | [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Who may sign in at all | `Keyring::allowSignInWhen()` | [Who May Sign In](sign-in-flow.md#who-may-sign-in) |
 | Who may add a sign-in method | `Keyring::allowEnrollmentWhen()` | [Who May Enroll](authenticators.md#who-may-enroll) |
-| Whether registering signs the user in | `Keyring::signInAfterRegistering()` | [Registration](sign-in-flow.md#registration) |
+| Whether registration says when an address is taken | `registration.reveal_taken` | [Registration](sign-in-flow.md#registration) |
+| Whether registering signs the user in, when it says so | `Keyring::signInAfterRegistering()` | [Saying When an Address Is Taken](sign-in-flow.md#saying-when-an-address-is-taken) |
 | Risk signals and what they do | `Keyring::risk()`, your own `Signal` | [Risk](risk.md) |
 | Where a request is located | `devices.locator`, your own `LocatesIps` | [Devices & Sessions](devices-and-sessions.md) |
 | Whose key attestation is trusted | `webauthn.attestation_roots`, your own `TrustsAuthenticators` | [Passkeys & Security Keys](passkeys.md#trusting-each-model-separately) |

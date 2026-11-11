@@ -83,11 +83,12 @@ it('only offers to trust the device when devices are on', function () {
     $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.canTrustDevice', false);
 });
 
-it('starts with the password, registration, password resets, the security log and no emails', function () {
+it('starts with the password, registration, password resets, email verification, password changes, the security log and no emails', function () {
     $config = require __DIR__.'/../../config/keyring.php';
 
     expect(new FactorRegistry()->all()->keys()->all())->toBe(['password'])
-        ->and($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::securityLog()])
+        ->and($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords(), Features::securityLog()])
+        ->and($config['registration']['reveal_taken'])->toBeFalse()
         ->and(new KeyringManager(new FactorRegistry, app(ProtectedAttributes::class))->hasNotification('password_changed'))->toBeFalse()
         ->and($config['protected'])->toBe([]);
 });

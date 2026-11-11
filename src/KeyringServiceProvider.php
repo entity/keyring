@@ -27,6 +27,7 @@ use Keyring\Contracts\LocatesIps;
 use Keyring\Contracts\Responses;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\TrustsAuthenticators;
+use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\UnknownFeature;
 use Keyring\Http\Middleware\AuthenticateSession;
@@ -36,6 +37,7 @@ use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Middleware\RequirePasswordChange;
 use Keyring\Http\Middleware\ValidateSignature;
 use Keyring\Http\Responses as DefaultResponses;
+use Keyring\Login\VerificationLink;
 use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionRegistryManager;
@@ -102,6 +104,13 @@ class KeyringServiceProvider extends ServiceProvider
         // A misspelt feature would otherwise just be off.
         if (($unknown = array_values(array_diff(config('keyring.features'), Features::all()))) !== []) {
             throw UnknownFeature::in($unknown);
+        }
+
+        // Registration that hides who has an account leaves new users signed
+        // out until they verify their address. Without the feature none ever
+        // could, so say so now rather than at the first registration.
+        if ($this->app->make(KeyringManager::class)->hidesRegisteredAddresses() && ! Features::enabled(Features::emailVerification())) {
+            throw EmailVerificationRequired::forHiddenRegistration();
         }
 
         // And a password minimum under eight would only show once someone
@@ -185,6 +194,8 @@ class KeyringServiceProvider extends ServiceProvider
         Event::subscribe(SendSecurityNotifications::class);
         Event::subscribe(DispatchLaravelEvents::class);
         Event::listen(Login::class, [Sessions::class, 'markRecalled']);
+        Event::listen(Events\Authenticated::class, [VerificationLink::class, 'signedIn']);
+        Event::listen(Events\PasswordReset::class, [VerificationLink::class, 'passwordReset']);
     }
 
     /**

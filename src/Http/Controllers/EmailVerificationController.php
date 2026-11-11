@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\Http\Requests\VerifyEmailRequest;
 use Keyring\KeyringManager;
+use Keyring\Login\VerificationLink;
 use Keyring\Support\Input;
 
 class EmailVerificationController
@@ -34,9 +37,29 @@ class EmailVerificationController
      * does (a mail scanner, a browser loading it ahead) shouldn't be what
      * verifies the address. The page's button posts the link's signature
      * in the body (ValidatePostedSignature).
+     *
+     * A browser that isn't signed in is sent to sign in and comes back, as
+     * the auth middleware would send it. Where registration hides who has
+     * an account, having followed the link is what lets an unverified user
+     * sign in at all, and signing in is what verifies their address.
      */
-    public function page(VerifyEmailRequest $request): mixed
+    public function page(Request $request, VerificationLink $link, string $id, string $hash): mixed
     {
+        if ($this->keyring->guard()->guest()) {
+            if ($this->keyring->hidesRegisteredAddresses()) {
+                $link->remember($request, $id, $hash);
+                $request->session()->flash('status', 'sign-in-to-verify');
+            }
+
+            throw new AuthenticationException(guards: [config('keyring.guard')], redirectTo: route('login'));
+        }
+
+        // As the auth middleware does, so the request's user is Keyring's.
+        Auth::shouldUse(config('keyring.guard'));
+
+        // Laravel's check that the link is this user's own, made now that
+        // there is a user to check it against.
+        $request = app(VerifyEmailRequest::class);
         $user = $this->keyring->user();
 
         if (! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail()) {

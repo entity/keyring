@@ -9,6 +9,7 @@ use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use App\Notifications\Keyring as Notifications;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
@@ -36,6 +37,10 @@ class KeyringServiceProvider extends ServiceProvider
         // a passkey or security key whenever they have one. See "Policies".
         Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 
+        // Everyone needs a second factor: until they've set one up, every page
+        // sends them to the "enrollment_url" in config/keyring.php.
+        $this->app->make(Kernel::class)->appendMiddlewareToGroup('web', 'keyring.enrolled');
+
         // Your code for the account changes, in app/Actions/Keyring. Keyring
         // does the security work around them.
         Keyring::createUsersUsing(CreateNewUser::class);
@@ -51,15 +56,18 @@ class KeyringServiceProvider extends ServiceProvider
             'confirm_email_change' => Notifications\ConfirmEmailChange::class,
             'email_change_notice' => Notifications\EmailChangeNotice::class,
             'email_address_in_use' => Notifications\EmailAddressInUse::class,
+            'already_registered' => Notifications\AlreadyRegistered::class,
             'password_changed' => Notifications\PasswordChanged::class,
             'authenticator_added' => Notifications\AuthenticatorAdded::class,
             'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
             'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
+            'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
+            'email_changed' => Notifications\EmailChanged::class,
+            'account_locked' => Notifications\AccountLocked::class,
             // 'new_device' => Notifications\NewDevice::class,
             // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
             // 'suspicious_activity' => Notifications\SuspiciousActivity::class,
             // 'clone_suspected' => Notifications\CloneSuspected::class,
-            // 'email_changed' => Notifications\EmailChanged::class,
             // 'email_change_reverted' => Notifications\EmailChangeReverted::class,
         ]);
     }

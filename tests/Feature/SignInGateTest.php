@@ -133,6 +133,8 @@ it('signs out a session the app started itself', function () {
 });
 
 it('leaves a new account that may not sign in yet signed out after registering', function () {
+    // Where registering signs new users in at all.
+    revealTakenAddresses();
     Keyring::allowSignInWhen(fn (User $user) => $user->email_verified_at !== null);
 
     $this->post('/register', ['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1'])

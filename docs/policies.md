@@ -102,6 +102,15 @@ Without `ifEnrolled()`, users who can't meet the requirement can't sign in at al
 
 It lets guests through, leaving them to `auth`, so it can sit in the `web` group. It also works on a single route or group after `auth`.
 
+`keyring:install` asks "Require a second factor for everyone?" when you pick an authenticator app, passkeys or security keys, and the answer is yes unless you say otherwise. It then adds the middleware to the `web` group from your `KeyringServiceProvider`, which does the same as the lines above, and sets `enrollment_url` to `/settings/security`:
+
+```php
+// app/Providers/KeyringServiceProvider.php
+$this->app->make(Kernel::class)->appendMiddlewareToGroup('web', 'keyring.enrolled');
+```
+
+It doesn't ask when the password is the only sign-in method, or the only other one is an emailed code: nobody could set up what the middleware asks for, and every page would send them to one that can't help.
+
 ```php
 // config/keyring.php
 'enrollment_url' => '/settings/security',
@@ -166,7 +175,7 @@ The closure must cope with `null` devices and risk, and give its strictest answe
 - The policy is asked again after every factor the user verifies during a login. A risk assessment can raise it partway through.
 - When the [risk response](risk.md#responding-to-risk) asks for a step-up and the user has enough authenticators, the requirement becomes at least `aal2()`.
 - The policy applies to logins, and to [fresh verification](step-up.md#fresh-verification), which asks for as much as a login would and never less than the strongest combination the account can give. [Step-up](step-up.md) to a level sets its own requirement.
-- [Registration](sign-in-flow.md#registration) signs the new user in with their password without asking the policy, since they can't have other factors yet.
+- [Registration](sign-in-flow.md#registration) doesn't sign anyone in by default. Where `registration.reveal_taken` has it sign the new user in, it does so with their password without asking the policy, since they can't have other factors yet.
 - Users can't remove an authenticator if what's left can't sign in, or can't meet the policy (unless it uses `ifEnrolled()`). See [Removing Authenticators](authenticators.md#removing-authenticators).
 
 ## Checking Requirements in Code

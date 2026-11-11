@@ -444,6 +444,7 @@ it('publishes a notification for every type, that builds from what keyring passe
         'url' => 'https://example.com/link', 'expiresAt' => now()->addDay(),
         'code' => '12345678', 'minutes' => 10, 'enrolling' => false,
         'email' => 'n•••@example.com', 'revertUrl' => 'https://example.com/revert', 'confirmUrl' => null,
+        'loginUrl' => 'https://example.com/login', 'resetUrl' => 'https://example.com/forgot-password',
     ]);
 
     expect($notification->via($this->user))->toBe(['mail'])

@@ -5,6 +5,7 @@
 The first release. Nothing is tagged yet.
 
 - Sign in, sign out, registration, password resets and email verification, with your own actions and pages.
+- Registration that doesn't reveal who has an account: the same answer for a free and a taken address, with new users signing in once they've verified theirs.
 - Factors behind one contract: password, authenticator apps, passkeys, security keys, email codes and recovery codes, plus your own.
 - `WebAuthn::securityKeys()->requireAttestation()` to only add hardware keys whose attestation chains to root certificates you list, and `allowOnly()` to limit them to certain models by AAGUID.
 - Many authenticators per user, with a default and "try another way".

@@ -25,7 +25,7 @@ Keyring records sign ins, failures, lockouts, refusals, changes and automatic ac
 
 The log never holds passwords, codes, tokens, signatures, session IDs or anything else from the request body.
 
-It's on as shipped: `Features::securityLog()` is in Keyring's default features, and in the list `keyring:install` writes when you pick it. Its options:
+It's on as shipped: `Features::securityLog()` is in Keyring's default features, and in the list `keyring:install` writes unless you leave it out. Its options:
 
 ```php
 'security_log' => [
@@ -242,21 +242,23 @@ Keyring::notifications([
     'confirm_email_change' => Notifications\ConfirmEmailChange::class,
     'email_change_notice' => Notifications\EmailChangeNotice::class,
     'email_address_in_use' => Notifications\EmailAddressInUse::class,
+    'already_registered' => Notifications\AlreadyRegistered::class,
     'password_changed' => Notifications\PasswordChanged::class,
     'authenticator_added' => Notifications\AuthenticatorAdded::class,
     'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
     'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
-    // 'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
-    // 'account_locked' => Notifications\AccountLocked::class,
+    'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
+    'email_changed' => Notifications\EmailChanged::class,
+    'account_locked' => Notifications\AccountLocked::class,
     // 'new_device' => Notifications\NewDevice::class,
     // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
     // ...
 ]);
 ```
 
-A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on. Every notice's class is published either way, so turning another on is one line in that list.
+A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` registers those four with `recovery_codes_generated`, `email_changed` and `account_locked` unless you answer no (or pass `--no-emails`), whichever sign-in methods you picked. Every notice's class is published either way, so turning another on or off is one line in that list.
 
-OWASP ASVS 5.0.0 asks for more. Requirement 6.3.7 is a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated` and `email_changed`. Requirement 6.3.5 is a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` with the [risk signals](risk.md#built-in-signals) you pick. Register those to meet them.
+OWASP ASVS 5.0.0 asks for more. Requirement 6.3.7 is a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated` and `email_changed`, which the installer has registered. Requirement 6.3.5 is a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` with the [risk signals](risk.md#built-in-signals) you pick. Register the ones that are still commented out to meet it. [OWASP ASVS](owasp-asvs.md) has the whole list for each level.
 
 Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
@@ -293,7 +295,7 @@ The published notices share an abstract `SecurityNotice` in the same folder, whi
 
 ### Emails a Flow Needs
 
-Four emails are part of a flow rather than a notice. The flow can't work without one, so it throws `Keyring\Exceptions\MissingNotification`, naming the type, when none is registered:
+Five emails are part of a flow rather than a notice. The flow can't work without one, so it throws `Keyring\Exceptions\MissingNotification`, naming the type, when none is registered:
 
 | Type | Sent to | Passes |
 |---|---|---|
@@ -301,12 +303,13 @@ Four emails are part of a flow rather than a notice. The flow can't work without
 | `confirm_email_change` | The new address, during an email change. | `url` and `expiresAt` |
 | `email_change_notice` | The current address, during an email change. | `email` (the new address, with most of its name hidden), `revertUrl`, and `confirmUrl` when this address must confirm too |
 | `email_address_in_use` | An address someone tried to change their email to, when it already has an account. | |
+| `already_registered` | An address someone tried to [register](sign-in-flow.md#without-revealing-who-has-an-account) with, when it already has an account. | `loginUrl`, and `resetUrl` when password resets are on |
 
-`verification_code` sends straight away; the three email change emails are sent after the response, so timing doesn't reveal whether an address has an account. An email change is refused before anything is saved when one of its three is missing.
+`verification_code` sends straight away; the three email change emails and `already_registered` are sent after the response, so timing doesn't reveal whether an address has an account. An email change is refused before anything is saved when one of its three is missing, and so is a registration without `already_registered`, unless `registration.reveal_taken` is on.
 
-The email change emails, and the copies of `email_changed` and `email_change_reverted` that go to an address the account no longer has, are sent to a bare address: the `$notifiable` is an `AnonymousNotifiable` routed to mail, not your user. Keep `via()` and `toMail()` from reading user attributes in those classes.
+The email change emails, `already_registered`, and the copies of `email_changed` and `email_change_reverted` that go to an address the account no longer has, are sent to a bare address: the `$notifiable` is an `AnonymousNotifiable` routed to mail, not your user. Keep `via()` and `toMail()` from reading user attributes in those classes.
 
-Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. You change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response.
+Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. You change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response, and so is a new user's verification email, unless `registration.reveal_taken` is on.
 
 ### Your Own Templates
 

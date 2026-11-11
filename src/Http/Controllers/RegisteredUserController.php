@@ -4,22 +4,17 @@ declare(strict_types=1);
 
 namespace Keyring\Http\Controllers;
 
-use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Auth\Events\Registered;
-use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\CreatesNewUsers;
 use Keyring\Contracts\Responses\RegisterResponse;
 use Keyring\Enums\Category;
-use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Factors\Password;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Login\Registration;
 use Keyring\Login\SignIn;
 use Keyring\Login\Verification;
-use Keyring\Support\Input;
-use Keyring\Support\PasswordRules;
 
 class RegisteredUserController
 {
@@ -34,16 +29,20 @@ class RegisteredUserController
         return $this->keyring->render('register');
     }
 
-    public function store(Request $request, CreatesNewUsers $creator, SignIn $signIn): mixed
+    public function store(Request $request, CreatesNewUsers $creator, Registration $registration, SignIn $signIn): mixed
     {
         // Before anything is saved, so a broken setup doesn't take the address.
-        $provider = $this->keyring->provider();
+        $registration->ensureReady();
 
-        if ($provider instanceof EloquentUserProvider && is_a($provider->getModel(), MustVerifyEmail::class, true)) {
-            throw_unless(Route::has('verification.verify'), EmailVerificationRequired::forRegistration($provider->getModel()));
+        // The same answer whether the address was free or not. Nobody is
+        // signed in: only a new account could be, and that would show.
+        if ($this->keyring->hidesRegisteredAddresses()) {
+            $registration->quietly($request, $creator);
+
+            return $this->status('registration-received', redirect: route('login'));
         }
 
-        $user = $creator->create(PasswordRules::normalizeInput(Input::all($request)));
+        $user = $registration->openly($request, $creator);
 
         event(new Registered($user));
 

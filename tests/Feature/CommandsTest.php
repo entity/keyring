@@ -13,7 +13,10 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\Encrypter;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Keyring\Console\InstallCommand;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\UpdatesUserPasswords;
@@ -52,21 +55,39 @@ describe('keyring:install', function () {
         $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
     });
 
-    it('installs the password, registration and password resets without asking', function () {
-        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
+    it('installs the password, registration, resets, verification, password changes, the security log and the security emails without asking', function () {
+        $this->artisan('keyring:install', ['--no-interaction' => true])
+            ->expectsOutputToContain('Nothing makes users set up a second factor')
+            ->assertSuccessful();
 
         $config = require config_path('keyring.php');
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
-        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
+        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords(), Features::securityLog()])
+            // The same features Keyring's own config starts with.
+            ->toBe((require __DIR__.'/../../config/keyring.php')['features'])
+            ->and($config['registration'])->toBe(['reveal_taken' => false])
+            ->and($config['enrollment_url'])->toBeNull()
             ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
-            // The emails a flow needs are registered, the security notices left for later.
+            // The emails a flow needs are registered, and the notices about changes.
             ->and($provider)->toContain("            'verification_code' => Notifications\VerificationCode::class,")
-            ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
+            ->toContain("            'already_registered' => Notifications\AlreadyRegistered::class,")
+            ->toContain("            'password_changed' => Notifications\PasswordChanged::class,")
+            ->toContain("            'authenticator_added' => Notifications\AuthenticatorAdded::class,")
+            ->toContain("            'authenticator_removed' => Notifications\AuthenticatorRemoved::class,")
+            ->toContain("            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,")
+            ->toContain("            'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,")
+            ->toContain("            'email_changed' => Notifications\EmailChanged::class,")
+            ->toContain("            'account_locked' => Notifications\AccountLocked::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
-            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(17)
+            // Every notification there is, whichever are registered.
+            ->and(array_map(basename(...), glob($this->sandbox.'/app/Notifications/Keyring/*.php')))
+            ->toEqualCanonicalizing(array_map(basename(...), glob(__DIR__.'/../../stubs/app/Notifications/Keyring/*.php')))
+            ->toContain('AlreadyRegistered.php')
             ->and($provider)->toContain('Password::class,')
-            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
+            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes::class')->not->toContain('Keyring::require(')
+            // Nothing a user could set up, so nothing makes them.
+            ->not->toContain('keyring.enrolled')->not->toContain('Kernel')
             // Every action, so turning a feature on later works.
             ->toContain('Keyring::updateUserPasswordsUsing(UpdateUserPassword::class);')
             ->and(array_map(basename(...), glob($this->sandbox.'/app/Actions/Keyring/*.php')))->toEqualCanonicalizing([
@@ -75,6 +96,20 @@ describe('keyring:install', function () {
             ->and(file_get_contents($this->sandbox.'/bootstrap/providers.php'))->toContain('App\Providers\KeyringServiceProvider::class');
 
         expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+    });
+
+    it('registers a security notice for every one that is published, and no other', function () {
+        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
+
+        $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+
+        foreach (['PasswordChanged', 'AuthenticatorAdded', 'AuthenticatorRemoved', 'RecoveryCodeUsed', 'RecoveryCodesGenerated', 'EmailChanged', 'AccountLocked'] as $notice) {
+            $line = "            '".Str::snake($notice)."' => Notifications\\{$notice}::class,";
+
+            file_exists(__DIR__."/../../stubs/app/Notifications/Keyring/{$notice}.php")
+                ? expect($provider)->toContain($line)
+                : expect($provider)->not->toContain($notice);
+        }
     });
 
     it('adds the sign-in methods and features picked, and what they need', function () {
@@ -88,7 +123,6 @@ describe('keyring:install', function () {
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
         expect($config['features'])->toBe([Features::updatePasswords(), Features::manageAuthenticators(), Features::devices()])
-            // With a second sign-in method, the security emails come too.
             ->and($provider)->toContain("            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
             ->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
@@ -104,14 +138,54 @@ describe('keyring:install', function () {
         expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('RecoveryCodes::class,');
     })->with(['passkeys', 'security-keys', 'email-codes']);
 
-    it('turns on email verification when registered users can add sign-in methods', function () {
-        $this->artisan('keyring:install', ['--factor' => ['passkeys'], '--feature' => [Features::registration()], '--no-interaction' => true])
+    it('makes everyone set up a second factor once there is one to set up, without asking', function (string $factor) {
+        $this->artisan('keyring:install', ['--factor' => [$factor], '--no-interaction' => true])
+            ->expectsOutputToContain('Build your page for adding a sign-in method at /settings/security')
+            ->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->toContain("\$this->app->make(Kernel::class)->appendMiddlewareToGroup('web', 'keyring.enrolled');")
+            ->toContain('use Illuminate\Contracts\Http\Kernel;')
+            ->toContain('Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());')
+            ->and((require config_path('keyring.php'))['enrollment_url'])->toBe('/settings/security')
+            ->and((require config_path('keyring.php'))['features'])->toContain(Features::manageAuthenticators());
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+        expectValidPhp(config_path('keyring.php'));
+    })->with(['totp', 'passkeys', 'security-keys']);
+
+    it('leaves a second factor to each user when asked to, or when the only one is an emailed code', function (array $options) {
+        $this->artisan('keyring:install', [...$options, '--no-interaction' => true])
+            ->expectsOutputToContain('Nothing makes users set up a second factor')
+            ->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->not->toContain('keyring.enrolled')->not->toContain('Kernel')
+            ->toContain('Keyring::require(')
+            ->and((require config_path('keyring.php'))['enrollment_url'])->toBeNull();
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+    })->with([
+        'asked to' => [['--factor' => ['totp'], '--optional-second-factor' => true]],
+        'email codes' => [['--factor' => ['email-codes']]],
+    ]);
+
+    it('refuses to require a second factor nobody could set up, before writing anything', function (array $factors) {
+        $this->artisan('keyring:install', ['--factor' => $factors, '--require-second-factor' => true, '--no-interaction' => true])
+            ->expectsOutputToContain('Requiring a second factor needs one users can set up')
+            ->assertFailed();
+
+        expect(file_exists(config_path('keyring.php')))->toBeFalse();
+    })->with(['the password alone' => [[]], 'email codes' => [['email-codes']]]);
+
+    it('turns on email verification with registration, which leaves new users signed out until they verify', function (array $factors) {
+        $this->artisan('keyring:install', ['--factor' => $factors, '--feature' => [Features::registration()], '--no-interaction' => true])
             ->expectsOutputToContain('Turned on email verification')
             ->expectsOutputToContain('MustVerifyEmail')
             ->assertSuccessful();
 
         expect((require config_path('keyring.php'))['features'])->toContain(Features::emailVerification());
-    });
+    })->with(['the password alone' => [[]], 'a passkey' => [['passkeys']]]);
 
     it('refuses sign-in methods and features it doesn\'t know, before writing anything', function () {
         $this->artisan('keyring:install', ['--factor' => ['totpp'], '--feature' => ['devicez'], '--no-interaction' => true])
@@ -126,19 +200,37 @@ describe('keyring:install', function () {
         $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-emails' => true, '--no-interaction' => true])->assertSuccessful();
 
         expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
             ->toContain("            // 'authenticator_added' => Notifications\AuthenticatorAdded::class,")
-            ->toContain("            'email_change_notice' => Notifications\EmailChangeNotice::class,");
+            ->toContain("            // 'email_changed' => Notifications\EmailChanged::class,")
+            ->toContain("            'email_change_notice' => Notifications\EmailChangeNotice::class,")
+            ->toContain("            'already_registered' => Notifications\AlreadyRegistered::class,");
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
     });
 
-    it('asks which sign-in methods and features to set up', function () {
+    it('asks which sign-in methods and features to set up, with the safe answers as the defaults', function () {
         $this->artisan('keyring:install')
             ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (the weakest option)'])
+            ->expectsConfirmation('Require a second factor for everyone?', 'yes')
             ->expectsQuestion('Which features?', [Features::resetPasswords(), Features::manageAuthenticators()])
-            ->expectsConfirmation('Email users when their password or sign-in methods change?', 'yes')
+            ->expectsConfirmation('Email users when their password, sign-in methods or email address change?', 'yes')
             ->assertSuccessful();
 
         expect((require config_path('keyring.php'))['features'])->toBe([Features::resetPasswords(), Features::manageAuthenticators()])
-            ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('WebAuthn::passkeys(),')->not->toContain('Totp');
+            ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('WebAuthn::passkeys(),')->toContain('keyring.enrolled')->not->toContain('Totp');
+    });
+
+    it('does not ask about a second factor when the password is the only sign-in method', function () {
+        $this->artisan('keyring:install')
+            ->expectsChoice('Which sign-in methods besides the password?', [], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (the weakest option)'])
+            ->expectsQuestion('Which features?', [Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords()])
+            ->expectsConfirmation('Email users when their password, sign-in methods or email address change?', 'no')
+            ->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->not->toContain('keyring.enrolled')
+            ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,");
     });
 
     it('can run again without duplicating migrations or overwriting customised files', function () {
@@ -150,12 +242,55 @@ describe('keyring:install', function () {
             ->doesntExpectOutputToContain('Turned on')
             ->doesntExpectOutputToContain('HasKeyring')
             ->doesntExpectOutputToContain('php artisan migrate')
+            // The provider is what would require a second factor, and it's kept.
+            ->doesntExpectOutputToContain('second factor')
             ->assertSuccessful();
 
         expect(glob(database_path('migrations/*_create_keyring_authenticators_table.php')))->toHaveCount(1)
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBe('<?php // mine');
     });
 })->skip(fn () => getenv('TEST_TOKEN') !== false, 'Publishes into the testbench app every parallel worker shares.');
+
+it('lists a security notice in the provider only while its notification is published, whatever the provider stub lists', function (bool $emails) {
+    $command = new InstallCommand;
+    $stub = file_get_contents(__DIR__.'/../../stubs/app/Providers/KeyringServiceProvider.php');
+    $prefix = $emails ? '' : '// ';
+
+    // A release where two of the notifications don't exist, or do, with a
+    // provider stub that lists both of them or neither.
+    $release = fn (bool $published, bool $listed) => new class($published, $listed ? $stub : preg_replace('/^.*(?:RecoveryCodesGenerated|AccountLocked).*\n/m', '', $stub)) extends Filesystem
+    {
+        public function __construct(protected bool $published, protected string $stub) {}
+
+        public function exists($path)
+        {
+            return Str::endsWith($path, ['/RecoveryCodesGenerated.php', '/AccountLocked.php']) ? $this->published : parent::exists($path);
+        }
+
+        public function get($path, $lock = false)
+        {
+            return Str::endsWith($path, '/Providers/KeyringServiceProvider.php') ? $this->stub : parent::get($path, $lock);
+        }
+    };
+
+    $provider = fn (bool $published, bool $listed) => (fn () => $this->provider($release($published, $listed), [], $emails, false))->call($command);
+
+    expect($provider(published: true, listed: true))->toContain(<<<PHP
+                {$prefix}'password_changed' => Notifications\\PasswordChanged::class,
+                {$prefix}'authenticator_added' => Notifications\\AuthenticatorAdded::class,
+                {$prefix}'authenticator_removed' => Notifications\\AuthenticatorRemoved::class,
+                {$prefix}'recovery_code_used' => Notifications\\RecoveryCodeUsed::class,
+                {$prefix}'recovery_codes_generated' => Notifications\\RecoveryCodesGenerated::class,
+                {$prefix}'email_changed' => Notifications\\EmailChanged::class,
+                {$prefix}'account_locked' => Notifications\\AccountLocked::class,
+
+    PHP)
+        ->toBe($provider(published: true, listed: false))
+        ->and($provider(published: false, listed: true))
+        ->not->toContain('RecoveryCodesGenerated')->not->toContain('AccountLocked')
+        ->toContain("{$prefix}'recovery_code_used' => Notifications\\RecoveryCodeUsed::class,\n            {$prefix}'email_changed' => Notifications\\EmailChanged::class,\n")
+        ->toBe($provider(published: false, listed: false));
+})->with(['with the emails' => true, 'without them' => false]);
 
 function passkeysTable(): void
 {
@@ -760,6 +895,25 @@ it('describes the setup in artisan about', function () {
         ->expectsOutputToContain('password, passkey, totp, recovery')
         ->expectsOutputToContain('registration, reset-passwords, email-verification')
         ->assertSuccessful();
+});
+
+it('publishes a provider that sends everyone without a second factor to set one up, when that was asked for', function () {
+    config(['keyring.enrollment_url' => '/settings/security']);
+    Route::middleware('web')->get('/anywhere', fn () => 'through');
+    Route::middleware('web')->get('/settings/security', fn () => 'set one up');
+
+    // The stub as a whole, which has the line keyring:install keeps for a yes.
+    new KeyringServiceProvider($this->app)->boot();
+
+    $this->get('/anywhere')->assertOk();
+
+    $user = taylor();
+    $this->actingAs($user)->get('/anywhere')->assertRedirect('/settings/security')->assertSessionHas('status', 'enroll-first');
+    $this->get('/settings/security')->assertOk()->assertSee('set one up');
+
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    $this->get('/anywhere')->assertOk()->assertSee('through');
 });
 
 it('publishes a provider that boots, with everything picked', function () {

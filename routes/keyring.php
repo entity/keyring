@@ -105,16 +105,23 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
     }
 
     // The verification link is an emailed link like the ones below: its GET
-    // shows a page, and the page's button posts the link's signature.
+    // shows a page, and the page's button posts the link's signature. The
+    // GET is further down, since the link is often opened signed out.
     if (Features::enabled(Features::emailVerification())) {
         Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
-        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'page'])->middleware(['keyring.signed:relative', 'throttle:keyring'])->name('verification.verify');
         Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware([ValidatePostedSignature::class, 'throttle:keyring'])->name('verification.verify.store');
         Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware('throttle:keyring')->name('verification.send');
     }
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });
+
+// The link in a verification email, for whoever opens it. A browser that
+// isn't signed in is sent to sign in by the controller, which remembers the
+// link first where an unverified account can only sign in after following it.
+if (Features::enabled(Features::emailVerification())) {
+    Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'page'])->middleware(['keyring.signed:relative', 'throttle:keyring'])->name('verification.verify');
+}
 
 // Emailed links. GET only shows a page with a button and the POST acts, so a
 // mail scanner that opens a link changes nothing. The link's token or

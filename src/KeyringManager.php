@@ -37,6 +37,7 @@ use Keyring\Factors\Password;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
+use Keyring\Login\VerificationLink;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\VerifyFactor;
@@ -238,9 +239,11 @@ class KeyringManager
     }
 
     /**
-     * Whether registering signs the new user in: pass false, or a callback
-     * deciding per user, to send them to the login page instead (for
-     * example until an admin approves them).
+     * Whether registering signs the new user in, for an app whose
+     * registration says when an address is taken ("registration.reveal_taken"):
+     * pass false, or a callback deciding per user, to send them to the login
+     * page instead (for example until an admin approves them). Otherwise
+     * nobody is signed in by registering.
      *
      * @param  bool|(Closure(Authenticatable&Model, Request): bool)  $when
      */
@@ -347,6 +350,8 @@ class KeyringManager
      * for its second factor, "remember me", and each request of a session
      * that's already signed in, which is signed out once the answer is no.
      * An account that's turned away is answered like one that doesn't exist.
+     * So is one that hasn't verified its address yet, when registration
+     * hides who has an account.
      *
      * It's asked on every signed-in request, so answer from the user you're
      * given rather than with a query.
@@ -361,11 +366,33 @@ class KeyringManager
     }
 
     /**
-     * Whether the app lets this user be signed in.
+     * Whether this user may be signed in: the app lets them, and they've
+     * verified their address when registration hides who has an account.
+     * There, a password that worked straight away would tell whoever just
+     * registered an address that it was free. Until then they can only sign
+     * in from the browser that followed their verification link.
      */
     public function allowsSignIn(Authenticatable&Model $user): bool
     {
+        if ($this->hidesRegisteredAddresses()
+            && $user instanceof MustVerifyEmail
+            && ! $user->hasVerifiedEmail()
+            && ! app(VerificationLink::class)->followedFor($user)) {
+            return false;
+        }
+
         return $this->signInGate === null || ($this->signInGate)($user);
+    }
+
+    /**
+     * Whether registration answers the same for an address that has an
+     * account and one that doesn't, which it does unless the app turned on
+     * the "registration.reveal_taken" option. New users then sign in once
+     * they've verified their address.
+     */
+    public function hidesRegisteredAddresses(): bool
+    {
+        return Features::enabled(Features::registration()) && ! config('keyring.registration.reveal_taken');
     }
 
     /**
@@ -465,7 +492,7 @@ class KeyringManager
      */
     public function signsInAfterRegistering(Authenticatable&Model $user, Request $request): bool
     {
-        return $this->allowsSignIn($user) && (is_bool($this->signInAfterRegistering)
+        return ! $this->hidesRegisteredAddresses() && $this->allowsSignIn($user) && (is_bool($this->signInAfterRegistering)
             ? $this->signInAfterRegistering
             : ($this->signInAfterRegistering)($user, $request));
     }
