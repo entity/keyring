@@ -15,7 +15,7 @@
 
 ## Introduction
 
-Keyring follows OWASP's authentication, session management and forgot password guidance, and NIST SP 800-63B's assurance levels. This page lists what it promises, so you can check your setup against it, and where it stops.
+Keyring is built on OWASP's authentication, session management and forgot password guidance, and on NIST SP 800-63B-4. Its assurance levels follow NIST SP 800-63B-4 as far as a library can check. This page lists what it promises, so you can check your setup against it, and where it stops.
 
 The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration.
 
@@ -90,7 +90,8 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 ### Second Factors and Step-Up
 
 - Policies count distinct categories, so two factors of the same kind are never treated as multi-factor.
-- Assurance levels follow NIST SP 800-63B: a passkey that syncs reaches AAL2, and AAL3 needs a phishing-resistant key that can't leave its device, read from the flag the key reports on every sign in.
+- Assurance levels follow NIST SP 800-63B-4 as far as a library can check. A passkey that syncs reaches AAL2. AAL3 needs a phishing-resistant key that reports on every sign in that it can't leave its device, that was added with a verified attestation, and that either verified the user itself or was used with a password: another authenticator's user verification is never counted beside it. A key nothing vouches for stays at AAL2, though a policy or route can still ask for one with `deviceBound()`.
+- NIST AAL3 further needs authenticators and verifier cryptography validated to FIPS 140. Keyring can't supply or check either, so a session it calls AAL3 has met NIST's rules for the authentication and nothing more.
 - Email codes are opt-in (`EmailCode::asSecondFactor()`), since NIST doesn't accept email as an authenticator and the inbox can also reset the password. A code is a step at sign in and never a factor: a password and an emailed code is an AAL1 session, doesn't pass `keyring:aal2` or `keyring.enrolled`, doesn't earn a trusted device, and can't stand in for a possession factor the account has.
 - A passkey or security key only counts as inherence when it actually verified the user that time.
 - With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in. Recovery codes stay on offer as the way back in, unless you pass `except: []`.
@@ -160,7 +161,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 
 | What Keyring does | From |
 |---|---|
-| Assurance levels, and what reaches AAL2 and AAL3 | NIST SP 800-63B |
+| Assurance levels, and what reaches AAL2 and AAL3, as far as a library can check. AAL3 takes an attested key that can't leave its device, with its own user verification or a password. Validated authenticators and verifier cryptography, which NIST AAL3 also needs, are yours to supply | NIST SP 800-63B-4, Sec. 2 and Appendix B |
 | Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours) | NIST SP 800-63B, reauthentication |
 | A cap of 100 failures in a row on an account's factor | NIST SP 800-63B, rate limiting |
 | Proving the account's factors again before adding a sign-in method | NIST SP 800-63B, binding an authenticator |
@@ -181,7 +182,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 ## Known Limitations
 
 - **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked by guessing faster than the per-minute limit. If they guess under one of the account's names and the owner types another, the owner is told the password is wrong rather than to wait, because saying more would tell a stranger the two names are one account. With `Features::devices()` on, browsers the owner has signed in from before keep their own limit and keep working. Without devices, the lock reaches every browser while the guessing goes on. A password reset clears the password's counts and locks, but not a second factor's.
-- **Attestation is off unless you ask for it, and only covers hardware keys.** By default any WebAuthn authenticator is accepted and AAGUIDs aren't verified. A factor set up with `requireAttestation()` checks `packed` and `fido-u2f` attestation against root certificates you list, and can then be limited to certain models. Platform formats (`tpm`, `android-key`, `apple`) aren't read, and certificates aren't looked up for revocation. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
+- **Attestation is off unless you ask for it, and only covers hardware keys.** By default any WebAuthn authenticator is accepted and AAGUIDs aren't verified, so no session reaches AAL3. A factor set up with `requireAttestation()` checks `packed` and `fido-u2f` attestation against root certificates you list, and can then be limited to certain models. Platform formats (`tpm`, `android-key`, `apple`) aren't read, and certificates aren't looked up for revocation. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
 - **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and a user's first passkey after the change gets a different user handle (later ones reuse the handle their keys already have). Recovery codes and reserved email addresses keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.

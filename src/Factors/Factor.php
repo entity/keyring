@@ -33,6 +33,11 @@ abstract class Factor implements FactorContract
         return false;
     }
 
+    public function attested(Authenticator $authenticator): bool
+    {
+        return false;
+    }
+
     public function priority(): int
     {
         return 50;

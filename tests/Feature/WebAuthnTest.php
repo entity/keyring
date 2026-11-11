@@ -87,8 +87,11 @@ it('signs in with a passkey alone, without a username', function (VirtualAuthent
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
 
+    // It stays on its device, by its own account: without attestation
+    // that's a second factor, not AAL3.
     $this->assertAuthenticatedAs($this->user);
-    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+        ->and(Requirement::aal2()->deviceBound()->isMetBy(app(SessionAssurance::class)->all()))->toBeTrue();
 })->with([
     'P-256' => fn () => new VirtualAuthenticator,
     'Ed25519' => fn () => VirtualAuthenticator::eddsa(),
@@ -264,7 +267,9 @@ it('uses a security key as a second factor', function () {
         ->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($this->user);
-    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+        ->and($this->user->keyring->refresh()->canMeet(Requirement::aal3()))->toBeFalse()
+        ->and($this->user->keyring->canMeet(Requirement::aal2()->deviceBound()))->toBeTrue();
 });
 
 it('does not let a security key sign in without a password', function () {

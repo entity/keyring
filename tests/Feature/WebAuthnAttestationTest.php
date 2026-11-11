@@ -8,6 +8,7 @@ use CBOR\TextStringObject;
 use Cose\Algorithms;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\TrustsAuthenticators;
 use Keyring\Enums\Assurance;
@@ -401,4 +402,117 @@ it('makes an attested key with the factory', function () {
     $key = Authenticator::factory()->securityKey()->attested(YUBIKEY)->for($this->user, 'authenticatable')->create();
 
     expect($key->refresh())->aaguid->toBe(YUBIKEY)->attestation->toBe('basic');
+});
+
+// NIST SP 800-63B-4, Sec. 2.3: AAL3 takes a key that can't be exported, and
+// its own activation or a password beside it. Only attestation says what
+// kind of authenticator a key is.
+describe('aal3', function () {
+    beforeEach(function () {
+        Route::middleware(['web', 'auth', 'keyring:aal3'])->get('/vault', fn () => 'vault');
+        Route::middleware(['web', 'auth', 'keyring:aal2,device-bound'])->get('/keys-only', fn () => 'keys only');
+        config(['keyring.enrollment_url' => '/settings/security']);
+    });
+
+    /**
+     * Sign in with the password, then the security key.
+     */
+    function signInWithKey(VirtualAuthenticator $key): void
+    {
+        test()->post('/logout');
+        test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+        $options = test()->inertia()->get(route('keyring.login.challenge', 'security-key'))->json('props.challenge.options');
+
+        test()->post(route('keyring.login.verify', 'security-key'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+    }
+
+    it('doesn\'t reach aal3 with a key added before the factor asked for attestation', function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()]);
+        $key = new VirtualAuthenticator(userVerification: false);
+        attest($key)->assertOk();
+
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()->requireAttestation()]);
+        signInWithKey($key);
+
+        expect(Authenticator::query()->sole()->attestation)->toBeNull()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+
+        // With no key that could reach it, confirming again can't help.
+        $this->get('/vault')->assertRedirect('/settings/security');
+        $this->get('/keys-only')->assertOk();
+    });
+
+    it('doesn\'t reach aal3 once the factor stops asking for attestation', function () {
+        $key = $this->maker->key(YUBIKEY, userVerification: false);
+        attest($key)->assertOk();
+
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()]);
+        signInWithKey($key);
+
+        expect(Authenticator::query()->sole()->attestation)->toBe('basic')
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+    });
+
+    it('reaches aal3 with an attested key that verified the user itself', function () {
+        $key = $this->maker->key(YUBIKEY);
+        attest($key)->assertOk();
+        signInWithKey($key);
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+        $this->get('/vault')->assertOk();
+    });
+
+    it('doesn\'t take a synced passkey\'s user verification for the attested key\'s', function () {
+        $passkey = new VirtualAuthenticator(synced: true);
+        attest($passkey, 'passkey')->assertOk();
+        $key = $this->maker->key(YUBIKEY, userVerification: false);
+        attest($key)->assertOk();
+        $this->post('/logout');
+
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $passkey->assert($options)])->assertRedirect('/dashboard');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+
+        // The key is asked for first, and touching it isn't enough: the
+        // passkey's fingerprint says nothing about who touched the key.
+        $this->get('/vault')->assertRedirect(route('keyring.confirm.challenge'));
+        $options = $this->inertia()->get(route('keyring.confirm.challenge'))
+            ->assertJsonPath('props.factor', 'security-key')
+            ->json('props.challenge.options');
+
+        $this->post(route('keyring.confirm.verify', 'security-key'), ['credential' => $key->assert($options)])
+            ->assertRedirect(route('keyring.confirm.challenge'));
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+
+        $this->inertia()->get(route('keyring.confirm.challenge'))
+            ->assertJsonPath('props.factor', 'password')
+            ->assertJsonPath('props.alternatives', []);
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/vault');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+        $this->get('/vault')->assertOk();
+    });
+
+    it('lets a route ask for a key that stays on its device without asking who made it', function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()]);
+        $passkey = new VirtualAuthenticator(synced: true);
+        attest($passkey, 'passkey')->assertOk();
+        $this->post('/logout');
+
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $passkey->assert($options)]);
+
+        // AAL2 already, and no such key on the account to step up with.
+        $this->get('/keys-only')->assertRedirect('/settings/security');
+
+        $key = new VirtualAuthenticator(userVerification: false);
+        attest($key)->assertOk();
+        signInWithKey($key);
+
+        $this->get('/keys-only')->assertOk();
+        $this->get('/vault')->assertRedirect('/settings/security');
+    });
 });

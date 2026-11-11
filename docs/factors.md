@@ -285,7 +285,8 @@ The contract's methods:
 | `categories($authenticator)` | none | The categories it's expected to prove. `[Category::Address]` for a factor that isn't an authenticator NIST accepts. |
 | `verify($attempt, $authenticator, $request)` | none | Check the proof. Return a `Verification`, or `null` when it's wrong. |
 | `phishingResistant($authenticator)` | `false` | Whether the proof is bound to your origin. Only WebAuthn should say yes. |
-| `deviceBound($authenticator)` | `false` | Whether the secret can't leave its device. Only these reach AAL3. |
+| `deviceBound($authenticator)` | `false` | Whether the secret can't leave its device, by the authenticator's own account. |
+| `attested($authenticator)` | `false` | Whether something else vouches for what the authenticator is, as a WebAuthn attestation checked when it was added does. AAL3 takes a device-bound key only when this is true too. |
 | `priority()` | `50` | Higher is offered first. |
 | `authenticators($user, $stored)` | the stored rows with this key | The user's authenticators. Return virtual ones for state kept elsewhere. |
 | `challenge($attempt, $authenticator)` | `[]` | Extra props for the challenge page. Called every time the page loads, so it must be safe to repeat. |

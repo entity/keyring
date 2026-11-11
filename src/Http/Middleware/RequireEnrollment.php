@@ -6,7 +6,6 @@ use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Uri;
-use Keyring\Enums\Assurance;
 use Keyring\KeyringManager;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
@@ -34,9 +33,9 @@ class RequireEnrollment
         protected StepUp $stepUp,
     ) {}
 
-    public function handle(Request $request, Closure $next, string $level = 'aal2'): Response
+    public function handle(Request $request, Closure $next, string $level = 'aal2', string ...$also): Response
     {
-        $requirement = Requirement::for(Assurance::fromName($level));
+        $requirement = Requirement::named($level, ...$also);
         $url = config('keyring.enrollment_url');
 
         $user = $this->keyring->guard()->user();

@@ -7,6 +7,7 @@
 - [Signature Algorithms](#signature-algorithms)
 - [Attestation and AAGUIDs](#attestation-and-aaguids)
     - [Requiring Attestation](#requiring-attestation)
+    - [Attestation and AAL3](#attestation-and-aal3)
     - [Allowing Only Certain Models](#allowing-only-certain-models)
     - [Trusting Each Model Separately](#trusting-each-model-separately)
     - [What Is Kept](#what-is-kept)
@@ -50,9 +51,10 @@ Users add either through the [authenticator routes](authenticators.md). Keyring 
 
 Every WebAuthn verification proves possession. It also proves inherence only when the authenticator reports that it verified the user this time (the UV flag), with a PIN, fingerprint or face.
 
-- A passkey always requires user verification, so it proves possession and inherence, and reaches [AAL2](policies.md#assurance-levels) on its own. Most passkeys sync between devices (iCloud Keychain, Google Password Manager), and NIST caps those at AAL2. A passkey that stays on its device reaches AAL3.
-- A security key that doesn't verify the user proves possession only. After a password, that's AAL3, since the key is phishing resistant and can't leave its device.
-- Whether a key may sync is the backup-eligible flag it reports. Keyring reads it on every sign in, not just at registration, and a key that hasn't reported it counts as synced.
+- A passkey always requires user verification, so it proves possession and inherence, and reaches [AAL2](policies.md#assurance-levels) on its own. Most passkeys sync between devices (iCloud Keychain, Google Password Manager), and NIST caps those at AAL2.
+- A security key that doesn't verify the user proves possession only. After a password, that's AAL2.
+- Whether a key may sync is the backup-eligible flag it reports. Keyring reads it on every sign in, not just at registration, and a key that hasn't reported it counts as synced. A key that says it can't is "device bound": `Requirement::deviceBound()` and `keyring:aal2,device-bound` ask for one.
+- AAL3 takes more than that flag, which is only the key's word. The key has to have been added with a [verified attestation](#requiring-attestation), and its second factor has to be its own user verification or a password. See [Attestation and AAL3](#attestation-and-aal3).
 
 When planning what to offer, Keyring assumes a security key will verify the user if it did so when it was registered. The categories that count are always the ones from the actual response.
 
@@ -130,6 +132,16 @@ WebAuthn::securityKeys()->as('staff-key')->requireAttestation(),
 ```
 
 Certificates aren't looked up for revocation, since that needs the network. If a maker withdraws a root, take it out of the list. Keys added before then stay: attestation is checked once, when a key is added.
+
+### Attestation and AAL3
+
+A key reaches [AAL3](policies.md#assurance-levels) only when its factor uses `requireAttestation()` and the key was added with an attestation Keyring verified, which is what the `attestation` column records. Nothing else tells a hardware key from software that reports the same flags.
+
+- Keys added before the factor asked for attestation have nothing in that column and stay at AAL2. Their owners add them again to reach AAL3.
+- Take `requireAttestation()` off a factor and its keys stop reaching AAL3, whatever the column says.
+- The attestation is for the key. Its second factor still has to be its own user verification or a password: touching an attested key after signing in with a synced passkey is AAL2.
+
+NIST AAL3 also needs the authenticator validated to FIPS 140 (Sec. 2.3.2). Attestation says which model a key is, not whether that model was validated, so use `allowOnly()` to accept only the models you've checked.
 
 ### Allowing Only Certain Models
 

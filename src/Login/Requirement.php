@@ -2,6 +2,7 @@
 
 namespace Keyring\Login;
 
+use InvalidArgumentException;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Factors\RecoveryCodes;
@@ -32,6 +33,7 @@ final readonly class Requirement
         public array $phishingResistanceExceptions = [],
         public bool $acceptsRecoveryCodes = true,
         public int $steps = 0,
+        public bool $requiresAttestedKey = false,
     ) {}
 
     public static function aal1(): self
@@ -46,11 +48,14 @@ final readonly class Requirement
 
     /**
      * AAL3: two factors, one of them a phishing-resistant key that can't
-     * leave its device. A synced passkey reaches AAL2, not AAL3.
+     * leave its device and that its maker vouched for when it was added.
+     * The other is that key's own user verification, or a password: what
+     * any other authenticator proved doesn't count. A synced passkey reaches
+     * AAL2, not AAL3, and so does a key nothing vouches for.
      */
     public static function aal3(): self
     {
-        return self::aal2()->including(Category::Possession)->deviceBound();
+        return self::aal2()->including(Category::Possession)->attestedKey();
     }
 
     public static function factors(int $count): self
@@ -66,6 +71,19 @@ final readonly class Requirement
     public static function steps(int $count): self
     {
         return new self(steps: max(1, $count));
+    }
+
+    /**
+     * The requirement named in middleware parameters: a level, then anything
+     * more to ask on top of it, e.g. keyring:aal2,device-bound.
+     */
+    public static function named(string $level, string ...$also): self
+    {
+        return array_reduce($also, fn (self $requirement, string $name) => match (strtolower($name)) {
+            'phishing-resistant' => $requirement->phishingResistant(),
+            'device-bound' => $requirement->deviceBound(),
+            default => throw new InvalidArgumentException("Unknown requirement [{$name}]."),
+        }, self::for(Assurance::fromName($level)));
     }
 
     public static function for(Assurance $assurance): self
@@ -99,12 +117,26 @@ final readonly class Requirement
 
     /**
      * Require a phishing-resistant key that can't leave its device: a
-     * security key or a passkey that doesn't sync.
+     * security key or a passkey that doesn't sync. That's the key's own
+     * report, so it's worth asking for and short of what AAL3 means.
      */
     #[\NoDiscard]
     public function deviceBound(): static
     {
         return clone ($this, ['requiresPhishingResistance' => true, 'requiresDeviceBound' => true]);
+    }
+
+    /**
+     * Require a device-bound key that was added with a verified attestation
+     * (WebAuthn's requireAttestation()), and count only what can't be
+     * copied off a device: that key's own proof, and factors that aren't
+     * something the user holds, like the password. NIST's terms for AAL3,
+     * where syncable authenticators aren't used at all.
+     */
+    #[\NoDiscard]
+    public function attestedKey(): static
+    {
+        return clone ($this->deviceBound(), ['requiresAttestedKey' => true]);
     }
 
     /**
@@ -164,6 +196,8 @@ final readonly class Requirement
      * factors as they can, never one while they have a second. Short of two
      * factors, a step that isn't one (an emailed code) is asked for beside
      * the one they have: the app chose to offer it, and it's all there is.
+     * An attested key is only asked for when the user can also give the
+     * second factor that counts beside it.
      *
      * @internal
      *
@@ -175,9 +209,10 @@ final readonly class Requirement
         $limited = clone ($this, [
             'requiresPhishingResistance' => $this->requiresPhishingResistance && array_any($provable, fn (Verification $verification) => $verification->phishingResistant),
             'requiresDeviceBound' => $this->requiresDeviceBound && array_any($provable, fn (Verification $verification) => $verification->phishingResistant && $verification->deviceBound),
+            'requiresAttestedKey' => $this->requiresAttestedKey && self::aal2()->attestedKey()->isMetBy($provable),
         ]);
 
-        $categories = $limited->categoriesIn($provable);
+        $categories = $limited->categoriesIn($limited->counted($provable));
         $factors = max(1, min(max($this->factors, 2), count($this->authenticating($categories))));
         $steps = min(max($this->steps, $this->factors, 2), count($categories));
 
@@ -193,6 +228,7 @@ final readonly class Requirement
      */
     public function isMetBy(array $verifications): bool
     {
+        $verifications = $this->counted($verifications);
         $verified = $this->categoriesIn($verifications);
 
         return count($this->authenticating($verified)) >= $this->factors
@@ -210,6 +246,11 @@ final readonly class Requirement
      */
     public function wouldProgress(array $verifications, Verification $next): bool
     {
+        if ($this->counted([$next]) === []) {
+            return false;
+        }
+
+        $verifications = $this->counted($verifications);
         $verified = $this->categoriesIn($verifications);
         $new = array_values(array_filter($next->categories, fn (Category $category) => ! in_array($category, $verified, true)));
 
@@ -256,6 +297,7 @@ final readonly class Requirement
             'categories' => array_values(array_unique([...$this->categories, ...$other->categories], SORT_REGULAR)),
             'requiresPhishingResistance' => $this->requiresPhishingResistance || $other->requiresPhishingResistance,
             'requiresDeviceBound' => $this->requiresDeviceBound || $other->requiresDeviceBound,
+            'requiresAttestedKey' => $this->requiresAttestedKey || $other->requiresAttestedKey,
             'noDowngrade' => $this->noDowngrade || $other->noDowngrade,
             'downgradeExceptions' => match (true) {
                 $this->noDowngrade && $other->noDowngrade => array_values(array_intersect($this->downgradeExceptions, $other->downgradeExceptions)),
@@ -272,7 +314,7 @@ final readonly class Requirement
     }
 
     /**
-     * @return array{factors: int, steps: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool}
+     * @return array{factors: int, steps: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, attested_key: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool}
      */
     public function toArray(): array
     {
@@ -282,6 +324,7 @@ final readonly class Requirement
             'categories' => array_map(fn (Category $category) => $category->value, $this->categories),
             'phishing_resistant' => $this->requiresPhishingResistance,
             'device_bound' => $this->requiresDeviceBound,
+            'attested_key' => $this->requiresAttestedKey,
             'if_enrolled' => $this->onlyIfEnrolled,
             'no_downgrade' => $this->noDowngrade,
             'downgrade_exceptions' => $this->downgradeExceptions,
@@ -291,7 +334,7 @@ final readonly class Requirement
     }
 
     /**
-     * @param  array{factors: int, steps?: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool}  $data
+     * @param  array{factors: int, steps?: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, attested_key?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -306,6 +349,7 @@ final readonly class Requirement
             phishingResistanceExceptions: $data['phishing_resistance_exceptions'] ?? [],
             acceptsRecoveryCodes: $data['accepts_recovery_codes'] ?? true,
             steps: $data['steps'] ?? 0,
+            requiresAttestedKey: $data['attested_key'] ?? false,
         );
     }
 
@@ -324,6 +368,30 @@ final readonly class Requirement
         }
 
         return array_values($categories);
+    }
+
+    /**
+     * The verifications this requirement takes into account. One that asks
+     * for an attested key leaves out everything else the user holds: a
+     * synced passkey that verified them says nothing of who touched the
+     * key, and at AAL3 nothing that can be copied counts.
+     *
+     * @param  list<Verification>  $verifications
+     * @return list<Verification>
+     */
+    private function counted(array $verifications): array
+    {
+        if (! $this->requiresAttestedKey) {
+            return $verifications;
+        }
+
+        return array_values(array_filter($verifications, fn (Verification $verification) => $this->isAttestedKey($verification)
+            || ! in_array(Category::Possession, $verification->categories, true)));
+    }
+
+    private function isAttestedKey(Verification $verification): bool
+    {
+        return $verification->phishingResistant && $verification->deviceBound && $verification->attested;
     }
 
     /**

@@ -24,12 +24,13 @@ final readonly class Verification
         public bool $phishingResistant = false,
         public int $at = 0,
         public bool $deviceBound = false,
+        public bool $attested = false,
     ) {}
 
     /**
      * A verification of the authenticator now. Categories, phishing
      * resistance and device binding come from its factor unless the factor
-     * saw otherwise.
+     * saw otherwise. Whether it's attested was settled when it was added.
      *
      * @param  list<Category>|null  $categories
      */
@@ -44,11 +45,12 @@ final readonly class Verification
             phishingResistant: $phishingResistant ?? $factor->phishingResistant($authenticator),
             at: now()->getTimestamp(),
             deviceBound: $deviceBound ?? $factor->deviceBound($authenticator),
+            attested: $factor->attested($authenticator),
         );
     }
 
     /**
-     * @return array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant: bool, at: int, device_bound: bool}
+     * @return array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant: bool, at: int, device_bound: bool, attested: bool}
      */
     public function toArray(): array
     {
@@ -59,11 +61,12 @@ final readonly class Verification
             'phishing_resistant' => $this->phishingResistant,
             'at' => $this->at,
             'device_bound' => $this->deviceBound,
+            'attested' => $this->attested,
         ];
     }
 
     /**
-     * @param  array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant?: bool, at?: int, device_bound?: bool}  $data
+     * @param  array{factor: string, authenticator: ?string, categories: list<string>, phishing_resistant?: bool, at?: int, device_bound?: bool, attested?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -74,6 +77,7 @@ final readonly class Verification
             phishingResistant: $data['phishing_resistant'] ?? false,
             at: $data['at'] ?? 0,
             deviceBound: $data['device_bound'] ?? false,
+            attested: $data['attested'] ?? false,
         );
     }
 }

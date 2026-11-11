@@ -8,7 +8,10 @@ use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
 /**
- * Authenticator assurance levels, loosely following NIST SP 800-63B.
+ * Authentication assurance levels. They follow NIST SP 800-63B-4 as far as a
+ * library can check: which kinds of factor were proved, by what, and when.
+ * What it can't check is the rest of what NIST asks at AAL3: authenticators
+ * and server cryptography validated to FIPS 140.
  */
 enum Assurance: int
 {
@@ -17,10 +20,17 @@ enum Assurance: int
     /** At least one factor. */
     case AAL1 = 1;
 
-    /** At least two factors from different categories. */
+    /**
+     * At least two factors from different categories. An emailed code isn't
+     * one, so a password and a code is AAL1.
+     */
     case AAL2 = 2;
 
-    /** Two categories, including a phishing-resistant possession factor. */
+    /**
+     * Two categories, from a phishing-resistant key that can't leave its
+     * device, was added with a verified attestation, and either verified
+     * the user itself or was used with a password.
+     */
     case AAL3 = 3;
 
     /**

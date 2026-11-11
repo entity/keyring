@@ -5,9 +5,9 @@ use Keyring\Enums\Category;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
-function verified(string $factor, array $categories, bool $phishingResistant = false, bool $deviceBound = false): Verification
+function verified(string $factor, array $categories, bool $phishingResistant = false, bool $deviceBound = false, bool $attested = false): Verification
 {
-    return new Verification($factor, null, $categories, $phishingResistant, time(), $deviceBound);
+    return new Verification($factor, null, $categories, $phishingResistant, time(), $deviceBound, $attested);
 }
 
 it('counts distinct categories, not verifications', function () {
@@ -21,15 +21,76 @@ it('counts distinct categories, not verifications', function () {
         ->and(Requirement::aal1()->isMetBy([]))->toBeFalse();
 });
 
-it('lets a user verified passkey finish aal2 on its own, and aal3 only when it can\'t sync', function () {
+it('lets a user verified passkey finish aal2 on its own, and aal3 only when it can\'t sync and was attested', function () {
     $synced = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
     $bound = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true, deviceBound: true);
+    $attested = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true, deviceBound: true, attested: true);
+    $attestedButSynced = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true, attested: true);
 
     expect(Requirement::aal2()->isMetBy([$synced]))->toBeTrue()
         ->and(Requirement::aal3()->isMetBy([$synced]))->toBeFalse()
-        ->and(Requirement::aal3()->isMetBy([$bound]))->toBeTrue()
+        ->and(Requirement::aal3()->isMetBy([$bound]))->toBeFalse()
+        ->and(Requirement::aal3()->isMetBy([$attestedButSynced]))->toBeFalse()
+        ->and(Requirement::aal3()->isMetBy([$attested]))->toBeTrue()
         ->and(Requirement::aal3()->wouldProgress([], $synced))->toBeFalse()
-        ->and(Requirement::aal3()->wouldProgress([], $bound))->toBeTrue();
+        ->and(Requirement::aal3()->wouldProgress([], $bound))->toBeFalse()
+        ->and(Requirement::aal3()->wouldProgress([], $attested))->toBeTrue();
+});
+
+it('still lets an app ask for a key that stays on its device without attestation', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $synced = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
+    $bound = verified('webauthn', [Category::Possession], phishingResistant: true, deviceBound: true);
+    $requirement = Requirement::aal2()->deviceBound();
+
+    expect($requirement->isMetBy([$synced]))->toBeFalse()
+        ->and($requirement->isMetBy([$password, $bound]))->toBeTrue()
+        ->and($requirement->requiresAttestedKey)->toBeFalse()
+        ->and(Requirement::named('aal2', 'device-bound'))->toEqual($requirement)
+        ->and(Requirement::named('AAL2', 'phishing-resistant'))->toEqual(Requirement::aal2()->phishingResistant())
+        ->and(Requirement::named('aal3'))->toEqual(Requirement::aal3())
+        ->and(fn () => Requirement::named('aal2', 'unphishable'))->toThrow(InvalidArgumentException::class, 'Unknown requirement [unphishable].');
+});
+
+it('takes the second factor at aal3 from the key itself or a password, never from another authenticator', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $totp = verified('totp', [Category::Possession]);
+    $synced = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
+    $touched = verified('security-key', [Category::Possession], phishingResistant: true, deviceBound: true, attested: true);
+    $unlocked = verified('security-key', [Category::Possession, Category::Inherence], phishingResistant: true, deviceBound: true, attested: true);
+
+    // A synced passkey that verified the user says nothing of who touched
+    // the security key.
+    expect(Requirement::aal3()->isMetBy([$synced, $touched]))->toBeFalse()
+        ->and(Assurance::of([$synced, $touched]))->toBe(Assurance::AAL2)
+        ->and(Requirement::aal3()->isMetBy([$totp, $touched]))->toBeFalse()
+        ->and(Requirement::aal3()->isMetBy([$touched]))->toBeFalse()
+        ->and(Requirement::aal3()->isMetBy([$password, $touched]))->toBeTrue()
+        ->and(Requirement::aal3()->isMetBy([$unlocked]))->toBeTrue()
+        ->and(Requirement::aal3()->isMetBy([$synced, $touched, $password]))->toBeTrue()
+        ->and(Requirement::aal3()->wouldProgress([$synced, $touched], $password))->toBeTrue()
+        ->and(Requirement::aal3()->wouldProgress([$touched], $synced))->toBeFalse()
+        ->and(Requirement::aal3()->wouldProgress([$touched], $totp))->toBeFalse()
+        ->and(Requirement::aal3()->wouldProgress([$synced], $touched))->toBeTrue();
+});
+
+it('limits aal3 to a key nothing vouches for when that is all a user has', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $bound = verified('webauthn', [Category::Possession], phishingResistant: true, deviceBound: true);
+    $attested = verified('webauthn', [Category::Possession], phishingResistant: true, deviceBound: true, attested: true);
+
+    expect(Requirement::aal3()->limitedTo([$password, $bound]))
+        ->requiresAttestedKey->toBeFalse()
+        ->requiresDeviceBound->toBeTrue()
+        ->factors->toBe(2)
+        ->and(Requirement::aal3()->limitedTo([$password, $bound])->isMetBy([$password, $bound]))->toBeTrue()
+        ->and(Requirement::aal3()->limitedTo([$password, $attested])->requiresAttestedKey)->toBeTrue()
+        ->and(Requirement::aal3()->limitedTo([$attested]))
+        ->requiresAttestedKey->toBeFalse()
+        ->requiresDeviceBound->toBeTrue()
+        ->factors->toBe(1)
+        ->and(Requirement::fromArray(Requirement::aal3()->toArray()))->toEqual(Requirement::aal3())
+        ->and(Requirement::aal2()->atLeast(Requirement::aal3())->requiresAttestedKey)->toBeTrue();
 });
 
 it('requires specific categories', function () {
@@ -162,12 +223,14 @@ it('works out assurance from verifications', function () {
     $totp = verified('totp', [Category::Possession]);
     $synced = verified('webauthn', [Category::Possession], phishingResistant: true);
     $key = verified('webauthn', [Category::Possession], phishingResistant: true, deviceBound: true);
+    $attested = verified('webauthn', [Category::Possession], phishingResistant: true, deviceBound: true, attested: true);
 
     expect(Assurance::of([]))->toBe(Assurance::None)
         ->and(Assurance::of([$password]))->toBe(Assurance::AAL1)
         ->and(Assurance::of([$password, $totp]))->toBe(Assurance::AAL2)
         ->and(Assurance::of([$password, $synced]))->toBe(Assurance::AAL2)
-        ->and(Assurance::of([$password, $key]))->toBe(Assurance::AAL3);
+        ->and(Assurance::of([$password, $key]))->toBe(Assurance::AAL2)
+        ->and(Assurance::of([$password, $attested]))->toBe(Assurance::AAL3);
 });
 
 it('reads assurance levels from middleware parameters in any case', function () {
