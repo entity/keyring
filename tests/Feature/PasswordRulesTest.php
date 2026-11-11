@@ -246,6 +246,34 @@ it('checks the breach list in production only, unless told otherwise', function 
     expect($breachCheck())->toBeFalse();
 });
 
+describe('how long a password can be', function () {
+    dataset('64 characters', [
+        'plain' => [str_repeat('k9$Tq2!x', 8)],
+        'accented' => [str_repeat('é', 64)],
+        'cyrillic' => [str_repeat('жщюя', 16)],
+        'japanese' => [str_repeat('鍵を守る', 16)],
+        'emoji' => [str_repeat('🔑', 64)],
+    ]);
+
+    it('takes 64 characters of any script with argon2id, and everything up to the maximum', function (string $password) {
+        config(['hashing.driver' => 'argon2id']);
+
+        expect(mb_strlen($password))->toBe(64)
+            ->and(passes($password))->toBeTrue()
+            ->and(passes(str_repeat($password, 2)))->toBeTrue()
+            ->and(passes(str_repeat($password, 2).'!'))->toBeFalse();
+    })->with('64 characters');
+
+    it('stops at 72 bytes with bcrypt, and says so', function (string $password) {
+        $errors = Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for()])->errors();
+
+        strlen($password) <= 72
+            ? expect($errors->all())->toBe([])
+            : expect($errors->all())->toBe([__('keyring::keyring.password_too_long', ['attribute' => 'password'])])
+                ->and($errors->first())->toContain('72 bytes')->toContain('fewer with accented letters, other alphabets or emoji');
+    })->with('64 characters');
+});
+
 /**
  * Swap in a hash manager that remembers what it was asked to check, whether
  * through a user provider, a validation rule or the facade.

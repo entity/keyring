@@ -19,6 +19,6 @@ return [
     'device_name' => ':browser on :platform',
     'unknown_device' => 'Unknown device',
     'near' => 'near :place',
-    'password_too_long' => 'The :attribute must not be longer than 72 bytes.',
+    'password_too_long' => 'The :attribute is too long. It can take up 72 bytes: that\'s 72 plain letters, digits and symbols, and fewer with accented letters, other alphabets or emoji.',
     'unavailable' => 'Your account needs a sign-in method that isn\'t set up. Please contact support.',
 ];

@@ -232,6 +232,16 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 6.2.1 and NIST SP 800-63B allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
 
+`max` is counted in characters, and how much of it you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password, so with bcrypt Keyring refuses anything longer instead of ignoring the end of it. That makes the real limit 72 bytes, not 128 characters: 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese or Korean ones, or 18 emoji. OWASP ASVS 6.2.9 asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. Hash with argon2id to take every password up to `max`:
+
+```ini
+HASH_DRIVER=argon2id
+# While some users still have bcrypt hashes. They're rehashed as they sign in.
+HASH_VERIFY=false
+```
+
+Keyring doesn't hash a password before bcrypt to get around the limit: the hashes would no longer be ones Laravel's own hasher can check. The [conformance suite](testing.md#the-conformance-suite) fails on bcrypt until you switch or say you're keeping it.
+
 `context` is your list of words a password mustn't contain: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 6.1.2 asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
 
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.

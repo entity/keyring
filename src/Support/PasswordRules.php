@@ -221,7 +221,9 @@ final class PasswordRules
 
     /**
      * Bcrypt only uses the first 72 bytes. Refuse longer passwords instead of
-     * silently ignoring the end of them.
+     * silently ignoring the end of them. That's bytes, not characters, so
+     * under bcrypt passwords.max is never reached and 64 characters of
+     * accented or non-Latin text are too many. Argon2 has no such limit.
      */
     private static function bcryptLimit(): Closure
     {

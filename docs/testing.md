@@ -274,8 +274,18 @@ The suite checks that:
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
+- passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
 If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
+
+A new Laravel app hashes with bcrypt, so the password length check fails until you set `HASH_DRIVER=argon2id` (see [Passwords](configuration.md#passwords)). If your tests run on bcrypt for speed and production doesn't, set the driver for this test class. To keep bcrypt and its limit, say so:
+
+```php
+protected function keyringAcknowledgesBcryptLimit(): bool
+{
+    return true;
+}
+```
 
 `KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

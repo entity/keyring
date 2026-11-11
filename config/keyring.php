@@ -223,9 +223,15 @@ return [
     |
     | At least 8 characters with a second factor and 15 without, any
     | characters, and no composition rules. Neither minimum can go below 8:
-    | Keyring throws on a lower one rather than raise it quietly. Bcrypt
-    | silently ignores anything past 72 bytes, so with bcrypt longer
-    | passwords are rejected rather than truncated.
+    | Keyring throws on a lower one rather than raise it quietly.
+    |
+    | "max" is in characters, and is only reached with a hasher that reads a
+    | whole password. Bcrypt, Laravel's default, silently ignores anything
+    | past 72 bytes, so with bcrypt Keyring refuses a longer password rather
+    | than truncate it: the real limit is then 72 bytes, which is 72 plain
+    | characters but only 36 accented or Cyrillic ones, 24 Chinese, Japanese
+    | or Korean ones, or 18 emoji. Set HASH_DRIVER=argon2id to take every
+    | password up to "max", as OWASP ASVS 6.2.9 asks (at least 64 characters).
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
