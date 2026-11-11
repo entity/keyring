@@ -1,0 +1,484 @@
+{
+    "routes": {
+        "keyring.authenticators.confirm": "POST /user/authenticators/{factor}/confirm",
+        "keyring.authenticators.destroy": "DELETE /user/authenticators/{authenticator}",
+        "keyring.authenticators.store": "POST /user/authenticators/{factor}",
+        "keyring.authenticators.update": "PATCH /user/authenticators/{authenticator}",
+        "keyring.confirm.challenge": "GET /confirm/{factor?}",
+        "keyring.confirm.send": "POST /confirm/{factor}/send",
+        "keyring.confirm.verify": "POST /confirm/{factor}",
+        "keyring.devices.destroy": "DELETE /user/devices/{device}",
+        "keyring.devices.destroy-others": "DELETE /user/devices",
+        "keyring.devices.index": "GET /user/devices",
+        "keyring.devices.report": "GET /devices/{device}/report",
+        "keyring.devices.report.store": "POST /devices/{device}/report",
+        "keyring.email.confirm": "GET /email-changes/{change}/confirm/{token}",
+        "keyring.email.confirm.store": "POST /email-changes/{change}/confirm",
+        "keyring.email.destroy": "DELETE /user/email",
+        "keyring.email.revert": "GET /email-changes/{change}/revert/{token}",
+        "keyring.email.revert.store": "POST /email-changes/{change}/revert",
+        "keyring.email.show": "GET /user/email",
+        "keyring.email.store": "POST /user/email",
+        "keyring.login.challenge": "GET /login/challenge/{factor?}",
+        "keyring.login.factor": "POST /login/{factor}",
+        "keyring.login.options": "GET /login/{factor}/options",
+        "keyring.login.send": "POST /login/challenge/{factor}/send",
+        "keyring.login.verify": "POST /login/challenge/{factor}",
+        "keyring.sessions.destroy": "DELETE /user/sessions/{session}",
+        "keyring.sessions.destroy-others": "DELETE /user/sessions",
+        "keyring.sessions.index": "GET /user/sessions",
+        "login": "GET /login",
+        "login.store": "POST /login",
+        "logout": "POST /logout",
+        "password.email": "POST /forgot-password",
+        "password.request": "GET /forgot-password",
+        "password.reset": "GET /reset-password/{token}",
+        "password.update": "POST /reset-password",
+        "register": "GET /register",
+        "register.store": "POST /register",
+        "user-password.update": "PUT /user/password",
+        "verification.notice": "GET /email/verify",
+        "verification.send": "POST /email/verification-notification",
+        "verification.verify": "GET /email/verify/{id}/{hash}",
+        "verification.verify.store": "POST /email/verify/{id}/{hash}"
+    },
+    "middleware": [
+        "keyring",
+        "keyring.enrolled",
+        "keyring.fresh",
+        "keyring.password",
+        "keyring.session",
+        "keyring.signed"
+    ],
+    "features": [
+        "registration",
+        "reset-passwords",
+        "email-verification",
+        "update-passwords",
+        "manage-authenticators",
+        "devices",
+        "email-changes",
+        "security-log"
+    ],
+    "emails": [
+        "new_device",
+        "password_changed",
+        "authenticator_added",
+        "authenticator_removed",
+        "second_factor_failed",
+        "recovery_code_used",
+        "recovery_codes_generated",
+        "suspicious_activity",
+        "clone_suspected",
+        "account_locked",
+        "email_changed",
+        "email_change_reverted",
+        "verification_code",
+        "confirm_email_change",
+        "email_change_notice",
+        "email_address_in_use",
+        "already_registered"
+    ],
+    "facade": [
+        "activity",
+        "allowEnrollmentWhen",
+        "allowSignInWhen",
+        "allowsEnrollment",
+        "allowsSignIn",
+        "attempt",
+        "authenticatorModel",
+        "belongsToGuard",
+        "cancelPasswordChange",
+        "createUsersUsing",
+        "dangerouslyChangedSteps",
+        "describeDevice",
+        "describeDevicesUsing",
+        "deviceModel",
+        "email",
+        "extend",
+        "factor",
+        "factors",
+        "failureCountModel",
+        "fake",
+        "findUser",
+        "findUsersUsing",
+        "for",
+        "guard",
+        "hasFactor",
+        "hasNotification",
+        "hidesRegisteredAddresses",
+        "linkRoot",
+        "linkRootUsing",
+        "normalizeUsername",
+        "normalizeUsernamesUsing",
+        "notification",
+        "notifications",
+        "page",
+        "pendingChangeModel",
+        "pipeline",
+        "policy",
+        "protectedAttributes",
+        "provider",
+        "recordIpsUsing",
+        "recordedIp",
+        "registered",
+        "render",
+        "require",
+        "requirePasswordChange",
+        "requiredNotification",
+        "requirementFor",
+        "requiresPasswordChange",
+        "resetUserPasswordsUsing",
+        "respondWith",
+        "response",
+        "risk",
+        "routes",
+        "securityEventModel",
+        "signInAfterRegistering",
+        "signsInAfterRegistering",
+        "statusMessage",
+        "steps",
+        "unlock",
+        "updateUserPasswordsUsing",
+        "useAuthenticatorModel",
+        "useDeviceModel",
+        "useFailureCountModel",
+        "usePendingChangeModel",
+        "useSecurityEventModel",
+        "user",
+        "username",
+        "validateEmailChangesUsing",
+        "withoutProtection"
+    ],
+    "user": [
+        "all",
+        "canMeet",
+        "canSignIn",
+        "default",
+        "find",
+        "has",
+        "hasFactorToRecover",
+        "hasRecoveryCodes",
+        "hasSecondFactor",
+        "of",
+        "reachable",
+        "refresh",
+        "shouldReplaceRecoveryCodes",
+        "unregistered",
+        "usefulFor",
+        "without",
+        "withoutFallbacks"
+    ],
+    "contracts": {
+        "Keyring\\Contracts\\CreatesNewUsers": [
+            "create",
+            "validate"
+        ],
+        "Keyring\\Contracts\\DiscoverableFactor": [
+            "answersChallenges",
+            "attested",
+            "authenticators",
+            "categories",
+            "challenge",
+            "deviceBound",
+            "errorKey",
+            "identificationRules",
+            "identify",
+            "key",
+            "limits",
+            "loginOptions",
+            "phishingResistant",
+            "present",
+            "priority",
+            "rules",
+            "stall",
+            "startsLogin",
+            "verify"
+        ],
+        "Keyring\\Contracts\\Enrollable": [
+            "attested",
+            "authenticators",
+            "beginEnrollment",
+            "categories",
+            "challenge",
+            "confirmEnrollment",
+            "deviceBound",
+            "enrollmentRules",
+            "errorKey",
+            "key",
+            "limits",
+            "multiple",
+            "phishingResistant",
+            "present",
+            "priority",
+            "rules",
+            "verify"
+        ],
+        "Keyring\\Contracts\\Factor": [
+            "attested",
+            "authenticators",
+            "categories",
+            "challenge",
+            "deviceBound",
+            "errorKey",
+            "key",
+            "limits",
+            "phishingResistant",
+            "present",
+            "priority",
+            "rules",
+            "verify"
+        ],
+        "Keyring\\Contracts\\LocatesIps": [
+            "locate"
+        ],
+        "Keyring\\Contracts\\PrimaryFactor": [
+            "answersChallenges",
+            "attested",
+            "authenticators",
+            "categories",
+            "challenge",
+            "deviceBound",
+            "errorKey",
+            "identificationRules",
+            "identify",
+            "key",
+            "limits",
+            "phishingResistant",
+            "present",
+            "priority",
+            "rules",
+            "stall",
+            "startsLogin",
+            "verify"
+        ],
+        "Keyring\\Contracts\\ResetsUserPasswords": [
+            "reset"
+        ],
+        "Keyring\\Contracts\\Responses\\AuthenticatedResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\ChallengeResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\ConfirmationRequiredResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\EnrollmentRequiredResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\FailedResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\LockoutResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\LogoutResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\PasswordChangeRequiredResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\RegisterResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\SignedOutResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\StatusResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\Responses\\VerifiedResponse": [
+            "toResponse"
+        ],
+        "Keyring\\Contracts\\SendsCodes": [
+            "attested",
+            "authenticators",
+            "categories",
+            "challenge",
+            "deviceBound",
+            "errorKey",
+            "key",
+            "limits",
+            "phishingResistant",
+            "present",
+            "priority",
+            "rules",
+            "send",
+            "verify"
+        ],
+        "Keyring\\Contracts\\SessionRegistry": [
+            "find",
+            "forUser",
+            "prune",
+            "replace",
+            "revoke",
+            "revokeAll",
+            "revokeDevice",
+            "revokeEveryone",
+            "save",
+            "update"
+        ],
+        "Keyring\\Contracts\\Signal": [
+            "assess",
+            "checkpoints"
+        ],
+        "Keyring\\Contracts\\TrustsAuthenticators": [
+            "roots"
+        ],
+        "Keyring\\Contracts\\UpdatesUserPasswords": [
+            "update"
+        ],
+        "Keyring\\Contracts\\ValidatesEmailChanges": [
+            "validate"
+        ]
+    },
+    "events": {
+        "Keyring\\Events\\AccessRefused": [
+            "id",
+            "resource",
+            "user"
+        ],
+        "Keyring\\Events\\AccountLocked": [
+            "factor",
+            "user"
+        ],
+        "Keyring\\Events\\Attempting": [
+            "factor",
+            "purpose",
+            "request"
+        ],
+        "Keyring\\Events\\Authenticated": [
+            "attempt",
+            "device",
+            "user"
+        ],
+        "Keyring\\Events\\AuthenticatorAdded": [
+            "authenticator",
+            "user"
+        ],
+        "Keyring\\Events\\AuthenticatorRemovalRefused": [
+            "authenticator",
+            "user"
+        ],
+        "Keyring\\Events\\AuthenticatorRemoved": [
+            "authenticator",
+            "user"
+        ],
+        "Keyring\\Events\\CloneSuspected": [
+            "authenticator"
+        ],
+        "Keyring\\Events\\Confirmed": [
+            "attempt",
+            "user"
+        ],
+        "Keyring\\Events\\DeviceRevoked": [
+            "device",
+            "reported",
+            "user"
+        ],
+        "Keyring\\Events\\EmailChangeRequested": [
+            "change",
+            "user"
+        ],
+        "Keyring\\Events\\EmailChangeReverted": [
+            "change",
+            "user"
+        ],
+        "Keyring\\Events\\EmailChanged": [
+            "change",
+            "user"
+        ],
+        "Keyring\\Events\\EnrollmentRefused": [
+            "factor",
+            "reason",
+            "user"
+        ],
+        "Keyring\\Events\\FactorChallenged": [
+            "attempt",
+            "authenticator"
+        ],
+        "Keyring\\Events\\FactorFailed": [
+            "attempt",
+            "authenticator",
+            "factor",
+            "request"
+        ],
+        "Keyring\\Events\\FactorVerified": [
+            "attempt",
+            "authenticator",
+            "verification"
+        ],
+        "Keyring\\Events\\LinkRefused": [
+            "link",
+            "reason",
+            "user"
+        ],
+        "Keyring\\Events\\Lockout": [
+            "factor",
+            "request",
+            "retryAfter"
+        ],
+        "Keyring\\Events\\LoggedOut": [
+            "user"
+        ],
+        "Keyring\\Events\\NewDeviceSignedIn": [
+            "device",
+            "user"
+        ],
+        "Keyring\\Events\\PasswordChangeRequired": [
+            "reason",
+            "user"
+        ],
+        "Keyring\\Events\\PasswordChanged": [
+            "user"
+        ],
+        "Keyring\\Events\\PasswordReset": [
+            "user"
+        ],
+        "Keyring\\Events\\ProtectionBypassed": [
+            "reason"
+        ],
+        "Keyring\\Events\\RateLimited": [
+            "limiter",
+            "retryAfter",
+            "route",
+            "user"
+        ],
+        "Keyring\\Events\\RecoveryCodeUsed": [
+            "authenticator",
+            "remaining"
+        ],
+        "Keyring\\Events\\RecoveryCodesGenerated": [
+            "authenticator",
+            "user"
+        ],
+        "Keyring\\Events\\RememberMeReused": [
+            "session",
+            "user"
+        ],
+        "Keyring\\Events\\RiskAssessed": [
+            "action",
+            "checkpoint",
+            "risk",
+            "user"
+        ],
+        "Keyring\\Events\\SessionEnded": [
+            "reason",
+            "user"
+        ],
+        "Keyring\\Events\\SessionResumed": [
+            "session",
+            "user"
+        ],
+        "Keyring\\Events\\SessionsRevoked": [
+            "count",
+            "user"
+        ],
+        "Keyring\\Events\\VerificationRefused": [
+            "attempt",
+            "factor",
+            "skipped"
+        ]
+    }
+}
