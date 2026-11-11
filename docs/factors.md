@@ -121,7 +121,7 @@ Enrolling sends a code to the current address, and the user types it to confirm.
 
 ### Recovery Codes
 
-Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx`, shown once. Each carries 120 random bits, above the 112 OWASP ASVS asks for, and they're stored as keyed hashes. Codes from before this format keep working. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
+Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx`, shown once. Each is 16 random bytes, the 128 bits OWASP ASVS asks of a value that mustn't be guessed, written as 26 base32 characters, and they're stored as keyed hashes. Codes from before this format keep working. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
 
 A user has at most one set. Generating a new set replaces the old one. Users get a set automatically with their first extra factor. Recovery codes are a fallback, so they can never be the default authenticator. See [Recovery Codes](authenticators.md#recovery-codes).
 

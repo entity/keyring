@@ -5,6 +5,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use ParagonIE\ConstantTime\Base32;
 
 beforeEach(function () {
     $this->user = taylor();
@@ -49,11 +50,12 @@ it('keeps recovery codes working after APP_KEY is rotated', function () {
     expect(Keyring::factor('recovery')->verify($this->attempt, Authenticator::find($id), Request::create('/', 'POST', ['code' => 'aaaaa-11111'])))->not->toBeNull();
 });
 
-it('makes recovery codes with 120 random bits each, and still takes older shorter ones', function () {
+it('makes recovery codes with 128 random bits each, and still takes older shorter ones', function () {
     ['codes' => $codes, 'secret' => $secret] = Keyring::factor('recovery')->generate();
 
-    expect($codes)->each->toMatch('/^[a-z2-7]{4}(-[a-z2-7]{4}){5}$/')
-        ->and(array_unique($codes))->toHaveCount(count($codes));
+    expect($codes)->each->toMatch('/^[a-z2-7]{4}(-[a-z2-7]{4}){5}-[a-z2-7]{2}$/')
+        ->and(array_unique($codes))->toHaveCount(count($codes))
+        ->and(array_map(fn (string $code) => strlen(Base32::decodeNoPadding(str_replace('-', '', $code))), $codes))->each->toBe(16);
 
     $new = Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'recovery', 'secret' => $secret]);
     $typed = strtoupper(str_replace('-', ' ', $codes[0]));
