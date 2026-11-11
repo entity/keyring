@@ -25,6 +25,9 @@ jobs:
           extensions: sqlite3, pdo_sqlite, sodium, bcmath, intl
           coverage: none
       - run: composer install --no-interaction --prefer-dist
+      # Fails on a known vulnerability in anything installed. An abandoned
+      # package is listed without failing: that's not a vulnerability.
+      - run: composer audit --abandoned=report
       - run: vendor/bin/rector --dry-run
       - run: vendor/bin/pint --test
       - run: vendor/bin/phpstan analyse --no-progress
@@ -104,5 +107,6 @@ jobs:
           node-version: 24
       - run: npm install -g bun@1
       - run: bun install --frozen-lockfile
+      - run: bun audit
       - run: bun run typecheck
       - run: bun test
