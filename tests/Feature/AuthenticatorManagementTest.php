@@ -280,12 +280,12 @@ it('keeps the session verified when enrolling from an inertia page', function ()
 it('only allows the shorter password with a real second factor, not recovery codes alone', function () {
     $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
-    expect($this->user->keyring->hasSecondFactor())->toBeFalse();
+    expect($this->user->keyring->hasExtraStep())->toBeFalse();
     expect(Validator::make(['password' => 'short pass', 'password_confirmation' => 'short pass'], ['password' => PasswordRules::for($this->user)])->fails())->toBeTrue();
 
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-    expect($this->user->keyring->refresh()->hasSecondFactor())->toBeTrue();
+    expect($this->user->keyring->refresh()->hasExtraStep())->toBeTrue();
     expect(Validator::make(['password' => 'short pass', 'password_confirmation' => 'short pass'], ['password' => PasswordRules::for($this->user->fresh())])->fails())->toBeFalse();
 });
 

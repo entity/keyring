@@ -68,7 +68,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `factor_failed` | warning | A factor failed. | |
 | `second_factor_failed` | warning | A factor failed during a login after a correct password. | |
 | `locked_out` | warning | A rate limit started refusing an IP address for a factor, whether the answer said so or was that of a wrong password. [Logged once](#refusals-that-repeat), not for each request it refuses. Not linked to a user. | `retry_after` |
-| `rate_limited` | warning | The [form limiter](configuration.md#pending-logins-timebox-and-rate-limits) started refusing requests to one of Keyring's other routes: registration, a reset, a change, an emailed link, or passkey options. [Logged once](#refusals-that-repeat) for each wait, per route. Linked to the signed-in user when there is one. | `limiter` (`keyring` or `keyring-login-options`), `route` (its name), `retry_after` |
+| `rate_limited` | warning | The [form limiter](configuration.md#pending-logins-timebox-and-rate-limits) started refusing requests to one of Keyring's other routes: registration, a reset, a change, an emailed link or the page it opens, or passkey options. [Logged once](#refusals-that-repeat) for each wait, per route. Linked to the signed-in user when there is one. | `limiter` (`keyring`, `keyring-pages` or `keyring-login-options`), `route` (its name), `retry_after` |
 | `account_locked` | warning | Failed attempts got the password or a passkey refused until a password reset: the cap on failures in a row, or `limits.lock_after`. | |
 | `signed_out` | info | The user signed out. | |
 | `authenticator_added`, `authenticator_removed` | notice | | `name` |

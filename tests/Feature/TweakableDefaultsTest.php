@@ -146,7 +146,7 @@ it('answers with the app\'s own responses when a session ends or needs confirmin
 
 it('sends email codes of the length the app picks, for as long as it picks', function () {
     Notification::fake();
-    Keyring::factors([Password::class, EmailCode::asSecondFactor(length: 6, expireAfter: '5m')]);
+    Keyring::factors([Password::class, EmailCode::asExtraStep(length: 6, expireAfter: '5m')]);
 
     $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
         ->postJson(route('keyring.authenticators.store', 'email-code'))

@@ -46,7 +46,7 @@ class ConformanceTest extends TestCase
         parent::setUp();
 
         Notification::fake();
-        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys(), Totp::class, EmailCode::asSecondFactor(), RecoveryCodes::class]);
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys(), Totp::class, EmailCode::asExtraStep(), RecoveryCodes::class]);
     }
 
     protected function keyringUser(): User

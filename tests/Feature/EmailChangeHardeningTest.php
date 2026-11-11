@@ -419,7 +419,7 @@ it('puts the address back from the link for an earlier change that a later one r
 });
 
 it('ends a sign in that was waiting for a code sent to the address the undo takes away', function () {
-    Keyring::factors([PasswordFactor::class, EmailCode::asSecondFactor()]);
+    Keyring::factors([PasswordFactor::class, EmailCode::asExtraStep()]);
     $this->travelTo(now()->subMonth(), fn () => Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]));
 
     $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);

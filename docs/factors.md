@@ -70,7 +70,7 @@ Removing a factor from the list doesn't delete anyone's authenticators. A user w
 |---|---|---|---|---|---|
 | `password` | `Password` | knowledge | yes | no | 40 |
 | `totp` | `Totp` | possession | no | yes | 60 |
-| `email-code` | `EmailCode::asSecondFactor()` | address (not a factor) | no | yes, one | 30 |
+| `email-code` | `EmailCode::asExtraStep()` | address (not a factor) | no | yes, one | 30 |
 | `recovery` | `RecoveryCodes` | possession | no | yes, one set | 0 |
 | `passkey` | `WebAuthn::passkeys()` | possession, plus inherence when the user was verified | yes | yes | 100 |
 | `security-key` | `WebAuthn::securityKeys()` | possession, plus inherence when the user was verified | no | yes | 90 |
@@ -122,13 +122,13 @@ The `otpauth://` URL and the QR code then say `algorithm=SHA256`, and enrolling 
 An eight digit code sent to the user's current email address. It's opt-in, because NIST SP 800-63B-4 doesn't accept email as an authenticator at any level (Sec. 3.1.3.1): whoever controls the inbox can also reset the password, so for a user with nothing else beside their password, the inbox is the whole account. Registering plain `EmailCode::class` throws an exception that says so. To accept that risk:
 
 ```php
-Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor()]);
+Keyring::factors([Password::class, Totp::class, EmailCode::asExtraStep()]);
 ```
 
 Codes are eight digits, last ten minutes and allow five wrong guesses. To change that:
 
 ```php
-EmailCode::asSecondFactor(length: 6, expireAfter: '5m', maxGuesses: 3)
+EmailCode::asExtraStep(length: 6, expireAfter: '5m', maxGuesses: 3)
 ```
 
 Six digits is the shortest a code can be and ten minutes the longest it can last, the bounds OWASP ASVS 5.0.0 sets for codes sent out of band (requirements 6.5.4 and 6.5.5). Asking for less or for longer throws a `LogicException` on that line.

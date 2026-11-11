@@ -31,7 +31,7 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | Validation and status messages | The `keyring-lang` translation files | [Messages and Translations](configuration.md#messages-and-translations) |
 | The route prefix, domain and middleware | `prefix`, `domain` and `middleware` | [Routes](configuration.md#routes) |
 | The middleware on account changes | `changes_middleware` | [Account Changes and Enrollment](configuration.md#account-changes-and-enrollment) |
-| The form rate limits | The `keyring` and `keyring-login-options` rate limiters | [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits) |
+| The form rate limits | The `keyring`, `keyring-pages` and `keyring-login-options` rate limiters | [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Who may sign in at all | `Keyring::allowSignInWhen()` | [Who May Sign In](sign-in-flow.md#who-may-sign-in) |
 | Who may add a sign-in method | `Keyring::allowEnrollmentWhen()` | [Who May Enroll](authenticators.md#who-may-enroll) |
 | Whether registration says when an address is taken | `registration.reveal_taken` | [Registration](sign-in-flow.md#registration) |
@@ -72,7 +72,7 @@ Set `routes` to `false` and call `Keyring::routes()` inside your own group to ch
 
 A few things have no switch, because turning them off would quietly remove a protection:
 
-- Plain `EmailCode::class` is refused. `EmailCode::asSecondFactor()` is the switch, and it says what you're accepting.
+- Plain `EmailCode::class` is refused. `EmailCode::asExtraStep()` is the switch, and it says what you're accepting.
 - A user can't remove their last way to sign in, and removing the last second factor takes the password, typed again and long enough to stand alone.
 - An email change is confirmed from the new address, announced to the old one, and can be undone from there.
 - Trusting a device takes a real second factor, and a confirm page opened without a step-up behind it never accepts recovery codes.

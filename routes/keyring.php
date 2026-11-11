@@ -120,24 +120,24 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
 // isn't signed in is sent to sign in by the controller, which remembers the
 // link first where an unverified account can only sign in after following it.
 if (Features::enabled(Features::emailVerification())) {
-    Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'page'])->middleware(['keyring.signed:relative', 'throttle:keyring'])->name('verification.verify');
+    Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'page'])->middleware(['keyring.signed:relative', 'throttle:keyring-pages'])->name('verification.verify');
 }
 
 // Emailed links. GET only shows a page with a button and the POST acts, so a
 // mail scanner that opens a link changes nothing. The link's token or
 // signature is in its URL, and the page posts it in the body, so the request
 // that acts doesn't put it in a URL a second time. keyring.signed is
-// Laravel's signed middleware, which also logs the links it refuses.
-Route::middleware('throttle:keyring')->group(function () {
-    if (Features::enabled(Features::emailChanges())) {
-        Route::get('/email-changes/{change}/confirm/{token}', [EmailChangeController::class, 'page'])->name('keyring.email.confirm');
-        Route::post('/email-changes/{change}/confirm', [EmailChangeController::class, 'confirm'])->name('keyring.email.confirm.store');
-        Route::get('/email-changes/{change}/revert/{token}', [EmailChangeController::class, 'page'])->name('keyring.email.revert');
-        Route::post('/email-changes/{change}/revert', [EmailChangeController::class, 'revert'])->name('keyring.email.revert.store');
-    }
+// Laravel's signed middleware, which also logs the links it refuses. The
+// pages have a looser limit of their own, so opening them doesn't use up
+// the few tries their buttons get.
+if (Features::enabled(Features::emailChanges())) {
+    Route::get('/email-changes/{change}/confirm/{token}', [EmailChangeController::class, 'page'])->middleware('throttle:keyring-pages')->name('keyring.email.confirm');
+    Route::post('/email-changes/{change}/confirm', [EmailChangeController::class, 'confirm'])->middleware('throttle:keyring')->name('keyring.email.confirm.store');
+    Route::get('/email-changes/{change}/revert/{token}', [EmailChangeController::class, 'page'])->middleware('throttle:keyring-pages')->name('keyring.email.revert');
+    Route::post('/email-changes/{change}/revert', [EmailChangeController::class, 'revert'])->middleware('throttle:keyring')->name('keyring.email.revert.store');
+}
 
-    if (Features::enabled(Features::devices())) {
-        Route::get('/devices/{device}/report', [DeviceController::class, 'page'])->middleware('keyring.signed:relative')->name('keyring.devices.report');
-        Route::post('/devices/{device}/report', [DeviceController::class, 'report'])->middleware(ValidatePostedSignature::class)->name('keyring.devices.report.store');
-    }
-});
+if (Features::enabled(Features::devices())) {
+    Route::get('/devices/{device}/report', [DeviceController::class, 'page'])->middleware(['keyring.signed:relative', 'throttle:keyring-pages'])->name('keyring.devices.report');
+    Route::post('/devices/{device}/report', [DeviceController::class, 'report'])->middleware([ValidatePostedSignature::class, 'throttle:keyring'])->name('keyring.devices.report.store');
+}

@@ -90,7 +90,7 @@ it('locks an account out and clears its limits under keys a Swoole table can hol
 
 it('keeps a sent code, its guesses and an enrollment\'s confirmation under keys a Swoole table can hold', function () {
     Notification::fake();
-    Keyring::factors([Password::class, EmailCode::asSecondFactor()]);
+    Keyring::factors([Password::class, EmailCode::asExtraStep()]);
     Authenticator::factory()->emailCode()->for($this->user, 'authenticatable')->create();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);

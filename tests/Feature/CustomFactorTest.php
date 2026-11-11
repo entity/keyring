@@ -56,7 +56,7 @@ class VoicePrint extends Factor
 
 beforeEach(function () {
     SmsCode::$sent = [];
-    Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor(), SmsCode::class]);
+    Keyring::factors([Password::class, Totp::class, EmailCode::asExtraStep(), SmsCode::class]);
 
     $this->user = taylor();
 });
@@ -174,7 +174,7 @@ describe('a factor that is nothing the user holds', function () {
     it('doesn\'t count as the account\'s second factor', function () {
         $keyring = $this->user->keyring;
 
-        expect($keyring->hasSecondFactor())->toBeFalse()
+        expect($keyring->hasExtraStep())->toBeFalse()
             ->and($keyring->canMeet(Requirement::aal2()))->toBeFalse()
             ->and($keyring->canMeet(Requirement::factors(2)))->toBeTrue();
     });

@@ -164,6 +164,14 @@ describe('the form limiter', function () {
         expect(logEntry('rate_limited')->meta)->toMatchArray(['limiter' => 'keyring-login-options', 'route' => 'keyring.login.options']);
     });
 
+    it('logs the limit on the pages emailed links open too', function () {
+        foreach (range(1, 63) as $request) {
+            $this->get(route('keyring.email.revert', ['change' => 'missing', 'token' => 'wrong']));
+        }
+
+        expect(logEntry('rate_limited')->meta)->toMatchArray(['limiter' => 'keyring-pages', 'route' => 'keyring.email.revert']);
+    });
+
     it('logs again once the wait is over, and for each address it turns away', function () {
         $fill = fn (string $ip = '127.0.0.1') => array_map(fn () => $this->withServerVariables(['REMOTE_ADDR' => $ip])->post('/forgot-password'), range(1, 8));
 

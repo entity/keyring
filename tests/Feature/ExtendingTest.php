@@ -155,7 +155,7 @@ it('says which notification is missing before starting a flow that needs it', fu
 })->throws(MissingNotification::class, 'No notification is registered for [email_change_notice]');
 
 it('says so when an email code has no notification to go out in', function () {
-    Keyring::factors([PasswordFactor::class, EmailCode::asSecondFactor()]);
+    Keyring::factors([PasswordFactor::class, EmailCode::asExtraStep()]);
     Keyring::notifications(['verification_code' => null]);
 
     $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1)
