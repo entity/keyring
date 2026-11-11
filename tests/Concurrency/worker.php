@@ -15,6 +15,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Support\Throttle;
 use Keyring\Tests\Fixtures\User;
 use Keyring\Tests\TestCase;
 
@@ -44,6 +45,20 @@ try {
             $attempt->put('passkey', 'options', $options);
 
             return Keyring::factor('passkey')->verify($attempt, $authenticator, Request::create('/', 'POST', ['credential' => $credential])) !== null;
+        })(),
+        'guess-password' => (function () use ($id) {
+            $throttle = app(Throttle::class);
+            $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => User::findOrFail($id)->email]), null);
+
+            // As the pipeline does around a wrong password: counted going
+            // in, unless a limit refuses it, and failed coming out.
+            if ($throttle->hit($limits) !== null) {
+                return 'refused';
+            }
+
+            $throttle->failed($limits);
+
+            return 'checked';
         })(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),

@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\DB;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\WebAuthn\Ceremonies;
@@ -73,6 +74,27 @@ it('lets one of two assertions with the same count through, and keeps that count
     expect(outcomes($results, true))->toBe(1)
         ->and(outcomes($results, false))->toBe(1)
         ->and($passkey->fresh()->sign_count)->toBe($record->counter + 1);
+});
+
+it('checks one more proof at the last failure the cap allows, however many arrive together', function () {
+    $user = taylor();
+
+    // One short of the 80 failures in a row browsers the account hasn't
+    // signed in from may make.
+    $count = new FailureCount(['factor' => 'password', 'authenticator' => 'password', 'failures' => 79]);
+    $count->authenticatable()->associate($user)->save();
+
+    $results = contend($count, [
+        ['guess-password', $user->id],
+        ['guess-password', $user->id],
+        ['guess-password', $user->id],
+    ]);
+
+    expect(outcomes($results, 'checked'))->toBe(1)
+        ->and(outcomes($results, 'refused'))->toBe(2)
+        ->and($count->fresh())
+        ->failures->toBe(80)
+        ->locked_at->not->toBeNull();
 });
 
 it('ends with the old address whichever of confirm and revert wins', function () {
