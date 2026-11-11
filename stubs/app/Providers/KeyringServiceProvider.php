@@ -31,6 +31,7 @@ class KeyringServiceProvider extends ServiceProvider
             RecoveryCodes::class,
             WebAuthn::passkeys(),
             WebAuthn::securityKeys(),
+            // A step at sign in, not a second factor: a password and an emailed code is AAL1.
             EmailCode::asSecondFactor(),
         ]);
 

@@ -1,7 +1,13 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { router } from '@inertiajs/core'
+import { isAbort, keyPrompt, passkeyLogin } from '../src/inertia'
+import { standIn } from './browser'
 
 // The browser prompt, the options request and Inertia's router, as stand-ins
-// the tests drive by hand.
+// the tests drive by hand. They stand in for what the browser and Inertia
+// provide, not for Keyring's own modules, and are taken away after each
+// test: Bun runs every file in one process, and a mock.module() made here
+// would replace the module for every file that runs after this one.
 type Prompt = { options: object, autofill: boolean, signal?: AbortSignal, resolve: (credential: object) => void, reject: (error: unknown) => void }
 
 let prompts: Prompt[] = []
@@ -13,11 +19,25 @@ let autofillSupported = true
 let letsGoAfter: number | null = null
 let open = 0
 let refused = 0
+let requested: string[] = []
 let posted: Array<{ url: string, callbacks: { onError: (errors: Record<string, string>) => void, onFinish: () => void } }> = []
+let restore = () => {}
 
-mock.module('../src/webauthn', () => ({
-  supportsAutofill: async () => autofillSupported,
-  getCredential: (options: object, { autofill = false, signal }: { autofill?: boolean, signal?: AbortSignal } = {}) => new Promise((resolve, reject) => {
+// A browser with the JSON helpers, so options reach the prompt as they were
+// sent and a credential comes back as the JSON the test answered with.
+class FakeCredential {
+  static isConditionalMediationAvailable = async () => autofillSupported
+  static parseRequestOptionsFromJSON = (options: object) => options
+
+  constructor(private json: object) {}
+
+  toJSON() {
+    return this.json
+  }
+}
+
+const credentials = {
+  get: ({ publicKey, mediation, signal }: { publicKey: object, mediation?: string, signal?: AbortSignal }) => new Promise((resolve, reject) => {
     if (letsGoAfter !== null && open > 0) {
       refused++
 
@@ -31,18 +51,10 @@ mock.module('../src/webauthn', () => ({
     }
     const aborted = close(() => reject(new DOMException('Aborted', 'AbortError')))
 
-    prompts.push({ options, autofill, signal, resolve: close(resolve), reject: close(reject) })
+    prompts.push({ options: publicKey, autofill: mediation === 'conditional', signal, resolve: close((credential: object) => resolve(new FakeCredential(credential))), reject: close(reject) })
     signal?.addEventListener('abort', () => letsGoAfter === null ? aborted(undefined) : setTimeout(aborted, letsGoAfter))
   }),
-}))
-
-mock.module('../src/http', () => ({ json: async () => ({ options: { challenge: 'abc' } }) }))
-
-mock.module('@inertiajs/core', () => ({
-  router: { post: (url: string, _data: object, callbacks: any) => posted.push({ url, callbacks }), get: () => {} },
-}))
-
-const { isAbort, keyPrompt, passkeyLogin } = await import('../src/inertia')
+}
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -52,10 +64,33 @@ const challenge = { challenge: { options: {} } } as any
 beforeEach(() => {
   prompts = []
   posted = []
+  requested = []
   autofillSupported = true
   letsGoAfter = null
   open = 0
   refused = 0
+
+  restore = standIn({
+    window: globalThis,
+    PublicKeyCredential: FakeCredential,
+    document: { cookie: '' },
+    navigator: { credentials },
+    // Answers without a turn of the event loop, as the tests wait one tick.
+    fetch: async (url: string) => {
+      requested.push(url)
+
+      return { ok: true, status: 200, json: async () => ({ options: { challenge: 'abc' } }) }
+    },
+  })
+
+  spyOn(router, 'post').mockImplementation(((url: string, _data: object, callbacks: any) => {
+    posted.push({ url, callbacks })
+  }) as any)
+})
+
+afterEach(() => {
+  restore()
+  ;(router.post as any).mockRestore()
 })
 
 describe('isAbort', () => {
@@ -139,6 +174,7 @@ describe('passkeyLogin', () => {
     login.signIn()
     await tick()
 
+    expect(requested).toEqual(['/login/passkey/options'])
     expect(prompts[0].options).toEqual({ challenge: 'abc' })
     login.stop()
   })

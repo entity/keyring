@@ -61,15 +61,15 @@ function databaseIgnoresAccents(): bool
 
 /**
  * A passkey as laravel/passkeys keeps one: its credential ID and the record
- * a real registration produced.
+ * a real registration produced, with a new key or the one given.
  *
  * @return array{credential_id: string, credential: string}
  */
-function passkeyRow(User $user): array
+function passkeyRow(User $user, ?VirtualAuthenticator $key = null): array
 {
     $ceremonies = app(Ceremonies::class);
     $options = $ceremonies->creationOptions($user, Profile::passkeys(), []);
-    $record = $ceremonies->register(json_encode(new VirtualAuthenticator()->register($ceremonies->toBrowser($options))), $ceremonies->toJson($options), Profile::passkeys());
+    $record = $ceremonies->register(json_encode(($key ?? new VirtualAuthenticator)->register($ceremonies->toBrowser($options))), $ceremonies->toJson($options), Profile::passkeys());
 
     return [
         'credential_id' => Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId),

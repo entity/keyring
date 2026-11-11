@@ -223,12 +223,16 @@ class Ceremonies
      * An opaque, stable handle for the user. Never their real ID or email.
      * Taken from a key they already have, so one added after APP_KEY was
      * rotated doesn't show up as another account in their password manager.
+     *
+     * Made from the model as well as the ID. An authenticator keeps one
+     * passkey per handle for a site, so two kinds of account with the same
+     * ID would otherwise replace each other's there.
      */
     public function userHandle(Authenticatable&Model $user): string
     {
         $existing = $this->keyring->authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
 
-        return $this->record($existing)->userHandle ?? KeyedHash::make(KeyedHash::USER_HANDLES, (string) $user->getAuthIdentifier());
+        return $this->record($existing)->userHandle ?? KeyedHash::make(KeyedHash::USER_HANDLES, $user->getMorphClass().':'.$user->getAuthIdentifier());
     }
 
     /**
@@ -329,11 +333,39 @@ class Ceremonies
             'EdDSA' => Ed25519::isSupported() ? Ed25519::create() : null,
             'RS256' => RS256::create($this->rsaKeys()),
             default => throw new LogicException('Keyring only knows the WebAuthn algorithms ES256, EdDSA and RS256. Check keyring.webauthn.algorithms.'),
-        }, config('keyring.webauthn.algorithms') ?? ['ES256', 'EdDSA']));
+        }, $this->algorithmNames()));
 
         throw_if($algorithms === [], LogicException::class, 'Keyring has no algorithm to check WebAuthn signatures with. List at least one this server supports in keyring.webauthn.algorithms: EdDSA on its own needs PHP\'s sodium extension.');
 
         return Manager::create()->add(...$algorithms);
+    }
+
+    /**
+     * The algorithms the app lists, as "webauthn.algorithms" names them.
+     *
+     * @return list<mixed>
+     */
+    public function algorithmNames(): array
+    {
+        return array_values(config('keyring.webauthn.algorithms') ?? ['ES256', 'EdDSA']);
+    }
+
+    /**
+     * The algorithm a key signs with, as "webauthn.algorithms" would name
+     * it, or its COSE number when it's none of those. Null when the key
+     * can't be read.
+     */
+    public function algorithmOf(CredentialRecord $record): ?string
+    {
+        $algorithm = $this->coseKey($record)?->alg();
+
+        return match ($algorithm) {
+            null => null,
+            ES256::ID => 'ES256',
+            Ed25519::ID => 'EdDSA',
+            RS256::ID => 'RS256',
+            default => 'COSE algorithm '.$algorithm,
+        };
     }
 
     /**
@@ -348,24 +380,42 @@ class Ceremonies
     }
 
     /**
-     * Whether signatures from a new key could be checked: its algorithm is
-     * one the app takes now, and an RSA key is long enough. The library
-     * only looks at a key when it verifies with it, at sign in, so without
-     * this a key could be added that would never work.
+     * Whether signatures from a key could be checked: its algorithm is one
+     * the app takes now, and an RSA key is long enough. The library only
+     * looks at a key when it verifies with it, at sign in, so without this
+     * a key could be added, or imported unremarked, that would never work.
      */
-    protected function canVerify(CredentialRecord $record): bool
+    public function canVerify(CredentialRecord $record): bool
     {
-        $decoded = Decoder::create()->decode(StringStream::create($record->credentialPublicKey));
-        $data = $decoded instanceof Normalizable ? $decoded->normalize() : null;
+        $key = $this->coseKey($record);
 
-        if (! is_array($data)) {
+        if ($key === null) {
             return false;
         }
 
-        $algorithm = Key::create($data)->alg();
+        return $this->algorithms()->has($key->alg())
+            && ($key->alg() !== RS256::ID || ($key instanceof RsaKey && $this->rsaKeys()->isValid($key)));
+    }
 
-        return $this->algorithms()->has($algorithm)
-            && ($algorithm !== RS256::ID || $this->rsaKeys()->isValid(RsaKey::create($data)));
+    /**
+     * A key's public half as the COSE key it's stored as, or null when it
+     * can't be read as one that names its algorithm.
+     */
+    protected function coseKey(CredentialRecord $record): ?Key
+    {
+        try {
+            $decoded = Decoder::create()->decode(StringStream::create($record->credentialPublicKey));
+            $data = $decoded instanceof Normalizable ? $decoded->normalize() : null;
+            $key = is_array($data) ? Key::create($data) : null;
+
+            // The algorithm is asked for here, and an RSA key read as one,
+            // so a key that can't answer is unreadable now and not later.
+            return $key?->alg() === RS256::ID ? RsaKey::create($key->getData()) : $key;
+        } catch (Throwable $e) {
+            report_if(! $this->isRejection($e), $e);
+
+            return null;
+        }
     }
 
     /**

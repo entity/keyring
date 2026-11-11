@@ -163,7 +163,7 @@ Build an action with one of the static constructors and chain extras:
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
 | `->requirePasswordChange()` | Hold the user until they choose a new password. The sign in goes ahead unless the action also denies it, and the hold is there for whoever signs in next. | Hold them from this request on. |
 
-Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
+Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. A database or Redis store is the one to use. Octane's `octane` store loses every lock when the server restarts, among [other things](security.md#octanes-cache-store). While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
 
 ### Requiring a New Password
 

@@ -118,7 +118,7 @@ describe('an account kept out while some of its sessions stay away', function ()
         // banned, with "remember me" ticked and the browser trusted.
         $response = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
         $this->laptop = session()->all();
-        $this->laptopCookies = collect([Auth::guard()->getRecallerName(), 'keyring_remember'])
+        $this->laptopCookies = collect([Auth::guard()->getRecallerName(), 'remembered_session'])
             ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)->getValue()])
             ->all();
         $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'laptop'), 'trusted_until' => now()->addDay()]);
@@ -172,7 +172,7 @@ describe('an account kept out while some of its sessions stay away', function ()
 
 it('refuses a "remember me" cookie', function () {
     $response = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
-    $cookies = collect([Auth::guard()->getRecallerName(), 'keyring_remember'])
+    $cookies = collect([Auth::guard()->getRecallerName(), 'remembered_session'])
         ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)->getValue()])
         ->all();
 

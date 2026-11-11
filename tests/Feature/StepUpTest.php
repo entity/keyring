@@ -546,7 +546,7 @@ describe('under a policy that asks more of a browser it hasn\'t seen', function 
         signIn();
         $this->device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])
             ->assertRedirect('/dashboard')
-            ->getCookie('keyring_device')->getValue();
+            ->getCookie('known_device')->getValue();
 
         $this->travel(16)->minutes();
     });
@@ -565,7 +565,7 @@ describe('under a policy that asks more of a browser it hasn\'t seen', function 
     });
 
     it('asks for both factors of a browser the account knows too, though the policy would sign it in with one', function () {
-        $this->withCookie('keyring_device', $this->device);
+        $this->withCookie('known_device', $this->device);
 
         $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
 
@@ -598,7 +598,7 @@ it('still hears a policy that asks more than the strongest the account would oth
     // passkey, and the passkey is asked for all the same.
     $device = $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'known'), 'first_seen_at' => now(), 'last_seen_at' => now()]);
     $this->travel(16)->minutes();
-    $this->withCookie('keyring_device', 'known');
+    $this->withCookie('known_device', 'known');
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect(route('keyring.confirm.challenge'));
@@ -612,10 +612,10 @@ it('gives a trusted device no discount on a fresh verification', function () {
     signIn();
     $device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret), 'trust' => true])
         ->assertRedirect('/dashboard')
-        ->getCookie('keyring_device')->getValue();
+        ->getCookie('known_device')->getValue();
 
     $this->travel(16)->minutes();
-    $this->withCookie('keyring_device', $device);
+    $this->withCookie('known_device', $device);
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
     $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, 1)]);

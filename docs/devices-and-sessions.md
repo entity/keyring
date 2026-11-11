@@ -422,9 +422,11 @@ Keyring sets two cookies of its own: the device cookie, and the one that ties ["
 
 | Your app | Device cookie | "Remember me" cookie |
 |---|---|---|
-| Served over HTTPS | `__Host-keyring_device` | `__Host-keyring_remember` |
-| Served over HTTPS, with `session.domain` set or `session.path` other than `/` | `__Secure-keyring_device` | `__Secure-keyring_remember` |
-| Served over plain HTTP, as on `http://localhost` | `keyring_device` | `keyring_remember` |
+| Served over HTTPS | `__Host-known_device` | `__Host-remembered_session` |
+| Served over HTTPS, with `session.domain` set or `session.path` other than `/` | `__Secure-known_device` | `__Secure-remembered_session` |
+| Served over plain HTTP, as on `http://localhost` | `known_device` | `remembered_session` |
+
+The names say what each cookie is for and not what set it. OWASP's Session Management Cheat Sheet asks that of cookie names, because one that names the software behind it tells an attacker what to look up. Laravel's session cookie is yours to name (`SESSION_COOKIE`): see [Secure Cookies](security.md#secure-cookies).
 
 Keyring takes your app to be served over HTTPS when `APP_URL` starts with `https://`, or when `session.secure` (`SESSION_SECURE_COOKIE`) is `true`. It goes by those settings and not by the request, because the name has to be the same on every request, and behind a proxy your app doesn't [trust](security.md#what-your-app-must-provide) every request looks like plain HTTP.
 
