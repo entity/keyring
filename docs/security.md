@@ -11,6 +11,7 @@
     - [Links and Headers](#links-and-headers)
     - [Storage](#storage)
     - [Logging](#logging)
+- [What Keyring Keeps](#what-keyring-keeps)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
@@ -167,6 +168,28 @@ Work it out from something the server knows. The request's `Host` header is what
 - A log write that fails never fails the sign in, with one exception: `Keyring::withoutProtection()` doesn't run unless its entry was written.
 - Old entries, devices, ended email changes and ended sessions are deleted every day by a task Keyring schedules itself, and a force deleted user's records are deleted with them.
 
+## What Keyring Keeps
+
+Everything Keyring stores about a person, how it's protected, how long it stays and who can read it. Built from the migrations, so a table you've added columns to holds whatever you put there as well.
+
+| Where | Personal data | Protected by | Kept for |
+|---|---|---|---|
+| `keyring_authenticators` | The name the user gave it (plain). TOTP secrets and recovery codes in `secret`. A passkey's or security key's credential ID, public key, AAGUID and transports. The address an email code goes to, when a factor keeps one. | `secret` is encrypted with `APP_KEY`, and recovery codes are keyed hashes inside it. Credential IDs and public keys are plain: they're public by design, and useless without the key itself. `secret`, `public_key` and `credential_id` are hidden when the model is serialised. | Until the user removes it, an email change is undone, or the user is force deleted. |
+| `keyring_devices` (with `Features::devices()`) | IP address, user agent, a name, and the [location](devices-and-sessions.md#locations) your locator returned (country, region, city, coordinates). | The device cookie's token is a SHA-256 hash, hidden when serialised. The rest is plain. | 30 days after it's signed out (`devices.keep_revoked_for`), a year after it was last seen (`devices.keep_unseen_for`), or until it's the oldest past `devices.limit`. Deleted with a force deleted user. |
+| `keyring_sessions`, or your cache with the `cache` driver | The user's ID, IP address, user agent, and when they signed in and were last active. | The ID is Keyring's own random one, never Laravel's session ID. The rest is plain. | Until the session expires or is revoked, then the next daily prune. A record "remember me" replaced stays until it would have expired. Cache records expire on their own. |
+| `keyring_pending_changes` (with `Features::emailChanges()`) | The new and the old email address. | Both addresses are encrypted with `APP_KEY`, with a keyed hash of the old one to find it by. The three tokens are SHA-256 hashes. All of them are hidden when serialised. | 30 days after the change ended (`email_changes.keep_ended_for`). Deleted with a force deleted user. |
+| `keyring_events` (with `Features::securityLog()`) | IP address, user agent, the device's ID, and in `meta` an authenticator's name or a device's description. | Plain. Never a password, code, token, signature, session ID or request body. | 180 days (`security_log.keep_for`). Deleted with a force deleted user. |
+| Your app's log (without `Features::securityLog()`) | The same as `keyring_events`, one line per event. | Whatever protects that log channel. | Whatever that channel keeps (`days` on a `daily` channel). |
+| The session | A sign in waiting for its second factor, an enrollment in progress (including the secret being set up), and what the session has verified. | Encrypted with `APP_KEY` inside the session, whichever session driver holds it. | 10 minutes for a pending login (`pending_logins.keep_for`), 15 for an enrollment (`enrollments.keep_for`), otherwise the session's life. |
+| The rate limiter's cache store | Counts of attempts, keyed by a SHA-1 of the factor with the account, the typed username or the IP address. | Hashed keys, so the store holds no names or addresses to read back. | A minute for counts, up to 24 hours for locks, 30 days for failures in a row (`limits.remember_failures_for`). |
+| Laravel's own tables | The reset token and address in `password_reset_tokens`, and `remember_token` on your users table. | Laravel hashes the reset token. | Laravel's `auth.passwords.*.expire`. Keyring deletes a user's reset tokens when they're deleted or their address changes. |
+
+To store less of an address, or none, see [What's Stored](security-log-and-emails.md#whats-stored): `Keyring::recordIpsUsing()` applies to devices, sessions and the log alike. Security emails pass the IP address and a description of the browser to the user they're about.
+
+**Who can read it.** Keyring has no admin screens and no route that returns another person's records. A signed-in user can read their own: [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices) lists their devices with IP address and location, ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) show them the type, time and IP address of entries about their account, and [`Keyring::activity($user)`](security-log-and-emails.md#showing-recent-activity) returns their entries if you build a page for it. Everything else is reached only by your own code and by whoever can read your database, cache and logs, so those are what to restrict: treat `keyring_events` and the log channel as you would any audit log.
+
+**Deleting someone.** Force deleting a user deletes their authenticators, devices, pending changes, security log entries and reset tokens, and revokes their sessions, which the next prune removes. A soft deleted user keeps all of it in case they're restored, until each record's own time is up.
+
 ## Standards
 
 Keyring's code and config say what each thing does. This is where the choices come from:
@@ -192,6 +215,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
 | Logging sign ins, failures, lockouts and session ends by default, and what was refused: someone else's record, a link's token or signature, a skipped pipeline step | OWASP ASVS 16.3.1 to 16.3.3 |
 | A severity and a request ID on every entry, no secrets in any, and a cap on entries a refused request can cause | OWASP's Logging Cheat Sheet |
+| A list of what's stored and how it's protected, deleted on a schedule Keyring sets up itself | OWASP ASVS 14.1 and 14.2.7 |
 | A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 
 ## Known Limitations
