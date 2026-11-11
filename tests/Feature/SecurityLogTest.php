@@ -71,7 +71,8 @@ it('writes to the app\'s log when the table is turned off, so something always r
 it('gives each line its time with an offset, whatever timezone the app keeps', function (string $timezone, string $at) {
     config(['app.timezone' => $timezone]);
     date_default_timezone_set($timezone);
-    $this->travelTo(CarbonImmutable::parse('2026-11-08 14:05:09', 'UTC'));
+    // The same moment everywhere, on the clock the app keeps.
+    $this->travelTo(CarbonImmutable::parse('2026-11-08 14:05:09', 'UTC')->setTimezone($timezone));
     config(['logging.default' => 'memory']);
     $log = logTo();
     withFeatures([]);
