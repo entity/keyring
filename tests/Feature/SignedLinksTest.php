@@ -50,7 +50,7 @@ it('builds email verification links from APP_URL, not the Host header', function
 
     expect($url)->toStartWith('https://app.example.com/email/verify/');
 
-    $this->get(parse_url($url, PHP_URL_PATH).'?'.parse_url($url, PHP_URL_QUERY))->assertRedirect();
+    postSignedLink($url)->assertRedirect();
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
 });
 

@@ -50,6 +50,7 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `POST` | `/reset-password` | `password.update` | guest, limited |
 | `GET` | `/email/verify` | `verification.notice` | `auth` |
 | `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, limited |
+| `POST` | `/email/verify/{id}/{hash}` | `verification.verify.store` | `auth`, signature in the body, limited |
 | `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
 `auth` here is `auth:{guard}`, Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute by default. The email routes exist only with `Features::emailChanges()`, the password route with `Features::updatePasswords()`, the reset routes with `Features::resetPasswords()`, and the verification routes with `Features::emailVerification()`.
@@ -251,7 +252,25 @@ Resets use Laravel's password broker (`passwords.broker`, or your default), so i
 
 ## Email Verification
 
-With `Features::emailVerification()` on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
+With `Features::emailVerification()` on, Keyring provides Laravel's verification routes, the `verify-email` page that asks the user to check their inbox, and the `email-verification` page the emailed link opens. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them.
+
+Laravel verifies the address as soon as the link is opened. Keyring doesn't: like its other emailed links, the link opens a page with a button, and only the button changes anything. So nothing that fetches the link by itself verifies an address, and no `GET` in Keyring changes state.
+
+- `GET /email/verify/{id}/{hash}` renders the `email-verification` page with `email` (the address being verified), `url`, `expires` and `signature`. It changes nothing. Someone already verified is sent on to `home`.
+- `POST` to `url` with `expires` and `signature` in the body verifies the address. `url` is the link's path without its query string, so the signature isn't in the URL of the request that acts.
+
+```html
+<form method="POST" action="{{ $url }}">
+    @csrf
+    <input type="hidden" name="expires" value="{{ $expires }}">
+    <input type="hidden" name="signature" value="{{ $signature }}">
+    <button>Verify {{ $email }}</button>
+</form>
+```
+
+Both need the user to be signed in, as the account the link was sent to: anyone else gets a `403`, and a signed-out browser goes to the login page and comes back. The link stops working when it expires (`auth.verification.expire`, 60 minutes) or the account's address changes. After verifying, users go to `home` with `?verified=1`, and Laravel's `Illuminate\Auth\Events\Verified` event is dispatched as usual.
+
+Laravel's own `VerifyEmail` notification and the `MustVerifyEmail` contract work unchanged. Only what the link's `GET` does is different.
 
 If you've already set `VerifyEmail::createUrlUsing()` yourself, Keyring leaves it alone.
 

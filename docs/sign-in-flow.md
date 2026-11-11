@@ -476,6 +476,7 @@ Keyring renders these pages:
 | `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` (a translated message) |
+| `email-verification` | `email` (the address being verified), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [Email Verification](protected-changes.md#email-verification). |
 | `email-change` | `action` (`confirm` or `revert`), `url` (where its button posts) and `token` (posted in the body). See [Protected Changes](protected-changes.md#the-emailed-links). |
 | `device-report` | `device` (a description), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 

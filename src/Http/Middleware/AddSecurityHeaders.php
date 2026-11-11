@@ -10,7 +10,8 @@ use Symfony\Component\HttpFoundation\Response;
  * The headers every Keyring response is sent with. Auth pages and responses
  * are never cached, are only ever read as the type they say they are, and
  * never pass their URL on to another site as a Referer: links from emails
- * (resets, email changes, "this wasn't me") carry their token in it.
+ * (resets, verification, email changes, "this wasn't me") carry their token
+ * or signature in it.
  *
  * The app itself still gets the Referer. A single-page app keeps the policy
  * of the page it loaded on, so sending none at all from the login page would
@@ -27,6 +28,7 @@ class AddSecurityHeaders
      */
     protected const array EMAILED_LINKS = [
         'password.reset' => 'password.update',
+        'verification.verify' => 'verification.verify.store',
         'keyring.email.confirm' => 'keyring.email.confirm.store',
         'keyring.email.revert' => 'keyring.email.revert.store',
         'keyring.devices.report' => 'keyring.devices.report.store',

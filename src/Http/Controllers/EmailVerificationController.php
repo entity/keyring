@@ -5,9 +5,11 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Support\Input;
 
 class EmailVerificationController
 {
@@ -22,6 +24,29 @@ class EmailVerificationController
         return $this->verified($request)
             ? $this->keyring->response(VerifiedResponse::class)
             : $this->keyring->render('verify-email', ['status' => $this->statusMessage($request)]);
+    }
+
+    /**
+     * The page the emailed link opens. It verifies nothing: a GET changes
+     * nothing in Keyring, and whatever opens the link before the person
+     * does (a mail scanner, a browser loading it ahead) shouldn't be what
+     * verifies the address. The page's button posts the link's signature
+     * in the body (ValidatePostedSignature).
+     */
+    public function page(EmailVerificationRequest $request): mixed
+    {
+        $user = $this->keyring->user();
+
+        if (! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail()) {
+            return $this->keyring->response(VerifiedResponse::class);
+        }
+
+        return $this->keyring->render('email-verification', [
+            'email' => $user->getEmailForVerification(),
+            'url' => Str::before($request->getRequestUri(), '?'),
+            'expires' => Input::text($request, 'expires'),
+            'signature' => Input::text($request, 'signature'),
+        ]);
     }
 
     public function verify(EmailVerificationRequest $request): mixed

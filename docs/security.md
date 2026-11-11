@@ -122,7 +122,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - An email change needs a fresh verification, confirmation from the new address, and confirmation from the current address unless the session proved a second factor the account has had for a week (`email_changes.established_after`) and since before it signed in.
 - An email change never reveals whether the new address has an account, in its answer, its timing or the pending change it shows: its emails, like the reset email, are sent after the response.
 - An email change only applies if the address is still the one it was requested from.
-- Emailed links (email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing. The page posts the link's token or signature in the body to a URL without it, as the password reset does, so the request that acts doesn't leave it in access logs a second time.
+- Emailed links (email verification, email change confirm and revert, and "this wasn't me") only act on a button press (a POST), so mail scanners that open links change nothing. No `GET` route of Keyring's changes state. The page posts the link's token or signature in the body to a URL without it, as the password reset does, so the request that acts doesn't leave it in access logs a second time.
 - A password reset with a bad token gets the same answer for every address. Password rules, which are shorter for accounts with MFA, only run once the token checks out.
 - Reverting an email change signs out every session, ends any sign in still waiting for its second factor, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
@@ -134,7 +134,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 
 - Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
 - Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
-- Pages opened from emailed links (password resets, email changes, "this wasn't me") have the link's token in their URL, so they're sent with `Referrer-Policy: no-referrer`: nothing the page loads is told its URL, your own assets and analytics included. A failed form still finds its way back, because Keyring notes the page in the session.
+- Pages opened from emailed links (password resets, email verification, email changes, "this wasn't me") have the link's token or signature in their URL, so they're sent with `Referrer-Policy: no-referrer`: nothing the page loads is told its URL, your own assets and analytics included. A failed form still finds its way back, because Keyring notes the page in the session.
 - Every other Keyring response sends `Referrer-Policy: same-origin`, so other sites never see its URL and your own app still does.
 - An Inertia app keeps the policy of the page it first loaded. So when the form on an emailed link's page succeeds, Keyring answers Inertia with a full page visit (`409` with `X-Inertia-Location`), and the next page comes with its own policy. Otherwise every page after it would send no `Referer` either, signed in or not.
 
@@ -152,7 +152,7 @@ Work it out from something the server knows. The request's `Host` header is what
 
 A URL ends up in places a request's body doesn't: access logs, proxies, the browser's history. Laravel's `$request->input()` reads the query string as well as the body, so a password sent as `POST /login?password=...` would work, and be logged.
 
-- Keyring reads what proves something from the body alone, as a form or as JSON: passwords (signing in, confirming, changing, resetting, registering, removing the last second factor), codes, WebAuthn credentials, the reset token, and the tokens and signatures the [emailed links](#emailed-links) post.
+- Keyring reads what proves something from the body alone, as a form or as JSON: passwords (signing in, confirming, changing, resetting, registering, removing the last second factor), codes, WebAuthn credentials, the reset token, and the tokens and signatures the pages of [emailed links](#links-and-headers) post.
 - Sign in, challenges, step-up, enrollment and password resets validate against the body, so a required field that's only in the query string fails as missing. That covers a factor of your own: its `rules()` are checked the same way.
 - Your `CreatesNewUsers`, `ResetsUserPasswords` and `UpdatesUserPasswords` actions are passed the body, not the query string.
 - A `GET` has no body, so a sign in you start from a `GET` route with `Keyring::attempt()`, like a social login's callback, is read from its query string.
