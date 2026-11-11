@@ -3,18 +3,23 @@
 declare(strict_types=1);
 
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
+use Keyring\Events\SessionEnded;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
@@ -155,6 +160,8 @@ it('asks a user with two factors for both once the window has passed', function 
 
 it('also satisfies laravel password confirmation', function () {
     Route::middleware(['web', 'auth', 'password.confirm'])->get('/legacy', fn () => 'legacy');
+    // Long enough for Laravel to want the password again, in a session that's still open.
+    config(['keyring.sessions.idle' => null]);
     signIn();
     $this->travel(4)->hours();
 
@@ -386,6 +393,118 @@ describe('levels lapsing, as nist sp 800-63b asks', function () {
     });
 });
 
+// NIST SP 800-63B-4, Sec. 5.2: when the overall or the inactivity timeout
+// passes, the session is terminated.
+describe('ending a session with the level it signed in at', function () {
+    beforeEach(function () {
+        config(['keyring.sessions.end_on_lapse' => true]);
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        Event::fake([SessionEnded::class]);
+
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    });
+
+    /**
+     * Sign in with the password and the authenticator app: an AAL2 session.
+     */
+    function signInWithBoth(): void
+    {
+        signIn();
+        test()->post(route('keyring.login.verify', 'totp'), ['code' => totpCode(test()->totp->secret)])->assertRedirect('/dashboard');
+    }
+
+    it('ends an aal2 session after an hour idle', function () {
+        signInWithBoth();
+        $session = session(Sessions::KEY);
+
+        $this->travel(59)->minutes();
+        $this->get('/home')->assertOk();
+
+        $this->travel(61)->minutes();
+        $this->get('/home')->assertRedirect('/login')->assertSessionHas('status', 'signed-out');
+
+        $this->assertGuest();
+        expect(app(SessionRegistry::class)->find($session)->revokedAt)->not->toBeNull();
+        Event::assertDispatched(SessionEnded::class, fn (SessionEnded $event) => $event->reason === 'idle');
+    });
+
+    it('answers a json request for a lapsed session with a 401', function () {
+        signInWithBoth();
+        $this->travel(61)->minutes();
+
+        $this->getJson('/home')->assertUnauthorized()->assertJsonPath('status', 'signed-out');
+    });
+
+    it('ends an aal2 session after 24 hours however active it is', function () {
+        signInWithBoth();
+
+        foreach (range(1, 28) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        $this->travel(50)->minutes();
+        $this->get('/home')->assertRedirect('/login');
+
+        $this->assertGuest();
+        Event::assertDispatched(SessionEnded::class, fn (SessionEnded $event) => $event->reason === 'expired');
+    });
+
+    it('starts both limits over when the user proves both factors again', function () {
+        signInWithBoth();
+
+        foreach (range(1, 27) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        // Twenty-two and a half hours in.
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+
+        foreach (range(1, 20) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('leaves a session that signed in with one factor alone, whatever it stepped up to', function () {
+        Keyring::require(Requirement::aal1());
+        signIn();
+
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect('/billing');
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+
+        $this->travel(90)->minutes();
+        $this->get('/home')->assertOk();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('doesn\'t end a session because the authenticator it signed in with was removed', function () {
+        signInWithBoth();
+        $this->totp->delete();
+
+        $this->get('/home')->assertOk();
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('carries on at a lower level when the option is off', function () {
+        config(['keyring.sessions.end_on_lapse' => false]);
+        signInWithBoth();
+
+        $this->travel(61)->minutes();
+        $this->get('/home')->assertOk();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+    });
+});
+
 it('reports an expired confirmation on the field the confirm page asks for next', function () {
     $this->user->forceFill(['password' => null])->saveQuietly();
     Authenticator::factory()->totp()->default()->for($this->user, 'authenticatable')->create();
@@ -445,14 +564,45 @@ describe('under a policy that asks more of a browser it hasn\'t seen', function 
         $this->get('/account')->assertOk();
     });
 
-    it('asks what the policy asks of a browser the account knows', function () {
+    it('asks for both factors of a browser the account knows too, though the policy would sign it in with one', function () {
         $this->withCookie('keyring_device', $this->device);
 
         $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
 
-        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])->assertRedirect('/account');
+        // What the account can give sets the floor, whatever the policy
+        // asks at sign in.
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])
+            ->assertRedirect(route('keyring.confirm.challenge'));
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
         $this->get('/account')->assertOk();
     });
+});
+
+it('still hears a policy that asks more than the strongest the account would otherwise be asked for', function () {
+    // A passkey that verified the user is the most this account can give
+    // on its own. The policy wants the password with it on a new browser.
+    Keyring::require(fn (User $user, Attempt $attempt) => $attempt->isNewDevice() ? Requirement::factors(3) : Requirement::aal1());
+    $passkey = Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+    Keyring::fake()->pass('passkey');
+
+    $this->actingAs($this->user)->withAssurance(Assurance::None);
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'passkey'))->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+    $this->get('/account')->assertOk();
+
+    // On a browser the account knows, the policy asks for less than the
+    // passkey, and the passkey is asked for all the same.
+    $device = $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'known'), 'first_seen_at' => now(), 'last_seen_at' => now()]);
+    $this->travel(16)->minutes();
+    $this->withCookie('keyring_device', 'known');
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.confirm.verify', 'passkey'))->assertRedirect('/account');
 });
 
 it('gives a trusted device no discount on a fresh verification', function () {
@@ -471,4 +621,155 @@ it('gives a trusted device no discount on a fresh verification', function () {
     $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, 1)]);
 
     $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+});
+
+// NIST SP 800-63B-4, Sec. 4.1.2.1: a new authenticator is bound at the
+// highest level the account can authenticate at, whatever signing in asks.
+describe('asking for the strongest combination the account can give', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()->requireAttestation(), Totp::class, RecoveryCodes::class]);
+        Keyring::fake()->pass('security-key', 'passkey');
+
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user);
+    });
+
+    /**
+     * Whether the session may add a sign-in method right now.
+     */
+    function mayAddSignInMethod(): bool
+    {
+        return test()->postJson(route('keyring.authenticators.store', 'totp'))->status() === 200;
+    }
+
+    it('takes the key, not a password and a code, from a user who holds one that can\'t leave its device', function (Closure $key) {
+        $key = $key()->for($this->user, 'authenticatable')->create();
+
+        // What signing in asks under the default policy, proved just now.
+        $this->verifiedWith($this->totp);
+        expect(mayAddSignInMethod())->toBeFalse();
+
+        $this->inertia()->get(route('keyring.confirm.challenge'))
+            ->assertJsonPath('props.factor', 'security-key')
+            ->assertJsonPath('props.alternatives', []);
+
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertSessionHasErrors();
+        $this->post(route('keyring.confirm.verify', 'security-key'))->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertSessionHasNoErrors();
+
+        $this->flushHeaders();
+        expect(mayAddSignInMethod())->toBeTrue();
+    })->with([
+        'attested, so the account can reach aal3' => fn () => Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a'),
+        'not attested, so only its own word for it' => fn () => Authenticator::factory()->securityKey(),
+    ]);
+
+    it('takes a recovery code and the password in a lost key\'s place', function () {
+        Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        $this->verifiedWith($this->totp);
+        expect(mayAddSignInMethod())->toBeFalse();
+
+        $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.alternatives.0.factor', 'recovery');
+        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertSessionHasNoErrors();
+
+        $this->flushHeaders();
+        expect(mayAddSignInMethod())->toBeTrue();
+    });
+
+    it('takes no recovery code in the key\'s place where the policy takes none at sign in', function () {
+        Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade(except: []));
+        Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        $this->verifiedWith($this->totp);
+        expect(mayAddSignInMethod())->toBeFalse();
+
+        $this->inertia()->get(route('keyring.confirm.challenge'))
+            ->assertJsonPath('props.factor', 'security-key')
+            ->assertJsonPath('props.alternatives', []);
+    });
+
+    it('asks for both factors where the policy would sign in with one', function () {
+        Keyring::require(Requirement::aal1());
+
+        $this->withAssurance(Assurance::AAL1);
+        expect(mayAddSignInMethod())->toBeFalse();
+
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect(route('keyring.confirm.challenge'));
+        expect(mayAddSignInMethod())->toBeFalse();
+
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertSessionHasNoErrors();
+        expect(mayAddSignInMethod())->toBeTrue();
+    });
+
+    it('is content with two factors from an account whose passkey syncs', function () {
+        Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+        $this->verifiedWith($this->totp);
+
+        expect(mayAddSignInMethod())->toBeTrue();
+    });
+
+    it('still lets an account with only a password add its first sign-in method', function () {
+        $this->totp->delete();
+
+        $this->withAssurance(Assurance::AAL1);
+
+        expect(mayAddSignInMethod())->toBeTrue();
+    });
+
+    it('still lets a user add the key a policy asks for and they don\'t have yet', function () {
+        Keyring::require(Requirement::aal3());
+
+        $this->verifiedWith($this->totp);
+
+        expect($this->postJson(route('keyring.authenticators.store', 'security-key'))->status())->toBe(200);
+    });
+});
+
+// docs/recipes.md, "An App Whose Every Page Needs AAL2".
+describe('an app whose every page needs aal2', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, WebAuthn::passkeys()]);
+        Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
+        config(['keyring.sessions.end_on_lapse' => true, 'keyring.enrollment_url' => '/settings/security']);
+
+        $this->app['router']->pushMiddlewareToGroup('web', 'keyring.enrolled');
+        Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/app', fn () => 'app');
+        Route::middleware(['web', 'auth'])->get('/settings/security', fn () => 'security');
+    });
+
+    it('lets a new user in to add a second factor, and nowhere else until they have', function () {
+        signIn();
+
+        $this->get('/app')->assertRedirect('/settings/security');
+        $this->get('/settings/security')->assertOk();
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        // Adding it proved it, so the session is at AAL2 from here.
+        $this->get('/app')->assertOk();
+
+        // It signed in with one factor, so it isn't ended when AAL2 runs
+        // out: the app's pages ask for both factors again.
+        $this->travel(61)->minutes();
+        $this->get('/app')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('ends a session that signed in with both factors once aal2 runs out', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        signIn();
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+        $this->get('/app')->assertOk();
+
+        $this->travel(61)->minutes();
+        $this->get('/app')->assertRedirect('/login');
+        $this->assertGuest();
+    });
 });

@@ -10,6 +10,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
+use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 
 /**
@@ -20,7 +21,8 @@ use Keyring\Login\Verification;
  * verifications made within its overall limit (sessions.levels.aal2.absolute,
  * 24 hours by default), and inactivity past its idle limit (an hour at AAL2)
  * lapses it until the user proves every factor for it again. The session
- * itself stays signed in at whatever level is left.
+ * itself stays signed in at whatever level is left, unless
+ * sessions.end_on_lapse says a session ends with the level it signed in at.
  */
 #[Scoped]
 class SessionAssurance
@@ -32,6 +34,9 @@ class SessionAssurance
 
     /** When inactivity last lapsed each level, keyed by the level's value. */
     public const string LAPSED = 'keyring.lapsed_at';
+
+    /** The level the session signed in at, as its value. */
+    public const string SIGNED_IN = 'keyring.signed_in_level';
 
     public function __construct(
         protected Session $session,
@@ -48,6 +53,7 @@ class SessionAssurance
     {
         $this->flush();
         $this->record($verifications);
+        $this->session->put(static::SIGNED_IN, Assurance::of($verifications)->value);
     }
 
     /**
@@ -118,7 +124,7 @@ class SessionAssurance
      */
     public function all(): array
     {
-        $verifications = array_map(Verification::fromArray(...), array_values($this->session->get(static::KEY, [])));
+        $verifications = $this->recorded();
         $ids = array_column($verifications, 'authenticator') |> array_filter(...) |> array_values(...);
 
         if ($ids === []) {
@@ -156,10 +162,59 @@ class SessionAssurance
      */
     public function countingToward(Assurance $level): array
     {
-        return $this->since(max(
+        return $this->since($this->countsFrom($level));
+    }
+
+    /**
+     * Why the level the session signed in at no longer holds, if it
+     * doesn't and sessions.end_on_lapse is on: "idle" past its idle limit,
+     * "expired" past its overall one. NIST SP 800-63B-4 (Sec. 5.2) ends a
+     * session when either passes. Proving every factor for the level again
+     * in time starts both over, as reauthenticating does there.
+     *
+     * A level a step-up reached later lapses on its own and takes nothing
+     * with it, and an authenticator removed since doesn't end the sessions
+     * it signed in: only time does.
+     *
+     * @return 'idle'|'expired'|null
+     */
+    public function lapse(): ?string
+    {
+        $level = Assurance::tryFrom((int) $this->session->get(static::SIGNED_IN, 0)) ?? Assurance::None;
+
+        if (! config('keyring.sessions.end_on_lapse') || $level === Assurance::None) {
+            return null;
+        }
+
+        $from = $this->countsFrom($level);
+
+        if (Requirement::for($level)->isMetBy(array_values(array_filter($this->recorded(), fn (Verification $verification) => $verification->at >= $from)))) {
+            return null;
+        }
+
+        return $from > now()->getTimestamp() - $this->sessions->absolute($level) ? 'idle' : 'expired';
+    }
+
+    /**
+     * The moment a verification must be no older than to count toward a
+     * level: its overall limit ago, or when inactivity last lapsed it.
+     */
+    protected function countsFrom(Assurance $level): int
+    {
+        return max(
             now()->getTimestamp() - $this->sessions->absolute($level),
             $this->session->get(static::LAPSED, [])[$level->value] ?? 0,
-        ));
+        );
+    }
+
+    /**
+     * Everything recorded, whether or not its authenticator is still there.
+     *
+     * @return list<Verification>
+     */
+    protected function recorded(): array
+    {
+        return array_map(Verification::fromArray(...), array_values($this->session->get(static::KEY, [])));
     }
 
     /**
@@ -169,6 +224,6 @@ class SessionAssurance
      */
     public function flush(): void
     {
-        $this->session->forget([static::KEY, static::LAPSED, AttemptStore::key(Purpose::Confirm), 'auth.password_confirmed_at']);
+        $this->session->forget([static::KEY, static::LAPSED, static::SIGNED_IN, AttemptStore::key(Purpose::Confirm), 'auth.password_confirmed_at']);
     }
 }

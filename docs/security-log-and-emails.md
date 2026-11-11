@@ -74,7 +74,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `new_device` | notice | A sign in from a new device. | `device` |
 | `device_revoked` | info | A device was signed out. | `device` |
 | `device_reported` | warning | A device was signed out from the "this wasn't me" link. | `device` |
-| `sessions_revoked` | info | "Sign out everywhere else". | `count` |
+| `sessions_revoked` | info | "Sign out everywhere else", one session ended from the sessions list, or an administrator's `keyring:sign-out` for the user. | `count` |
 | `session_ended` | info | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `remember_me_reused` | warning | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent are the request that brought the used one; `device_id` is the device the ended session was on. | `device` |
 | `email_change_requested` | info | | |
@@ -86,7 +86,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `clone_suspected` | critical | A passkey or security key's counter went backwards. | `name` |
 | `risk_step_up`, `risk_reauthenticate`, `risk_notified` | notice | A risk action did something. | `checkpoint`, `score`, `reasons` |
 | `risk_denied`, `risk_locked`, `risk_revoked_sessions` | warning | A risk action refused, locked or signed out. | `checkpoint`, `score`, `reasons` |
-| `access_refused` | warning | A signed-in user asked for an authenticator or device that isn't theirs, or that doesn't exist (a 404 either way), or opened an email verification link made for another account (a 403). | `resource` (`authenticator`, `device` or `email_verification`), `id` (what was asked for, cut to 64 characters) |
+| `access_refused` | warning | A signed-in user asked for an authenticator, device or session that isn't theirs, or that doesn't exist (a 404 either way), or opened an email verification link made for another account (a 403). | `resource` (`authenticator`, `device`, `session` or `email_verification`), `id` (what was asked for, cut to 64 characters; for a session, its [handle](devices-and-sessions.md#listing-and-ending-sessions), never its registry ID) |
 | `enrollment_refused` | warning | A sign-in method wasn't added. | `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account [may not add one yet](authenticators.md#who-may-enroll)) |
 | `authenticator_removal_refused` | warning | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `name` |
 | `link_refused` | warning | An emailed link was refused. Linked to the user whose email change it was, when there is one. | `link` and `reason`, [below](#refused-links) |

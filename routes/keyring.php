@@ -13,6 +13,7 @@ use Keyring\Http\Controllers\EmailVerificationController;
 use Keyring\Http\Controllers\PasswordController;
 use Keyring\Http\Controllers\PasswordResetController;
 use Keyring\Http\Controllers\RegisteredUserController;
+use Keyring\Http\Controllers\SessionController;
 use Keyring\Http\Middleware\ValidatePostedSignature;
 
 $guard = config('keyring.guard');
@@ -72,6 +73,12 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
             });
         }
 
+        // Sessions are kept whatever the features, so ending them is always there.
+        Route::delete('/user/sessions', [SessionController::class, 'destroyOthers'])->name('keyring.sessions.destroy-others');
+        // Only something shaped like a handle gets as far as being looked for
+        // or logged. A registry ID isn't.
+        Route::delete('/user/sessions/{session}', [SessionController::class, 'destroy'])->where('session', '[0-9a-f]{64}')->name('keyring.sessions.destroy');
+
         if (Features::enabled(Features::devices())) {
             Route::delete('/user/devices', [DeviceController::class, 'destroyOthers'])->name('keyring.devices.destroy-others');
             Route::delete('/user/devices/{device}', [DeviceController::class, 'destroy'])->name('keyring.devices.destroy');
@@ -85,6 +92,8 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
             Route::post('/user/email', [EmailChangeController::class, 'store'])->middleware('throttle:keyring')->name('keyring.email.store');
         }
     });
+
+    Route::get('/user/sessions', [SessionController::class, 'index'])->name('keyring.sessions.index');
 
     if (Features::enabled(Features::devices())) {
         Route::get('/user/devices', [DeviceController::class, 'index'])->name('keyring.devices.index');

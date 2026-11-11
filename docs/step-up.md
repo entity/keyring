@@ -41,9 +41,11 @@ Route::delete('/account', [AccountController::class, 'destroy'])
 
 `keyring:aal2` lets the request through when the session has reached AAL2 or higher. `keyring:aal1` and `keyring:aal3` work the same way, and `keyring` on its own means `keyring:aal2`. An unknown level name throws an `InvalidArgumentException`.
 
-It counts everything proved so far this session, so it only asks for what's missing. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL2, and at AAL3 if the passkey stays on its device.
+`keyring:aal3` needs a key that was added with a [verified attestation](passkeys.md#attestation-and-aal3). An app that doesn't check attestation can ask for more of AAL2 by name instead: `keyring:aal2,device-bound` wants a phishing-resistant key that stays on its device among what the session proved, and `keyring:aal2,phishing-resistant` any passkey or security key. [`keyring.enrolled`](policies.md#requiring-a-second-factor) takes the same names.
 
-A level doesn't last the whole session. It lapses after its idle and overall limits (an hour without a request, or 24 hours, at AAL2 by default, as NIST SP 800-63B asks), and the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts). The idle limit is tracked by the [session middleware](devices-and-sessions.md#the-session-registry), which Keyring adds to the `web` group; routes outside it, such as Sanctum's `api` group, need `keyring.session` too. A [risk response](risk.md#checkpoints) can also clear a level, and an authenticator that's removed stops counting in every session it was used in.
+It counts everything proved so far this session, so it only asks for what's missing. An emailed code isn't a factor, so it counts for nothing here. A user who signed in with a password is asked for a possession factor to reach AAL2; a user who signed in with a passkey is already at AAL2, and at AAL3 if the passkey stays on its device and was added with a verified attestation.
+
+A level doesn't last the whole session. It lapses after its idle and overall limits (an hour without a request, or 24 hours, at AAL2 by default, as NIST SP 800-63B-4 asks), and the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts), and [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level) to end the session there instead. The idle limit is tracked by the [session middleware](devices-and-sessions.md#the-session-registry), which Keyring adds to the `web` group; routes outside it, such as Sanctum's `api` group, need `keyring.session` too. A [risk response](risk.md#checkpoints) can also clear a level, and an authenticator that's removed stops counting in every session it was used in.
 
 Users who don't have the authenticators to reach the level can't be helped by confirming. They're sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) with the `enroll-first` status, the same as the [`keyring.enrolled`](policies.md#requiring-a-second-factor) middleware does. JSON requests get a `403` with that status and the URL. Without an `enrollment_url`, they get a plain `403`.
 
@@ -58,15 +60,19 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 
 ## Fresh Verification
 
-`keyring.fresh:15m` lets the request through when the user verified, in the last 15 minutes, as much as signing in would ask of them. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
+`keyring.fresh:15m` lets the request through when the user verified, in the last 15 minutes, the strongest combination their account can give, and at least as much as signing in would ask of them. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
 
-- Users with only a password confirm with their password.
-- Users with two factors prove both again, as NIST SP 800-63B asks before binding a new authenticator. A stolen session plus one phished factor can't add, remove or change anything.
-- Users who have any possession factor (an authenticator app, a passkey, a security key, email or recovery codes) always use one.
+NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new authenticator bound at the highest level the account can authenticate at, so what's asked here follows the account, not the sign-in policy:
+
+- Users with only a password confirm with their password, so an account can always add its first sign-in method.
+- Users with two factors prove both again, even where the policy would sign them in with one. A stolen session plus one phished factor can't add, remove or change anything.
+- Users with a key that can't leave its device use it, with its own user verification or their password beside it. A password and an authenticator app's code isn't enough for them, whatever the policy says. That goes for an attested key, which could reach AAL3, and for one nothing vouches for.
+- A recovery code stands in for a lost key, with the password, as it does at sign in. A policy that takes none there (`noDowngrade(except: [])`, or an explicit `phishingResistant()`) takes none here.
+- Users who have any possession factor (an authenticator app, a passkey or a security key) always use one. An [email code](factors.md#email-codes) isn't one, so it can't stand in. A user whose only other sign-in method it is proves the password and an emailed code, which is what lets them add a real second factor.
 - A policy the user can't fully meet yet (one that asks for a passkey they haven't added) counts as far as they can, so they can still add it.
-- A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about one nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
+- A policy that asks for more than that is heard. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about one nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
-- Signing in counts as a verification, so a fresh login is fresh for step-up too.
+- Signing in counts as a verification, so a fresh login is fresh for step-up too. So does [adding a sign-in method](authenticators.md#confirming), for the one that was added.
 
 Keyring uses `keyring.fresh:15m` on its own sensitive routes, through the `changes_middleware` config option (applied on top of `auth:{guard}`): managing authenticators and devices, changing the password, and starting an email change.
 

@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Keyring\Testing;
 
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Routing\Route;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\SessionRegistry;
@@ -15,6 +19,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
+use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Sessions\Sessions;
 
 /**
@@ -56,6 +61,18 @@ trait KeyringConformance
      * @return list<class-string>
      */
     protected function keyringAcknowledgedDangerousSteps(): array
+    {
+        return [];
+    }
+
+    /**
+     * Routes, by URI, that sign in to Keyring's guard without its session
+     * middleware on purpose. A revoked or timed-out session keeps working on
+     * them until Laravel's own session ends.
+     *
+     * @return list<string>
+     */
+    protected function keyringAcknowledgedUncheckedRoutes(): array
     {
         return [];
     }
@@ -184,6 +201,53 @@ trait KeyringConformance
 
         $this->assertNotNull($id, 'Signed-in sessions should be registered.');
         $this->assertNotNull(app(SessionRegistry::class)->find($id)?->revokedAt, 'Signing out should revoke the registered session.');
+    }
+
+    public function test_keyring_checks_the_session_on_every_signed_in_route(): void
+    {
+        $router = app('router');
+
+        $unchecked = new Collection($router->getRoutes()->getRoutes())
+            ->filter(function (Route $route) use ($router) {
+                $middleware = array_filter($router->gatherRouteMiddleware($route), is_string(...));
+
+                return $this->signsInToKeyringsGuard($middleware) && ! in_array(AuthenticateSession::class, $middleware, true);
+            })
+            ->map(fn (Route $route) => $route->uri())
+            ->unique()
+            ->diff($this->keyringAcknowledgedUncheckedRoutes())
+            ->values()
+            ->all();
+
+        $this->assertSame(
+            [],
+            $unchecked,
+            'These routes use the auth middleware for Keyring\'s guard without keyring.session, so a session that was revoked or timed out keeps working on them: '.implode(', ', $unchecked).'. Add keyring.session to their group, or list them in keyringAcknowledgedUncheckedRoutes().',
+        );
+    }
+
+    /**
+     * Whether a route's middleware includes "auth" for Keyring's guard: by
+     * name, as the default guard, or through Sanctum where it signs a
+     * single-page app in with the session guards it's given. Sanctum's
+     * token-only routes have no session to check.
+     *
+     * @param  array<array-key, string>  $middleware
+     */
+    protected function signsInToKeyringsGuard(array $middleware): bool
+    {
+        $guard = config('keyring.guard');
+
+        $throughSanctum = in_array('Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful', $middleware, true)
+            && in_array($guard, Arr::wrap(config('sanctum.guard', 'web')), true);
+
+        return array_any($middleware, function (string $middleware) use ($guard, $throughSanctum) {
+            $class = Str::before($middleware, ':');
+            $guards = str_contains($middleware, ':') ? explode(',', Str::after($middleware, ':')) : [config('auth.defaults.guard')];
+
+            return is_a($class, Authenticate::class, true)
+                && (in_array($guard, $guards, true) || ($throughSanctum && in_array('sanctum', $guards, true)));
+        });
     }
 
     /**

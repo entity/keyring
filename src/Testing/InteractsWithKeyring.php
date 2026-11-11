@@ -119,7 +119,7 @@ trait InteractsWithKeyring
             ...array_map(function (Authenticator $authenticator) use ($at) {
                 $verification = Verification::of($authenticator);
 
-                return new Verification($verification->factor, $verification->authenticator, $verification->categories, $verification->phishingResistant, $at, $verification->deviceBound);
+                return new Verification($verification->factor, $verification->authenticator, $verification->categories, $verification->phishingResistant, $at, $verification->deviceBound, $verification->attested);
             }, $this->keyringVerifiedWith),
         ] : match ($this->keyringAssurance) {
             Assurance::None => [],
@@ -128,7 +128,7 @@ trait InteractsWithKeyring
                 $password,
                 new Verification(Totp::KEY, null, [Category::Possession], at: $at),
             ],
-            Assurance::AAL3 => [new Verification(Profile::SECURITY_KEY, null, [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true)],
+            Assurance::AAL3 => [new Verification(Profile::SECURITY_KEY, null, [Category::Possession, Category::Inherence], phishingResistant: true, at: $at, deviceBound: true, attested: true)],
         };
 
         return $this->withSession([

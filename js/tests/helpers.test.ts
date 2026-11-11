@@ -32,6 +32,8 @@ describe('routes', () => {
     expect(routes.loginOptions('passkey')).toBe('/account/login/passkey/options')
     expect(routes.verify('confirm', 'totp')).toBe('/account/confirm/totp')
     expect(routes.enroll('totp')).toBe('/account/user/authenticators/totp')
+    expect(routes.sessions()).toBe('/account/user/sessions')
+    expect(routes.session('9f2c')).toBe('/account/user/sessions/9f2c')
 
     configureRoutes({ prefix: '' })
 

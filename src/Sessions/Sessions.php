@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Keyring\Sessions;
 
+use Closure;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -11,17 +12,21 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Session\CookieSessionHandler;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Changes\PendingEmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
+use Keyring\Events\SessionsRevoked;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Support\Cookies;
 use Keyring\Support\Duration;
+use Keyring\Support\KeyedHash;
+use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
 
 /**
@@ -59,12 +64,71 @@ class Sessions
             authenticatedAt: $now,
             lastActivityAt: $now,
             expiresAt: $now + $this->absolute(),
+            remembered: $remembered,
         );
 
-        $this->registry->save($session);
+        $previous = $request->session()->get(self::KEY);
+
+        $this->register($user, $session);
         $this->bind($request, $session, $remembered);
 
+        // A browser that signs in while it's signed in leaves the session it
+        // was on. Ending it is all that stops a copy of the old cookie
+        // carrying on with it on the cookie session driver, and on any
+        // driver it would be listed and counted with nobody left on it.
+        if (is_string($previous)) {
+            $this->registry->revoke($previous);
+        }
+
         return $session;
+    }
+
+    /**
+     * Store a new session, and keep the account to "sessions.max" of them:
+     * past that, whichever has gone unused longest ends. Refusing the sign
+     * in instead would let whoever holds an account's sessions keep its
+     * owner out. Two sign ins at once take turns (holding), so neither
+     * counts the sessions without the other's.
+     */
+    protected function register(Authenticatable $user, RegisteredSession $session): void
+    {
+        if (($max = config('keyring.sessions.max')) === null) {
+            $this->registry->save($session);
+
+            return;
+        }
+
+        $this->holding($user, function () use ($user, $session, $max) {
+            $this->registry->save($session);
+
+            $now = now()->getTimestamp();
+
+            $this->registry->forUser($user)
+                ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
+                ->sortBy([
+                    // One that has idled out is over already, so it goes first.
+                    fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
+                    fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
+                ])
+                ->skip(max(0, (int) $max - 1))
+                ->each(fn (RegisteredSession $other) => $this->registry->revoke($other->id));
+        });
+    }
+
+    /**
+     * Run a change to which sessions a user has while holding the user's
+     * row, so it and any other wait for each other. A session moving to a
+     * new record is such a change: if a sign-out everywhere could run in the
+     * middle of one, it would revoke the old record and miss the new.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $change
+     * @return TResult
+     */
+    protected function holding(Authenticatable $user, Closure $change): mixed
+    {
+        return $user instanceof Model ? RowLock::hold($user, fn () => $change()) : $change();
     }
 
     /**
@@ -78,7 +142,7 @@ class Sessions
      * Null when the record couldn't be replaced: a request sent alongside
      * this one used the cookie first, or the session was just revoked.
      */
-    public function resume(Request $request, RegisteredSession $session): ?RegisteredSession
+    public function resume(Request $request, Authenticatable $user, RegisteredSession $session): ?RegisteredSession
     {
         $current = $session->with([
             'id' => Str::random(40),
@@ -88,7 +152,7 @@ class Sessions
             'lastActivityAt' => now()->getTimestamp(),
         ]);
 
-        if (! $this->registry->replace($session->id, $current)) {
+        if (! $this->holding($user, fn () => $this->registry->replace($session->id, $current))) {
             return null;
         }
 
@@ -133,7 +197,7 @@ class Sessions
      * The session a replaced record became, however many times it has moved
      * since. Null when that record is gone.
      */
-    public function latest(RegisteredSession $session): ?RegisteredSession
+    public function latest(?RegisteredSession $session): ?RegisteredSession
     {
         while ($session?->replacedBy !== null) {
             $session = $this->registry->find($session->replacedBy);
@@ -158,6 +222,81 @@ class Sessions
 
         $request->session()->put(self::REMEMBERED, true);
         $this->queueRememberCookie($request, $session);
+    }
+
+    /**
+     * The user's sessions that can still be carried on, most recently active
+     * first. One that has idled out is over, though its record only says so
+     * once something comes across it.
+     *
+     * @return Collection<int, RegisteredSession>
+     */
+    public function active(Authenticatable $user): Collection
+    {
+        $now = now()->getTimestamp();
+
+        return $this->registry->forUser($user)
+            ->reject(fn (RegisteredSession $session) => $this->idledOut($session, $now))
+            ->values();
+    }
+
+    /**
+     * The user's sessions for a "where you're signed in" page, most recently
+     * active first, each under its handle.
+     *
+     * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool}>
+     */
+    public function list(Request $request, Authenticatable $user): Collection
+    {
+        $current = $request->session()->get(self::KEY);
+        $time = fn (int $timestamp) => now()->setTimestamp($timestamp)->toIso8601String();
+
+        return $this->active($user)->map(fn (RegisteredSession $session) => [
+            'id' => $this->handle($session),
+            'name' => $this->keyring->describeDevice($session->userAgent),
+            'ip' => $session->ip,
+            'device' => $session->deviceId,
+            'remembered' => $session->remembered,
+            'signedInAt' => $time($session->authenticatedAt),
+            'lastActiveAt' => $time($session->lastActivityAt),
+            'expiresAt' => $time($session->expiresAt),
+            'current' => $session->id === $current,
+        ]);
+    }
+
+    /**
+     * What a session goes by outside the server. Its registry ID is what the
+     * "remember me" cookie carries, so that never reaches a page: whoever
+     * could read it there could come back as the session. The handle is a
+     * keyed hash of the ID. It picks the session out from its user's others
+     * and leads nowhere else: not back to the ID, and to nothing at all in a
+     * cookie.
+     */
+    public function handle(RegisteredSession $session): string
+    {
+        return KeyedHash::make(KeyedHash::SESSION_HANDLES, $session->id);
+    }
+
+    /**
+     * The user's session with this handle, if it's one that can still be
+     * carried on. Only ever looked for among the user's own.
+     */
+    public function find(Authenticatable $user, string $handle): ?RegisteredSession
+    {
+        return $this->active($user)->first(fn (RegisteredSession $session) => hash_equals($this->handle($session), $handle));
+    }
+
+    /**
+     * End one of the user's sessions, wherever it is by now: "remember me"
+     * may have carried it on to another record since it was listed.
+     */
+    public function revoke(Authenticatable $user, RegisteredSession $session): void
+    {
+        $this->holding($user, function () use ($session) {
+            if ($current = $this->latest($this->registry->find($session->id))) {
+                $this->registry->revoke($current->id);
+            }
+        });
     }
 
     public function current(Request $request): ?RegisteredSession
@@ -194,9 +333,11 @@ class Sessions
 
     /**
      * Give the current session a new ID, so a copy of it made before now
-     * stops working. Regenerating destroys the old session on the server. A
-     * cookie session lives in the browser, where nothing can destroy a copy,
-     * so its registry record is swapped for a new one and the old one revoked.
+     * stops working: after a step-up, a password change, signing out
+     * everywhere else. Regenerating destroys the old session on the server.
+     * A cookie session lives in the browser, where nothing can destroy a
+     * copy, so its registry record is swapped for a new one and the old one
+     * revoked.
      */
     public function rotate(Request $request): void
     {
@@ -220,9 +361,16 @@ class Sessions
     public function reregister(Request $request, array $changes = []): void
     {
         $session = $this->current($request);
+        $user = $this->keyring->guard()->user();
+
+        if ($session === null || $user === null) {
+            return;
+        }
+
+        $current = $session->with(['id' => Str::random(40), ...$changes]);
 
         // One that has ended, or moved on without this request, isn't brought back.
-        if ($session === null || ! $this->registry->replace($session->id, $current = $session->with(['id' => Str::random(40), ...$changes]), revoke: true)) {
+        if (! $this->holding($user, fn () => $this->registry->replace($session->id, $current, revoke: true))) {
             return;
         }
 
@@ -301,15 +449,28 @@ class Sessions
     }
 
     /**
-     * Seconds of inactivity allowed before the session ends, or with a level,
-     * before that level lapses. Null for no limit (Laravel's own session
-     * lifetime still applies).
+     * Seconds of inactivity allowed before a session nobody asked to be
+     * remembered ends, or with a level, before that level lapses. Null for
+     * no limit (Laravel's own session lifetime still applies).
      */
     public function idle(?Assurance $level = null): ?int
     {
         $idle = $this->timeout($level, 'idle');
 
         return $idle === null ? null : Duration::seconds($idle);
+    }
+
+    /**
+     * Whether the session has gone unused for too long to carry on. A
+     * remembered one has a limit of its own ("sessions.remember_idle"):
+     * held to the same one as the rest, "remember me" would bring nobody
+     * back who had been away for longer than Laravel's session lasts anyway.
+     */
+    public function idledOut(RegisteredSession $session, ?int $now = null): bool
+    {
+        $idle = $session->remembered ? config('keyring.sessions.remember_idle') : config('keyring.sessions.idle');
+
+        return $idle !== null && ($now ?? now()->getTimestamp()) - $session->lastActivityAt > Duration::seconds($idle);
     }
 
     /**
@@ -341,7 +502,7 @@ class Sessions
     public function signOutEverywhere(Authenticatable $user, ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
-        $count = $this->registry->revokeAll($user, $except);
+        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except));
 
         $this->cycleRememberToken($user);
         $this->distrustDevices($user, except: $keptDevice);
@@ -351,6 +512,30 @@ class Sessions
         }
 
         return $count;
+    }
+
+    /**
+     * Sign the user out everywhere but here, and give this session a new ID,
+     * so someone who copied its cookie doesn't get to stay either. Returns
+     * how many sessions ended.
+     */
+    public function signOutOthers(Request $request, Authenticatable $user): int
+    {
+        $count = $this->signOutEverywhere($user, except: $this->current($request)?->id);
+
+        $this->rotate($request);
+
+        SessionsRevoked::dispatch($user, $count);
+
+        return $count;
+    }
+
+    /**
+     * End the user's sessions on one device.
+     */
+    public function revokeDevice(Authenticatable $user, string $deviceId): int
+    {
+        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId));
     }
 
     public function cycleRememberToken(Authenticatable $user): void

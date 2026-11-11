@@ -29,6 +29,7 @@ class PasswordChanges
         protected RiskLocks $locks,
         protected ResetTokens $resetTokens,
         protected Throttle $throttle,
+        protected PasswordHolds $holds,
     ) {}
 
     /**
@@ -90,5 +91,8 @@ class PasswordChanges
 
         $this->emailChanges->cancel($user);
         $this->resetTokens->forget($user);
+
+        // A user held until they chose a new password just did.
+        $this->holds->lift($user);
     }
 }
