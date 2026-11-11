@@ -42,7 +42,7 @@ $this->actingAs($user)->withAssurance(Assurance::AAL2)->get('/billing')->assertO
 $this->actingAs($user)->freshAt(now()->subHour())->deleteJson('/account')->assertStatus(423);
 ```
 
-- `withAssurance($level)` pretends the session proved enough to reach that level: a password for AAL1, a password and a TOTP code for AAL2, a security key for AAL3. `Assurance::None` proves nothing.
+- `withAssurance($level)` pretends the session proved enough to reach that level: a password for AAL1, a password and a TOTP code for AAL2, an attested security key that verified the user for AAL3. `Assurance::None` proves nothing.
 - `freshAt($time)` pretends those verifications happened at that time, for [`keyring.fresh`](step-up.md#fresh-verification). Without it, they happen now.
 
 You can chain both, in either order. The level defaults to AAL1, so `freshAt()` alone gives a password verification at that time.
@@ -84,7 +84,7 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
 ```
 
-`verifiedWith(...$authenticators)` pretends the session verified the password and each authenticator you pass. The level is whatever those reach (a password and an authenticator app is AAL2), so it replaces `withAssurance()`. `freshAt()` chains with it as before.
+`verifiedWith(...$authenticators)` pretends the session verified the password and each authenticator you pass. The level is whatever those reach (a password and an authenticator app is AAL2), so it replaces `withAssurance()`. `freshAt()` chains with it as before. Reach for it when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method: that route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
 
 ## Faking Factors
 
@@ -148,7 +148,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | `totp($secret = null)` | An authenticator app with a random (or the given) secret. This is also the default state. |
 | `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the given codes. Each must be in the form Keyring makes them, 24 base32 characters (`a`-`z` and `2`-`7`), with or without dashes: anything else throws an `InvalidArgumentException`. |
 | `emailCode()` | Email codes. |
-| `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. Only one that isn't synced reaches AAL3. |
+| `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. One that isn't synced is device bound, and reaches AAL3 when it's `attested()` and its factor requires attestation. |
 | `securityKey($userVerified = false)` | A security key. |
 | `attested($aaguid, $type = 'basic')` | Add to either of those: a key whose model was checked by attestation. |
 | `default()` | Marks it as the default. |

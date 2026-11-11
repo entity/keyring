@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Keyring\Activity\SecurityLog;
+use Keyring\Changes\PasswordHolds;
 use Keyring\Changes\ProtectedAttributes;
 use Keyring\Concerns\BuildsResponses;
 use Keyring\Concerns\HasKeyring;
@@ -28,13 +29,11 @@ use Keyring\Concerns\SwapsModels;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Devices\UserAgent;
-use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Password;
-use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
@@ -175,19 +174,9 @@ class KeyringManager
             $requirement = $requirement->withoutDowngrades();
         }
 
-        if ($requirement->onlyIfEnrolled && ! $attempt->keyring()->canMeet($requirement)) {
-            // Recovery codes alone aren't a second factor: asking for them
-            // here would spend one on every login.
-            $keyring = $attempt->keyring()->without(...$attempt->keyring()->of(RecoveryCodes::KEY)->all());
-
-            return $requirement->limitedTo(
-                array_values(array_filter(Category::cases(), $keyring->has(...))),
-                $keyring->canMeet(Requirement::aal1()->phishingResistant()),
-                $keyring->canMeet(Requirement::aal1()->deviceBound()),
-            );
-        }
-
-        return $requirement;
+        return $requirement->onlyIfEnrolled
+            ? $attempt->keyring()->reachable($requirement)
+            : $requirement;
     }
 
     /**
@@ -423,6 +412,38 @@ class KeyringManager
     {
         app(RiskLocks::class)->unlock($user);
         app(Throttle::class)->clearAccount($user);
+    }
+
+    /**
+     * Hold a user until they choose a new password, when you have reason to
+     * think theirs is known to someone else: a breach of your own, a report
+     * from the user, a credential-stuffing run. They can still sign in, and
+     * every page sends them to keyring.password_change_url until the
+     * password changes, by them or by a reset. Signing out doesn't shake it
+     * off. Returns false for an account with no password, which is left
+     * alone. A risk response does the same with requirePasswordChange().
+     */
+    public function requirePasswordChange(Authenticatable&Model $user, ?string $reason = null): bool
+    {
+        return app(PasswordHolds::class)->place($user, $reason);
+    }
+
+    /**
+     * Whether the user is held until they choose a new password.
+     */
+    public function requiresPasswordChange(Authenticatable&Model $user): bool
+    {
+        return app(PasswordHolds::class)->holds($user);
+    }
+
+    /**
+     * Stop holding a user for a new password without one being set, when
+     * the evidence turned out to be wrong. An app that saves passwords
+     * outside Keyring's flows calls this once it has saved a new one.
+     */
+    public function cancelPasswordChange(Authenticatable&Model $user): void
+    {
+        app(PasswordHolds::class)->lift($user);
     }
 
     /**

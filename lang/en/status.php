@@ -9,6 +9,7 @@ return [
     'authenticator-added' => 'Sign-in method added.',
     'authenticator-removed' => 'Sign-in method removed.',
     'authenticator-updated' => 'Sign-in method updated.',
+    'change-password' => 'Choose a new password to carry on.',
     'code-sent' => 'We sent you a new code.',
     'device-reported' => 'We\'ve signed that device out. We recommend changing your password now.',
     'device-revoked' => 'That device has been signed out.',

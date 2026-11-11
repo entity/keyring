@@ -33,6 +33,7 @@ use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireEnrollment;
 use Keyring\Http\Middleware\RequireFreshVerification;
+use Keyring\Http\Middleware\RequirePasswordChange;
 use Keyring\Http\Middleware\ValidateSignature;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Notifications\SendSecurityNotifications;
@@ -75,6 +76,7 @@ class KeyringServiceProvider extends ServiceProvider
         Responses\SignedOutResponse::class => DefaultResponses\SignedOutResponse::class,
         Responses\ConfirmationRequiredResponse::class => DefaultResponses\ConfirmationRequiredResponse::class,
         Responses\EnrollmentRequiredResponse::class => DefaultResponses\EnrollmentRequiredResponse::class,
+        Responses\PasswordChangeRequiredResponse::class => DefaultResponses\PasswordChangeRequiredResponse::class,
         Responses\VerifiedResponse::class => DefaultResponses\VerifiedResponse::class,
     ];
 
@@ -134,10 +136,12 @@ class KeyringServiceProvider extends ServiceProvider
         $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);
         $router->aliasMiddleware('keyring.session', AuthenticateSession::class);
         $router->aliasMiddleware('keyring.enrolled', RequireEnrollment::class);
+        $router->aliasMiddleware('keyring.password', RequirePasswordChange::class);
         $router->aliasMiddleware('keyring.signed', ValidateSignature::class);
 
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);
+            $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', RequirePasswordChange::class);
         }
     }
 

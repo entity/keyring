@@ -9,20 +9,28 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Testing\TestResponse;
 use Keyring\Concerns\HasKeyring;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
+use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\PasswordRules;
+use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -419,5 +427,142 @@ describe('a browser that sends back an earlier copy of its session', function ()
             ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
 
         expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+    });
+});
+
+// NIST SP 800-63B-4, Sec. 3.1.2.1: recovery codes handed over in an online
+// session need that session to be authenticated at AAL2.
+describe('counting a new sign-in method as proved', function () {
+    beforeEach(function () {
+        Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
+        Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
+
+        $this->post('/logout');
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('hands the first recovery codes to a session that has proved two factors', function () {
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        $before = session()->getId();
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        expect($response->json('recoveryCodes'))->toHaveCount(8)
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+            ->and(app(SessionRegistry::class)->forUser($this->user)->sole()->assurance)->toBe(Assurance::AAL2)
+            ->and(session()->getId())->not->toBe($before);
+
+        $proved = collect(app(SessionAssurance::class)->all())->firstWhere('factor', 'totp');
+
+        expect($proved->authenticator)->toBe($this->user->keyring->refresh()->of('totp')->sole()->id);
+        $this->get('/billing')->assertOk();
+    });
+
+    it('counts nothing when the proof is wrong', function () {
+        $this->postJson(route('keyring.authenticators.store', 'totp'));
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000'])->assertUnprocessable();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
+            ->and(app(SessionAssurance::class)->all())->toHaveCount(1);
+    });
+
+    it('counts nothing for new recovery codes, which are only shown', function () {
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        expect(collect(app(SessionAssurance::class)->all())->pluck('factor')->all())->toBe(['password', 'totp']);
+    });
+
+    it('doesn\'t make the password any fresher', function () {
+        $this->travel(10)->minutes();
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+        $this->get('/account')->assertOk();
+
+        // The password was proved 16 minutes ago, the app's code six.
+        $this->travel(6)->minutes();
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('counts a new passkey for what it proved, and no more', function () {
+        $key = new VirtualAuthenticator;
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+
+        $proved = collect(app(SessionAssurance::class)->all())->firstWhere('factor', 'passkey');
+
+        expect($proved)
+            ->categories->toBe([Category::Possession, Category::Inherence])
+            ->phishingResistant->toBeTrue()
+            ->attested->toBeFalse()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+    });
+});
+
+// NIST SP 800-63B-4, Sec. 4.2.1.1: after a recovery code is used, a new one
+// is issued. Only the user can save new codes, so the app is told to send
+// them to make a set.
+describe('replacing recovery codes once one is used', function () {
+    beforeEach(function () {
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        $this->post('/logout');
+    });
+
+    /**
+     * Sign in with the password and a recovery code.
+     */
+    function signInWithRecoveryCode(string $code): TestResponse
+    {
+        test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+        return test()->post(route('keyring.login.verify', 'recovery'), ['code' => $code]);
+    }
+
+    it('tells the app the user should make a new set, until they have', function () {
+        Event::fake([RecoveryCodeUsed::class]);
+
+        expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeFalse()
+            ->and(Keyring::factor('recovery')->present(Keyring::for($this->user)->of('recovery')->sole()))->toMatchArray(['remaining' => 3, 'replace' => false]);
+
+        signInWithRecoveryCode('wrong-code')->assertSessionHasErrors('code');
+        expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeFalse();
+
+        signInWithRecoveryCode('aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa')->assertRedirect('/dashboard');
+        expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeTrue()
+            ->and(Keyring::factor('recovery')->present(Keyring::for($this->user)->of('recovery')->sole()))->toMatchArray(['remaining' => 2, 'replace' => true]);
+        Event::assertDispatched(RecoveryCodeUsed::class, fn (RecoveryCodeUsed $event) => $event->remaining === 2);
+
+        // It isn't a one-off notice: it's still there the next time.
+        $this->post('/logout');
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect('/dashboard');
+
+        expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeTrue();
+    });
+
+    it('lets the session that used a code make the new set straight away, and stops asking', function () {
+        signInWithRecoveryCode('aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa')->assertRedirect('/dashboard');
+
+        $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk()->json('enrollment.codes');
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        expect($codes)->toHaveCount(8)
+            ->and(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeFalse()
+            ->and(Keyring::for($this->user)->of('recovery')->sole()->meta(RecoveryCodes::USED_AT))->toBeNull();
+    });
+
+    it('says so after a code is used to confirm, too', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
+
+        $this->post(route('keyring.authenticators.store', 'totp'))->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb']);
+
+        expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeTrue();
     });
 });

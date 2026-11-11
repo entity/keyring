@@ -75,6 +75,7 @@ Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of 
 | `EmailChangeReverted` | The old address undid a change. Every session was signed out. | `user`, `change` |
 | `PasswordChanged` | The user changed their password. | `user` |
 | `PasswordReset` | The password was reset from a reset link. Every session was signed out. | `user` |
+| `PasswordChangeRequired` | A user was [held until they choose a new password](protected-changes.md#requiring-a-password-change). | `user`, `reason` (nullable) |
 | `ProtectionBypassed` | Protected attributes were changed with [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection). | `reason` (nullable) |
 
 `change` is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden when it's serialised. See [Protected Changes](protected-changes.md#events).

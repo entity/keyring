@@ -17,6 +17,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
+use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Verifier;
@@ -85,9 +86,22 @@ class ChallengeController
                 ->map(fn (Authenticator $option) => $option->factor()->present($option))
                 ->values()
                 ->all(),
-            'canTrustDevice' => $purpose === Purpose::Login && Features::enabled(Features::devices()) && config('keyring.devices.trust_for') !== null,
+            'canTrustDevice' => $this->canTrustDevice($attempt, $authenticator),
             'expiresAt' => date(DATE_ATOM, $attempt->expiresAt),
         ]);
+    }
+
+    /**
+     * Whether "don't ask again on this device" could be earned here. Trust
+     * takes a login that proved two factors, which an emailed code beside
+     * a password doesn't.
+     */
+    protected function canTrustDevice(Attempt $attempt, Authenticator $authenticator): bool
+    {
+        return $attempt->purpose === Purpose::Login
+            && Features::enabled(Features::devices())
+            && config('keyring.devices.trust_for') !== null
+            && Requirement::aal2()->isMetBy([...$attempt->verifications, Verification::of($authenticator)]);
     }
 
     /**

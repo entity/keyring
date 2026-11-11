@@ -12,6 +12,7 @@ use Keyring\Changes\ResetTokens;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Models\PasswordHold;
 use Keyring\Sessions\Sessions;
 use Keyring\UserKeyring;
 
@@ -64,6 +65,7 @@ trait HasKeyring
             $user->devices()->delete();
             Keyring::pendingChangeModel()::query()->ownedBy($user)->delete();
             Keyring::securityEventModel()::query()->ownedBy($user)->delete();
+            PasswordHold::query()->ownedBy($user)->delete();
         });
     }
 

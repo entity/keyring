@@ -101,6 +101,12 @@ class AuthenticateSession
         // Before anything checks the level, so inactivity lapses it first.
         $this->assurance->touch();
 
+        // With sessions.end_on_lapse, a session ends with the level it
+        // signed in at, where it would otherwise carry on at a lower one.
+        if (($lapse = $this->assurance->lapse()) !== null) {
+            return $this->signOut($request, $lapse);
+        }
+
         if ($this->risk->signalsFor(Checkpoint::Request) !== [] && ($response = $this->assessRisk($request, $user, $session)) !== null) {
             return $response;
         }
@@ -198,6 +204,14 @@ class AuthenticateSession
             }
 
             return $this->signOut($request, $ended);
+        }
+
+        // The cookie proves nothing, so it can't carry a session on where a
+        // session ends with the level it signed in at.
+        if (config('keyring.sessions.end_on_lapse')) {
+            $this->sessions->registry()->revoke($session->id);
+
+            return $this->signOut($request, 'expired');
         }
 
         // Whatever this session held, the cookie proved none of it.

@@ -18,6 +18,7 @@ The first release. Nothing is tagged yet.
 - `keyring:install`, `keyring:import fortify`, `keyring:prune`, and `keyring:sign-out` to end one user's sessions or everyone's.
 - `Keyring::attempt()` to start a sign in from your own route, for social logins and the like.
 - `Keyring::allowSignInWhen()` to keep banned or unapproved accounts out, however they try to sign in.
+- `Keyring::requirePasswordChange()`, and a risk action of the same name, to hold a user until they choose a new password when theirs is known to someone else.
 - Rate limits per account, per typed username and per IP address, with locks that double, a cap on failures in a row, and `limits.lock_after` to keep an account locked until its password is reset.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment and the challenge page, with Vue and React bindings. Passkey sign in works with Laravel's `@laravel/passkeys` client too.

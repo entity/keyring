@@ -70,7 +70,7 @@ Removing a factor from the list doesn't delete anyone's authenticators. A user w
 |---|---|---|---|---|---|
 | `password` | `Password` | knowledge | yes | no | 40 |
 | `totp` | `Totp` | possession | no | yes | 60 |
-| `email-code` | `EmailCode::asSecondFactor()` | possession | no | yes, one | 30 |
+| `email-code` | `EmailCode::asSecondFactor()` | address (not a factor) | no | yes, one | 30 |
 | `recovery` | `RecoveryCodes` | possession | no | yes, one set | 0 |
 | `passkey` | `WebAuthn::passkeys()` | possession, plus inherence when the user was verified | yes | yes | 100 |
 | `security-key` | `WebAuthn::securityKeys()` | possession, plus inherence when the user was verified | no | yes | 90 |
@@ -119,7 +119,7 @@ The `otpauth://` URL and the QR code then say `algorithm=SHA256`, and enrolling 
 
 ### Email Codes
 
-An eight digit code sent to the user's current email address. It's opt-in, because NIST SP 800-63B rules out email for authentication codes: whoever controls the inbox can also reset the password, so for a user whose only second factor it is, the inbox is the whole account. Registering plain `EmailCode::class` throws an exception that says so. To accept that risk:
+An eight digit code sent to the user's current email address. It's opt-in, because NIST SP 800-63B-4 doesn't accept email as an authenticator at any level (Sec. 3.1.3.1): whoever controls the inbox can also reset the password, so for a user with nothing else beside their password, the inbox is the whole account. Registering plain `EmailCode::class` throws an exception that says so. To accept that risk:
 
 ```php
 Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor()]);
@@ -150,6 +150,18 @@ The code, its guess count and the fact that it was used are kept on the server, 
 
 Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)) after the first wrong guess. They're counted per user, so another browser doesn't get guesses of its own. Email codes are only as strong as the inbox, so they aren't phishing resistant.
 
+#### What Turning Email Codes On Means
+
+An emailed code is a step at sign in, not a second factor. Its category is `Category::Address`, which counts toward no [assurance level](policies.md#assurance-levels). For an account whose only sign-in methods are a password and an email code:
+
+- Signing in asks for both under a policy with `ifEnrolled()`, such as the default. A policy that asks for two factors outright, `Requirement::aal2()` without `ifEnrolled()`, turns the account away; `Requirement::steps(2)` takes a password and a code.
+- The session is AAL1. `keyring:aal2` isn't satisfied by it and sends the user to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) to add a real second factor, and so does [`keyring.enrolled`](policies.md#requiring-a-second-factor).
+- The account doesn't count as having a second factor: its password needs the [longer minimum](protected-changes.md#password-rules), an [email change](protected-changes.md#changing-the-email-address) is confirmed from the current address too, and "don't ask again on this device" isn't offered or granted.
+- It gets no recovery codes. They stand in for a lost factor, and the inbox a code goes to is how the account is recovered anyway.
+- The user can add a real second factor: the [fresh verification](step-up.md#fresh-verification) before it asks for the password and an emailed code. From then on the emailed code isn't asked for or offered at sign in, and can't stand in for the possession factor a fresh verification wants.
+
+If your app has routes behind `keyring:aal2`, or tells users their account has two-factor authentication, offer an authenticator app or passkeys next to email codes and send users to them.
+
 ### Recovery Codes
 
 Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx`, shown once. Each is 16 random bytes, the 128 bits OWASP ASVS asks of a value that mustn't be guessed, written as 26 base32 characters, and is stored as a keyed hash (HMAC-SHA-256 under a key derived from `APP_KEY` for recovery codes alone). OWASP ASVS 5.0.0 requirement 6.5.2 allows that for a code with 112 random bits or more, and asks for a slow, salted password hash below it, so Keyring stores and accepts nothing shorter: `secretFor()` throws an `InvalidArgumentException` for a code in any other form, and one typed in another form never matches. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
@@ -175,6 +187,7 @@ Every verification proves one or more **categories**, from `Keyring\Enums\Catego
 - `Knowledge`: something the user knows, like a password.
 - `Possession`: something they have, like a phone, a key or saved recovery codes.
 - `Inherence`: something they are, like a fingerprint checked by their authenticator.
+- `Address`: something sent to an address of theirs, like a code by email. This one isn't an authentication factor: it shows that whoever answers can read the address, and NIST SP 800-63B-4 doesn't accept email as an authenticator. A verification with only this category is a step an app can ask for, and never raises the session's level. `Category::authenticates()` tells the two kinds apart.
 
 Policies count distinct categories, not verifications, so a password and a PIN together are still one factor. See [Policies](policies.md).
 
@@ -235,6 +248,8 @@ You can override these properties:
 Keyring checks `$length` and `$ttl` when it resolves your factors, and throws a `LogicException` naming the factor when a code would be shorter than six digits or last longer than ten minutes (OWASP ASVS 5.0.0, requirements 6.5.4 and 6.5.5). The bounds are `CodeFactor::MIN_LENGTH` and `CodeFactor::MAX_TTL`.
 
 Code factors count as possession and have priority 30. Override `categories()`, `priority()` or `present()` to change that.
+
+Possession is right for a code sent to a device the user holds, such as a text message to their phone. NIST restricts that one without ruling it out (see the [SMS recipe](recipes.md#sms-codes)). A code sent somewhere that only takes a password to read, as email does, isn't a factor: return `[Category::Address]` from `categories()`, as `EmailCode` does, and Keyring treats it as a step that reaches no level.
 
 ### Collecting Details at Enrollment
 
@@ -302,10 +317,11 @@ The contract's methods:
 | Method | Default in `Factor` | Purpose |
 |---|---|---|
 | `key()` | none | The factor's key. |
-| `categories($authenticator)` | none | The categories it's expected to prove. |
+| `categories($authenticator)` | none | The categories it's expected to prove. `[Category::Address]` for a factor that isn't an authenticator NIST accepts. |
 | `verify($attempt, $authenticator, $request)` | none | Check the proof. Return a `Verification`, or `null` when it's wrong. |
 | `phishingResistant($authenticator)` | `false` | Whether the proof is bound to your origin. Only WebAuthn should say yes. |
-| `deviceBound($authenticator)` | `false` | Whether the secret can't leave its device. Only these reach AAL3. |
+| `deviceBound($authenticator)` | `false` | Whether the secret can't leave its device, by the authenticator's own account. |
+| `attested($authenticator)` | `false` | Whether something else vouches for what the authenticator is, as a WebAuthn attestation checked when it was added does. AAL3 takes a device-bound key only when this is true too. |
 | `priority()` | `50` | Higher is offered first. |
 | `authenticators($user, $stored)` | the stored rows with this key | The user's authenticators. Return virtual ones for state kept elsewhere. |
 | `challenge($attempt, $authenticator)` | `[]` | Extra props for the challenge page. Called every time the page loads, so it must be safe to repeat. |
@@ -335,7 +351,7 @@ Implement these as well when they apply:
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment()`, `enrollmentRules()`, `confirmEnrollment()` and `multiple()`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |
 
-An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it, once: an enrollment that has added its authenticator can't be confirmed again, even from an earlier copy of the session. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
+An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it, once: an enrollment that has added its authenticator can't be confirmed again, even from an earlier copy of the session. It also counts it as verified in the session, so only return one when the proof really shows the new authenticator works. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
 
 `enrollmentRules()` validates the confirm request. On `Keyring\Factors\Factor` it defaults to the factor's `rules()` plus an optional `name`, so a name can be given when confirming as well as when beginning.
 

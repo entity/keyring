@@ -1128,3 +1128,13 @@ describe('replacing a session\'s record', function () {
         expect($registry->find('old'))->toBeNull();
     });
 });
+
+it('brings nothing back where a session ends with the level it signed in at', function () {
+    config(['keyring.sessions.end_on_lapse' => true]);
+    $cookies = rememberedSignIn();
+    $session = app(SessionRegistry::class)->forUser($this->user)->sole();
+
+    // The cookie proves nothing, so there's no level left to carry on at.
+    expectKeptCookiesRefused($cookies);
+    expect(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
+});

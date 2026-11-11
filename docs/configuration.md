@@ -146,6 +146,12 @@ Where the `keyring.enrolled` middleware sends users who still need a second fact
 More routes those users can still reach meanwhile, by route name, with `*` as a wildcard (`['billing.*', 'support']`). The enrollment page, Keyring's own routes, signing out, email verification and changing the password are always let through.
 
 ```php
+'password_change_url' => null,
+```
+
+Where a user who has to choose a new password is sent from every other page until they have. Null answers `403`. See [Requiring a Password Change](protected-changes.md#requiring-a-password-change).
+
+```php
 'enrollments' => [
     'keep_for' => '15m',
 ],
@@ -186,6 +192,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
         'aal2' => ['idle' => '1h', 'absolute' => '24h'],
         'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
+    'end_on_lapse' => false,
     'middleware' => true,
     'remember_cookie' => null,
     'remember_grace' => '10s',
@@ -202,6 +209,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `remember_idle` | The same, for a browser that ticked "remember me": how long it may stay away and still be signed back in, with nothing proved. `null` lets it stay away for the whole `absolute` limit. See [Inactivity and "Remember Me"](devices-and-sessions.md#inactivity-and-remember-me). |
 | `absolute` | The longest a session can last, however active it is. |
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
+| `end_on_lapse` | Whether a session ends when the level it signed in at runs out, where it would otherwise carry on at a lower one. See [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level). |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
 | `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `keyring_remember`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 | `remember_grace` | How long after that cookie is used the same browser's other requests, sent with it, are still let in on the same session. Each cookie works once; after this, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. `0` leaves no room at all, so requests a browser sends together end it too. |
@@ -382,6 +390,7 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::usePendingChangeModel($model)` | Uses your own subclass of `Keyring\Models\PendingChange`. |
 | `Keyring::useSecurityEventModel($model)` | Uses your own subclass of `Keyring\Models\SecurityEvent`. |
 | `Keyring::attempt($request, $factor)` | Starts a sign in with a factor from a route of your own, through the same pipeline as the login form. See [Starting a Sign In Yourself](sign-in-flow.md#starting-a-sign-in-yourself). |
+| `Keyring::requirePasswordChange($user, $reason = null)` | Holds a user until they choose a new password. `requiresPasswordChange($user)` asks whether they're held, and `cancelPasswordChange($user)` lets them go. See [Requiring a Password Change](protected-changes.md#requiring-a-password-change). |
 | `Keyring::unlock($user)` | Lets a locked-out user try again without a password reset: lifts their risk lock and clears their sign-in limits and locks. See [Locking Until a Reset](security.md#locking-until-a-reset). |
 | `Keyring::allowSignInWhen($callback)` | Decides who may be signed in at all, such as accounts that aren't banned. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |

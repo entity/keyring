@@ -69,7 +69,7 @@ A browser shared by several accounts has one cookie and a device for each accoun
 
 ### Trusted Devices
 
-When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device trusted for that long (30 days by default), counted from the moment it's granted. It only counts when that login verified two categories, such as a password and a code, and, with `Features::emailVerification()` on, the email address is verified. Sending it with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
+When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device trusted for that long (30 days by default), counted from the moment it's granted. It only counts when that login verified two factors, such as a password and an authenticator app's code, and, with `Features::emailVerification()` on, the email address is verified. An [emailed code](factors.md#email-codes) isn't a factor, so a login that used one beside the password isn't offered trust (`canTrustDevice` is false) and can't earn it. Sending it with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
 
 Trust on its own changes nothing. It's for your [policy](policies.md#deciding-per-user-and-attempt) to use:
 
@@ -365,6 +365,8 @@ On each signed-in request it:
 - runs the cheap [risk signals](risk.md#checkpoints),
 - updates the last activity time, at most once a minute.
 
+A second middleware, `keyring.password`, is added to the `web` group after it. It does nothing until a user is [held for a new password](protected-changes.md#requiring-a-password-change).
+
 A session whose record has gone missing is signed out rather than registered again, so clearing records can't restart a session's window.
 
 A signed-out request is sent to the login page with the `signed-out` status, and comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, and `Keyring\Events\SessionEnded` is dispatched with the reason, logged as `session_ended`.
@@ -475,13 +477,15 @@ Like every sign-out that isn't the browser's own, these take effect on a session
         'aal2' => ['idle' => '1h', 'absolute' => '24h'],
         'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
+    'end_on_lapse' => false,
 ],
 ```
 
 - **`idle`** ends a session after this much inactivity: two hours by default, the lifetime of Laravel's own session in a new app. Keyring counts it on the registry record, so it holds whatever your session driver and `session.lifetime` are, and a session that idled out can't be picked up again. `null` leaves inactivity to Laravel's session lifetime alone.
 - **`remember_idle`** is the same limit for a browser that ticked ["remember me"](#remember-me): 14 days by default. `null` lets it stay away for the whole `absolute` limit.
 - **`absolute`** ends a session this long after sign in, however active it is. A browser that comes back on ["remember me"](#remember-me) carries the same session on, under a new record with the same expiry, so that doesn't start the limit again. The browser is asked to keep Laravel's "remember me" cookie no longer either, unless you set your guard's `remember` (in minutes) yourself. That only changes how long the browser holds it: it still stops working when its session ends.
-- **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
+- **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B-4's reauthentication limits (Sec. 2.2.3 and 2.3.3).
+- **`end_on_lapse`** ends a session when the level it signed in at runs out. See [below](#ending-a-session-with-its-level).
 
 #### Inactivity and "Remember Me"
 
@@ -494,6 +498,26 @@ Ticking "remember me" asks to stay signed in on that browser between visits, so 
 Set `remember_idle` no shorter than `idle`, or ticking the box would sign people out sooner.
 
 A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.
+
+### Ending a Session With Its Level
+
+NIST SP 800-63B-4 (Sec. 5.2) says a session is terminated when its inactivity or overall timeout passes. It also lets a session be treated as a lower level than it was authenticated at (Sec. 5.1), and that's what Keyring does by default: a session that signed in with two factors stops being AAL2 after an hour idle or 24 hours, and carries on as the AAL1 session its password alone would have started, under `idle` and `absolute`. Nothing behind `keyring:aal2` or `keyring.fresh` is reachable meanwhile. It's the default because ending those sessions would sign out the people who set up a second factor after an hour away, and leave everyone who didn't signed in for 30 days.
+
+That isn't enough where the whole app is meant to be AAL2, or where you want NIST's wording to the letter. Turn the lapse into the end of the session:
+
+```php
+'sessions' => [
+    'end_on_lapse' => true,
+],
+```
+
+- A session ends on the first request after the level it **signed in at** runs out: after that level's `idle` without a request, or its `absolute` after the factors were proved. The user is signed out as for any other timeout, with the reason `idle` or `expired` on `SessionEnded`.
+- Proving every factor for that level again before then (any [step-up](step-up.md) that asks for them all) starts both limits over, as reauthenticating does in NIST.
+- A level reached later by a step-up still lapses on its own and takes nothing with it. A session that signed in with a password and stepped up for one page stays an AAL1 session.
+- "Remember me" brings nothing back. Its cookie proves nothing, so there's no level for the session to carry on at: the browser signs in again. NIST doesn't accept such a cookie in place of authenticating either (Sec. 5.1), so leave the checkbox off your login page.
+- Sessions signed in at AAL1 are unaffected: `idle` and `absolute` already end those.
+
+[Recipes](recipes.md#an-app-whose-every-page-needs-aal2) has the full setup for an app whose every page needs AAL2.
 
 ## Pruning
 

@@ -18,6 +18,7 @@ use Keyring\Events\Confirmed;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Features;
 use Keyring\KeyringManager;
+use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
@@ -130,6 +131,21 @@ class SignIn
         $this->sessions->elevate($request, $this->assurance->level());
 
         Confirmed::dispatch($attempt->user(), $attempt);
+    }
+
+    /**
+     * Count a sign-in method the user just added as verified in this
+     * session: confirming it took proving it, here and now. The recovery
+     * codes that come with a first second factor are then handed to a
+     * session that has proved two, as NIST SP 800-63B-4 asks of codes
+     * delivered online (Sec. 3.1.2.1). Like any proof, it changes the
+     * session ID.
+     */
+    public function enrolled(Request $request, Authenticator $authenticator): void
+    {
+        $request->session()->regenerate(true);
+        $this->assurance->record([Verification::of($authenticator)]);
+        $this->sessions->elevate($request, $this->assurance->level());
     }
 
     /**
