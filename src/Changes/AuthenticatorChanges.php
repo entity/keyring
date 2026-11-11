@@ -137,7 +137,7 @@ class AuthenticatorChanges
                 return [$authenticator, false];
             }
 
-            if ($keyring->hasSecondFactor() && ! $left->hasSecondFactor()) {
+            if ($keyring->hasExtraStep() && ! $left->hasExtraStep()) {
                 $this->ensurePasswordStandsAlone($user, $password);
             }
 

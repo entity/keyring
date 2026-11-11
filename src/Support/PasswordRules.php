@@ -68,7 +68,7 @@ final class PasswordRules
      */
     public static function for((Authenticatable&Model)|null $user = null, ?Closure $adjust = null, array $context = []): array
     {
-        $min = self::min($user !== null && Keyring::for($user)->hasSecondFactor());
+        $min = self::min($user !== null && Keyring::for($user)->hasExtraStep());
 
         $rule = Password::min($min)->max(config('keyring.passwords.max'));
 

@@ -17,7 +17,6 @@ use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Support\Input;
 use Keyring\Support\Throttle;
-use Keyring\Support\Url;
 
 class EmailChangeController
 {
@@ -88,7 +87,9 @@ class EmailChangeController
 
         return $this->keyring->render('email-change', [
             'action' => $action,
-            'url' => Url::route("keyring.email.{$action}.store", ['change' => $change]),
+            // A path, like the other pages: the form posts back to wherever
+            // the page was opened, not to another host the link root names.
+            'url' => route("keyring.email.{$action}.store", ['change' => $change], absolute: false),
             'token' => $token,
         ]);
     }

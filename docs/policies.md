@@ -55,7 +55,7 @@ Keyring works out an assurance level from what a user has proved in their sessio
 | Proved | Level |
 |---|---|
 | A password | AAL1 |
-| A password and an email code, with [`EmailCode::asSecondFactor()`](factors.md#email-codes) | AAL1: NIST doesn't accept email as an authenticator |
+| A password and an email code, with [`EmailCode::asExtraStep()`](factors.md#email-codes) | AAL1: NIST doesn't accept email as an authenticator |
 | A password and a TOTP or recovery code | AAL2 |
 | A passkey that syncs (iCloud Keychain, Google Password Manager...) | AAL2 |
 | A passkey or security key that stays on its device, added without attestation, alone or with a password | AAL2 |

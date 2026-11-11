@@ -84,7 +84,7 @@ describe('an email change link', function () {
 
         expect($props['action'])->toBe($action)
             ->and($props['token'])->toBe($token)
-            ->and($props['url'])->toBe(url("/email-changes/{$this->change->id}/{$action}"))
+            ->and($props['url'])->toBe("/email-changes/{$this->change->id}/{$action}")
             ->and($props['url'])->not->toContain($token);
     })->with([
         'to confirm from the new address' => ['confirm', 'confirm'],
@@ -320,6 +320,29 @@ it('keeps the rate limit and the CSRF check on the routes that act', function (s
     expect($middleware)->toContain('throttle:keyring')->toContain('web')
         ->and(app('router')->getMiddlewareGroups()['web'])->toContain(PreventRequestForgery::class);
 })->with(['keyring.email.confirm.store', 'keyring.email.revert.store', 'keyring.devices.report.store', 'verification.verify.store']);
+
+it('holds the pages the links open to their own, looser limit', function (string $name) {
+    expect(Route::getRoutes()->getByName($name)->gatherMiddleware())
+        ->toContain('throttle:keyring-pages')
+        ->not->toContain('throttle:keyring');
+})->with(['keyring.email.confirm', 'keyring.email.revert', 'keyring.devices.report', 'verification.verify']);
+
+it('leaves the six a minute for the buttons, however often the pages are opened', function () {
+    $links = emailedChangeLinks();
+    $change = PendingChange::sole();
+
+    foreach (range(1, 12) as $view) {
+        $this->inertia()->get($links[$view % 2 ? 'confirm' : 'current'])->assertOk();
+    }
+
+    $this->flushHeaders();
+
+    foreach (['current', 'confirm'] as $link) {
+        $this->post(route('keyring.email.confirm.store', $change), ['token' => Str::afterLast($links[$link], '/')])->assertRedirect(route('login'));
+    }
+
+    expect($this->user->fresh()->email)->toBe('new@example.com');
+});
 
 it('checks the signature on both the link and the form it posts', function (string $link) {
     expect(Route::getRoutes()->getByName($link)->gatherMiddleware())->toContain('keyring.signed:relative')

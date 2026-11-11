@@ -73,7 +73,7 @@ it('hashes each kind of stored value under its own purpose', function () {
 
     $recovery = Keyring::factor('recovery')->secretFor(['abcd-efgh-ijkl-mnop-qrst-uvwx-yz']);
 
-    $factor = EmailCode::asSecondFactor();
+    $factor = EmailCode::asExtraStep();
     $code = (fn () => $this->hash('12345678'))->call($factor);
 
     expect(json_decode($recovery))->toBe([KeyedHash::make(KeyedHash::RECOVERY_CODES, 'abcdefghijklmnopqrstuvwxyz')])

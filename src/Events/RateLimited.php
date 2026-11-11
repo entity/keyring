@@ -10,9 +10,9 @@ use Illuminate\Queue\SerializesModels;
 
 /**
  * A rate limiter on Keyring's form routes refused a request: "keyring" on
- * registration, resets, changes and the emailed links, or
- * "keyring-login-options" on passkey options. The sign-in limits have their
- * own event (Lockout).
+ * registration, resets, changes and the buttons on emailed links,
+ * "keyring-pages" on the pages those links open, or "keyring-login-options"
+ * on passkey options. The sign-in limits have their own event (Lockout).
  */
 class RateLimited
 {

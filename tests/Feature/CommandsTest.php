@@ -222,7 +222,7 @@ describe('keyring:install', function () {
             ->assertSuccessful();
 
         expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
-            ->toContain("            // A step at sign in, not a second factor: a password and an emailed code is AAL1.\n            EmailCode::asSecondFactor(),\n        ]);");
+            ->toContain("            // A step at sign in, not a second factor: a password and an emailed code is AAL1.\n            EmailCode::asExtraStep(),\n        ]);");
 
         expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
     });
@@ -331,7 +331,33 @@ describe('keyring:install', function () {
             ->assertSuccessful();
 
         expect(glob(database_path('migrations/*_create_keyring_authenticators_table.php')))->toHaveCount(1)
+            ->and(glob(database_path('migrations/*_create_keyring_*')))->toHaveCount(7)
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBe('<?php // mine');
+    });
+
+    it('adds the migrations a later version brought to an app that has the earlier ones', function () {
+        $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
+
+        $kept = glob(database_path('migrations/*_create_keyring_sessions_table.php'));
+        new Filesystem()->delete([
+            ...glob(database_path('migrations/*_create_keyring_failure_counts_table.php')),
+            ...glob(database_path('migrations/*_create_keyring_password_holds_table.php')),
+        ]);
+
+        // An upgrade comes some time after the install.
+        $this->travel(1)->days();
+
+        $this->artisan('keyring:install', ['--no-interaction' => true])
+            ->expectsOutputToContain('php artisan migrate')
+            ->assertSuccessful();
+
+        $published = array_map(basename(...), glob(database_path('migrations/*_create_keyring_*')));
+
+        expect($published)->toHaveCount(7)
+            ->and(glob(database_path('migrations/*_create_keyring_sessions_table.php')))->toBe($kept)
+            // In Keyring's order, after the ones the app already had.
+            ->and(array_map(fn (string $name) => Str::after($name, '_create_'), array_slice($published, -2)))
+            ->toBe(['keyring_failure_counts_table.php', 'keyring_password_holds_table.php']);
     });
 })->skip(fn () => getenv('TEST_TOKEN') !== false, 'Publishes into the testbench app every parallel worker shares.');
 

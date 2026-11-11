@@ -124,7 +124,7 @@ class SecurityController
 | `devices` | Where the user is signed in, with `Features::devices()`. The same list as [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
 | `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, with `Features::securityLog()`. |
 
-From there the page uses Keyring's routes: [`/user/authenticators`](authenticators.md#routes) to add, rename and remove sign-in methods, [`/user/devices`](devices-and-sessions.md#routes) to sign devices out, [`PUT /user/password`](protected-changes.md#changing-the-password) and [`POST /user/email`](protected-changes.md#changing-the-email-address). The [browser package](frontend.md#managing-authenticators) wraps the authenticator routes, including the passkey ceremony.
+From there the page uses Keyring's routes: [`/user/authenticators`](authenticators.md#routes) to add, rename and remove sign-in methods, [`/user/devices`](devices-and-sessions.md#routes) to sign devices out, [`/user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) to list sessions and end one, [`PUT /user/password`](protected-changes.md#changing-the-password) and [`POST /user/email`](protected-changes.md#changing-the-email-address). The [browser package](frontend.md#managing-authenticators) wraps the authenticator routes, including the passkey ceremony.
 
 Those routes need a [fresh verification](step-up.md#fresh-verification), 15 minutes by default. Put the same middleware on the page, after `auth`, so users confirm once when they open it rather than halfway through adding a passkey:
 

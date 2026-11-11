@@ -18,7 +18,7 @@ use Keyring\Support\MailText;
  * A code emailed to the user's current address. Opt-in only: whoever controls
  * the inbox can reset the password too, so for a user with nothing else
  * beside their password, the inbox is the whole account. Register
- * EmailCode::asSecondFactor() to accept that.
+ * EmailCode::asExtraStep() to accept that.
  *
  * NIST SP 800-63B-4 doesn't take email as an authenticator at any level
  * (Sec. 3.1.3.1), so a code is a step at sign in and never a factor: it
@@ -34,7 +34,7 @@ class EmailCode extends CodeFactor
         if (! $acceptRisk) {
             throw new InvalidArgumentException(
                 'Email codes are not a second factor: whoever controls the inbox can also reset the password. '
-                .'Register EmailCode::asSecondFactor() to ask for them at sign in anyway.',
+                .'Register EmailCode::asExtraStep() to ask for them at sign in anyway.',
             );
         }
 
@@ -51,10 +51,10 @@ class EmailCode extends CodeFactor
      * Accept email codes as a second step at sign in, knowing a password and
      * a code is still AAL1.
      * Eight digits, good for ten minutes and five wrong guesses, unless you
-     * say otherwise: EmailCode::asSecondFactor(length: 6, expireAfter: '5m').
+     * say otherwise: EmailCode::asExtraStep(length: 6, expireAfter: '5m').
      * Six digits is the fewest and ten minutes the longest Keyring allows.
      */
-    public static function asSecondFactor(?int $length = null, ?string $expireAfter = null, ?int $maxGuesses = null): static
+    public static function asExtraStep(?int $length = null, ?string $expireAfter = null, ?int $maxGuesses = null): static
     {
         return new static(true, $length, $expireAfter, $maxGuesses);
     }

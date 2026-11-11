@@ -52,7 +52,7 @@ class InstallCommand extends Command
         'totp' => ['Authenticator app', 'Totp::class,'],
         'passkeys' => ['Passkeys', 'WebAuthn::passkeys(),'],
         'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
-        'email-codes' => ['Email codes, as an extra step at sign in (not a second factor)', 'EmailCode::asSecondFactor(),', 'a password and an emailed code is AAL1.'],
+        'email-codes' => ['Email codes, as an extra step at sign in (not a second factor)', 'EmailCode::asExtraStep(),', 'a password and an emailed code is AAL1.'],
     ];
 
     /**
@@ -106,6 +106,8 @@ class InstallCommand extends Command
 
     protected const string STUBS = __DIR__.'/../../stubs';
 
+    protected const string MIGRATIONS = __DIR__.'/../../database/migrations';
+
     public function handle(Filesystem $files): int
     {
         $unknown = array_filter([
@@ -148,10 +150,7 @@ class InstallCommand extends Command
             $features = config('keyring.features');
         }
 
-        // Publishing again would add the migrations twice, under new timestamps.
-        if ($files->glob(database_path('migrations/*_create_keyring_authenticators_table.php')) === []) {
-            $this->callSilently('vendor:publish', ['--tag' => 'keyring-migrations']);
-        }
+        $migrations = $this->publishMigrations($files);
 
         if ($writesProvider) {
             $files->ensureDirectoryExists(dirname($provider));
@@ -172,7 +171,7 @@ class InstallCommand extends Command
         $this->components->bulletList(array_filter([
             $this->userModelHasKeyring() ? null : 'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
             in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
-            $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
+            $migrations === 0 && $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
             'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
             $writesConfig ? 'Set <comment>support_contact</comment> in <comment>config/keyring.php</comment> to a page or an address users can reach you at: the emails then say who to contact if something wasn\'t them' : null,
             match (true) {
@@ -461,6 +460,35 @@ class InstallCommand extends Command
     protected function withoutUnusedImports(string $code): string
     {
         return (string) preg_replace_callback('/^use [\w\\\\]+\\\\(\w+);\n/m', fn (array $import) => preg_match_all('/\b'.$import[1].'\b/', $code) > 1 ? $import[0] : '', $code);
+    }
+
+    /**
+     * Publish the migrations this app doesn't have yet, and return how many
+     * that was. Publishing the whole tag again would add the ones it has a
+     * second time under new timestamps, so each is matched by its name. One
+     * added by a later version follows the app's own, in Keyring's order.
+     */
+    protected function publishMigrations(Filesystem $files): int
+    {
+        $missing = array_values(array_filter(
+            $files->glob(self::MIGRATIONS.'/*.php'),
+            fn (string $path) => $files->glob(database_path('migrations/*_'.self::migrationName($path))) === [],
+        ));
+
+        foreach ($missing as $index => $path) {
+            $files->ensureDirectoryExists(database_path('migrations'));
+            $files->copy($path, database_path('migrations/'.now()->addSeconds($index)->format('Y_m_d_His').'_'.self::migrationName($path)));
+        }
+
+        return count($missing);
+    }
+
+    /**
+     * A migration's file name without the date it starts with.
+     */
+    protected static function migrationName(string $path): string
+    {
+        return (string) preg_replace('/^\d{4}_\d{2}_\d{2}_\d{6}_/', '', basename($path));
     }
 
     /**

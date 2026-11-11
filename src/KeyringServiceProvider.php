@@ -224,8 +224,9 @@ class KeyringServiceProvider extends ServiceProvider
 
     /**
      * The limit on Keyring's form routes (registration, resets, enrollment),
-     * and on usernameless login options. Define your own "keyring" or
-     * "keyring-login-options" limiter to change them. Each answers a refused
+     * on the pages emailed links open, and on usernameless login options.
+     * Define your own "keyring", "keyring-pages" or "keyring-login-options"
+     * limiter to change them. Each answers a refused
      * request with TooManyAttempts, which is Laravel's 429 and what gets the
      * refusal into the security log.
      */
@@ -238,6 +239,13 @@ class KeyringServiceProvider extends ServiceProvider
             $limiter->for('keyring', fn (Request $request) => Limit::perMinute(6)
                 ->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip())
                 ->response(new TooManyAttempts('keyring')));
+
+            // The pages emailed links open. They only show a button, and one
+            // person can open several at once (both ends of an email change),
+            // so they don't draw on the six a minute their buttons are held to.
+            $limiter->for('keyring-pages', fn (Request $request) => Limit::perMinute(60)
+                ->by($request->ip())
+                ->response(new TooManyAttempts('keyring-pages')));
 
             // The login page asks for these on every load, for passkey autofill,
             // and an office shares one address, so six a minute would be too few.

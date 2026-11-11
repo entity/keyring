@@ -953,7 +953,7 @@ describe('ending trust', function () {
     });
 
     it('stops trusting every device when a one-per-user factor is replaced', function () {
-        Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor(), RecoveryCodes::class]);
+        Keyring::factors([Password::class, Totp::class, EmailCode::asExtraStep(), RecoveryCodes::class]);
         Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]);
 
         app(AuthenticatorChanges::class)->add($this->user->fresh(), Keyring::factor('email-code'), new Authenticator(['factor' => 'email-code', 'name' => 'New email', 'secret' => null]));

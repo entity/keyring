@@ -165,6 +165,7 @@ it('boots before the cache store its rate limits are kept in is registered', fun
     Cache::extend('late', fn () => Cache::repository(new ArrayStore));
 
     expect(RateLimiter::limiter('keyring')(request())->maxAttempts)->toBe(6)
+        ->and(RateLimiter::limiter('keyring-pages')(request())->maxAttempts)->toBe(60)
         ->and(RateLimiter::limiter('keyring-login-options')(request())->maxAttempts)->toBe(60);
 });
 
@@ -182,7 +183,7 @@ it('keeps a rate limiter the app defines in place of its own', function () {
 it('registers a factor that sends codes before the cache store its codes are kept in exists', function () {
     withALateCacheStoreForRateLimits();
 
-    Keyring::factors([Password::class, EmailCode::asSecondFactor()]);
+    Keyring::factors([Password::class, EmailCode::asExtraStep()]);
 
     expect(Keyring::registered()->keys()->all())->toBe(['password', 'email-code']);
 });
