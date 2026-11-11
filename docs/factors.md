@@ -91,6 +91,16 @@ Each authenticator remembers the last time step it accepted, under a row lock, s
 
 A user can have several authenticator apps.
 
+Codes are made with HMAC-SHA1 by default. That's a compatibility choice, not a preference: it's what RFC 6238 defaults to and the only digest every authenticator app makes. Some widely used apps have ignored a request for anything else (Google Authenticator's own key format notes said so for years) and gone on showing SHA-1 codes, which then never match, so the user can't finish adding the app. OWASP ASVS lists HMAC-SHA-1 as a legacy algorithm, allowed for compatibility like this. The weakness that retired SHA-1 for signatures is finding two inputs with the same hash, which doesn't help anyone guess a code keyed with a secret they don't have.
+
+If you control which apps your users have, set the factor up with SHA-256 or SHA-512:
+
+```php
+fn ($app) => $app->make(Totp::class, ['algorithm' => 'sha256']),
+```
+
+The `otpauth://` URL and the QR code then say `algorithm=SHA256`, and enrolling returns it as `algorithm` to show beside the secret for anyone typing it in. Each authenticator keeps the digest it was set up with, so changing the setting only affects apps added afterwards and nobody has to enroll again. The secret is 160 random bits whichever digest is used.
+
 ### Email Codes
 
 An eight digit code sent to the user's current email address. It's opt-in, because NIST SP 800-63B rules out email for authentication codes: whoever controls the inbox can also reset the password, so for a user whose only second factor it is, the inbox is the whole account. Registering plain `EmailCode::class` throws an exception that says so. To accept that risk:
