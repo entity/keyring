@@ -462,7 +462,7 @@ app(SessionRegistry::class)->revokeEveryone();    // everyone
 Keyring::unlock($user);                           // let a locked-out user try again
 ```
 
-`Keyring::unlock()` is the other half of looking after an account: it lifts a [risk lock](risk.md#actions) and the [sign-in lockouts](security.md#rate-limiting) on it, as a completed password reset does. To keep someone out for good, use [`Keyring::allowSignInWhen()`](sign-in-flow.md#who-may-sign-in), which also ends their sessions.
+`Keyring::unlock()` is the other half of looking after an account: it lifts a [risk lock](risk.md#actions) and the [sign-in lockouts](security.md#rate-limiting) on it, as a completed password reset does. To keep someone out for good, use [`Keyring::allowSignInWhen()`](sign-in-flow.md#who-may-sign-in) and call `signOutEverywhere()` as you set your flag: by itself the gate ends the account's sessions when the first of them next makes a request.
 
 Like every sign-out that isn't the browser's own, these take effect on a session's next request [where the session middleware runs](#the-session-middleware).
 
@@ -556,7 +556,7 @@ In `Keyring\Events`:
 |---|---|
 | `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = null)` |
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
-| `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, or an administrator's `keyring:sign-out` for one user |
+| `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the app keeps out |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
 | `AccessRefused` | `user`, `resource` (`device`), `id`: a request to sign out a device that isn't the user's, answered with a 404 |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`): a "this wasn't me" link that was refused |

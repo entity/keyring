@@ -110,14 +110,26 @@ Keyring asks wherever a session starts or carries on:
 - Every way of starting a sign in: the password, a passkey, and any factor of your own.
 - A sign in that's waiting for its second factor.
 - A "remember me" cookie. The session it would have carried on is ended, so the same cookies don't sign the account back in once it's allowed again.
-- Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`.
+- Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`. The first request that's refused also ends every other session the account has, with its "remember me" cookies, trusted devices and any pending email change (a `sessions_revoked` entry), so a session that stayed away doesn't work again once the account is let back.
 - Registration that [signs new users in](#saying-when-an-address-is-taken), which leaves this one signed out.
 
 An account that's turned away gets the same answer as one that doesn't exist. So does one whose address isn't verified yet, when registration [doesn't reveal who has an account](#without-revealing-who-has-an-account). What doesn't sign anyone in still works for it: a password reset, and the emailed links that confirm or undo an email change or report a device.
 
 The callback runs on every signed-in request, so answer from the user it's given rather than with a query.
 
-Use this rather than a global scope on the user model to keep an account out. A scope makes the account look missing to Keyring, which ends nothing: its sessions, "remember me" cookies, trusted devices and any pending email change are all still there when the scope shows the account again, and no event fires to clear them. `allowSignInWhen()` ends each session on its next request.
+Keyring only finds out that an account is kept out when one of its sessions makes a request. Until then the sessions are still in the registry, and they would work again if the account were let back before any of them came. To end them as you set your flag, sign the account out yourself:
+
+```php
+use Keyring\Sessions\Sessions;
+
+$user->forceFill(['banned' => true])->save();
+
+app(Sessions::class)->signOutEverywhere($user);
+```
+
+That is also what OWASP ASVS 5.0.0 (7.4.2) asks for: a disabled account's sessions end when it's disabled, not when they're next used.
+
+Use `allowSignInWhen()` rather than a global scope on the user model to keep an account out. A scope makes the account look missing to Keyring, which ends nothing: its sessions, "remember me" cookies, trusted devices and any pending email change are all still there when the scope shows the account again, and no event fires to clear them.
 
 Failed attempts count against the user your finder returns, however the username was typed, so an account has one limit whether someone guesses at its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep it to a lookup.
 

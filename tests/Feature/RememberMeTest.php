@@ -654,27 +654,42 @@ describe('a "remember me" cookie first sent to a route without the session middl
         expect(sessionEndedReasons())->toBe(['risk']);
     });
 
-    it('stays refused once the lock is lifted, or the account is let back in', function (Closure $keepOut, Closure $letBack) {
+    it('stays refused once the lock is lifted', function () {
         $cookies = rememberedSignIn();
-        $keepOut($this->user);
+        app(RiskLocks::class)->lock($this->user, 3600);
 
         $this->flushSession();
         browser($cookies)->get('/outside')->assertOk();
         browser($cookies)->get('/home')->assertRedirect('/login');
 
-        $letBack($this->user);
+        app(RiskLocks::class)->unlock($this->user);
 
         expectKeptCookiesRefused($cookies);
-    })->with([
-        'a risk lock' => [
-            fn (User $user) => app(RiskLocks::class)->lock($user, 3600),
-            fn (User $user) => app(RiskLocks::class)->unlock($user),
-        ],
-        'an account the app keeps out' => [
-            fn () => Keyring::allowSignInWhen(fn () => false),
-            fn () => Keyring::allowSignInWhen(fn () => true),
-        ],
-    ]);
+    });
+
+    it('stays refused once the account is let back in', function () {
+        $cookies = rememberedSignIn();
+        Keyring::allowSignInWhen(fn () => false);
+
+        $this->flushSession();
+        browser($cookies)->get('/outside')->assertOk();
+        browser($cookies)->get('/home')->assertRedirect('/login');
+
+        Keyring::allowSignInWhen(fn () => true);
+
+        // Keeping the account out ended everything it had, Laravel's own
+        // cookie included, so nothing of Keyring's is even asked.
+        $this->flushSession();
+        browser($cookies)->get('/home')->assertRedirect('/login');
+        $this->assertGuest();
+
+        $this->flushSession();
+        browser($cookies)->getJson('/home')->assertUnauthorized();
+        $this->assertGuest();
+
+        expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+            ->and(sessionEndedReasons())->toBe(['not_allowed']);
+    });
 });
 
 describe('a "remember me" cookie that has been used', function () {

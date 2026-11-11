@@ -48,7 +48,7 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 |---|---|---|
 | `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)` (valid for `devices.report_link_for` unless you pass days) for a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
-| `SessionsRevoked` | Sessions were signed out: "sign out everywhere else", one session ended from the sessions list, or an administrator's `keyring:sign-out` for the user. | `user`, `count` |
+| `SessionsRevoked` | Sessions were signed out: "sign out everywhere else", one session ended from the sessions list, an administrator's `keyring:sign-out` for the user, or the first request refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
 | `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), so two browsers held the same ones, and the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended: its device, IP address and user agent are those of whoever used the cookie first) |
 

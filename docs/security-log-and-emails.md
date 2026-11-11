@@ -74,7 +74,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `new_device` | notice | A sign in from a new device. | `device` |
 | `device_revoked` | info | A device was signed out. | `device` |
 | `device_reported` | warning | A device was signed out from the "this wasn't me" link. | `device` |
-| `sessions_revoked` | info | "Sign out everywhere else", one session ended from the sessions list, or an administrator's `keyring:sign-out` for the user. | `count` |
+| `sessions_revoked` | info | "Sign out everywhere else", one session ended from the sessions list, an administrator's `keyring:sign-out` for the user, or the first request refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `count` |
 | `session_ended` | info | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `remember_me_reused` | warning | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent are the request that brought the used one; `device_id` is the device the ended session was on. | `device` |
 | `email_change_requested` | info | | |

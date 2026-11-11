@@ -14,6 +14,7 @@ use Keyring\Devices\UserAgent;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionEnded;
+use Keyring\Events\SessionsRevoked;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
@@ -68,7 +69,7 @@ class AuthenticateSession
         // isn't left signed in, whatever kept them so: a session, a "remember
         // me" cookie, or a sign in the app started.
         if (! $this->keyring->allowsSignIn($user)) {
-            return $this->signOut($request, 'not_allowed');
+            return $this->keepOut($request, $user);
         }
 
         $session = $this->sessions->current($request);
@@ -134,6 +135,23 @@ class AuthenticateSession
             $this->sessions->idledOut($session, $now) => 'idle',
             default => null,
         };
+    }
+
+    /**
+     * Sign out someone the app no longer lets sign in. The first request
+     * that's refused ends every session the account has, with its "remember
+     * me" cookies and trusted devices: one that stayed away while the account
+     * was kept out would otherwise work again the moment it's let back.
+     * After that there are none left, so the account's other browsers are
+     * only signed out themselves as each finds out.
+     */
+    protected function keepOut(Request $request, Authenticatable $user): Response
+    {
+        if ($this->sessions->registry()->forUser($user)->isNotEmpty()) {
+            SessionsRevoked::dispatch($user, $this->sessions->signOutEverywhere($user));
+        }
+
+        return $this->signOut($request, 'not_allowed');
     }
 
     /**

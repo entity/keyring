@@ -543,7 +543,17 @@ use App\Models\User;
 Keyring::allowSignInWhen(fn (User $user) => $user->approved_at !== null);
 ```
 
-Withdrawing an approval signs the account out on its next request. See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
+Withdrawing an approval signs the account out on its next request, and that request ends its other sessions too. To end them all as you withdraw it, without waiting for a request, sign the account out yourself:
+
+```php
+use Keyring\Sessions\Sessions;
+
+$user->forceFill(['approved_at' => null])->save();
+
+app(Sessions::class)->signOutEverywhere($user);
+```
+
+See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
 
 Approval can also be what lets a user add a sign-in method, in place of verifying their email address:
 

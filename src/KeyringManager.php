@@ -348,7 +348,9 @@ class KeyringManager
      * one nobody has approved yet. Keyring asks wherever a session starts or
      * carries on: every factor that can start a sign in, a sign in waiting
      * for its second factor, "remember me", and each request of a session
-     * that's already signed in, which is signed out once the answer is no.
+     * that's already signed in. Once the answer is no, that request is signed
+     * out and every other session of the account ends with it. To end them
+     * before any of them makes a request, call Sessions::signOutEverywhere().
      * An account that's turned away is answered like one that doesn't exist.
      * So is one that hasn't verified its address yet, when registration
      * hides who has an account.
