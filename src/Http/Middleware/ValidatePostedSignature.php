@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\URL;
+use Keyring\Events\LinkRefused;
 use Keyring\Support\Input;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -17,8 +18,9 @@ use Symfony\Component\HttpFoundation\Response;
  * posts back to the same path, and with the signature still in that URL it
  * would be written to access logs and seen by proxies a second time, by the
  * request that acts. So the page posts "expires" and "signature" as fields,
- * and this checks them exactly as "signed:relative" checked the link: the
- * same signature, over the same path, with the same expiry.
+ * and this checks them exactly as "keyring.signed:relative" checked the
+ * link: the same signature, over the same path, with the same expiry, and a
+ * refusal put on record the same way.
  */
 class ValidatePostedSignature
 {
@@ -29,7 +31,15 @@ class ValidatePostedSignature
             'signature' => Input::text($request, 'signature'),
         ]));
 
-        throw_unless(URL::hasValidSignature($link, absolute: false), InvalidSignatureException::class);
+        if (! URL::hasValidSignature($link, absolute: false)) {
+            // On record like a link "keyring.signed" turns away.
+            LinkRefused::dispatch(
+                (string) $request->route()?->getName(),
+                URL::hasCorrectSignature($link, absolute: false) ? 'expired' : 'signature',
+            );
+
+            throw new InvalidSignatureException;
+        }
 
         return $next($request);
     }

@@ -3,11 +3,11 @@
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
+use Keyring\Http\Requests\VerifyEmailRequest;
 use Keyring\KeyringManager;
 use Keyring\Support\Input;
 
@@ -33,7 +33,7 @@ class EmailVerificationController
      * verifies the address. The page's button posts the link's signature
      * in the body (ValidatePostedSignature).
      */
-    public function page(EmailVerificationRequest $request): mixed
+    public function page(VerifyEmailRequest $request): mixed
     {
         $user = $this->keyring->user();
 
@@ -49,7 +49,7 @@ class EmailVerificationController
         ]);
     }
 
-    public function verify(EmailVerificationRequest $request): mixed
+    public function verify(VerifyEmailRequest $request): mixed
     {
         if (! $this->verified($request)) {
             $request->fulfill();

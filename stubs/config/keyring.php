@@ -27,7 +27,8 @@ return [
     |
     | Signing in and out, challenges and step-up are always on. Add the rest
     | as your app needs them. Each one brings its routes, and anything else
-    | it needs, only once it's here.
+    | it needs, only once it's here. Without the security log, its events
+    | are written to your app's log instead.
     |
     */
 

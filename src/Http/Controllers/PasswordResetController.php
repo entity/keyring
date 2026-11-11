@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Events\LinkRefused;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Support\Input;
@@ -80,6 +81,8 @@ class PasswordResetController
         // Laravel says "no user with that address" for unknown accounts. Answer
         // every failure like a bad token instead.
         if ($status !== PasswordBroker::PASSWORD_RESET) {
+            LinkRefused::dispatch('password_reset', 'token');
+
             throw ValidationException::withMessages([$this->keyring->email() => __(PasswordBroker::INVALID_TOKEN)]);
         }
 

@@ -97,7 +97,7 @@ class EmailChangeController
      */
     public function confirm(Request $request, string $change): StatusResponse
     {
-        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
+        $change = $this->changes->fromLink($change, 'email_change_confirm');
 
         $status = match ($this->changes->confirm($change, Input::text($request, 'token'))) {
             EmailConfirmation::Applied => 'email-changed',
@@ -110,7 +110,7 @@ class EmailChangeController
 
     public function revert(Request $request, string $change): StatusResponse
     {
-        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
+        $change = $this->changes->fromLink($change, 'email_change_revert');
 
         // Send them to reset their password, when the app has that flow.
         return $this->changes->revert($change, Input::text($request, 'token'))

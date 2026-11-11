@@ -11,6 +11,8 @@
     - [Links and Headers](#links-and-headers)
     - [Request Input](#request-input)
     - [Storage](#storage)
+    - [Logging](#logging)
+- [What Keyring Keeps](#what-keyring-keeps)
 - [What Your App Must Provide](#what-your-app-must-provide)
     - [HTTPS and HSTS](#https-and-hsts)
     - [Trusted Proxies](#trusted-proxies)
@@ -26,7 +28,7 @@ Keyring follows OWASP's authentication, session management and forgot password g
 
 The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration.
 
-Guarantees about a [feature](quick-start.md#adding-features), such as devices, email changes or the security log, apply once that feature is on.
+Guarantees about a [feature](quick-start.md#adding-features), such as devices or email changes, apply once that feature is on.
 
 ## Guarantees
 
@@ -149,7 +151,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 ### Links and Headers
 
 - Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
-- Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
+- Signed links are signed over the path and query only, and checked with `keyring.signed:relative` (Laravel's `signed` middleware, with refused links logged), so a forged `Host` header can't redirect them.
 - Pages opened from emailed links (password resets, email verification, email changes, "this wasn't me") have the link's token or signature in their URL, so they're sent with `Referrer-Policy: no-referrer`: nothing the page loads is told its URL, your own assets and analytics included. A failed form still finds its way back, because Keyring notes the page in the session.
 - Every other Keyring response sends `Referrer-Policy: same-origin`, so other sites never see its URL and your own app still does.
 - An Inertia app keeps the policy of the page it first loaded. So when the form on an emailed link's page succeeds, Keyring answers Inertia with a full page visit (`409` with `X-Inertia-Location`), and the next page comes with its own policy. Otherwise every page after it would send no `Referer` either, signed in or not.
@@ -183,6 +185,38 @@ A URL ends up in places a request's body doesn't: access logs, proxies, the brow
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
 - WebAuthn user handles are an HMAC of the user ID, never the ID or email.
 - The security log never holds passwords, codes, tokens or session IDs.
+
+### Logging
+
+- Sign ins, failed factors, lockouts, session starts and ends, and every change to how an account signs in are recorded as shipped: in the [security log](security-log-and-emails.md) table, which is on by default, or in your app's log when you turn the table off. There is no setting that records nothing.
+- What was refused is recorded too: a request for someone else's authenticator, device or verification link, a sign-in method that wasn't added, a removal that would have left the account unable to sign in, an emailed link with a wrong, ended or expired token or signature, and a verification the pipeline's final gate turned away. None of it changes the answer the requester gets.
+- No entry holds a password, code, token, signature, session ID or request body, in the table or in the app's log. Form validation errors aren't logged.
+- Every entry carries a severity and the ID of the request that wrote it.
+- A refused request can't fill the log. A lock is logged once when it starts, not for each request it refuses, and refusals are capped per account or IP address, with one entry to say where the log stopped. See [Refusals That Repeat](security-log-and-emails.md#refusals-that-repeat).
+- A log write that fails never fails the sign in, with one exception: `Keyring::withoutProtection()` doesn't run unless its entry was written.
+- Old entries, devices, ended email changes and ended sessions are deleted every day by a task Keyring schedules itself, and a force deleted user's records are deleted with them.
+
+## What Keyring Keeps
+
+Everything Keyring stores about a person, how it's protected, how long it stays and who can read it. Built from the migrations, so a table you've added columns to holds whatever you put there as well.
+
+| Where | Personal data | Protected by | Kept for |
+|---|---|---|---|
+| `keyring_authenticators` | The name the user gave it (plain). TOTP secrets and recovery codes in `secret`. A passkey's or security key's credential ID, public key, AAGUID and transports. The address an email code goes to, when a factor keeps one. | `secret` is encrypted with `APP_KEY`, and recovery codes are keyed hashes inside it. Credential IDs and public keys are plain: they're public by design, and useless without the key itself. `secret`, `public_key` and `credential_id` are hidden when the model is serialised. | Until the user removes it, an email change is undone, or the user is force deleted. |
+| `keyring_devices` (with `Features::devices()`) | IP address, user agent, a name, and the [location](devices-and-sessions.md#locations) your locator returned (country, region, city, coordinates). | The device cookie's token is a SHA-256 hash, hidden when serialised. The rest is plain. | 30 days after it's signed out (`devices.keep_revoked_for`), a year after it was last seen (`devices.keep_unseen_for`), or until it's the oldest past `devices.limit`. Deleted with a force deleted user. |
+| `keyring_sessions`, or your cache with the `cache` driver | The user's ID, IP address, user agent, and when they signed in and were last active. | The ID is Keyring's own random one, never Laravel's session ID. The rest is plain. | Until the session expires or is revoked, then the next daily prune. A record "remember me" replaced stays until it would have expired. Cache records expire on their own. |
+| `keyring_pending_changes` (with `Features::emailChanges()`) | The new and the old email address. | Both addresses are encrypted with `APP_KEY`, with a keyed hash of the old one to find it by. The three tokens are SHA-256 hashes. All of them are hidden when serialised. | 30 days after the change ended (`email_changes.keep_ended_for`). Deleted with a force deleted user. |
+| `keyring_events` (with `Features::securityLog()`) | IP address, user agent, the device's ID, and in `meta` an authenticator's name or a device's description. | Plain. Never a password, code, token, signature, session ID or request body. | 180 days (`security_log.keep_for`). Deleted with a force deleted user. |
+| Your app's log (without `Features::securityLog()`) | The same as `keyring_events`, one line per event. | Whatever protects that log channel. | Whatever that channel keeps (`days` on a `daily` channel). |
+| The session | A sign in waiting for its second factor, an enrollment in progress (including the secret being set up), and what the session has verified. | Encrypted with `APP_KEY` inside the session, whichever session driver holds it. | 10 minutes for a pending login (`pending_logins.keep_for`), 15 for an enrollment (`enrollments.keep_for`), otherwise the session's life. |
+| The rate limiter's cache store | Counts of attempts, keyed by a SHA-1 of the factor with the account, the typed username or the IP address. | Hashed keys, so the store holds no names or addresses to read back. | A minute for counts, up to 24 hours for locks, 30 days for failures in a row (`limits.remember_failures_for`). |
+| Laravel's own tables | The reset token and address in `password_reset_tokens`, and `remember_token` on your users table. | Laravel hashes the reset token. | Laravel's `auth.passwords.*.expire`. Keyring deletes a user's reset tokens when they're deleted or their address changes. |
+
+To store less of an address, or none, see [What's Stored](security-log-and-emails.md#whats-stored): `Keyring::recordIpsUsing()` applies to devices, sessions and the log alike. Security emails pass the IP address and a description of the browser to the user they're about.
+
+**Who can read it.** Keyring has no admin screens and no route that returns another person's records. A signed-in user can read their own: [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices) lists their devices with IP address and location, ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) show them the type, time and IP address of entries about their account, and [`Keyring::activity($user)`](security-log-and-emails.md#showing-recent-activity) returns their entries if you build a page for it. Everything else is reached only by your own code and by whoever can read your database, cache and logs, so those are what to restrict: treat `keyring_events` and the log channel as you would any audit log.
+
+**Deleting someone.** Force deleting a user deletes their authenticators, devices, pending changes, security log entries and reset tokens, and revokes their sessions, which the next prune removes. A soft deleted user keeps all of it in case they're restored, until each record's own time is up.
 
 ## What Your App Must Provide
 
@@ -295,6 +329,9 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Emailed links that only act on a `POST`, with the token or signature in its body | OWASP ASVS 3.5.3 and 14.2.1, and OWASP's Cross-Site Request Forgery Prevention Cheat Sheet |
 | Passwords, codes, credentials and tokens read from the body, never the query string of a `POST` | OWASP ASVS 14.2.1 and 15.3.7 |
 | A passkey challenge that runs out on the server | OWASP's guidance on passkey challenges |
+| Logging sign ins, failures, lockouts and session ends by default, and what was refused: someone else's record, a link's token or signature, a skipped pipeline step | OWASP ASVS 16.3.1 to 16.3.3 |
+| A severity and a request ID on every entry, no secrets in any, and a cap on entries a refused request can cause | OWASP's Logging Cheat Sheet |
+| A list of what's stored and how it's protected, deleted on a schedule Keyring sets up itself | OWASP ASVS 14.1 and 14.2.7 |
 | A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 
 ## Known Limitations

@@ -4,6 +4,7 @@ namespace Keyring\Activity;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
+use Illuminate\Support\Str;
 use Keyring\Events;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
@@ -47,6 +48,11 @@ class RecordSecurityEvents
             Events\ProtectionBypassed::class => 'protectionBypassed',
             Events\CloneSuspected::class => 'cloneSuspected',
             Events\RiskAssessed::class => 'riskAssessed',
+            Events\AccessRefused::class => 'accessRefused',
+            Events\EnrollmentRefused::class => 'enrollmentRefused',
+            Events\AuthenticatorRemovalRefused::class => 'authenticatorRemovalRefused',
+            Events\LinkRefused::class => 'linkRefused',
+            Events\VerificationRefused::class => 'verificationRefused',
         ];
     }
 
@@ -67,10 +73,20 @@ class RecordSecurityEvents
     /**
      * A failed second factor after a correct password is the classic sign of
      * a stolen password, so it's logged as an alert for the user.
+     *
+     * An account's own limits bound how often it can fail. A name nobody
+     * has can be made up without end, so those failures are a refusal like
+     * any other, and only so many are kept per IP address.
      */
     public function factorFailed(Events\FactorFailed $event): void
     {
         $user = $event->attempt?->user();
+
+        if ($user === null) {
+            $this->log->recordRefusal('factor_failed', factor: $event->factor);
+
+            return;
+        }
 
         $this->log->record('factor_failed', $user, $event->factor);
 
@@ -79,9 +95,15 @@ class RecordSecurityEvents
         }
     }
 
+    /**
+     * The event fires for every request a lock refuses, and a client can
+     * send those as fast as it likes. The log says once that the lock is
+     * there: one entry per factor and IP address, until the wait the lock
+     * gave is over.
+     */
     public function lockout(Events\Lockout $event): void
     {
-        $this->log->record('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter]);
+        $this->log->recordRefusal('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter], once: $event->factor, for: $event->retryAfter);
     }
 
     public function accountLocked(Events\AccountLocked $event): void
@@ -192,6 +214,36 @@ class RecordSecurityEvents
             'checkpoint' => $event->checkpoint->value,
             'score' => $event->risk->score,
             'reasons' => $event->risk->reasons(),
+        ]);
+    }
+
+    public function accessRefused(Events\AccessRefused $event): void
+    {
+        $this->log->recordRefusal('access_refused', $event->user, meta: ['resource' => $event->resource, 'id' => Str::limit($event->id, 64, '')]);
+    }
+
+    public function enrollmentRefused(Events\EnrollmentRefused $event): void
+    {
+        $this->log->recordRefusal('enrollment_refused', $event->user, $event->factor, meta: ['reason' => $event->reason]);
+    }
+
+    public function authenticatorRemovalRefused(Events\AuthenticatorRemovalRefused $event): void
+    {
+        $this->log->recordRefusal('authenticator_removal_refused', $event->user, $event->authenticator->factor, meta: ['name' => $event->authenticator->name]);
+    }
+
+    /**
+     * Which link and why, never the token or signature that came with it.
+     */
+    public function linkRefused(Events\LinkRefused $event): void
+    {
+        $this->log->recordRefusal('link_refused', $event->user, meta: ['link' => $event->link, 'reason' => $event->reason]);
+    }
+
+    public function verificationRefused(Events\VerificationRefused $event): void
+    {
+        $this->log->recordRefusal('verification_refused', $event->attempt->user(), $event->factor, meta: [
+            'skipped' => array_map(class_basename(...), $event->skipped),
         ]);
     }
 }

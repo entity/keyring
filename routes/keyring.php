@@ -97,7 +97,7 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
     // shows a page, and the page's button posts the link's signature.
     if (Features::enabled(Features::emailVerification())) {
         Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
-        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'page'])->middleware(['signed:relative', 'throttle:keyring'])->name('verification.verify');
+        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'page'])->middleware(['keyring.signed:relative', 'throttle:keyring'])->name('verification.verify');
         Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware([ValidatePostedSignature::class, 'throttle:keyring'])->name('verification.verify.store');
         Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware('throttle:keyring')->name('verification.send');
     }
@@ -108,7 +108,8 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
 // Emailed links. GET only shows a page with a button and the POST acts, so a
 // mail scanner that opens a link changes nothing. The link's token or
 // signature is in its URL, and the page posts it in the body, so the request
-// that acts doesn't put it in a URL a second time.
+// that acts doesn't put it in a URL a second time. keyring.signed is
+// Laravel's signed middleware, which also logs the links it refuses.
 Route::middleware('throttle:keyring')->group(function () {
     if (Features::enabled(Features::emailChanges())) {
         Route::get('/email-changes/{change}/confirm/{token}', [EmailChangeController::class, 'page'])->name('keyring.email.confirm');
@@ -118,7 +119,7 @@ Route::middleware('throttle:keyring')->group(function () {
     }
 
     if (Features::enabled(Features::devices())) {
-        Route::get('/devices/{device}/report', [DeviceController::class, 'page'])->middleware('signed:relative')->name('keyring.devices.report');
+        Route::get('/devices/{device}/report', [DeviceController::class, 'page'])->middleware('keyring.signed:relative')->name('keyring.devices.report');
         Route::post('/devices/{device}/report', [DeviceController::class, 'report'])->middleware(ValidatePostedSignature::class)->name('keyring.devices.report.store');
     }
 });

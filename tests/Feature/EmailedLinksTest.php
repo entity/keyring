@@ -315,7 +315,7 @@ it('keeps the rate limit and the CSRF check on the routes that act', function (s
 })->with(['keyring.email.confirm.store', 'keyring.email.revert.store', 'keyring.devices.report.store', 'verification.verify.store']);
 
 it('checks the signature on both the link and the form it posts', function (string $link) {
-    expect(Route::getRoutes()->getByName($link)->gatherMiddleware())->toContain('signed:relative')
+    expect(Route::getRoutes()->getByName($link)->gatherMiddleware())->toContain('keyring.signed:relative')
         ->and(Route::getRoutes()->getByName($link.'.store')->gatherMiddleware())->toContain(ValidatePostedSignature::class);
 })->with(['keyring.devices.report', 'verification.verify']);
 
@@ -342,5 +342,5 @@ it('has no token left in the URL of any route that acts on an emailed link', fun
 })->with(['keyring.email.confirm.store', 'keyring.email.revert.store', 'keyring.devices.report.store', 'password.update']);
 
 it('has no signature in the URL of a route that acts on a signed link', function (string $name) {
-    expect(Route::getRoutes()->getByName($name)->gatherMiddleware())->not->toContain('signed:relative')->not->toContain('signed');
+    expect(Route::getRoutes()->getByName($name)->gatherMiddleware())->not->toContain('keyring.signed:relative')->not->toContain('signed');
 })->with(['keyring.devices.report.store', 'verification.verify.store']);

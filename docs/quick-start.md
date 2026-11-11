@@ -179,7 +179,7 @@ use Keyring\Features;
 | `manageAuthenticators()` | Adding, renaming and removing sign-in methods. Needed for users to set any up. | [Managing Authenticators](authenticators.md) |
 | `devices()` | A device cookie, "trust this device", a list of where users are signed in, and "this wasn't me" links. | [Devices & Sessions](devices-and-sessions.md) |
 | `emailChanges()` | Email changes confirmed by the new address and undoable from the old one. Changing the email elsewhere then throws. | [Protected Changes](protected-changes.md#changing-the-email-address) |
-| `securityLog()` | A log of sign ins, failures and changes, and "was this you?" alerts. | [Security Log & Emails](security-log-and-emails.md) |
+| `securityLog()` | A log of sign ins, failures, refusals and changes in `keyring_events`, and "was this you?" alerts. On unless you take it out, and then the events go to your app's log instead. | [Security Log & Emails](security-log-and-emails.md) |
 
 A few more things are opt-in, but aren't in the features list:
 
