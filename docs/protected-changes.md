@@ -202,11 +202,39 @@ Keyring runs your action as one of its own flows, so it may change the protected
 - no composition rules by default (no "one uppercase, one symbol"),
 - breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),
 - the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
-- no passwords containing the site's name, or the user's name or email username (words of four characters or more),
+- no passwords containing [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.
 
-`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass theirs yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+
+### Context-Specific Words
+
+A password that names your app, your company or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 6.1.2 asks you to keep a list of such words, and 6.2.11 to refuse passwords that use them. The list goes in the `passwords.context` option:
+
+```php
+'passwords' => [
+    'context' => ['Acme', 'Acme Rockets', 'Roadrunner', 'Wile E'],
+],
+```
+
+Put in the names of your organisation, products, systems, projects, departments and roles. Keyring adds what it can work out itself, and refuses a password containing any of:
+
+| | From |
+|---|---|
+| Your app's name | `app.name` |
+| The words you list | `passwords.context` |
+| The user's name | Their `name` attribute, or the `context` argument at registration |
+| Their email username | What's before the `@` in their username and email attributes |
+| The organisation they're at | The first label of their email domain: `megacorp` in `megacorp.example`. Skipped for providers anyone can have an address at (Gmail, Googlemail, Outlook, Hotmail, Live, Yahoo, Ymail, iCloud, Proton, Fastmail, Tutanota, Yandex, Zoho, and any domain starting `mail.` or `email.`). |
+
+How they're compared:
+
+- Case doesn't matter, and each value is also taken word by word, split at anything that isn't a letter or a digit: `Acme Rockets` refuses `acme` and `rockets`.
+- Characters that stand in for letters count as those letters: `0` as `o`, `1` and `l` as `i`, `3` as `e`, `4` and `@` as `a`, `5` and `$` as `s`, `7` as `t`. So `k3yr1ng` is `keyring`.
+- Words under four characters are ignored, because they turn up by chance in ordinary passwords: nobody called Amy is stopped from using `dreamy`.
+- The exception is your app's name or a listed entry as a whole, which counts from three characters, so an app called `IBM` refuses `ibm2026`. Two characters or fewer never count. Keep that in mind before listing a short common word: `Box` would refuse `inbox` and `sandbox`.
+- A name of several words also counts run together, however the password separates them: `My App` refuses `myapp`, `my-app` and `my app`, though `my` and `app` alone are too short to count. Only your app's names are joined up like this, so a user called Thor can still use `correct horse`.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:
 

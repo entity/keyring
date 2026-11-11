@@ -231,6 +231,10 @@ return [
     | network. Null runs it in production only, so local and test runs make
     | no network calls.
     |
+    | "context" is your list of words a password mustn't contain: names of
+    | your organisation, products, systems, projects and teams. Your app's
+    | name, and each user's name and address, are checked without listing.
+    |
     */
 
     'passwords' => [
@@ -238,6 +242,7 @@ return [
         'min_without_mfa' => 15,
         'max' => 128,
         'uncompromised' => null,
+        'context' => [],
         'broker' => null,
     ],
 

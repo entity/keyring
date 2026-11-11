@@ -223,6 +223,7 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
     'min_without_mfa' => 15,
     'max' => 128,
     'uncompromised' => null,
+    'context' => [],
     'broker' => null,
 ],
 ```
@@ -230,6 +231,8 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 See [Password Rules](protected-changes.md#password-rules). `broker` is the password broker used for resets; `null` is your default broker.
 
 `min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 6.2.1 and NIST SP 800-63B allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
+
+`context` is your list of words a password mustn't contain: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 6.1.2 asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
 
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
 

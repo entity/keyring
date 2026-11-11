@@ -9,7 +9,7 @@ return [
     'last_factor' => 'You need to keep at least one way to sign in that meets your account\'s security requirements.',
     'recovery_needs_second_factor' => 'Recovery codes back up another second factor. Add one first, like an authenticator app or a passkey.',
     'password_common' => 'That password is too common. Choose another.',
-    'password_context' => 'Your password can\'t contain your name, your email address or the name of this site.',
+    'password_context' => 'Your password can\'t contain your name, part of your email address, or a name to do with this site.',
     'password_to_remove_last_factor' => 'Enter your password to remove your last second factor.',
     'password_too_short_alone' => 'Without a second factor your password needs at least :min characters. Change it first, then remove this.',
     'enrollment_expired' => 'Setting this up took too long. Please start again.',

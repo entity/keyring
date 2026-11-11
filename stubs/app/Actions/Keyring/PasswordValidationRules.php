@@ -18,7 +18,7 @@ trait PasswordValidationRules
      *     PasswordRules::for($user, fn (Password $rule) => $rule->mixedCase())
      *
      * @param  User|null  $user  null at registration
-     * @param  list<mixed>  $context  words it mustn't contain while there's no user yet (non-strings are ignored)
+     * @param  list<mixed>  $context  the name and email it mustn't contain while there's no user yet (non-strings are ignored)
      * @return list<mixed>
      */
     protected function passwordRules((Authenticatable&Model)|null $user = null, array $context = []): array

@@ -28,6 +28,22 @@ final class PasswordRules
      */
     private const string COMMON = __DIR__.'/../../resources/passwords/common.txt';
 
+    /**
+     * Characters people swap for the letters they look like, so k3yr1ng
+     * reads as keyring. 1, i and l all read as one letter.
+     */
+    private const array LOOKALIKES = ['0' => 'o', '1' => 'i', 'l' => 'i', '3' => 'e', '4' => 'a', '5' => 's', '7' => 't', '@' => 'a', '$' => 's'];
+
+    /**
+     * Where anyone can have an address, by the first label of the domain
+     * (gmail.com, yahoo.co.uk). It says nothing about the user, unlike the
+     * megacorp of megacorp.example.
+     */
+    private const array PUBLIC_MAIL = [
+        'gmail', 'googlemail', 'outlook', 'hotmail', 'live', 'yahoo', 'ymail', 'icloud', 'proton', 'protonmail',
+        'fastmail', 'tutanota', 'yandex', 'zoho', 'mail', 'email',
+    ];
+
     /** @var array<string, int>|null */
     private static ?array $common = null;
 
@@ -35,7 +51,8 @@ final class PasswordRules
      * The rules for a new password. Pass a callback to adjust the Password
      * rule Keyring builds, e.g. fn (Password $rule) => $rule->mixedCase(),
      * and $context for words a password mustn't contain at registration,
-     * when there's no user yet (their name and email).
+     * when there's no user yet (their name and email). Words to do with the
+     * app itself go in the passwords.context option.
      *
      * @param  (Closure(Password): Password)|null  $adjust
      * @param  list<mixed>  $context
@@ -55,9 +72,10 @@ final class PasswordRules
             $rule = $adjust($rule);
         }
 
-        $context = [...$context, config('app.name'), $user?->getAttribute('name'), $user?->getAttribute(Keyring::username())];
+        $site = [config('app.name'), ...config('keyring.passwords.context')];
+        $personal = [...$context, $user?->getAttribute('name'), $user?->getAttribute(Keyring::username()), $user?->getAttribute(Keyring::email())];
 
-        return ['required', 'string', 'confirmed', $rule, self::notCommon(), self::withoutContext($context), self::bcryptLimit()];
+        return ['required', 'string', 'confirmed', $rule, self::notCommon(), self::withoutContext($site, $personal), self::bcryptLimit()];
     }
 
     /**
@@ -100,25 +118,90 @@ final class PasswordRules
     }
 
     /**
-     * Not the app's name, or the user's name or email username.
-     * Words shorter than four characters don't count.
+     * Not what the app is called or a word it listed, nor the user's name,
+     * their email username or the organisation their address is at. Characters
+     * that stand in for letters count as those letters.
      *
-     * @param  list<mixed>  $context
+     * Words under four characters turn up by chance too often to refuse,
+     * except a whole name of the app's, which counts from three ("IBM").
+     * A name of several words also counts run together, however the password
+     * separates them: "My App" refuses myapp, my-app and my app.
+     *
+     * @param  array<array-key, mixed>  $site  the app's name, and the words it listed, however they're keyed
+     * @param  array<array-key, mixed>  $personal  the user's names and addresses
      */
-    private static function withoutContext(array $context): Closure
+    private static function withoutContext(array $site, array $personal): Closure
     {
-        $words = collect($context)
+        $names = collect($site)->filter(fn (mixed $name) => is_string($name))->map(fn (string $name) => self::words($name));
+
+        $words = collect($personal)
             ->filter(fn (mixed $value) => is_string($value))
-            ->flatMap(fn (string $value) => preg_split('/[\s@._+-]+/', Str::lower(Str::before($value, '@'))) ?: [])
+            ->flatMap(fn (string $value) => self::personal($value))
+            ->merge($names->flatten())
             ->filter(fn (string $word) => mb_strlen($word) >= 4)
+            ->merge($names->filter(fn (array $name) => count($name) === 1)->flatten()->filter(fn (string $name) => mb_strlen($name) >= 3))
             ->unique()
             ->values();
 
-        return function (string $attribute, mixed $value, Closure $fail) use ($words) {
-            if (is_string($value) && $words->contains(fn (string $word) => str_contains(Str::lower($value), $word))) {
+        $phrases = $names
+            ->filter(fn (array $name) => count($name) > 1)
+            ->map(fn (array $name) => implode('', $name))
+            ->filter(fn (string $phrase) => mb_strlen($phrase) >= 3)
+            ->unique()
+            ->values();
+
+        return function (string $attribute, mixed $value, Closure $fail) use ($words, $phrases) {
+            if (! is_string($value)) {
+                return;
+            }
+
+            $typed = self::plain($value);
+            $joined = implode('', self::words($value));
+
+            if ($words->contains(fn (string $word) => str_contains($typed, $word)) || $phrases->contains(fn (string $phrase) => str_contains($joined, $phrase))) {
                 $fail(__('keyring::keyring.password_context'));
             }
         };
+    }
+
+    /**
+     * The words in something about the user. Of an address, that's what
+     * comes before the @ and the first label of its domain, where the
+     * organisation's name usually is, unless anyone can have an address there.
+     *
+     * @return list<string>
+     */
+    private static function personal(string $value): array
+    {
+        if (! str_contains($value, '@')) {
+            return self::words($value);
+        }
+
+        $organisation = Str::before(Str::afterLast($value, '@'), '.');
+
+        return [
+            ...self::words(Str::beforeLast($value, '@')),
+            ...in_array(Str::lower($organisation), self::PUBLIC_MAIL, true) ? [] : self::words($organisation),
+        ];
+    }
+
+    /**
+     * The runs of letters and digits in a value, as plain() reads them.
+     *
+     * @return list<string>
+     */
+    private static function words(string $value): array
+    {
+        return preg_split('/[^\p{L}\p{N}]+/u', self::plain($value), flags: PREG_SPLIT_NO_EMPTY) ?: [];
+    }
+
+    /**
+     * Lowercased, with look-alike characters read as their letters. Used on
+     * both sides of a comparison, so it only ever makes more things match.
+     */
+    private static function plain(string $value): string
+    {
+        return strtr(Str::lower($value), self::LOOKALIKES);
     }
 
     /**
