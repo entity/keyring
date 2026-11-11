@@ -5,6 +5,7 @@
     - [Entry Types](#entry-types)
     - [Severity](#severity)
     - [Request IDs](#request-ids)
+    - [Times](#times)
     - [Refusals That Repeat](#refusals-that-repeat)
     - [Refused Links](#refused-links)
     - [Showing Recent Activity](#showing-recent-activity)
@@ -45,7 +46,7 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 
 ### Without the Table
 
-Take `Features::securityLog()` out of your features and nothing is written to `keyring_events`, but the events are still recorded: each one becomes a line in your app's log, so there is never nothing. The line is `Keyring: {type}` at the entry's [severity](#severity), with the user (`{morph class}:{id}`), `factor`, `device_id`, `ip`, `user_agent`, `request_id` and `meta` as its context. `channel` names the log channel, and `null` is your default one:
+Take `Features::securityLog()` out of your features and nothing is written to `keyring_events`, but the events are still recorded: each one becomes a line in your app's log, so there is never nothing. The line is `Keyring: {type}` at the entry's [severity](#severity), with `at` (the time, [with its offset](#times)), the user (`{morph class}:{id}`), `factor`, `device_id`, `ip`, `user_agent`, `request_id` and `meta` as its context. `channel` names the log channel, and `null` is your default one:
 
 ```php
 // config/logging.php
@@ -141,6 +142,12 @@ Context::add('trace_id', (string) Str::uuid());
 ```
 
 Set `security_log.context_key` to the key you use, hidden or not. Then your own log lines for the request carry the same ID as its entries, and so does a queued job the request dispatched. When nothing is there, Keyring makes a UUID for the request and keeps it in the hidden context, so it adds nothing to your log lines. An ID longer than 64 characters is cut to fit. Set the key to `null` to leave `request_id` empty.
+
+### Times
+
+An entry's `created_at` is a plain timestamp in your app's timezone (`app.timezone`), as every Laravel timestamp is. The column holds no offset, so an app set to a local timezone logs local times that can't be told from UTC by looking at the table. Leave `app.timezone` at `UTC`, which is Laravel's default and what OWASP ASVS 5.0.0 (16.2.2) recommends for a log, and convert for display. If yours isn't UTC, say so wherever the table is read or copied to.
+
+An entry written to [your app's log](#without-the-table) carries its time with its offset as `at`, such as `2026-11-08T14:05:09+00:00`, because Laravel stamps a log line without one. Keeping your servers' clocks in step is yours.
 
 ### Refusals That Repeat
 

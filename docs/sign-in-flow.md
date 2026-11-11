@@ -272,7 +272,7 @@ Change both to fit your app, but leave out any check that the address is free. K
 
 ### Without Revealing Who Has an Account
 
-By default (`registration.reveal_taken` is `false`), nobody can use the form to find out whether an address has an account. This is what OWASP ASVS 6.3.8 asks of registration.
+By default (`registration.reveal_taken` is `false`), nobody can use the form to find out whether an address has an account. This is what OWASP ASVS 5.0.0 (6.3.8) asks of registration.
 
 - The answer is always the same: a redirect to the login page with the `registration-received` status ("Thanks for registering. We've emailed that address with what to do next."), or that status as JSON. Nobody is signed in.
 - Validation errors from your action are shown as usual. They're the same for every address, because your action never looks at whether it's taken.

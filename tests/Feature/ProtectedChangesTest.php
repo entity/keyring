@@ -23,6 +23,7 @@ use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Url;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -302,6 +303,40 @@ describe('resetting password', function () {
         $this->withHeader('Host', 'evil.example')->post(route('password.email'), ['email' => 'taylor@example.com']);
 
         Notification::assertSentTo($this->user, ResetPassword::class, fn (ResetPassword $notification) => str_starts_with($notification->toMail($this->user)->actionUrl, 'https://app.example.com/reset-password/'));
+    });
+
+    // The broker finds a reset by its address, so the form has to post
+    // one. Keyring's link carries it to save typing it. An app that wants
+    // it out of the URL builds the link itself and has its page ask.
+    it('still resets from a link of the app\'s own that leaves the address out', function () {
+        $before = ResetPassword::$createUrlCallback;
+        ResetPassword::createUrlUsing(fn (User $user, string $token) => Url::route('password.reset', ['token' => $token]));
+
+        try {
+            $this->post(route('password.email'), ['email' => 'taylor@example.com']);
+
+            $link = null;
+            Notification::assertSentTo($this->user, ResetPassword::class, function (ResetPassword $notification) use (&$link) {
+                $link = $notification->toMail($this->user)->actionUrl;
+
+                return true;
+            });
+
+            expect($link)->toStartWith(config('app.url').'/reset-password/')->not->toContain('taylor')->not->toContain('email=');
+
+            $this->inertia()->get($link)->assertOk()->assertJsonPath('props.email', '');
+
+            $this->flushHeaders()->post(route('password.update'), [
+                'token' => basename(parse_url($link, PHP_URL_PATH)),
+                'email' => 'taylor@example.com',
+                'password' => 'correct horse battery staple',
+                'password_confirmation' => 'correct horse battery staple',
+            ])->assertRedirect(route('login'));
+
+            expect(Hash::check('correct horse battery staple', $this->user->fresh()->password))->toBeTrue();
+        } finally {
+            ResetPassword::$createUrlCallback = $before;
+        }
     });
 
     it('resets without signing in, and signs out every session', function () {

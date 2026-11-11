@@ -107,7 +107,7 @@ The list covers the signature on an [attestation statement](#requiring-attestati
 
 ### RS256 and Windows Hello
 
-RS256 is left out because OWASP ASVS 5.0 doesn't approve it: its padding (PKCS #1 v1.5) is on the disallowed list of Appendix C, and the 2048 bit keys that use it give 112 bits of strength where ASVS 11.2.3 asks for 128. ES256 and Ed25519 are approved and give 128. NIST SP 800-63B asks for 112, so RS256 with a 2048 bit key meets NIST but not ASVS.
+RS256 is left out because OWASP ASVS 5.0.0 doesn't approve it: its padding (PKCS #1 v1.5) is on the disallowed list of Appendix C, and the 2048 bit keys that use it give 112 bits of strength where ASVS 11.2.3 asks for 128. ES256 and Ed25519 are approved and give 128. NIST SP 800-63B-4 asks for 112 (Sec. 3.1.6.2), so RS256 with a 2048 bit key meets NIST but not ASVS.
 
 The cost of leaving it out falls on Windows. Windows Hello signed with RS256 alone for years, and still does on some machines: older builds, and ones where it has no TPM that makes ES256 keys. There the browser can't create a passkey with Windows Hello while RS256 isn't offered, and the user is shown a phone or a security key to use, or an error. They can still add a passkey from a phone or a hardware key, or sign in with their password and another second factor.
 
@@ -119,7 +119,7 @@ If those users matter more to you than ASVS conformance here, add it, last so ev
 
 Record that as a deviation from ASVS 11.6.1 and 11.2.3 if you assess against it.
 
-With RS256 on, Keyring refuses an RSA key shorter than `minimum_rsa_bits`, both when it's added and at every sign in, and never takes one under 2048 bits however low that's set (RFC 8230 requires 2048 for RS256). Raising it to 3072 would give RSA the 128 bits ASVS asks for, but Windows Hello's RSA keys are 2048 bits, so in practice it refuses the keys RS256 was turned on for, after the browser has already made them. If you want 128 bits throughout, leave RS256 off.
+With RS256 on, Keyring refuses an RSA key shorter than `minimum_rsa_bits`, both when it's added and at every sign in, and never takes one under 2048 bits however low that's set (RFC 8812, Section 2, requires 2048 bits for RS256). Raising it to 3072 would give RSA the 128 bits ASVS asks for, but Windows Hello's RSA keys are 2048 bits, so in practice it refuses the keys RS256 was turned on for, after the browser has already made them. If you want 128 bits throughout, leave RS256 off.
 
 ## Attestation and AAGUIDs
 

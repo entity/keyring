@@ -269,9 +269,9 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
 See [Password Rules](protected-changes.md#password-rules). `broker` is the password broker used for resets; `null` is your default broker.
 
-`min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 6.2.1 and NIST SP 800-63B allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
+`min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 5.0.0 (6.2.1) and NIST SP 800-63B-4 (Sec. 3.1.1.2) allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
 
-`max` is counted in characters, and how much of it you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password, so with bcrypt Keyring refuses anything longer instead of ignoring the end of it. That makes the real limit 72 bytes, not 128 characters: 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese or Korean ones, or 18 emoji. OWASP ASVS 6.2.9 asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. Hash with argon2id to take every password up to `max`:
+`max` is counted in characters, and how much of it you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password, so with bcrypt Keyring refuses anything longer instead of ignoring the end of it. That makes the real limit 72 bytes, not 128 characters: 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese or Korean ones, or 18 emoji. OWASP ASVS 5.0.0 (6.2.9) asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. Hash with argon2id to take every password up to `max`:
 
 ```ini
 HASH_DRIVER=argon2id
@@ -281,7 +281,7 @@ HASH_VERIFY=false
 
 Keyring doesn't hash a password before bcrypt to get around the limit: the hashes would no longer be ones Laravel's own hasher can check. The [conformance suite](testing.md#the-conformance-suite) fails on bcrypt until you switch or say you're keeping it.
 
-`context` is your list of words a password mustn't be made up of: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 6.1.2 asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
+`context` is your list of words a password mustn't be made up of: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 5.0.0 (6.1.2) asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
 
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
 
@@ -357,7 +357,7 @@ The table is `Features::securityLog()`, which is on by default. Without it the s
 
 `timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too. Verifications that go through return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B allows). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
+`limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B-4 allows, Sec. 3.2.2). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
 
 The per-minute counts and their locks are kept in the cache store Laravel's rate limiter uses: `cache.limiter` in `config/cache.php`, or your default store. Point it at a database or Redis store. Octane's in-memory `octane` store fills up, isn't atomic across workers and is emptied by a restart: see [Octane's Cache Store](security.md#octanes-cache-store).
 

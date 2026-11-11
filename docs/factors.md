@@ -42,7 +42,7 @@ Keyring::factors([
 ]);
 ```
 
-Without `Keyring::factors()`, Keyring uses the password alone. `keyring:install` writes the list for the methods you pick. To let users set the others up, turn on [`Features::manageAuthenticators()`](authenticators.md). NIST SP 800-63B asks for at least one phishing-resistant option, which passkeys are.
+Without `Keyring::factors()`, Keyring uses the password alone. `keyring:install` writes the list for the methods you pick. To let users set the others up, turn on [`Features::manageAuthenticators()`](authenticators.md). NIST SP 800-63B-4 asks for at least one phishing-resistant option wherever AAL2 is offered (Sec. 2.2.2), which passkeys are.
 
 The list accepts class names (resolved from the container), instances, and closures that receive the container:
 
@@ -89,7 +89,7 @@ A typed password is put in Unicode's NFC form before it's checked, like every pa
 
 Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code.
 
-By default a code is accepted one 30 second time step either side of now (the `window` constructor argument), so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps it because RFC 6238 (section 5.2) recommends allowing one step for clocks that have drifted and for the time a code takes to arrive, and with none a code typed near the end of its step is refused, which is a large share of honest sign ins.
+By default a code is accepted one 30 second time step either side of now (the `window` constructor argument), so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps it because RFC 6238 recommends accepting one earlier step for the time a code takes to arrive (Section 5.2) and allows a limit on clock drift either way (Section 6), and with none a code typed near the end of its step is refused, which is a large share of honest sign ins.
 
 To meet 6.5.5 to the letter, give the factor a window of zero, so a code only works during its own step:
 
