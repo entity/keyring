@@ -387,13 +387,15 @@ If you registered the routes yourself, override the ones you moved:
 
 ```ts
 configureRoutes({
-  enroll: factor => `/account/authenticators/${factor}`,
-  confirmEnrollment: factor => `/account/authenticators/${factor}/confirm`,
-  authenticator: id => `/account/authenticators/${id}`,
+  enroll: factor => `/account/authenticators/${encodeURIComponent(factor)}`,
+  confirmEnrollment: factor => `/account/authenticators/${encodeURIComponent(factor)}/confirm`,
+  authenticator: id => `/account/authenticators/${encodeURIComponent(id)}`,
 })
 ```
 
-The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three. An override is used as written, without the `prefix`:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `sessions` and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three.
+
+Keyring's own paths put a factor's key or an ID in as one encoded path segment, and throw a `TypeError` for `.` and `..`, which a browser resolves away however they're written. So a value that isn't what the server issued, with a `/` or a `?` in it, can't send the request and the user's cookies to another path. An override is used as written, without the `prefix`, so encode what yours is given too:
 
 ```ts
 configureRoutes({

@@ -13,17 +13,32 @@ export const routes = {
   set login(path: string) {
     login = path
   },
-  loginOptions: (factor: string) => `${prefix}/login/${factor}/options`,
-  loginWith: (factor: string) => `${prefix}/login/${factor}`,
-  challenge: (purpose: Purpose, factor?: string) => `${routes.challengeBase(purpose)}${factor ? `/${factor}` : ''}`,
-  verify: (purpose: Purpose, factor: string) => `${routes.challengeBase(purpose)}/${factor}`,
-  send: (purpose: Purpose, factor: string) => `${routes.challengeBase(purpose)}/${factor}/send`,
+  loginOptions: (factor: string) => `${prefix}/login/${segment(factor)}/options`,
+  loginWith: (factor: string) => `${prefix}/login/${segment(factor)}`,
+  challenge: (purpose: Purpose, factor?: string) => `${routes.challengeBase(purpose)}${factor ? `/${segment(factor)}` : ''}`,
+  verify: (purpose: Purpose, factor: string) => `${routes.challengeBase(purpose)}/${segment(factor)}`,
+  send: (purpose: Purpose, factor: string) => `${routes.challengeBase(purpose)}/${segment(factor)}/send`,
   challengeBase: (purpose: Purpose) => `${prefix}${purpose === 'login' ? '/login/challenge' : '/confirm'}`,
-  enroll: (factor: string) => `${prefix}/user/authenticators/${factor}`,
-  confirmEnrollment: (factor: string) => `${prefix}/user/authenticators/${factor}/confirm`,
-  authenticator: (id: string) => `${prefix}/user/authenticators/${id}`,
+  enroll: (factor: string) => `${prefix}/user/authenticators/${segment(factor)}`,
+  confirmEnrollment: (factor: string) => `${prefix}/user/authenticators/${segment(factor)}/confirm`,
+  authenticator: (id: string) => `${prefix}/user/authenticators/${segment(id)}`,
   sessions: () => `${prefix}/user/sessions`,
-  session: (id: string) => `${prefix}/user/sessions/${id}`,
+  session: (id: string) => `${prefix}/user/sessions/${segment(id)}`,
+}
+
+/**
+ * A factor's key or an ID as one path segment, whatever it holds. The server
+ * issues these, but nothing says a page passes one on untouched, and a slash
+ * or a question mark in one would aim the request, with the user's cookies,
+ * at another path. "." and ".." have no encoding a browser won't resolve
+ * away, so they're refused.
+ */
+function segment(value: string): string {
+  if (value === '.' || value === '..') {
+    throw new TypeError(`Keyring can't put [${value}] in a URL path.`)
+  }
+
+  return encodeURIComponent(value)
 }
 
 export type Purpose = 'login' | 'confirm'
