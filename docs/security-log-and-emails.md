@@ -44,7 +44,7 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `factor_failed` | A factor failed. | |
 | `second_factor_failed` | A factor failed during a login after a correct password. | |
 | `locked_out` | A rate limit was hit, whether the answer said so or was that of a wrong password. Not linked to a user. | `retry_after` |
-| `account_locked` | Failed attempts locked the account until a password reset (only with `limits.lock_after`). | |
+| `account_locked` | Failed attempts got the password or a passkey refused until a password reset: the cap on failures in a row, or `limits.lock_after`. | |
 | `signed_out` | The user signed out. | |
 | `authenticator_added`, `authenticator_removed` | | `name` |
 | `recovery_codes_generated` | | |

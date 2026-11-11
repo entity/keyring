@@ -43,7 +43,7 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | Whether Keyring checks sessions on the `web` group | `sessions.middleware` | [The Session Middleware](devices-and-sessions.md#the-session-middleware) |
 | What's stored as an IP address | `Keyring::recordIpsUsing()` | [What's Stored](security-log-and-emails.md#whats-stored) |
 | Where emailed links start | `Keyring::linkRootUsing()` | [Emailed Links](security.md#emailed-links) |
-| The models | `Keyring::useAuthenticatorModel()` and the other three | [The Keyring Facade](configuration.md#the-keyring-facade) |
+| The models | `Keyring::useAuthenticatorModel()` and the other four | [The Keyring Facade](configuration.md#the-keyring-facade) |
 | Which attributes are protected | `protected`, `Keyring::withoutProtection()` | [Protected Changes](protected-changes.md) |
 
 Risk signals, security notices, the security log, devices and every sign-in method but the password are off until you turn them on.
