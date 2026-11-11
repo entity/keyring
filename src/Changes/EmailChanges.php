@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Notification;
@@ -16,6 +17,7 @@ use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EmailChanged;
 use Keyring\Events\EmailChangeRequested;
 use Keyring\Events\EmailChangeReverted;
+use Keyring\Events\LinkRefused;
 use Keyring\Exceptions\MissingNotification;
 use Keyring\KeyringManager;
 use Keyring\Login\Verification;
@@ -167,6 +169,10 @@ class EmailChanges
             EmailChanged::dispatch($user, $change);
         }
 
+        if ($result === EmailConfirmation::Invalid) {
+            $this->refused('email_change_confirm', $change, $token, 'confirm_token', 'current_token');
+        }
+
         return $result;
     }
 
@@ -222,7 +228,48 @@ class EmailChanges
             EmailChangeReverted::dispatch($user, $change);
         }
 
+        if (! $reverted) {
+            $this->refused('email_change_revert', $change, $token, 'revert_token');
+        }
+
         return $reverted;
+    }
+
+    /**
+     * The change an emailed link names. A link for one that doesn't exist
+     * is a 404 as before, and goes on record: it was made up, or its change
+     * was pruned long ago.
+     *
+     * @param  'email_change_confirm'|'email_change_revert'  $link
+     *
+     * @throws ModelNotFoundException<PendingChange>
+     */
+    public function fromLink(string $id, string $link): PendingChange
+    {
+        $change = $this->keyring->pendingChangeModel()::query()->find($id);
+
+        if ($change === null) {
+            LinkRefused::dispatch($link, 'unknown');
+
+            throw new ModelNotFoundException()->setModel($this->keyring->pendingChangeModel(), $id);
+        }
+
+        return $change;
+    }
+
+    /**
+     * Put a link that did nothing on record, against the account it was
+     * for: its token was wrong, or it was the right one for a change that's
+     * over (expired, cancelled, already used or undone). Said once the lock
+     * is released, so the entry isn't rolled back with anything.
+     *
+     * @param  'confirm_token'|'current_token'|'revert_token'  ...$columns
+     */
+    protected function refused(string $link, ?PendingChange $change, #[\SensitiveParameter] string $token, string ...$columns): void
+    {
+        $known = $change !== null && array_any($columns, fn (string $column) => $change->matches($column, $token));
+
+        LinkRefused::dispatch($link, $known ? 'ended' : 'token', $change?->owner());
     }
 
     /**

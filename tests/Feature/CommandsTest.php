@@ -4,6 +4,8 @@ use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use App\Providers\KeyringServiceProvider;
+use Illuminate\Console\Scheduling\Event;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\Encrypter;
@@ -539,6 +541,28 @@ it('prunes old devices, email changes, security events and ended sessions', func
         ->and($registry->find('ended'))->toBeNull()
         ->and($registry->find('live'))->not->toBeNull();
 });
+
+it('schedules the prune itself, every day, so nothing is kept because a line was left out', function () {
+    $pruning = collect(app(Schedule::class)->events())->filter(fn (Event $event) => str_contains((string) $event->command, 'keyring:prune'));
+
+    expect($pruning)->toHaveCount(1)
+        ->and($pruning->first()->expression)->toBe('0 3 * * *');
+
+    // The scheduled command is the one that prunes.
+    $this->artisan('schedule:list')->expectsOutputToContain('keyring:prune')->assertSuccessful();
+});
+
+it('lets the app move the daily prune, or schedule it for itself', function (?string $at, array $expressions) {
+    config(['keyring.prune_at' => $at]);
+    app()->forgetInstance(Schedule::class);
+
+    expect(collect(app(Schedule::class)->events())
+        ->filter(fn (Event $event) => str_contains((string) $event->command, 'keyring:prune'))
+        ->map(fn (Event $event) => $event->expression)->values()->all())->toBe($expressions);
+})->with([
+    'another time' => ['01:30', ['30 1 * * *']],
+    'not at all' => [null, []],
+]);
 
 it('describes the setup in artisan about', function () {
     $this->artisan('about', ['--only' => 'keyring'])
