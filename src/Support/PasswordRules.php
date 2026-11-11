@@ -138,8 +138,9 @@ final class PasswordRules
      * can't be reached: it reports the failure and answers "not breached".
      * With passwords.refuse_unchecked on, Keyring asks itself, the same way
      * (only the first five characters of the password's SHA-1 are sent), and
-     * refuses a password it got no answer about. One too short to be taken
-     * anyway isn't sent.
+     * refuses a password it got no answer about. It only ever asks that one
+     * host: it follows no redirect. One too short to be taken anyway isn't
+     * sent.
      */
     private static function notBreached(int $min): Closure
     {
@@ -150,7 +151,9 @@ final class PasswordRules
 
             $hash = Str::upper(sha1($value));
 
-            $range = rescue(fn () => Http::withHeaders(['Add-Padding' => 'true'])->timeout(10)->get(self::BREACHES.substr($hash, 0, 5))->throw()->body());
+            // One host and no other: a redirect isn't followed, and what
+            // comes back in its place is no answer.
+            $range = rescue(fn () => Http::withHeaders(['Add-Padding' => 'true'])->timeout(10)->withoutRedirecting()->get(self::BREACHES.substr($hash, 0, 5))->throw()->body());
 
             // A range that was read always lists hashes, so anything else is no answer.
             if (! is_string($range) || preg_match('/^[0-9A-F]{35}:\d/mi', $range) !== 1) {
