@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Models;
 
 use Carbon\CarbonInterface;
@@ -70,12 +72,12 @@ class PendingChange extends Model
     }
 
     /**
-     * How a previous value is found while it's reserved: folded, and keyed
-     * with APP_KEY since the value itself is encrypted.
+     * How a previous value is found while it's reserved: folded, and hashed
+     * with a key of its own since the value itself is encrypted.
      */
     public static function lookupHash(string $value): string
     {
-        return KeyedHash::make(static::fold($value));
+        return KeyedHash::make(KeyedHash::RESERVED_ADDRESSES, static::fold($value));
     }
 
     /**
@@ -174,7 +176,7 @@ class PendingChange extends Model
     #[Scope]
     protected function reserving(Builder $query, string $value): void
     {
-        $query->whereIn('previous_value_hash', KeyedHash::candidates(static::fold($value)))
+        $query->whereIn('previous_value_hash', KeyedHash::candidates(KeyedHash::RESERVED_ADDRESSES, static::fold($value)))
             ->whereNotNull('applied_at')
             ->whereNull('cancelled_at')
             ->whereNull('reverted_at')

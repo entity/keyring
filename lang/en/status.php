@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 // Messages for the status slugs Keyring flashes (and returns as "status"
 // in JSON). Pages can show these, or use the slug to decide for themselves.
 

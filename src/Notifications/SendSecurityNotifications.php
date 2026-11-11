@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Notifications;
 
 use Illuminate\Contracts\Auth\Authenticatable;

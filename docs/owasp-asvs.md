@@ -181,7 +181,7 @@ Everything in Level 2, and:
 | 6.2.5 No composition rules | 1 | Met by default | Don't add `mixedCase()`, `numbers()` or `symbols()` through the rules' `$adjust` callback. A longer minimum is fine. |
 | 6.2.6 Password fields are masked | 1 | Yours | Use `type="password"` on your forms. A "show" toggle is allowed. |
 | 6.2.7 Paste and password managers are permitted | 1 | Yours | Don't block paste, and set `autocomplete="current-password"` or `"new-password"`. Keyring's browser package touches neither. |
-| 6.2.8 The password is verified exactly as typed | 1 | Met | |
+| 6.2.8 The password is verified exactly as typed | 1 | Met | Nothing is cut short or has its case changed. Keyring does put a password in Unicode's NFC form before hashing or checking it, as NIST SP 800-63B recommends, so the same password matches from every keyboard. |
 | 6.2.9 Passwords of at least 64 characters are permitted | 2 | Needs setup | Set `HASH_DRIVER=argon2id`. With bcrypt, Laravel's default, Keyring refuses anything over 72 bytes rather than cut it short, which turns away 64 characters of accented or non-Latin text. The conformance suite flags bcrypt. |
 | 6.2.10 No periodic rotation | 2 | Met | Keyring has no password expiry. Don't add one. |
 | 6.2.11 The context word list is enforced | 2 | Needs setup | Put your list (6.1.2) in `passwords.context`. Keyring refuses a password made up of nothing but listed words, the app's name, the user's name, the name part of their email address and their organisation's part of its domain, with digits and punctuation taken out and look-alike spellings such as `k3yr1ng` read as letters. A longer passphrase that only has one of them in it passes. |

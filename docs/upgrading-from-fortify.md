@@ -18,7 +18,7 @@
 
 Keyring covers what Fortify does (login, registration, password reset, email verification, password confirmation, two factor authentication) and replaces it. Fortify keeps two factor state in three columns on `users`, which gives one authenticator app per user. Keyring keeps every sign-in method in its own table, so users can have several.
 
-Your users keep their passwords, authenticator apps, recovery codes and `laravel/passkeys` passkeys. The exception is a password over 72 bytes on a bcrypt hash: bcrypt only ever stored its first 72 bytes, and Keyring refuses longer input rather than comparing a truncated value, so those users need to reset their password.
+Your users keep their passwords, authenticator apps, recovery codes and `laravel/passkeys` passkeys. The exception is a password over 72 bytes on a bcrypt hash: bcrypt only ever stored its first 72 bytes, and Keyring refuses longer input rather than comparing a truncated value, so those users need to reset their password. The same goes for a password with characters that weren't typed in Unicode's NFC form (an accented letter sent as a letter and a separate accent, which few keyboards do): Fortify hashed it as typed and Keyring [checks the NFC form](protected-changes.md#password-rules), so it no longer matches.
 
 ## Steps
 
@@ -112,6 +112,7 @@ Things to know:
 - One exception: a failed two factor import's stand-in is replaced by a later run that can read the secret, whatever else the user has by then. A passkey that failed has no stand-in. If the user's two factor came across in the meantime, a later run lists that passkey as skipped, since it can't tell a row that failed from one the user removed, and the user adds the passkey again in the app.
 - It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Drop them once the import is clean: a user who removes every sign-in method in Keyring has none left to tell a later run they were already imported.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
+- `laravel/passkeys` takes RS256 keys and Keyring doesn't by default, so a passkey made by Windows Hello may be imported and then refused at sign in. Add `RS256` to [`webauthn.algorithms`](passkeys.md#rs256-and-windows-hello) to keep those working.
 - Imported recovery codes work as they did: typed as Fortify showed them, capitals included. Spaces and dashes are ignored. Keyring stores each as a keyed hash, which OWASP ASVS 5.0.0 requirement 6.5.2 allows for a code with 112 random bits or more, and Fortify's 20 letters and digits have 119 only while their case counts. The codes Keyring makes itself are case-insensitive.
 - A recovery code set holding anything other than Fortify's own codes (an app that swapped in a shorter format, say) is left behind and listed as skipped, since a short code can't safely be stored that way. Those users keep their authenticator app and make new codes.
 - `--dry-run` reports the same outcome and exit code without writing anything.

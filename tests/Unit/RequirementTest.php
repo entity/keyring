@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Login\Requirement;

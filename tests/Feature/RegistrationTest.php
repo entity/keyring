@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Actions\Keyring\CreateNewUser;
 use App\Notifications\Keyring\AlreadyRegistered;
 use Illuminate\Auth\Events\Registered;

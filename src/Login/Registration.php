@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Login;
 
 use Closure;
@@ -26,6 +28,7 @@ use Keyring\Exceptions\MissingNotification;
 use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 use Keyring\Support\Input;
+use Keyring\Support\PasswordRules;
 use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 use LogicException;
@@ -89,7 +92,7 @@ class Registration
     public function quietly(Request $request, CreatesNewUsers $creator): void
     {
         $this->container->make(Timebox::class)->call(function () use ($request, $creator) {
-            $input = $creator->validate($request->all());
+            $input = $creator->validate($this->input($request));
             $email = $this->address($request, $input);
 
             $user = $this->taken($email) ? null : $this->create($creator, $input, $email);
@@ -125,7 +128,7 @@ class Registration
     public function openly(Request $request, CreatesNewUsers $creator): Authenticatable&Model
     {
         try {
-            $input = $creator->validate($request->all());
+            $input = $creator->validate($this->input($request));
         } catch (ValidationException $e) {
             if ($this->taken($email = $this->address($request))) {
                 $e->validator->errors()->merge($this->alreadyTaken($email)->errors());
@@ -139,6 +142,17 @@ class Registration
         $user = $this->taken($email) ? null : $this->create($creator, $input, $email);
 
         return $user ?? throw $this->alreadyTaken($email);
+    }
+
+    /**
+     * The form, with its password as it will be hashed and checked from now
+     * on, so the action's rules measure that.
+     *
+     * @return array<string, mixed>
+     */
+    protected function input(Request $request): array
+    {
+        return PasswordRules::normalizeInput($request->all());
     }
 
     /**

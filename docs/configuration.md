@@ -126,12 +126,16 @@ The browser package uses Keyring's default paths. If you change the prefix, tell
     'origins' => [],
     'timeout' => '60s',
     'attestation_roots' => [],
+    'algorithms' => ['ES256', 'EdDSA'],
+    'minimum_rsa_bits' => 2048,
 ],
 ```
 
 See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout` is a [duration](#durations).
 
 `attestation_roots` lists the root certificates a new key's attestation has to chain to, as PEM text or paths to PEM files. It's only read for a factor set up with [`requireAttestation()`](passkeys.md#requiring-attestation), which refuses every key while the list is empty.
+
+`algorithms` lists the signature algorithms keys may use, in order of preference: `ES256`, `EdDSA` and `RS256`. `RS256` is off by default, and `minimum_rsa_bits` is the shortest RSA key taken when it's on, never under 2048. See [Signature Algorithms](passkeys.md#signature-algorithms) for what turning it on gains and costs.
 
 ## Account Changes and Enrollment
 

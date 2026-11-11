@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
@@ -135,7 +137,7 @@ it('still offers recovery codes under no downgrade, so a lost key is not a locko
     expect(collect($response->json('props.alternatives'))->pluck('factor')->all())->toBe(['recovery']);
     $this->flushHeaders();
 
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertRedirect('/dashboard');
     $this->assertAuthenticatedAs($this->user);
 });
 

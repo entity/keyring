@@ -83,6 +83,8 @@ The password stays in your `users` table, so password resets and Laravel's own h
 
 When a login starts with an unknown address, Keyring still runs a password hash, so the response takes the same time either way. A correct password is rehashed if your hashing settings changed.
 
+A typed password is put in Unicode's NFC form before it's checked, like every password Keyring's routes set, so it matches whichever way the device composed its characters. See [Password Rules](protected-changes.md#password-rules).
+
 ### Authenticator Apps (TOTP)
 
 Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code.
@@ -104,6 +106,16 @@ One step is the widest window there is (`Totp::MAX_WINDOW`). Anything else throw
 Each authenticator remembers the last time step it accepted, under a row lock, so a code can't be used twice, even by two requests at the same moment.
 
 A user can have several authenticator apps.
+
+Codes are made with HMAC-SHA1 by default. That's a compatibility choice, not a preference: it's what RFC 6238 defaults to and the only digest every authenticator app makes. Some widely used apps have ignored a request for anything else (Google Authenticator's own key format notes said so for years) and gone on showing SHA-1 codes, which then never match, so the user can't finish adding the app. OWASP ASVS lists HMAC-SHA-1 as a legacy algorithm, allowed for compatibility like this. The weakness that retired SHA-1 for signatures is finding two inputs with the same hash, which doesn't help anyone guess a code keyed with a secret they don't have.
+
+If you control which apps your users have, set the factor up with SHA-256 or SHA-512:
+
+```php
+fn ($app) => $app->make(Totp::class, ['algorithm' => 'sha256']),
+```
+
+The `otpauth://` URL and the QR code then say `algorithm=SHA256`, and enrolling returns it as `algorithm` to show beside the secret for anyone typing it in. Each authenticator keeps the digest it was set up with, so changing the setting only affects apps added afterwards and nobody has to enroll again. The secret is 160 random bits whichever digest is used.
 
 ### Email Codes
 
@@ -140,7 +152,7 @@ Enrolling sends a code to the current address, and the user types it to confirm.
 
 ### Recovery Codes
 
-Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx`, shown once. Each carries 120 random bits and is stored as a keyed hash (HMAC-SHA256 with `APP_KEY`). OWASP ASVS 5.0.0 requirement 6.5.2 allows that for a code with 112 random bits or more, and asks for a slow, salted password hash below it, so Keyring stores and accepts nothing shorter: `secretFor()` throws an `InvalidArgumentException` for a code in any other form, and one typed in another form never matches. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
+Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx`, shown once. Each is 16 random bytes, the 128 bits OWASP ASVS asks of a value that mustn't be guessed, written as 26 base32 characters, and is stored as a keyed hash (HMAC-SHA-256 under a key derived from `APP_KEY` for recovery codes alone). OWASP ASVS 5.0.0 requirement 6.5.2 allows that for a code with 112 random bits or more, and asks for a slow, salted password hash below it, so Keyring stores and accepts nothing shorter: `secretFor()` throws an `InvalidArgumentException` for a code in any other form, and one typed in another form never matches. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
 
 The one other form is Fortify's, for sets [`keyring:import`](upgrading-from-fortify.md#importing-two-factor-data) brings across: 20 letters and digits, 119 random bits. Those have that many only while their case counts, so an imported code has to be typed as it was shown.
 
@@ -148,7 +160,7 @@ A user has at most one set. Generating a new set replaces the old one. Users get
 
 The factor's key is available as `RecoveryCodes::KEY` (`recovery`), for code that looks the set up.
 
-The hashes are keyed with `APP_KEY`. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
+The hashes are keyed with a key derived from `APP_KEY` for recovery codes alone. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
 
 Once every code is used, the set no longer counts as a factor, so policies and step-up stop asking for it.
 

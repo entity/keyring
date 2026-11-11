@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -28,7 +30,7 @@ use ParagonIE\ConstantTime\Base32;
  * password hash for anything with fewer. So a code is only stored, and only
  * accepted, in one of two forms that have them:
  *
- * - Keyring's own: 24 base32 characters (120 bits), typed in either case.
+ * - Keyring's own: 26 base32 characters (128 bits), typed in either case.
  * - Fortify's, as keyring:import brings them in: 20 letters and digits (119
  *   bits), which only carry that much while their case counts.
  *
@@ -68,7 +70,7 @@ class RecoveryCodes extends Factor implements Enrollable
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $code = $this->canonical((string) $request->input('code'));
-        $candidates = $code === null ? [] : KeyedHash::candidates($code);
+        $candidates = $code === null ? [] : KeyedHash::candidates(KeyedHash::RECOVERY_CODES, $code);
 
         $used = $this->consume($authenticator, function (Authenticator $locked) use ($candidates) {
             $hashes = $this->hashes($locked);
@@ -159,10 +161,11 @@ class RecoveryCodes extends Factor implements Enrollable
      */
     public function generate(): array
     {
-        // 120 random bits each (ASVS asks for 112), as lowercase base32 in
-        // groups of four: xxxx-xxxx-xxxx-xxxx-xxxx-xxxx.
+        // 128 random bits each, as OWASP ASVS asks of anything that mustn't
+        // be guessed: 26 lowercase base32 characters, in groups of four with
+        // the last two on their own, xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx.
         $codes = array_map(
-            fn () => implode('-', str_split(Str::lower(Base32::encodeUnpadded(random_bytes(15))), 4)),
+            fn () => implode('-', str_split(Str::lower(Base32::encodeUnpadded(random_bytes(16))), 4)),
             range(1, $this->count),
         );
 
@@ -199,8 +202,8 @@ class RecoveryCodes extends Factor implements Enrollable
 
     protected function hash(#[\SensitiveParameter] string $code): string
     {
-        return KeyedHash::make($this->canonical($code) ?? throw new InvalidArgumentException(
-            'Keyring only stores recovery codes with 112 random bits or more: its own (24 base32 characters) or Fortify\'s (20 letters and digits). '
+        return KeyedHash::make(KeyedHash::RECOVERY_CODES, $this->canonical($code) ?? throw new InvalidArgumentException(
+            'Keyring only stores recovery codes with 112 random bits or more: its own (26 base32 characters) or Fortify\'s (20 letters and digits). '
             .'A shorter code is too easy to guess to be kept as a keyed hash (OWASP ASVS 6.5.2).',
         ));
     }
@@ -216,7 +219,7 @@ class RecoveryCodes extends Factor implements Enrollable
         $code = $this->normalizeCode($code);
 
         return match (true) {
-            preg_match('/^[a-z2-7]{24}$/i', $code) === 1 => Str::lower($code),
+            preg_match('/^[a-z2-7]{26}$/i', $code) === 1 => Str::lower($code),
             preg_match('/^[a-z0-9]{20}$/i', $code) === 1 => $code,
             default => null,
         };

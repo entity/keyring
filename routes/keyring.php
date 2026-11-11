@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\Route;
 use Keyring\Features;
 use Keyring\Http\Controllers\AuthenticatedSessionController;

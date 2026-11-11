@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers\Concerns;
 
 use Illuminate\Http\Request;
@@ -22,12 +24,13 @@ trait RespondsWithStatus
 
     /**
      * The flashed status as a message for a page to show. Statuses that
-     * aren't Keyring's (like the password broker's) are already messages.
+     * aren't Keyring's (like the password broker's) are already messages,
+     * and one that isn't text, flashed by the app for itself, is no message.
      */
     protected function statusMessage(Request $request): ?string
     {
         $status = $request->session()->get('status');
 
-        return $this->keyring->statusMessage($status) ?? $status;
+        return $this->keyring->statusMessage($status) ?? (is_string($status) ? $status : null);
     }
 }

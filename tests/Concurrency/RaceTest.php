@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\DB;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -38,11 +40,11 @@ it('never lets two removals at once take the last way in', function () {
 
 it('spends a recovery code once, however many requests bring it', function () {
     $user = taylor();
-    $codes = Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb'])->for($user, 'authenticatable')->create();
+    $codes = Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb'])->for($user, 'authenticatable')->create();
 
     $results = contend($codes, [
-        ['use-recovery-code', $codes->id, 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'],
-        ['use-recovery-code', $codes->id, 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'],
+        ['use-recovery-code', $codes->id, 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'],
+        ['use-recovery-code', $codes->id, 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'],
     ]);
 
     expect(outcomes($results, true))->toBe(1)
