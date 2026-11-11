@@ -6,6 +6,7 @@
 - [Authenticators](#authenticators)
 - [Account Changes](#account-changes)
 - [Risk](#risk)
+- [Refusals](#refusals)
 - [Laravel's Auth Events](#laravels-auth-events)
 
 ## Introduction
@@ -33,7 +34,7 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `FactorChallenged` | The challenge page showed a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (null when the user wasn't found), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. | `request`, `factor`, `retryAfter` (seconds) |
+| `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. Dispatched for every request the limit refuses; the [security log](security-log-and-emails.md#refusals-that-repeat) notes it once per lock. | `request`, `factor`, `retryAfter` (seconds) |
 | `AccountLocked` | Failed attempts locked the account out of a factor that can start a sign in until a password reset or `Keyring::unlock()`. Only with `limits.lock_after` set. | `user`, `factor` |
 | `Authenticated` | A login completed and the user was signed in. | `user`, `attempt`, `device` (null without `Features::devices()`) |
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
@@ -86,6 +87,18 @@ Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of 
 
 An assessment that ends in `Action::allow()` dispatches nothing. See [Risk](risk.md#events-and-logging).
 
+## Refusals
+
+| Event | When | Properties |
+|---|---|---|
+| `AccessRefused` | A signed-in user asked for an authenticator or device that isn't theirs, or that doesn't exist (both get the same 404, so the event doesn't tell them apart), or opened an email verification link made for another account. | `user`, `resource` (`authenticator`, `device` or `email_verification`), `id` (what was asked for, as it was sent) |
+| `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account may not add one yet) |
+| `AuthenticatorRemovalRefused` | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `user`, `authenticator` |
+| `LinkRefused` | An emailed link was refused: a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
+| `VerificationRefused` | A sign in or step-up met its requirement and was still refused, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `attempt`, `factor`, `skipped` (the steps' class names) |
+
+None of these changes what the person who was refused sees. Each fires every time, however often it's repeated: only the [security log](security-log-and-emails.md#refusals-that-repeat) limits how many it writes down. A form that fails ordinary validation dispatches nothing.
+
 ## Laravel's Auth Events
 
 Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on, so the verification email it sends doesn't show in how long a new address takes to answer. Like Fortify, it also dispatches these next to its own, so listeners and packages built for them keep working:
@@ -93,5 +106,5 @@ Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`
 | Laravel event | Dispatched with |
 |---|---|
 | `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
-| `Illuminate\Auth\Events\Lockout` | `Lockout`. |
+| `Illuminate\Auth\Events\Lockout` | `Lockout`, so once for every refused request. |
 | `Illuminate\Auth\Events\PasswordReset` | Keyring's `PasswordReset`. |

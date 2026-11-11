@@ -33,7 +33,7 @@ Each level includes the ones below it. The other ASVS chapters (TLS, input valid
 `php artisan keyring:install` with every default accepted, or with `--no-interaction`, sets up:
 
 - the password as the only sign-in method, with [Keyring's password rules](protected-changes.md#password-rules),
-- `Features::registration()`, `resetPasswords()`, `emailVerification()` and `updatePasswords()`,
+- `Features::registration()`, `resetPasswords()`, `emailVerification()`, `updatePasswords()` and `securityLog()`,
 - [registration that doesn't reveal who has an account](sign-in-flow.md#without-revealing-who-has-an-account),
 - the emails that tell users their password, sign-in methods, recovery codes or email address changed, that a recovery code was used, or that their account was locked,
 - rate limits, the timebox, the session registry and a 30 day limit on every session.
@@ -81,6 +81,7 @@ Everything in Level 1, and:
         Features::updatePasswords(),
         Features::manageAuthenticators(),
         Features::devices(),
+        Features::securityLog(),
     ],
 
     'enrollment_url' => '/settings/security',
@@ -140,7 +141,7 @@ Everything in Level 2, and:
     With `ifEnrolled()` a new user signs in with their password, and `keyring.enrolled:aal3` keeps them on your enrollment page until they've added a key; from then on they need it every time. Drop `ifEnrolled()` if you hand out keys before an account first signs in. See [Requiring Attestation](passkeys.md#requiring-attestation). Without attestation, "hardware" is only what the key says about itself.
 
 2. **No email codes, and no SMS** ([6.3.6](#v63-general-authentication-security), [6.6.1](#v66-out-of-band-authentication-mechanisms)). Don't register `EmailCode::asSecondFactor()` or an SMS factor of your own. Recovery codes can't meet `aal3` either, so a lost key goes to your support process.
-3. **Tell users about suspicious sign ins** ([6.3.5](#v63-general-authentication-security)). Register the notices the installer leaves commented out, turn on the security log, and pick [risk signals](risk.md) with a response that notifies, as [Telling the User](risk.md#telling-the-user) shows for a sign in after a long quiet period or after several failures:
+3. **Tell users about suspicious sign ins** ([6.3.5](#v63-general-authentication-security)). Register the notices the installer leaves commented out, keep the security log on, and pick [risk signals](risk.md) with a response that notifies, as [Telling the User](risk.md#telling-the-user) shows for a sign in after a long quiet period or after several failures:
 
     ```php
     Keyring::notifications([
@@ -194,7 +195,7 @@ Everything in Level 2, and:
 | 6.3.2 No default accounts | 1 | Met | Keyring creates no users. Don't seed any in production. |
 | 6.3.3 Multi-factor authentication is required; a hardware factor at Level 3 | 2 | Needs setup | Level 2: a second factor registered and `keyring.enrolled`, which the installer sets up when you answer yes to requiring one. Level 3: `Requirement::aal3()`, `keyring.enrolled:aal3` and `requireAttestation()`. See [Level 2](#level-2) and [Level 3](#level-3). Until a user enrolls they are signed in, and held at your enrollment page. |
 | 6.3.4 No undocumented pathways, and consistent strength across them | 2 | Met | Every sign in runs one pipeline. Start a social login with [`Keyring::attempt()`](sign-in-flow.md#starting-a-sign-in-yourself) rather than `Auth::login()`, which registers a session at no assurance level. |
-| 6.3.5 Users are notified of suspicious authentication attempts | 3 | Needs setup | Register the `new_device`, `second_factor_failed`, `suspicious_activity` and `clone_suspected` notices, turn on `Features::devices()` and `Features::securityLog()`, and pick [risk signals](risk.md), among them `InactiveAccount` and `SuccessAfterFailures`, with a response that notifies ([Telling the User](risk.md#telling-the-user)). `account_locked`, which a default install registers, is only sent with `limits.lock_after`; an ordinary lockout that lifts by itself emails nobody, so listen for `Lockout` if you want to. |
+| 6.3.5 Users are notified of suspicious authentication attempts | 3 | Needs setup | Register the `new_device`, `second_factor_failed`, `suspicious_activity` and `clone_suspected` notices, turn on `Features::devices()`, keep `Features::securityLog()`, and pick [risk signals](risk.md), among them `InactiveAccount` and `SuccessAfterFailures`, with a response that notifies ([Telling the User](risk.md#telling-the-user)). `account_locked`, which a default install registers, is only sent with `limits.lock_after`; an ordinary lockout that lifts by itself emails nobody, so listen for `Lockout` if you want to. |
 | 6.3.6 Email isn't an authentication factor | 3 | Met by default | Don't register `EmailCode::asSecondFactor()`. |
 | 6.3.7 Users are notified when authentication details change | 3 | Met by default | A default install mails a changed or reset password, a sign-in method added or removed, new recovery codes, a recovery code used and a changed email address. Also register `email_change_reverted`. Renaming a sign-in method or changing the default one sends nothing. Each kind is capped at five an hour per account, with every event still in the security log. Installing with `--no-emails` turns them off. |
 | 6.3.8 Valid users can't be deduced from sign in, registration or forgot password | 3 | Met by default | All three answer the same for every address, in the same time. Keep `registration.reveal_taken` off. A username of your own that must be unique will still say when it's taken. See [Registration](sign-in-flow.md#without-revealing-who-has-an-account). |

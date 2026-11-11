@@ -22,7 +22,7 @@ use function Laravel\Prompts\multiselect;
 #[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
-        {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords, email-verification and update-passwords): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
+        {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords, email-verification, update-passwords and security-log): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
         {--emails : Register the emails that tell users their password, sign-in methods or email address changed (the default)}
         {--no-emails : Register no security emails, only the ones a flow needs}
         {--require-second-factor : Make every user set up a second factor (the default with an authenticator app, passkeys or security keys)}
@@ -34,7 +34,7 @@ class InstallCommand extends Command
      * The features turned on unless others are picked. What config/keyring.php
      * ships with says the same.
      */
-    protected const array FEATURES = ['registration', 'reset-passwords', 'email-verification', 'update-passwords'];
+    protected const array FEATURES = ['registration', 'reset-passwords', 'email-verification', 'update-passwords', 'security-log'];
 
     /**
      * Sign-in methods besides the password, and the line each adds to the

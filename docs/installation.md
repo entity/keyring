@@ -39,7 +39,7 @@ The command asks four things:
 
 1. **Which sign-in methods besides the password?** None by default. Recovery codes come with any of them.
 2. **Require a second factor for everyone?** Asked when you picked an authenticator app, passkeys or security keys, and yes by default. Users still sign in with what they have, then every page sends them to `/settings/security` until they've set one up (see [Requiring a Second Factor](policies.md#requiring-a-second-factor)). It isn't asked with the password alone or with only email codes, where nobody could meet it: then nothing requires a second factor.
-3. **Which features?** Registration, password resets, email verification and changing the password by default, plus managing sign-in methods when you picked one. Registration always brings email verification, because by default [new users sign in once they've verified their address](sign-in-flow.md#without-revealing-who-has-an-account).
+3. **Which features?** Registration, password resets, email verification, changing the password and the security log by default, plus managing sign-in methods when you picked one. Registration always brings email verification, because by default [new users sign in once they've verified their address](sign-in-flow.md#without-revealing-who-has-an-account).
 4. **Email users when their password, sign-in methods or email address change?** Yes by default: password changed, sign-in method added or removed, recovery code used, new recovery codes made, email address changed and account locked.
 
 Without prompts (`--no-interaction`, or in CI) you get the same defaults. You can also answer with options:
@@ -48,7 +48,7 @@ Without prompts (`--no-interaction`, or in CI) you get the same defaults. You ca
 php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --require-second-factor
 ```
 
-`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration`, `reset-passwords`, `email-verification` and `update-passwords`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--require-second-factor` and `--optional-second-factor` answer the second question; requiring one without a sign-in method that counts stops the command too. `--emails` and `--no-emails` say whether the provider registers the security notices about changes; the classes are published either way.
+`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration`, `reset-passwords`, `email-verification`, `update-passwords` and `security-log`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--require-second-factor` and `--optional-second-factor` answer the second question; requiring one without a sign-in method that counts stops the command too. `--emails` and `--no-emails` say whether the provider registers the security notices about changes; the classes are published either way.
 
 Pass `--force` to overwrite files that already exist; without it, existing files are skipped, and with `config/keyring.php` already there it doesn't ask which features to turn on. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
 
@@ -131,13 +131,4 @@ To change the prefix, domain or middleware, or to turn routes off, see [Configur
 - Build your [pages](quick-start.md#your-pages), and the page at `enrollment_url` if you required a second factor.
 - Run a queue worker if your queue isn't `sync`. [Security emails](security-log-and-emails.md#security-emails) are queued, so they wait for one, while sign-in codes go out straight away.
 - Add [features](quick-start.md#adding-features) and [sign-in methods](quick-start.md#adding-sign-in-methods) as you need them.
-- Schedule `keyring:prune`, which clears out old devices, finished email changes, old security log entries and ended sessions:
-
-  ```php
-  // routes/console.php
-  use Illuminate\Support\Facades\Schedule;
-
-  Schedule::command('keyring:prune')->daily();
-  ```
-
-  See [Pruning](devices-and-sessions.md#pruning).
+- Run Laravel's scheduler (`* * * * * php artisan schedule:run`) if you don't already. Keyring adds `keyring:prune` to it, daily, which clears out old devices, finished email changes, old security log entries and ended sessions. See [Pruning](devices-and-sessions.md#pruning).

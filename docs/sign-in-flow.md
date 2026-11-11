@@ -370,7 +370,7 @@ Keyring::pipeline(fn (Steps $steps) => $steps
 
 `dangerouslyReplace()` and `dangerouslyRemove()` log a warning when `Keyring::pipeline()` is called, and the [conformance suite](testing.md#the-conformance-suite) fails until you acknowledge the step. Whatever that step checked is then up to you.
 
-Before signing anyone in, `CompleteAttempt` also confirms that this request was throttled, verified and checked for a risk lock, and that the requirement is met. If one of those didn't happen, it logs an error and refuses with the usual generic error. It doesn't ask this of a step you took out with `dangerouslyReplace()` or `dangerouslyRemove()`, but the requirement must always be met.
+Before signing anyone in, `CompleteAttempt` also confirms that this request was throttled, verified and checked for a risk lock, and that the requirement is met. If one of those didn't happen, it logs an error, dispatches `VerificationRefused` (a `verification_refused` entry in the [security log](security-log-and-emails.md#entry-types)) and refuses with the usual generic error. It doesn't ask this of a step you took out with `dangerouslyReplace()` or `dangerouslyRemove()`, but the requirement must always be met.
 
 ### Writing a Step
 
@@ -559,7 +559,8 @@ All in `Keyring\Events`:
 | `FactorChallenged` | The challenge page shows a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (nullable), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit. | `request`, `factor`, `retryAfter` |
+| `Lockout` | A rate limit was hit. Dispatched for each request it refuses. | `request`, `factor`, `retryAfter` |
+| `VerificationRefused` | The final gate refused because a [mandatory step](#mandatory-steps) hadn't run. | `attempt`, `factor`, `skipped` |
 | `AccountLocked` | The account is locked until a password reset (only with `limits.lock_after`). | `user`, `factor` |
 | `Authenticated` | A login completed. | `user`, `attempt`, `device` |
 | `Confirmed` | A step-up completed. | `user`, `attempt` |
@@ -571,5 +572,5 @@ Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyr
 | Laravel event | Dispatched with |
 |---|---|
 | `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
-| `Illuminate\Auth\Events\Lockout` | `Lockout`. |
+| `Illuminate\Auth\Events\Lockout` | `Lockout`, so once for every refused request. |
 | `Illuminate\Auth\Events\PasswordReset` | Keyring's `PasswordReset`. |

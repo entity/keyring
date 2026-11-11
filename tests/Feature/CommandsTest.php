@@ -4,6 +4,8 @@ use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use App\Providers\KeyringServiceProvider;
+use Illuminate\Console\Scheduling\Event;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\Encrypter;
@@ -51,7 +53,7 @@ describe('keyring:install', function () {
         $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
     });
 
-    it('installs the password, registration, resets, verification, password changes and the security emails without asking', function () {
+    it('installs the password, registration, resets, verification, password changes, the security log and the security emails without asking', function () {
         $this->artisan('keyring:install', ['--no-interaction' => true])
             ->expectsOutputToContain('Nothing makes users set up a second factor')
             ->assertSuccessful();
@@ -59,7 +61,7 @@ describe('keyring:install', function () {
         $config = require config_path('keyring.php');
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
-        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords()])
+        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords(), Features::securityLog()])
             // The same features Keyring's own config starts with.
             ->toBe((require __DIR__.'/../../config/keyring.php')['features'])
             ->and($config['registration'])->toBe(['reveal_taken' => false])
@@ -674,6 +676,28 @@ it('prunes old devices, email changes, security events and ended sessions', func
         ->and($registry->find('ended'))->toBeNull()
         ->and($registry->find('live'))->not->toBeNull();
 });
+
+it('schedules the prune itself, every day, so nothing is kept because a line was left out', function () {
+    $pruning = collect(app(Schedule::class)->events())->filter(fn (Event $event) => str_contains((string) $event->command, 'keyring:prune'));
+
+    expect($pruning)->toHaveCount(1)
+        ->and($pruning->first()->expression)->toBe('0 3 * * *');
+
+    // The scheduled command is the one that prunes.
+    $this->artisan('schedule:list')->expectsOutputToContain('keyring:prune')->assertSuccessful();
+});
+
+it('lets the app move the daily prune, or schedule it for itself', function (?string $at, array $expressions) {
+    config(['keyring.prune_at' => $at]);
+    app()->forgetInstance(Schedule::class);
+
+    expect(collect(app(Schedule::class)->events())
+        ->filter(fn (Event $event) => str_contains((string) $event->command, 'keyring:prune'))
+        ->map(fn (Event $event) => $event->expression)->values()->all())->toBe($expressions);
+})->with([
+    'another time' => ['01:30', ['30 1 * * *']],
+    'not at all' => [null, []],
+]);
 
 it('describes the setup in artisan about', function () {
     $this->artisan('about', ['--only' => 'keyring'])

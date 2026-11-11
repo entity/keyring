@@ -3,12 +3,12 @@
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Auth\AuthenticationException;
-use Illuminate\Auth\Events\Verified;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
+use Keyring\Http\Requests\VerifyEmailRequest;
 use Keyring\KeyringManager;
 use Keyring\Login\VerificationLink;
 
@@ -35,9 +35,7 @@ class EmailVerificationController
      */
     public function verify(Request $request, VerificationLink $link, string $id, string $hash): mixed
     {
-        $user = $this->keyring->guard()->user();
-
-        if (! $user instanceof Model) {
+        if ($this->keyring->guard()->guest()) {
             if ($this->keyring->hidesRegisteredAddresses()) {
                 $link->remember($request, $id, $hash);
                 $request->session()->flash('status', 'sign-in-to-verify');
@@ -46,15 +44,15 @@ class EmailVerificationController
             throw new AuthenticationException(guards: [config('keyring.guard')], redirectTo: route('login'));
         }
 
-        abort_unless(
-            $user instanceof MustVerifyEmail
-                && hash_equals((string) $user->getKey(), $id)
-                && hash_equals(sha1($user->getEmailForVerification()), $hash),
-            403,
-        );
+        // As the auth middleware does, so the request's user is Keyring's.
+        Auth::shouldUse(config('keyring.guard'));
 
-        if (! $user->hasVerifiedEmail() && $user->markEmailAsVerified()) {
-            event(new Verified($user));
+        // Laravel's check that the link is this user's own, made now that
+        // there is a user to check it against.
+        $verification = app(VerifyEmailRequest::class);
+
+        if (! $this->verified($request)) {
+            $verification->fulfill();
         }
 
         return $this->keyring->response(VerifiedResponse::class, justNow: true);

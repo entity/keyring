@@ -25,7 +25,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), which features to turn on, and whether to email users when their password, sign-in methods or email address change. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes and those emails. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
+`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), which features to turn on, and whether to email users when their password, sign-in methods or email address change. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes, the security log and those emails. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
 
 Add the trait to your user model, and keep Laravel's `hashed` cast on the password. Registration leaves a new user signed out until they've verified their address, so nobody can use the form to find out who has an account. That needs `MustVerifyEmail` (the installer turns on email verification for you):
 
@@ -181,7 +181,7 @@ use Keyring\Features;
 | `manageAuthenticators()` | Adding, renaming and removing sign-in methods. Needed for users to set any up. | [Managing Authenticators](authenticators.md) |
 | `devices()` | A device cookie, "trust this device", a list of where users are signed in, and "this wasn't me" links. | [Devices & Sessions](devices-and-sessions.md) |
 | `emailChanges()` | Email changes confirmed by the new address and undoable from the old one. Changing the email elsewhere then throws. | [Protected Changes](protected-changes.md#changing-the-email-address) |
-| `securityLog()` | A log of sign ins, failures and changes, and "was this you?" alerts. | [Security Log & Emails](security-log-and-emails.md) |
+| `securityLog()` | A log of sign ins, failures, refusals and changes in `keyring_events`, and "was this you?" alerts. On unless you take it out, and then the events go to your app's log instead. | [Security Log & Emails](security-log-and-emails.md) |
 
 A few more things are opt-in, but aren't in the features list:
 
