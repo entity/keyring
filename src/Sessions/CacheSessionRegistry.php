@@ -63,7 +63,9 @@ class CacheSessionRegistry implements SessionRegistry
         $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id), $this->everyoneKey()]);
         $data = $found[$this->key($id)] ?? null;
 
-        if (! is_array($data)) {
+        // A record from before records said whose table their ID is one of
+        // can't be told apart from another model's, so it's no session.
+        if (! is_array($data) || ! is_string($data['user_type'] ?? null)) {
             return null;
         }
 

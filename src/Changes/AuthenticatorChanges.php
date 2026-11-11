@@ -59,11 +59,7 @@ class AuthenticatorChanges
         $recoverable = array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
         $recovery = ! $isRecovery && $recoverable && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
-        $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery, $request) {
-            if ($request !== null) {
-                $this->sessions->stillSignedIn($request, $user);
-            }
-
+        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
             if (! $factor->multiple()) {
                 $replaced = $keyring->of($factor->key())->each->delete();
 
@@ -80,6 +76,8 @@ class AuthenticatorChanges
                 $this->save($user, $recovery['authenticator']);
             }
         });
+
+        $request === null ? $save() : $this->sessions->whileSignedIn($request, $user, $save);
 
         $isRecovery
             ? RecoveryCodesGenerated::dispatch($user, $authenticator)

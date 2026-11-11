@@ -902,8 +902,8 @@ it('prunes old devices, email changes, security events and ended sessions', func
     $recent = $event(1);
 
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('ended', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
-    $registry->save(new RegisteredSession('live', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addDay()->getTimestamp()));
+    $registry->save(new RegisteredSession('ended', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
+    $registry->save(new RegisteredSession('live', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addDay()->getTimestamp()));
 
     $this->artisan('keyring:prune')->assertSuccessful();
 
@@ -924,7 +924,7 @@ describe('keyring:sign-out', function () {
             $now = now()->getTimestamp();
 
             return tap(
-                new RegisteredSession($id, (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->with($with),
+                new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->with($with),
                 fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
             );
         };
@@ -1080,7 +1080,7 @@ describe('keyring:sign-out', function () {
     it('ends more sessions than it revokes in one go', function () {
         $now = now()->getTimestamp();
 
-        DB::table('keyring_sessions')->insert(array_map(fn (int $n) => new RegisteredSession("session-{$n}", (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->toArray(), range(1, 1001)));
+        DB::table('keyring_sessions')->insert(array_map(fn (int $n) => new RegisteredSession("session-{$n}", (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->toArray(), range(1, 1001)));
 
         $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
 

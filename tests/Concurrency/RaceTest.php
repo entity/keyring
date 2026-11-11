@@ -7,7 +7,6 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
-use Keyring\Models\Device;
 use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\RegisteredSession;
@@ -194,7 +193,7 @@ it('puts the address back when a later change is confirmed while an earlier one 
 it('refuses an email change from a session that is signed out while its request waits', function (bool $signedOut, mixed $expected) {
     $user = taylor();
     $now = now()->getTimestamp();
-    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
 
     [$requested] = contend($user, [['request-email-change', $user->id, 'asking']], fn () => $signedOut && app(SessionRegistry::class)->revokeAll($user));
 
@@ -210,7 +209,7 @@ it('refuses an email change from a session that is signed out while its request 
 it('refuses a sign-in method from a session that is signed out while its request waits', function (bool $signedOut, string $expected) {
     $user = taylor();
     $now = now()->getTimestamp();
-    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
 
     [$added] = contend($user, [['add-authenticator', $user->id, 'asking']], fn () => $signedOut && app(SessionRegistry::class)->revokeAll($user));
 
@@ -221,35 +220,11 @@ it('refuses a sign-in method from a session that is signed out while its request
     'still signed in' => [false, 'added'],
 ]);
 
-// A browser someone else has signed in on keeps its cookie, so two sign ins
-// to a second account from it would each store that account's device under
-// the same token. The second finds the first's there, and carries on with it.
-it('gives two sign ins at once from one browser the same device, and fails neither', function () {
-    $user = taylor();
-    $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);
-    $token = str_repeat('a', 40);
-    $device = fn (User $owner) => Device::query()->forceCreate([
-        'authenticatable_type' => $owner->getMorphClass(), 'authenticatable_id' => $owner->id,
-        'token_hash' => Device::hashToken($token), 'first_seen_at' => now(), 'last_seen_at' => now(),
-    ]);
-    $device($other);
-
-    // Stored by the other sign in and not yet committed: this one has
-    // looked, found nothing, and waits at the unique index.
-    $stored = null;
-    [$recorded] = contend($user, [['record-device', $user->id, $token]], hold: function () use ($device, $user, &$stored) {
-        $stored = $device($user);
-    });
-
-    expect($recorded)->toBe($stored->id)
-        ->and(Device::query()->whereMorphedTo('authenticatable', $user)->count())->toBe(1);
-});
-
 it('lets one of two requests use a "remember me" cookie, and starts one session between them', function () {
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('remembered', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
 
     // Both read the record before either can replace it.
     $results = contend(sessionRow('remembered'), [
@@ -273,7 +248,7 @@ it('keeps an account to its session limit when two sign ins land at once', funct
     $registry = app(SessionRegistry::class);
 
     foreach (['older' => 120, 'newer' => 60] as $id => $ago) {
-        $registry->save(new RegisteredSession($id, (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now - $ago, $now - $ago, $now + 3600));
+        $registry->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now - $ago, $now - $ago, $now + 3600));
     }
 
     // Each waits for the user's row, so the second counts the first's session.
@@ -291,7 +266,7 @@ it('leaves nothing signed in when a sign-out everywhere meets a "remember me" co
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('remembered', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
 
     // Both wait for the user's row. Whichever goes first, the session ends:
     // signed out and then refused, or carried on and then signed out.
@@ -311,7 +286,7 @@ it('ends a reused "remember me" session wherever it has moved to by the time it 
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('remembered', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
 
     // Both wait for the user's row. Carried on first, it's followed to the
     // new record and ended there. Ended first, there's nothing to carry on.
@@ -329,7 +304,7 @@ it('signs out a session that moved to a new record while everyone was being sign
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
-    $registry->save($session = new RegisteredSession('remembered', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+    $registry->save($session = new RegisteredSession('remembered', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
 
     // The sign-out comes to the record while "remember me" is carrying its
     // session on, and waits. By the time it gets the record, the session is

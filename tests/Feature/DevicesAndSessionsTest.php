@@ -43,6 +43,7 @@ use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -333,6 +334,12 @@ describe('a sign in that fails after the guard is signed in', function () {
             {
                 throw new RuntimeException('The database went away.');
             }
+
+            // And is still away when the sign in is undone.
+            public function revoke(string $id): void
+            {
+                throw new RuntimeException('The database went away.');
+            }
         });
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();
@@ -429,7 +436,7 @@ it('signs out everywhere else', function (string $driver) {
     $other = new RegisteredSession(
         id: 'other',
         userId: (string) $this->user->id,
-        userType: $this->user->getMorphClass(),
+        userType: RegisteredSession::typeOf($this->user),
         guard: 'web',
         deviceId: null,
         assurance: Assurance::AAL1,
@@ -1122,7 +1129,7 @@ describe('an app with two kinds of account whose ids overlap', function () {
         $this->staff = staff();
 
         $now = now()->getTimestamp();
-        $session = fn (string $id, Model $user, ?string $device = null) => new RegisteredSession($id, (string) $user->getKey(), $user->getMorphClass(), 'web', $device, Assurance::AAL1, null, null, $now, $now, $now + 3600);
+        $session = fn (string $id, Model $user, ?string $device = null) => new RegisteredSession($id, (string) $user->getKey(), RegisteredSession::typeOf($user), 'web', $device, Assurance::AAL1, null, null, $now, $now, $now + 3600);
 
         $this->seed = function () use ($session) {
             app(SessionRegistry::class)->save($session('users', $this->user, 'device'));
@@ -1151,6 +1158,29 @@ describe('an app with two kinds of account whose ids overlap', function () {
         'deleting the account' => [fn (Model $user) => $user->delete()],
     ]);
 
+    // One account loaded as two classes is still one account, as it is to
+    // the guard: an Admin that extends User, on the users table.
+    it('takes one account for itself whichever of its classes it is loaded as', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        $admin = AdminUser::query()->findOrFail($this->user->id);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect();
+
+        // Signed in as the one, found and signed out as the other.
+        expect(app(SessionRegistry::class)->forUser($admin))->toHaveCount(1)
+            ->and(app(Sessions::class)->signOutEverywhere($admin))->toBe(1);
+        $this->get('/home')->assertRedirect('/login');
+
+        // And a session the app starts for the other carries on as the one.
+        $this->flushSession();
+        $this->app['auth']->forgetGuards();
+        Auth::login($admin);
+        $this->get('/home')->assertOk();
+        $this->app['auth']->forgetGuards();
+        $this->get('/home')->assertOk();
+    })->with(['database', 'cache']);
+
     it('does not carry one kind of account on with the other\'s session', function () {
         Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
 
@@ -1177,7 +1207,7 @@ describe('ending other sessions along with a change to how the user signs in', f
             $this->here = session(Sessions::KEY);
 
             $now = now()->getTimestamp();
-            app(SessionRegistry::class)->save(new RegisteredSession('elsewhere', (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+            app(SessionRegistry::class)->save(new RegisteredSession('elsewhere', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
         };
 
         $this->expectOnlyThisSessionLeft = function () {
@@ -1295,7 +1325,7 @@ describe('signing out other sessions without the devices feature', function () {
         $here = session(Sessions::KEY);
         $id = session()->getId();
         $now = now()->getTimestamp();
-        $registry->save(new RegisteredSession('elsewhere', (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+        $registry->save(new RegisteredSession('elsewhere', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
         $this->user->forceFill(['remember_token' => 'remembered'])->save();
 
         $this->deleteJson(route('keyring.sessions.destroy-others'))->assertOk()->assertJsonPath('status', 'sessions-revoked');
@@ -1327,7 +1357,7 @@ describe('the sessions a user can see and end', function () {
             $now = now()->getTimestamp();
 
             return tap(
-                new RegisteredSession($id, (string) ($user ?? $this->user)->id, ($user ?? $this->user)->getMorphClass(), 'web', null, Assurance::AAL1, '203.0.113.7', CHROME, $now - 600, $now - 300, $now + 3600)->with($with),
+                new RegisteredSession($id, (string) ($user ?? $this->user)->id, RegisteredSession::typeOf(($user ?? $this->user)), 'web', null, Assurance::AAL1, '203.0.113.7', CHROME, $now - 600, $now - 300, $now + 3600)->with($with),
                 fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
             );
         };

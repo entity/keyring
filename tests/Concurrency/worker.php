@@ -14,7 +14,6 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
-use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
@@ -102,13 +101,6 @@ try {
             app(AuthenticatorChanges::class)->add($user, Keyring::factor('totp'), Authenticator::factory()->totp()->for($user, 'authenticatable')->make(), $request);
 
             return 'added';
-        })(),
-        'record-device' => (function () use ($id, $value) {
-            // A sign in from a browser carrying this device cookie.
-            $request = Request::create('/login', 'POST', cookies: ['known_device' => $value]);
-            $request->setLaravelSession(app('session.store'));
-
-            return app(DeviceManager::class)->signIn($request, User::findOrFail($id))?->id;
         })(),
         'sign-out' => app(Sessions::class)->signOutEverywhere(User::findOrFail($id)),
         'end-latest' => (function () use ($id) {

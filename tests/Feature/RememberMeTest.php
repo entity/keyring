@@ -1072,7 +1072,7 @@ describe('a "remember me" cookie that has been used', function () {
 
 describe('replacing a session\'s record', function () {
     beforeEach(function () {
-        $this->session = fn (string $id, array $changes = []) => new RegisteredSession($id, (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp())->with($changes);
+        $this->session = fn (string $id, array $changes = []) => new RegisteredSession($id, (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp())->with($changes);
     });
 
     it('happens once, and keeps only the record that did it', function (string $driver) {

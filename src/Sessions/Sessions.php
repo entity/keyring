@@ -134,35 +134,50 @@ class Sessions
     }
 
     /**
-     * For a change only a signed-in session may make, called inside the
-     * transaction that saves it: hold the user's row until that transaction
-     * ends, so the change and a sign-out everywhere take turns, and refuse
-     * if this request's session has been ended since its middleware let it
-     * through (an email change undone, a password reset, a device reported).
+     * Make a change only a signed-in session may make, holding the user's
+     * row so it and a sign-out everywhere take turns, and refusing if this
+     * request's session has been ended since its middleware let it through
+     * (an email change undone, a password reset, a device reported).
      * Without this a request already under way would still save its change
-     * after the account's owner had ended every session. Returns the user
-     * as the locked row has it.
+     * after the account's owner had ended every session. The change is
+     * given the user as the locked row has it.
      *
-     * A request with no registered session is one Keyring isn't keeping
-     * track of, and is let through as before.
+     * A session whose record has gone is an ended one, as it is to the
+     * session middleware. A request with no session, or one Keyring never
+     * registered, isn't one Keyring keeps track of, and is let through.
      *
-     * @template TUser of Authenticatable&Model
+     * The row is held on the user's own connection. Where what's being
+     * changed is kept on another, the two can't commit as one, and the lock
+     * goes a moment before the change is saved. And on MySQL, a caller
+     * that has already read inside a transaction of its own reads the
+     * registry as it was then: Keyring's routes open none.
      *
-     * @param  TUser  $user
-     * @return TUser
+     * @template TResult
+     *
+     * @param  Closure(Authenticatable&Model): TResult  $change
+     * @return TResult
      *
      * @throws AuthenticationException
      */
-    public function stillSignedIn(Request $request, Authenticatable&Model $user): Authenticatable&Model
+    public function whileSignedIn(Request $request, Authenticatable&Model $user, Closure $change): mixed
     {
-        $fresh = $user->newQueryWithoutScopes()->lockForUpdate()->whereKey($user->getKey())->first();
-        $session = $request->hasSession() ? $this->current($request) : null;
+        return RowLock::hold($user, function (?Model $fresh) use ($request, $change) {
+            if (! $fresh instanceof Authenticatable) {
+                throw new AuthenticationException;
+            }
 
-        if (! $fresh instanceof Authenticatable || $session?->isActive(now()->getTimestamp()) === false || $session?->belongsTo($fresh) === false) {
-            throw new AuthenticationException;
-        }
+            $id = $request->hasSession() ? $request->session()->get(self::KEY) : null;
 
-        return $fresh;
+            if (is_string($id)) {
+                $session = $this->registry->find($id);
+
+                if ($session === null || ! $session->isActive(now()->getTimestamp()) || ! $session->belongsTo($fresh)) {
+                    throw new AuthenticationException;
+                }
+            }
+
+            return $change($fresh);
+        });
     }
 
     /**

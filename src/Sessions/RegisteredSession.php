@@ -20,9 +20,10 @@ use Keyring\Enums\Assurance;
  * A remembered session is one "remember me" may bring back once Laravel's
  * own session has gone, so it's allowed to sit unused for longer.
  *
- * Whose it is takes the model as well as the ID (userType is the user's
- * morph class), as everything else Keyring keeps for a user does: two user
- * models can have the same IDs.
+ * Whose it is takes more than the ID: two user models can have the same
+ * IDs. userType says which table the ID is one of. It's the table and not
+ * the class, so one account loaded as two classes (an Admin that extends
+ * User, on the users table) is still one account, as it is to the guard.
  */
 final readonly class RegisteredSession
 {
@@ -53,11 +54,12 @@ final readonly class RegisteredSession
     }
 
     /**
-     * What a user's records carry as userType.
+     * What a user's records carry as userType: the connection and table
+     * their ID is unique in. A user that isn't a model has only its class.
      */
     public static function typeOf(Authenticatable $user): string
     {
-        return $user instanceof Model ? $user->getMorphClass() : $user::class;
+        return $user instanceof Model ? $user->getConnection()->getName().':'.$user->getTable() : $user::class;
     }
 
     public function isActive(int $now): bool

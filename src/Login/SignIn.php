@@ -70,7 +70,17 @@ class SignIn
 
             $ended = $this->changedMeanwhile($user) || ! $attempt->keepsItsAuthenticators();
         } catch (Throwable $e) {
-            $this->out($request, onlyThisBrowser: true);
+            // Whatever failed may fail again as the session is ended (the
+            // registry, say), and the guard has to be signed out all the
+            // same.
+            try {
+                $this->out($request, onlyThisBrowser: true);
+            } catch (Throwable) {
+                $guard = $this->keyring->guard();
+
+                $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
+                $request->session()->invalidate();
+            }
 
             throw $e;
         }

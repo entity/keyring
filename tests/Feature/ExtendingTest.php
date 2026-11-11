@@ -224,7 +224,7 @@ it('raises laravel\'s own auth events for listeners built for them', function ()
 
 it('runs the app\'s own password action, with keyring\'s security work around it', function () {
     Keyring::updateUserPasswordsUsing(SymbolsRequired::class);
-    $other = new RegisteredSession('other', (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
+    $other = new RegisteredSession('other', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
     app(SessionRegistry::class)->save($other);
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
@@ -280,7 +280,7 @@ it('only lets the app\'s password action change the password', function () {
 
 it('refuses a password action that saves nothing, before signing anyone out', function () {
     Keyring::updateUserPasswordsUsing(SavesNothing::class);
-    $other = new RegisteredSession('other', (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
+    $other = new RegisteredSession('other', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
     app(SessionRegistry::class)->save($other);
 
     $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1);

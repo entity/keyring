@@ -56,17 +56,13 @@ function outcomes(array $results, mixed $value): int
  * @param  list<list<string|int>>  $operations  worker.php arguments
  * @param  (Closure(): void)|null  $meanwhile  work to finish, holding the lock, before letting go
  * @param  int|null  $waiting  how many of them should get as far as the lock, when the rest are turned away before it
- * @param  (Closure(): void)|null  $hold  what to hold in place of the row's lock, inside the transaction
  * @return list<mixed>
  */
-function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null, ?Closure $hold = null): array
+function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null): array
 {
     $connection = $locked->getConnection();
     $connection->beginTransaction();
-
-    // The row, unless what the operations wait on is something else: a
-    // row this side has stored and not yet committed, say.
-    $hold === null ? $locked->newQuery()->lockForUpdate()->find($locked->getKey()) : $hold();
+    $locked->newQuery()->lockForUpdate()->find($locked->getKey());
 
     $env = ['DB_CONNECTION' => $connection->getName(), 'DB_DATABASE' => $connection->getDatabaseName()];
 
@@ -86,20 +82,29 @@ function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?
     // Long enough for an operation that ignores the lock to finish.
     Sleep::usleep(500_000);
 
-    $running = fn () => count(array_filter($workers, fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running()));
+    // Let go whatever happens: a failed expectation that kept the lock would
+    // leave every later test waiting for the tables it holds.
+    try {
+        $running = fn () => count(array_filter($workers, fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running()));
 
-    // Those turned away before the lock get time to finish. The rest can't.
-    for ($deadline = microtime(true) + 15; $waiting !== null && $running() > $waiting && microtime(true) < $deadline;) {
-        Sleep::usleep(50_000);
-    }
+        // Those turned away before the lock get time to finish. The rest can't.
+        for ($deadline = microtime(true) + 15; $waiting !== null && $running() > $waiting && microtime(true) < $deadline;) {
+            Sleep::usleep(50_000);
+        }
 
-    expect($running())->toBe($waiting ?? count($workers), 'An operation ran without waiting for the lock, or one that should have been turned away is waiting for it: '.implode('', array_map(
-        fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->output().$worker->errorOutput(),
-        $workers,
-    )));
+        expect($running())->toBe($waiting ?? count($workers), 'An operation ran without waiting for the lock, or one that should have been turned away is waiting for it: '.implode('', array_map(
+            fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->output().$worker->errorOutput(),
+            $workers,
+        )));
 
-    if ($meanwhile !== null) {
-        $meanwhile();
+        if ($meanwhile !== null) {
+            $meanwhile();
+        }
+    } catch (Throwable $e) {
+        $connection->rollBack();
+        array_map(fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running() && $worker->signal(SIGKILL), $workers);
+
+        throw $e;
     }
 
     $connection->commit();

@@ -98,24 +98,26 @@ class EmailChanges
             // in first has saved its change where the undo's last look
             // closes it. The address is the row's, not the one this request
             // loaded before an undo moved it.
-            $current = (string) $this->sessions->stillSignedIn($request, $user)->getAttribute($this->attribute());
+            return $this->sessions->whileSignedIn($request, $user, function (Authenticatable&Model $user) use ($email, &$current, $tokens, $needsCurrent, $signedInAt) {
+                $current = (string) $user->getAttribute($this->attribute());
 
-            if ($email === $this->keyring->normalizeUsername($current)) {
-                return null;
-            }
+                if ($email === $this->keyring->normalizeUsername($current)) {
+                    return null;
+                }
 
-            $change = new ($this->keyring->pendingChangeModel())([
-                'attribute' => $this->attribute(),
-                'value' => $email,
-                'previous_value' => $current,
-                'confirm_token' => PendingChange::hashToken($tokens['confirm']),
-                'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
-                'revert_token' => PendingChange::hashToken($tokens['revert']),
-                'signed_in_at' => $signedInAt,
-                'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for')),
-            ]);
+                $change = new ($this->keyring->pendingChangeModel())([
+                    'attribute' => $this->attribute(),
+                    'value' => $email,
+                    'previous_value' => $current,
+                    'confirm_token' => PendingChange::hashToken($tokens['confirm']),
+                    'current_token' => $needsCurrent ? PendingChange::hashToken($tokens['current']) : null,
+                    'revert_token' => PendingChange::hashToken($tokens['revert']),
+                    'signed_in_at' => $signedInAt,
+                    'expires_at' => Duration::fromNow(config('keyring.email_changes.confirmable_for')),
+                ]);
 
-            return tap($change->authenticatable()->associate($user))->save();
+                return tap($change->authenticatable()->associate($user))->save();
+            });
         });
 
         if ($change === null) {

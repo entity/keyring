@@ -707,7 +707,7 @@ function otherSession(User $user, string $id = 'other-session'): string
     app(SessionRegistry::class)->save(new RegisteredSession(
         id: $id,
         userId: (string) $user->getKey(),
-        userType: $user->getMorphClass(),
+        userType: RegisteredSession::typeOf($user),
         guard: 'web',
         deviceId: null,
         assurance: Assurance::AAL1,
