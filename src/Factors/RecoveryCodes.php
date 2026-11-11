@@ -15,6 +15,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use Keyring\Support\KeyedHash;
 use ParagonIE\ConstantTime\Base32;
 
@@ -54,7 +55,7 @@ class RecoveryCodes extends Factor implements Enrollable
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $candidates = KeyedHash::candidates($this->normalizeCode((string) $request->input('code')));
+        $candidates = KeyedHash::candidates($this->normalizeCode((string) Input::get($request, 'code')));
 
         $used = $this->consume($authenticator, function (Authenticator $locked) use ($candidates) {
             $hashes = $this->hashes($locked);

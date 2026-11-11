@@ -14,6 +14,7 @@ use Keyring\Enums\Category;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use Keyring\Support\KeyedHash;
 
 /**
@@ -87,7 +88,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         // aimed at another one leaves it be.
         $ours = ($sent['authenticator'] ?? null) === $authenticator->getKey();
 
-        ['valid' => $valid, 'issued' => $issued, 'guesses' => $guesses] = $this->check($ours ? $sent : null, (string) $request->input('code'), $attempt->state($this->key(), 'guesses', 0));
+        ['valid' => $valid, 'issued' => $issued, 'guesses' => $guesses] = $this->check($ours ? $sent : null, (string) Input::get($request, 'code'), $attempt->state($this->key(), 'guesses', 0));
 
         $attempt->put($this->key(), 'guesses', $guesses);
 
@@ -132,7 +133,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
     {
-        ['valid' => $valid, 'issued' => $issued, 'guesses' => $guesses] = $this->check($enrollment->state('code'), (string) $request->input('code'), $enrollment->state('guesses', 0));
+        ['valid' => $valid, 'issued' => $issued, 'guesses' => $guesses] = $this->check($enrollment->state('code'), (string) Input::get($request, 'code'), $enrollment->state('guesses', 0));
 
         if (! $valid) {
             // Keep the guess count, or enrollment codes could be guessed forever.

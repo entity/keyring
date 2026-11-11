@@ -69,6 +69,8 @@ Post the username and password to `/login`:
 
 A wrong password and an unknown account produce the same error, on the username field, using Laravel's `auth.failed` message. Both take the same time.
 
+Send them in the body, as a form or as JSON. Keyring doesn't read a `POST`'s query string for these, so `POST /login?password=...` fails as if no password was sent. See [Request Input](security.md#request-input).
+
 ### Finding the User
 
 By default Keyring looks the user up by the `username` attribute, trimmed and lowercased. Change either in your `KeyringServiceProvider`:

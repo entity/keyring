@@ -16,6 +16,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use PragmaRX\Google2FA\Google2FA;
 
 /**
@@ -105,7 +106,7 @@ class Totp extends Factor implements Enrollable
      */
     protected function check(#[\SensitiveParameter] string $secret, Request $request, int $after = 0): int|false
     {
-        $code = $this->normalizeCode((string) $request->input('code'));
+        $code = $this->normalizeCode((string) Input::get($request, 'code'));
 
         $timestep = ctype_digit($code)
             ? $this->engine->verifyKeyNewer($secret, $code, $after, $this->window, static::timestep())

@@ -9,6 +9,7 @@ use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Input;
 use Keyring\Support\PasswordRules;
 
 class PasswordController
@@ -32,7 +33,7 @@ class PasswordController
         // The action checks this itself. The published one uses Keyring's
         // CurrentPassword rule; Laravel's current_password goes straight to
         // the hasher, so this covers an action that still uses it.
-        $input = $request->all();
+        $input = Input::all($request);
 
         if (is_string($input['current_password'] ?? null)) {
             $input['current_password'] = PasswordRules::forVerifying($input['current_password'], $user->getAuthPassword());

@@ -17,6 +17,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
 use ParagonIE\ConstantTime\Base64UrlSafe;
@@ -315,7 +316,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
      */
     protected function credential(Request $request): string
     {
-        $credential = $request->input('credential');
+        $credential = Input::get($request, 'credential');
 
         return is_string($credential) ? $credential : (string) json_encode($credential);
     }

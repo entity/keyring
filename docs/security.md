@@ -9,6 +9,7 @@
     - [Sessions and Devices](#sessions-and-devices)
     - [Account Changes](#account-changes)
     - [Links and Headers](#links-and-headers)
+    - [Request Input](#request-input)
     - [Storage](#storage)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
@@ -146,6 +147,16 @@ Keyring::linkRootUsing(fn () => tenant()->url);
 ```
 
 Work it out from something the server knows. The request's `Host` header is whatever the sender says, and a link built from it sends a real reset token to their site. The signature covers the path and query, so links keep working under any root.
+
+### Request Input
+
+A URL ends up in places a request's body doesn't: access logs, proxies, the browser's history. Laravel's `$request->input()` reads the query string as well as the body, so a password sent as `POST /login?password=...` would work, and be logged.
+
+- Keyring reads what proves something from the body alone, as a form or as JSON: passwords (signing in, confirming, changing, resetting, registering, removing the last second factor), codes, WebAuthn credentials, the reset token, and the tokens and signatures the [emailed links](#emailed-links) post.
+- Sign in, challenges, step-up, enrollment and password resets validate against the body, so a required field that's only in the query string fails as missing. That covers a factor of your own: its `rules()` are checked the same way.
+- Your `CreatesNewUsers`, `ResetsUserPasswords` and `UpdatesUserPasswords` actions are passed the body, not the query string.
+- A `GET` has no body, so a sign in you start from a `GET` route with `Keyring::attempt()`, like a social login's callback, is read from its query string.
+- Fields that prove nothing can still come from either: `remember`, `trust`, which authenticator to show, `sign_out_others`, and the new address of an email change.
 
 ### Storage
 
