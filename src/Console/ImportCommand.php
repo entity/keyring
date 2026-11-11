@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Models\Authenticator;
@@ -57,11 +58,20 @@ class ImportCommand extends Command
     /** @var array{skipped: list<string>, failed: list<string>} */
     protected array $issues;
 
+    /**
+     * The passkeys that came across but the app refuses at sign in: the
+     * user each belongs to, by the algorithm it signs with.
+     *
+     * @var array<string, list<int|string>>
+     */
+    protected array $refused = [];
+
     public function handle(): int
     {
         $this->inKeyring = [];
         $this->counts = ['totp' => 0, 'recovery' => 0, 'passkey' => 0, 'already_imported' => 0];
         $this->issues = ['skipped' => [], 'failed' => []];
+        $this->refused = [];
 
         if ($this->argument('source') !== 'fortify') {
             $this->components->error('Only "fortify" can be imported for now.');
@@ -121,6 +131,7 @@ class ImportCommand extends Command
         $this->components->twoColumnDetail('Authenticator apps', (string) $this->counts['totp']);
         $this->components->twoColumnDetail('Recovery code sets', (string) $this->counts['recovery']);
         $this->components->twoColumnDetail('Passkeys', (string) $this->counts['passkey']);
+        $this->components->twoColumnDetail('Passkeys refused at sign in', (string) array_sum(array_map(count(...), $this->refused)));
         $this->components->twoColumnDetail('Already imported', (string) $this->counts['already_imported']);
         $this->components->twoColumnDetail('Skipped', (string) count($this->issues['skipped']));
         $this->components->twoColumnDetail('Failed', (string) count($this->issues['failed']));
@@ -131,6 +142,10 @@ class ImportCommand extends Command
 
         foreach ($this->issues['failed'] as $issue) {
             $this->error("Failed {$issue}");
+        }
+
+        foreach ($this->refused as $algorithm => $users) {
+            $this->warn($this->refusal($algorithm, $users));
         }
 
         if ($this->option('dry-run')) {
@@ -318,14 +333,24 @@ class ImportCommand extends Command
 
         $credential = is_string($passkey->credential) ? json_decode($passkey->credential, true) : (array) $passkey->credential;
 
+        $ceremonies = app(Ceremonies::class);
+        $record = is_array($credential) ? $ceremonies->record((string) json_encode($credential)) : null;
+
         // Anything else would be stored, then fail every time it's read.
-        if (! is_array($credential) || ! $this->isCredentialId($passkey->credential_id) || app(Ceremonies::class)->record((string) json_encode($credential)) === null) {
+        if (! is_array($credential) || ! $this->isCredentialId($passkey->credential_id) || $record === null) {
             $this->issues['failed'][] = "passkey {$passkey->id} of user {$passkey->user_id}: its credential is in an unexpected format";
 
             return;
         }
 
         $this->counts['passkey']++;
+
+        // Imported all the same. It may be all the user has, it works again
+        // the moment the app takes its algorithm, and left behind it would
+        // be gone for good once the passkeys table is dropped.
+        if (! $ceremonies->canVerify($record)) {
+            $this->refused[$ceremonies->algorithmOf($record) ?? 'a key that can\'t be read'][] = $passkey->user_id;
+        }
 
         if ($this->option('dry-run')) {
             return;
@@ -343,6 +368,27 @@ class ImportCommand extends Command
             'last_used_at' => $passkey->last_used_at ?? null,
             'meta' => ['imported_from' => 'laravel/passkeys', 'user_verified' => (bool) ($credential['uvInitialized'] ?? true)],
         ]);
+    }
+
+    /**
+     * What to tell the operator about passkeys that were imported but won't
+     * be accepted, and whose they are: laravel/passkeys offers RS256, which
+     * Keyring only takes when the app lists it.
+     *
+     * @param  list<int|string>  $users
+     */
+    protected function refusal(string $algorithm, array $users): string
+    {
+        $passkeys = count($users).' imported '.Str::plural('passkey', count($users))." signing with {$algorithm} will be refused at sign in";
+        $listed = in_array($algorithm, app(Ceremonies::class)->algorithmNames(), true);
+
+        $why = match (true) {
+            $listed && $algorithm === 'RS256' => 'the RSA key is shorter than webauthn.minimum_rsa_bits in config/keyring.php allows. Lower that (2048 is the least Keyring takes) to keep them working, or their users will need to add a new passkey',
+            ! $listed && in_array($algorithm, ['ES256', 'EdDSA', 'RS256'], true) => "{$algorithm} isn't in webauthn.algorithms. Add '{$algorithm}' to that list in config/keyring.php to keep them working, or their users will need to add a new passkey",
+            default => 'this server can\'t check those signatures, so their users will need to add a new passkey',
+        };
+
+        return "{$passkeys}: {$why}. ".Str::plural('User', count(array_unique($users))).' '.implode(', ', array_unique($users)).'.';
     }
 
     /**

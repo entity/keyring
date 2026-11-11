@@ -137,7 +137,7 @@ it('fails a stored rsa key that is too short without relying on php turning warn
     // A key that got in some other way: registration itself would refuse it.
     app()->instance(Ceremonies::class, new class(app(KeyringManager::class)) extends Ceremonies
     {
-        protected function canVerify(CredentialRecord $record): bool
+        public function canVerify(CredentialRecord $record): bool
         {
             return true;
         }

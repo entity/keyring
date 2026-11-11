@@ -630,6 +630,72 @@ describe('keyring:import fortify', function () {
 
         expect($this->user->keyring->refresh()->of('passkey')->first()->name)->toBe('MacBook');
     });
+
+    it('imports a passkey whose algorithm the app does not take, and says it will be refused', function (bool $dryRun) {
+        $key = VirtualAuthenticator::rsa();
+        $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);
+
+        // laravel/passkeys offers RS256, so it holds keys Keyring's default list leaves out.
+        passkeysTable();
+        config(['keyring.webauthn.algorithms' => ['ES256', 'RS256']]);
+        DB::table('passkeys')->insert([
+            ['user_id' => $this->user->id, 'name' => 'Windows Hello', ...passkeyRow($this->user, $key)],
+            ['user_id' => $this->user->id, 'name' => 'MacBook', ...passkeyRow($this->user)],
+            ['user_id' => $other->id, 'name' => 'Windows Hello', ...passkeyRow($other, VirtualAuthenticator::rsa())],
+        ]);
+        config(['keyring.webauthn.algorithms' => ['ES256', 'EdDSA']]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify', '--dry-run' => $dryRun])
+            ->expectsOutputToContain("2 imported passkeys signing with RS256 will be refused at sign in: RS256 isn't in webauthn.algorithms. Add 'RS256' to that list in config/keyring.php to keep them working, or their users will need to add a new passkey. Users {$this->user->id}, {$other->id}.")
+            ->assertSuccessful();
+
+        // Kept, so it's still theirs and works once the app takes RS256.
+        expect(Authenticator::query()->where('factor', 'passkey')->count())->toBe($dryRun ? 0 : 3);
+
+        if ($dryRun) {
+            return;
+        }
+
+        $signIn = fn () => $this->post(route('keyring.login.factor', 'passkey'), [
+            'credential' => $key->assert($this->getJson(route('keyring.login.options', 'passkey'))->json('options')),
+        ]);
+
+        $signIn()->assertSessionHasErrors('credential');
+        $this->assertGuest();
+
+        config(['keyring.webauthn.algorithms' => ['ES256', 'EdDSA', 'RS256']]);
+
+        $signIn()->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+    })->with(['for real' => false, 'on a dry run' => true]);
+
+    it('says nothing about refused passkeys when the app takes every algorithm imported', function () {
+        passkeysTable();
+        config(['keyring.webauthn.algorithms' => ['ES256', 'EdDSA', 'RS256']]);
+        DB::table('passkeys')->insert([
+            ['user_id' => $this->user->id, 'name' => 'Windows Hello', ...passkeyRow($this->user, VirtualAuthenticator::rsa())],
+            ['user_id' => $this->user->id, 'name' => 'MacBook', ...passkeyRow($this->user)],
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->doesntExpectOutputToContain('refused at sign in:')
+            ->assertSuccessful();
+
+        expect(Authenticator::query()->where('factor', 'passkey')->count())->toBe(2);
+    });
+
+    it('says when an imported rsa key is shorter than the app allows', function () {
+        passkeysTable();
+        config(['keyring.webauthn.algorithms' => ['ES256', 'RS256']]);
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'Windows Hello', ...passkeyRow($this->user, VirtualAuthenticator::rsa())]);
+        config(['keyring.webauthn.minimum_rsa_bits' => 3072]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("1 imported passkey signing with RS256 will be refused at sign in: the RSA key is shorter than webauthn.minimum_rsa_bits in config/keyring.php allows. Lower that (2048 is the least Keyring takes) to keep them working, or their users will need to add a new passkey. User {$this->user->id}.")
+            ->assertSuccessful();
+
+        expect(Authenticator::query()->where('factor', 'passkey')->count())->toBe(1);
+    });
 });
 
 it('prunes old devices, email changes, security events and ended sessions', function () {
