@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### Fixed
+
+- A sign-out your app does itself, with `Auth::logout()` or `Auth::logoutCurrentDevice()`, now ends the registered session too, with its "remember me" cookie and what the session proved. Before, the record stayed good until it timed out, so a copy of the session or of its "remember me" cookies stayed signed in.
+
 ## v0.1.0 - 2026-11-18
 
 The first release.

@@ -495,3 +495,63 @@ it('answers a signed-out json request with a 401, and remembers where a page vis
     $this->get('/home')->assertRedirect('/login');
     expect(session('url.intended'))->toEndWith('/home');
 });
+
+describe('a sign-out the app does itself', function () {
+    beforeEach(function () {
+        Route::middleware('web')->post('/app/logout', function (Request $request) {
+            auth()->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/logout-this-device', function (Request $request) {
+            auth()->logoutCurrentDevice();
+            $request->session()->invalidate();
+
+            return response()->noContent();
+        });
+
+        // One that leaves the session as it was, and signs the user back in on it.
+        Route::middleware('web')->post('/app/logout-only', fn () => tap(response()->noContent(), fn () => auth()->logout()));
+        Route::middleware('web')->post('/app/login', fn () => tap(response()->noContent(), fn () => auth()->login(test()->user)));
+    });
+
+    it('ends the session for a copy of its cookie too', function (string $driver, string $uri) {
+        config(['keyring.sessions.driver' => $driver, 'session.driver' => 'cookie']);
+        app('session')->forgetDrivers();
+        app()->forgetInstance('session.store');
+
+        $copied = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
+        $registered = session(Sessions::KEY);
+
+        $this->withCredentials()->withCookies($copied)->post($uri)->assertNoContent();
+
+        expect(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull()
+            ->and(app(Sessions::class)->active($this->user))->toBeEmpty();
+
+        session()->flush();
+        app('auth')->forgetGuards();
+        $this->withCredentials()->withCookies($copied)->getJson(route('keyring.devices.index'))->assertUnauthorized();
+    })->with('drivers')->with(['/app/logout', '/app/logout-this-device']);
+
+    it('leaves nothing the session proved for the next sign in on it', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $registered = session(Sessions::KEY);
+
+        expect(session(SessionAssurance::KEY))->not->toBeEmpty();
+
+        $this->post('/app/logout-only')->assertNoContent();
+
+        expect(session(Sessions::KEY))->toBeNull()
+            ->and(session(SessionAssurance::KEY))->toBeNull()
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
+
+        $this->post('/app/login')->assertNoContent();
+
+        expect(session(Sessions::KEY))->not->toBeNull()->not->toBe($registered)
+            ->and(session(SessionAssurance::KEY))->toBeNull()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::None);
+    });
+});

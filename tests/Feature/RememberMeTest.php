@@ -1186,3 +1186,22 @@ it('brings nothing back where a session ends with the level it signed in at', fu
     expectKeptCookiesRefused($cookies);
     expect(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
 });
+
+it('refuses the kept cookies after a sign-out the app did itself', function () {
+    // The guard's own sign-out for one browser leaves the "remember me"
+    // token as it was, so Laravel's cookie alone would still sign in.
+    Route::middleware('web')->post('/app/logout', function () {
+        Auth::logoutCurrentDevice();
+        session()->invalidate();
+
+        return response()->noContent();
+    });
+
+    $cookies = rememberedSignIn();
+    $session = session()->all();
+
+    session()->replace($session);
+    browser($cookies)->post('/app/logout')->assertNoContent()->assertCookieExpired('remembered_session');
+
+    expectKeptCookiesRefused($cookies);
+});
