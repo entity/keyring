@@ -2,6 +2,7 @@
 
 namespace Keyring\Sessions;
 
+use Closure;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -71,8 +72,8 @@ class Sessions
      * Store a new session, and keep the account to "sessions.max" of them:
      * past that, whichever has gone unused longest ends. Refusing the sign
      * in instead would let whoever holds an account's sessions keep its
-     * owner out. One sign in at a time per user, so two at once can't each
-     * count the sessions without the other's.
+     * owner out. Two sign ins at once take turns (holding), so neither
+     * counts the sessions without the other's.
      */
     protected function register(Authenticatable $user, RegisteredSession $session): void
     {
@@ -82,7 +83,7 @@ class Sessions
             return;
         }
 
-        $register = function () use ($user, $session, $max) {
+        $this->holding($user, function () use ($user, $session, $max) {
             $this->registry->save($session);
 
             $now = now()->getTimestamp();
@@ -96,9 +97,23 @@ class Sessions
                 ])
                 ->skip(max(0, (int) $max - 1))
                 ->each(fn (RegisteredSession $other) => $this->registry->revoke($other->id));
-        };
+        });
+    }
 
-        $user instanceof Model ? RowLock::hold($user, $register) : $register();
+    /**
+     * Run a change to which sessions a user has while holding the user's
+     * row, so it and any other wait for each other. A session moving to a
+     * new record is such a change: if a sign-out everywhere could run in the
+     * middle of one, it would revoke the old record and miss the new.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $change
+     * @return TResult
+     */
+    protected function holding(Authenticatable $user, Closure $change): mixed
+    {
+        return $user instanceof Model ? RowLock::hold($user, fn () => $change()) : $change();
     }
 
     /**
@@ -112,7 +127,7 @@ class Sessions
      * Null when the record couldn't be replaced: a request sent alongside
      * this one used the cookie first, or the session was just revoked.
      */
-    public function resume(Request $request, RegisteredSession $session): ?RegisteredSession
+    public function resume(Request $request, Authenticatable $user, RegisteredSession $session): ?RegisteredSession
     {
         $current = $session->with([
             'id' => Str::random(40),
@@ -122,7 +137,7 @@ class Sessions
             'lastActivityAt' => now()->getTimestamp(),
         ]);
 
-        if (! $this->registry->replace($session->id, $current)) {
+        if (! $this->holding($user, fn () => $this->registry->replace($session->id, $current))) {
             return null;
         }
 
@@ -270,9 +285,16 @@ class Sessions
     public function reregister(Request $request, array $changes = []): void
     {
         $session = $this->current($request);
+        $user = $this->keyring->guard()->user();
+
+        if ($session === null || $user === null) {
+            return;
+        }
+
+        $current = $session->with(['id' => Str::random(40), ...$changes]);
 
         // One that has ended, or moved on without this request, isn't brought back.
-        if ($session === null || ! $this->registry->replace($session->id, $current = $session->with(['id' => Str::random(40), ...$changes]), revoke: true)) {
+        if (! $this->holding($user, fn () => $this->registry->replace($session->id, $current, revoke: true))) {
             return;
         }
 
@@ -411,7 +433,7 @@ class Sessions
     public function signOutEverywhere(Authenticatable $user, ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
-        $count = $this->registry->revokeAll($user, $except);
+        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except));
 
         $this->cycleRememberToken($user);
         $this->distrustDevices($user, except: $keptDevice);
@@ -421,6 +443,14 @@ class Sessions
         }
 
         return $count;
+    }
+
+    /**
+     * End the user's sessions on one device.
+     */
+    public function revokeDevice(Authenticatable $user, string $deviceId): int
+    {
+        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId));
     }
 
     public function cycleRememberToken(Authenticatable $user): void

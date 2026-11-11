@@ -506,6 +506,195 @@ it('prunes old devices, email changes, security events and ended sessions', func
         ->and($registry->find('live'))->not->toBeNull();
 });
 
+describe('keyring:sign-out', function () {
+    beforeEach(function () {
+        $this->user = taylor();
+        $this->other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+        /** A session of the user's, started a moment ago. */
+        $this->session = function (User $user, string $id, array $with = []): RegisteredSession {
+            $now = now()->getTimestamp();
+
+            return tap(
+                new RegisteredSession($id, (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->with($with),
+                fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
+            );
+        };
+    });
+
+    it('signs one user out of every session, named by ID', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+
+        ($this->session)($this->user, 'laptop');
+        ($this->session)($this->user, 'phone');
+        ($this->session)($this->other, 'theirs');
+        $this->user->forceFill(['remember_token' => 'remembered'])->save();
+        $device = $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'laptop'), 'trusted_until' => now()->addDay()]);
+
+        $this->artisan('keyring:sign-out', ['user' => (string) $this->user->id])
+            ->expectsOutputToContain("Signed out taylor@example.com (ID {$this->user->id}): 2 sessions ended.")
+            ->assertSuccessful();
+
+        // As Sessions::signOutEverywhere() leaves things: no way back in
+        // without signing in.
+        expect($registry->forUser($this->user))->toBeEmpty()
+            ->and($registry->find('laptop')->revokedAt)->not->toBeNull()
+            ->and($this->user->fresh()->remember_token)->not->toBe('remembered')
+            ->and($device->fresh()->isTrusted())->toBeFalse()
+            ->and($registry->forUser($this->other)->map->id->all())->toBe(['theirs'])
+            ->and(SecurityEvent::query()->where('type', 'sessions_revoked')->sole()->meta)->toBe(['count' => 2]);
+    })->with(['database', 'cache']);
+
+    it('finds a user by their username too, however it was typed', function () {
+        ($this->session)($this->user, 'laptop');
+
+        $this->artisan('keyring:sign-out', ['user' => ' Taylor@Example.com'])
+            ->expectsOutputToContain('1 session ended.')
+            ->assertSuccessful();
+
+        expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+    });
+
+    it('signs out nobody when the name is one user\'s ID and another\'s username', function () {
+        config(['keyring.username' => 'name']);
+        $this->user->forceFill(['name' => (string) $this->other->id])->save();
+
+        ($this->session)($this->user, 'named');
+        ($this->session)($this->other, 'numbered');
+
+        $this->artisan('keyring:sign-out', ['user' => (string) $this->other->id])
+            ->expectsOutputToContain("could be Abigail (ID {$this->other->id}) or {$this->other->id} (ID {$this->user->id})")
+            ->assertFailed();
+
+        expect(app(SessionRegistry::class)->find('named')->revokedAt)->toBeNull()
+            ->and(app(SessionRegistry::class)->find('numbered')->revokedAt)->toBeNull();
+
+        // Said to be an ID, it can only mean one of them.
+        $this->artisan('keyring:sign-out', ['user' => (string) $this->other->id, '--id' => true])->assertSuccessful();
+
+        expect(app(SessionRegistry::class)->find('named')->revokedAt)->toBeNull()
+            ->and(app(SessionRegistry::class)->find('numbered')->revokedAt)->not->toBeNull();
+    });
+
+    it('takes a username that is the same user\'s ID for that user', function () {
+        config(['keyring.username' => 'name']);
+        $this->user->forceFill(['name' => (string) $this->user->id])->save();
+        ($this->session)($this->user, 'laptop');
+
+        $this->artisan('keyring:sign-out', ['user' => (string) $this->user->id])->assertSuccessful();
+
+        expect(app(SessionRegistry::class)->find('laptop')->revokedAt)->not->toBeNull();
+    });
+
+    it('says so when nobody goes by the name', function (string $name) {
+        ($this->session)($this->user, 'laptop');
+
+        $this->artisan('keyring:sign-out', ['user' => $name])
+            ->expectsOutputToContain("No user has the ID or username [{$name}].")
+            ->assertFailed();
+
+        expect(app(SessionRegistry::class)->find('laptop')->revokedAt)->toBeNull();
+    })->with(['nobody@example.com', '999999', '99999999999999999999999999']);
+
+    it('needs one user or --all, and not both', function (array $arguments) {
+        ($this->session)($this->user, 'laptop');
+
+        $this->artisan('keyring:sign-out', $arguments)
+            ->expectsOutputToContain('Name one user to sign out, or pass --all to sign out everyone.')
+            ->assertExitCode(2);
+
+        expect(app(SessionRegistry::class)->find('laptop')->revokedAt)->toBeNull();
+    })->with([
+        'neither' => [[]],
+        'both' => [['user' => '1', '--all' => true, '--force' => true]],
+    ]);
+
+    it('signs everyone out once it has asked', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+
+        ($this->session)($this->user, 'laptop');
+        ($this->session)($this->other, 'theirs');
+
+        $this->artisan('keyring:sign-out', ['--all' => true])
+            ->expectsConfirmation('Sign every user out of every session?', 'no')
+            ->assertFailed();
+
+        expect($registry->forUser($this->user))->toHaveCount(1)
+            ->and($registry->forUser($this->other))->toHaveCount(1);
+
+        $this->artisan('keyring:sign-out', ['--all' => true])
+            ->expectsConfirmation('Sign every user out of every session?', 'yes')
+            ->assertSuccessful();
+
+        expect($registry->forUser($this->user))->toBeEmpty()
+            ->and($registry->forUser($this->other))->toBeEmpty()
+            ->and($registry->find('laptop')->revokedAt)->not->toBeNull()
+            ->and($registry->find('theirs')->revokedAt)->not->toBeNull();
+    })->with(['database', 'cache']);
+
+    it('signs everyone out without asking when forced', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        ($this->session)($this->user, 'laptop');
+
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+    })->with(['database', 'cache']);
+
+    it('ends a session whichever record it has moved to, and the records it left behind', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+
+        $first = ($this->session)($this->user, 'first');
+        $registry->replace('first', $second = $first->with(['id' => 'second']));
+        $registry->replace('second', $second->with(['id' => 'third']));
+
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        expect($registry->find('first')->revokedAt)->not->toBeNull()
+            ->and($registry->find('second')->revokedAt)->not->toBeNull()
+            ->and($registry->find('third')->revokedAt)->not->toBeNull();
+    })->with(['database', 'cache']);
+
+    it('leaves a session that signs in afterwards alone', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        $this->travel(1)->seconds();
+        ($this->session)($this->user, 'afterwards');
+
+        expect(app(SessionRegistry::class)->forUser($this->user)->map->id->all())->toBe(['afterwards']);
+    })->with(['database', 'cache']);
+
+    it('ends more sessions than it revokes in one go', function () {
+        $now = now()->getTimestamp();
+
+        DB::table('keyring_sessions')->insert(array_map(fn (int $n) => new RegisteredSession("session-{$n}", (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600)->toArray(), range(1, 1001)));
+
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        expect(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
+    });
+
+    it('keeps a session signed out that was moving to a new record as everyone was signed out, on the cache driver', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+
+        $session = ($this->session)($this->user, 'remembered');
+        $this->travel(1)->minutes();
+        $registry->revokeEveryone();
+
+        // Stored a moment later, by a request that read the old record first.
+        $registry->save($session->with(['id' => 'resumed', 'lastActivityAt' => now()->getTimestamp()]));
+
+        expect($registry->find('resumed')->revokedAt)->not->toBeNull()
+            ->and($registry->forUser($this->user))->toBeEmpty();
+    });
+});
+
 it('describes the setup in artisan about', function () {
     $this->artisan('about', ['--only' => 'keyring'])
         ->expectsOutputToContain('password, passkey, totp, recovery')

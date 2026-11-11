@@ -208,7 +208,7 @@ class AuthenticateSession
             return null;
         }
 
-        $current = $this->sessions->resume($request, $session);
+        $current = $this->sessions->resume($request, $user, $session);
 
         // A request sent alongside this one used the cookie first, or the
         // session was revoked a moment ago. Looking again says which.

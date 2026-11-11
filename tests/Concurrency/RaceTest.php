@@ -173,3 +173,39 @@ it('keeps an account to its session limit when two sign ins land at once', funct
         ->and($registry->find('older')->revokedAt)->not->toBeNull()
         ->and($registry->find('newer')->revokedAt)->not->toBeNull();
 });
+
+it('leaves nothing signed in when a sign-out everywhere meets a "remember me" cookie coming back', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+
+    // Both wait for the user's row. Whichever goes first, the session ends:
+    // signed out and then refused, or carried on and then signed out.
+    [$resumed, $revoked] = contend($user, [
+        ['resume-session', 'remembered'],
+        ['sign-out', $user->id],
+    ]);
+
+    expect($revoked)->toBe(1)
+        ->and($registry->forUser($user))->toBeEmpty()
+        ->and($registry->find($resumed ?? 'remembered')->revokedAt)->not->toBeNull();
+});
+
+it('signs out a session that moved to a new record while everyone was being signed out', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save($session = new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+
+    // The sign-out comes to the record while "remember me" is carrying its
+    // session on, and waits. By the time it gets the record, the session is
+    // on another one it hasn't seen.
+    contend(sessionRow('remembered'), [['sign-out-everyone', 'everyone']], function () use ($registry, $session) {
+        expect($registry->replace('remembered', $session->with(['id' => 'resumed'])))->toBeTrue();
+    });
+
+    expect($registry->find('resumed')->revokedAt)->not->toBeNull()
+        ->and($registry->find('remembered')->revokedAt)->not->toBeNull()
+        ->and($registry->forUser($user))->toBeEmpty();
+});

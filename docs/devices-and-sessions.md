@@ -17,6 +17,7 @@
     - [The Session Middleware](#the-session-middleware)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
+- [For Administrators](#for-administrators)
 - [Timeouts](#timeouts)
     - [Inactivity and "Remember Me"](#inactivity-and-remember-me)
 - [Pruning](#pruning)
@@ -238,7 +239,7 @@ $this->app->afterResolving(SessionRegistryManager::class, function (SessionRegis
 });
 ```
 
-Then set `sessions.driver` to `custom`. The contract's methods:
+Then set `sessions.driver` to `custom`. Keyring calls `replace()`, `revokeAll()` and `revokeDevice()`, and stores a new session, while holding the user's database row, so for one user those never run at the same moment and a driver doesn't have to guard them against each other. The contract's methods:
 
 | Method | Does |
 |---|---|
@@ -250,6 +251,7 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 | `replace($id, $successor, $revoke = false)` | Moves a session to a new record: stores `$successor` and sets the old record's `replacedBy` and `replacedAt` (and revokes it, with `$revoke`). It only does so for a record that is neither revoked nor replaced, and returns whether it did. Of two calls for the same record at the same moment exactly one may return `true`, and the other's record must not be left behind: "remember me" being single use rests on this. The database driver uses one conditional `UPDATE` in a transaction, the cache driver the store's `add()`. |
 | `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many, not counting replaced records. `Sessions::signOutEverywhere()` calls it, then also changes the remember token, stops trusting the other devices and cancels a pending email change, so call that one from your own code. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
+| `revokeEveryone()` | Revokes every user's sessions that signed in up to now, for [`keyring:sign-out --all`](#for-administrators). A session that is moving to a new record (`replace()`) as this runs must end up revoked there too, or "remember me" would carry it past the sign-out. The database driver revokes in rounds until none are left, and the cache driver, which can't list every user's records, keeps the moment and treats every session that signed in by then as revoked. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A replaced record is kept until it expires, revoked or not: it's how a used "remember me" cookie is told from one that was never issued. A store that expires records itself can return `0`. |
 
 ### How Many Sessions
@@ -338,6 +340,38 @@ Event::listen(function (RememberMeReused $event) {
 A browser that comes back usually sends several requests at once, the page and whatever it loads alongside, all with the cookie the first of them uses up. So for a few seconds (`sessions.remember_grace`, 10 seconds by default) a request with the cookie that was just replaced joins the session the first one resumed, as long as it comes from the same browser (the same user agent). It gets the same new cookie and its own Laravel session pointing at the same record. It doesn't start another session, change the record or record a device, and the seconds count from when the cookie was replaced, so sending it again doesn't keep it alive. A used cookie from a different browser counts as used twice, however soon it comes.
 
 A shorter time leaves less room for a copy to slip in next to the owner, and more chance that a slow request of the owner's own ends their session. Set it to `0` only if a browser's requests never overlap.
+
+## For Administrators
+
+Whoever runs the app can end sessions without waiting for them to time out.
+
+```bash
+php artisan keyring:sign-out 42
+php artisan keyring:sign-out taylor@example.com
+php artisan keyring:sign-out --all
+```
+
+**One user** is named by ID or by username (the `username` attribute, typed however they would type it). The command says who it signed out and how many sessions ended. It does what `Sessions::signOutEverywhere($user)` does: every session is revoked, the "remember me" token is changed, no device stays trusted and a pending email change is cancelled, so nothing gets back in without signing in. It dispatches `SessionsRevoked`, logged as `sessions_revoked`. If the name is one user's ID and another's username, nobody is signed out and the command names both: run it again with `--id` and the ID of the one you mean.
+
+**Everyone** takes `--all`, and asks first unless you pass `--force`. Every session that signed in up to that moment ends, whichever record it's on, and a browser is signed out on its next request. "Remember me" brings none of them back: a cookie is only good for the session it names, and a session that was being carried on at that very moment is ended on the record it moved to. People can sign in again straight away. It only ends sessions. Trusted devices, "remember me" tokens and pending email changes are left as they are, since everyone being signed out says nothing about any one account.
+
+From your own code, for an admin screen say:
+
+```php
+use Keyring\Contracts\SessionRegistry;
+use Keyring\Facades\Keyring;
+use Keyring\Sessions\Sessions;
+
+app(Sessions::class)->signOutEverywhere($user);   // one user, returns how many sessions ended
+
+app(SessionRegistry::class)->revokeEveryone();    // everyone
+
+Keyring::unlock($user);                           // let a locked-out user try again
+```
+
+`Keyring::unlock()` is the other half of looking after an account: it lifts a [risk lock](risk.md#actions) and the [sign-in lockouts](security.md#rate-limiting) on it, as a completed password reset does. To keep someone out for good, use [`Keyring::allowSignInWhen()`](sign-in-flow.md#who-may-sign-in), which also ends their sessions.
+
+Like every sign-out that isn't the browser's own, these take effect on a session's next request [where the session middleware runs](#the-session-middleware).
 
 ## Timeouts
 

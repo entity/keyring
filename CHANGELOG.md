@@ -15,7 +15,7 @@ The first release. Nothing is tagged yet.
 - Protected `email` and `password` attributes, with email changes confirmed from both addresses and revertable from the old one.
 - Risk signals with an action for each level.
 - A security log, "was this you?" alerts and security emails, each a notification published into your app.
-- `keyring:install`, `keyring:import fortify` and `keyring:prune`.
+- `keyring:install`, `keyring:import fortify`, `keyring:prune`, and `keyring:sign-out` to end one user's sessions or everyone's.
 - `Keyring::attempt()` to start a sign in from your own route, for social logins and the like.
 - `Keyring::allowSignInWhen()` to keep banned or unapproved accounts out, however they try to sign in.
 - Rate limits per account, per typed username and per IP address, with locks that double, a cap on failures in a row, and `limits.lock_after` to keep an account locked until its password is reset.

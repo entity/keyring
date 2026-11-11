@@ -89,6 +89,32 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->update(['revoked_at' => now()->getTimestamp()]);
     }
 
+    /**
+     * A thousand at a time, found first and then revoked by ID, until none
+     * are left. A session moving to a new record holds its old one until the
+     * new one is stored, so the round that comes to the old one waits, and
+     * the next finds where it went. Replaced records are revoked with the
+     * rest, which is what keeps the rounds coming. Rows are locked one by
+     * one this way, never a range, so a sign in or a move isn't held up or
+     * deadlocked. A session that started after this did is left alone, so
+     * new sign ins can't keep it going.
+     */
+    public function revokeEveryone(): void
+    {
+        $now = now()->getTimestamp();
+
+        do {
+            $ids = $this->query()
+                ->whereNull('revoked_at')
+                ->where('authenticated_at', '<=', $now)
+                ->where('expires_at', '>', $now)
+                ->limit(1000)
+                ->pluck('id');
+
+            $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]);
+        } while ($ids->isNotEmpty());
+    }
+
     public function prune(): int
     {
         return $this->query()
