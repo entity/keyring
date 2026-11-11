@@ -242,8 +242,8 @@ return [
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
     | again. With "end_on_lapse" a session ends instead when the level it
-    | signed in at runs out, as NIST SP 800-63B words it, and "remember me"
-    | brings nothing back. "remember_cookie" names the cookie that ties
+    | signed in at runs out, as NIST SP 800-63B-4 words it (Sec. 5.2), and
+    | "remember me" brings nothing back. "remember_cookie" names the cookie that ties
     | "remember me" to the session it was ticked for: null is
     | remembered_session, prefixed over HTTPS like the device cookie. Each one
     | works once and is replaced. For "remember_grace" a browser's other
@@ -314,7 +314,8 @@ return [
     | than truncate it: the real limit is then 72 bytes, which is 72 plain
     | characters but only 36 accented or Cyrillic ones, 24 Chinese, Japanese
     | or Korean ones, or 18 emoji. Set HASH_DRIVER=argon2id to take every
-    | password up to "max", as OWASP ASVS 6.2.9 asks (at least 64 characters).
+    | password up to "max": OWASP ASVS 5.0.0 (6.2.9) asks for at least 64
+    | characters.
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
@@ -447,7 +448,7 @@ return [
     |
     | Default attempts per minute, per account and per IP address, and the
     | failures in a row one of an account's authenticators allows however
-    | slowly they come (100 is the most NIST SP 800-63B allows, null is no
+    | slowly they come (100 is the most NIST SP 800-63B-4 allows, null is no
     | cap). They're counted in the database, and at the cap the authenticator
     | is refused until a password reset or Keyring::unlock() clears it, or a
     | second factor is removed and added again. "consecutive_elsewhere" is

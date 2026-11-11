@@ -47,9 +47,10 @@ class Totp extends Factor implements Enrollable
 
     /**
      * A window of 1 takes the step before and the step after now as well,
-     * as RFC 6238 recommends for a clock that's a little off, so a code
-     * works for up to 90 seconds. OWASP ASVS 6.5.5 caps a code's life at 30
-     * seconds, which is a window of 0. Nothing wider than 1 is accepted.
+     * as RFC 6238 allows for delay (Sec. 5.2) and a clock that's a little
+     * off (Sec. 6), so a code works for up to 90 seconds. OWASP ASVS 5.0.0
+     * (6.5.5) caps a code's life at 30 seconds, which is a window of 0.
+     * Nothing wider than 1 is accepted.
      *
      * @throws LogicException
      * @throws InvalidArgumentException
@@ -61,7 +62,7 @@ class Totp extends Factor implements Enrollable
         protected string $algorithm = 'sha1',
     ) {
         throw_if($window < 0 || $window > self::MAX_WINDOW, LogicException::class, sprintf(
-            'The [%s] factor was given a window of %d. Keyring accepts 0 (a code works for its own 30 seconds, as OWASP ASVS 6.5.5 asks) or 1 (one step either side, for clocks that are a little off): a wider one keeps every code working for minutes.',
+            'The [%s] factor was given a window of %d. Keyring accepts 0 (a code works for its own 30 seconds, as requirement 6.5.5 of OWASP ASVS 5.0.0 asks) or 1 (one step either side, for clocks that are a little off): a wider one keeps every code working for minutes.',
             self::KEY, $window,
         ));
 

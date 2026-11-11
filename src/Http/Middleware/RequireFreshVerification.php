@@ -83,9 +83,11 @@ class RequireFreshVerification
     /**
      * The most the account's authenticators can prove together, whatever
      * the policy asks at sign in. NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new
-     * authenticator bound at the highest level the account can reach, or a
-     * user who holds a key that can't leave its device could add another
-     * after proving only a password and a code.
+     * authenticator bound at the highest level the account can reach, or at
+     * the level the new one will be used at if that's lower. Keyring always
+     * asks for the highest: otherwise a user who holds a key that can't
+     * leave its device could add another after proving only a password and
+     * a code.
      *
      * A key nothing vouches for is asked for too: if it is what it says, it
      * is the best the account has. A recovery code is taken in a lost key's

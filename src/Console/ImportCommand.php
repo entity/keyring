@@ -33,7 +33,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
  *
  * Recovery codes come across as keyed hashes of the codes exactly as
  * Fortify showed them, case included, which is what keeps them above the
- * 112 random bits OWASP ASVS 6.5.2 asks of a code stored that way.
+ * 112 random bits OWASP ASVS 5.0.0 (6.5.2) asks of a code stored that way.
  */
 #[AsCommand(name: 'keyring:import')]
 #[Description('Import authenticators from Fortify (TOTP, recovery codes and passkeys)')]

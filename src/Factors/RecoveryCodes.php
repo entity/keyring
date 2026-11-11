@@ -27,7 +27,7 @@ use ParagonIE\ConstantTime\Base32;
  * Stored as keyed hashes, never in plain text.
  *
  * A keyed hash is quick to work out, so it's only enough for a code too long
- * to guess: OWASP ASVS 6.5.2 asks for 112 random bits, and a slow, salted
+ * to guess: OWASP ASVS 5.0.0 (6.5.2) asks for 112 random bits, and a slow, salted
  * password hash for anything with fewer. So a code is only stored, and only
  * accepted, in one of two forms that have them:
  *
@@ -220,7 +220,7 @@ class RecoveryCodes extends Factor implements Enrollable
     {
         return KeyedHash::make(KeyedHash::RECOVERY_CODES, $this->canonical($code) ?? throw new InvalidArgumentException(
             'Keyring only stores recovery codes with 112 random bits or more: its own (26 base32 characters) or Fortify\'s (20 letters and digits). '
-            .'A shorter code is too easy to guess to be kept as a keyed hash (OWASP ASVS 6.5.2).',
+            .'A shorter code is too easy to guess to be kept as a keyed hash (OWASP ASVS 5.0.0, 6.5.2).',
         ));
     }
 

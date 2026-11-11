@@ -22,7 +22,7 @@ use Normalizer;
  */
 final class PasswordRules
 {
-    /** The shortest password any setting may allow (OWASP ASVS 6.2.1, NIST SP 800-63B). */
+    /** The shortest password any setting may allow (OWASP ASVS 5.0.0 6.2.1, NIST SP 800-63B-4 Sec. 3.1.1.2). */
     public const int SHORTEST = 8;
 
     /**
@@ -175,7 +175,7 @@ final class PasswordRules
      * with or without digits and punctuation around them. Characters that
      * stand in for letters count as those letters.
      *
-     * The password is compared whole, as NIST SP 800-63B asks: a passphrase
+     * The password is compared whole, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2): a passphrase
      * that happens to have a name in it is as hard to guess as one without,
      * and refusing it would be a composition rule by another name. "Taylor
      * rides a blue bicycle" passes, and "taylor.otwell.2026" doesn't.
@@ -295,7 +295,7 @@ final class PasswordRules
 
     /**
      * A password as Keyring hashes and checks it: in Unicode's NFC form, as
-     * NIST SP 800-63B asks. The same "é" is one code point from one keyboard
+     * NIST SP 800-63B-4 recommends (Sec. 3.1.1.2). The same "é" is one code point from one keyboard
      * and two from another, and without this the two wouldn't match. Bytes
      * that aren't UTF-8 have no form to put them in and stay as they are.
      */

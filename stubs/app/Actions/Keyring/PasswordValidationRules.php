@@ -20,7 +20,8 @@ trait PasswordValidationRules
      *     PasswordRules::for($user, fn (Password $rule) => $rule->rules(['min:20']))
      *
      * Leave out rules about which characters it has (mixedCase(), symbols()):
-     * OWASP ASVS 6.2.5 and NIST want any composition accepted.
+     * OWASP ASVS 5.0.0 (6.2.5) and NIST SP 800-63B-4 (Sec. 3.1.1.2) want any
+     * composition accepted.
      *
      * @param  User|null  $user  null at registration
      * @param  list<mixed>  $context  the name and email it mustn't contain while there's no user yet (non-strings are ignored)
