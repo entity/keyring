@@ -183,6 +183,47 @@ it('lets the app keep its own referer, and keeps it from other sites', function 
     $this->get('/login')->assertHeader('Referrer-Policy', 'same-origin');
 });
 
+// The page an emailed link opens sends no Referer at all, and an Inertia app
+// would go on running in it: every page after would send none either.
+describe('leaving the page an emailed link opened', function () {
+    beforeEach(function () {
+        $this->user = taylor();
+        $this->token = app('auth.password')->broker()->createToken($this->user);
+        $this->page = route('password.reset', ['token' => $this->token, 'email' => 'taylor@example.com']);
+
+        $this->inertia()->get($this->page)->assertOk()->assertHeader('Referrer-Policy', 'no-referrer');
+    });
+
+    it('has an Inertia app load the next page in full, with what was flashed for it', function () {
+        $this->inertia()->post(route('password.update'), ['token' => $this->token, 'email' => 'taylor@example.com', 'password' => 'a-long-new-password', 'password_confirmation' => 'a-long-new-password'])
+            ->assertStatus(409)
+            ->assertHeader('X-Inertia-Location', route('login'))
+            ->assertHeaderMissing('Location')
+            ->assertSessionHas('status', 'password-reset');
+
+        $this->flushHeaders()->get('/login')->assertHeader('Referrer-Policy', 'same-origin');
+    });
+
+    it('sends a form that failed back to the page it is on', function () {
+        $this->inertia()->post(route('password.update'), ['token' => $this->token, 'email' => 'taylor@example.com', 'password' => 'short', 'password_confirmation' => 'short'])
+            ->assertRedirect($this->page)
+            ->assertHeaderMissing('X-Inertia-Location')
+            ->assertSessionHasErrors('password');
+    });
+
+    it('redirects a browser that is not running Inertia as it always did', function () {
+        $this->flushHeaders()->post(route('password.update'), ['token' => $this->token, 'email' => 'taylor@example.com', 'password' => 'a-long-new-password', 'password_confirmation' => 'a-long-new-password'])
+            ->assertRedirect(route('login'))
+            ->assertHeaderMissing('X-Inertia-Location');
+    });
+
+    it('leaves an Inertia redirect from any other form alone', function () {
+        $this->inertia()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard')
+            ->assertHeaderMissing('X-Inertia-Location');
+    });
+});
+
 it('sends a failed form back to its own page, though the browser sends no referer', function () {
     totpFor(taylor());
 

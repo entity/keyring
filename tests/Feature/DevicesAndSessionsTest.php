@@ -181,7 +181,8 @@ it('gives new device events a working "this wasn\'t me" link', function () {
     $this->get('/home')->assertOk();
 
     // Opening the link only shows a page, so mail scanners can't sign anyone out.
-    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report');
+    // Its URL is the signed link, so the page sends no Referer to anyone.
+    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report')->assertHeader('Referrer-Policy', 'no-referrer');
     $this->flushHeaders();
     expect(Device::sole()->isRevoked())->toBeFalse();
 

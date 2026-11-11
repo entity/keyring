@@ -285,10 +285,11 @@ describe('resetting password', function () {
             return true;
         });
 
+        // The token is in the page's URL, so not even the app gets a Referer.
         $this->inertia()->get(route('password.reset', ['token' => $token, 'email' => 'taylor@example.com']))
-            ->assertHeader('Referrer-Policy', 'same-origin');
+            ->assertHeader('Referrer-Policy', 'no-referrer');
 
-        $this->post(route('password.update'), [
+        $this->flushHeaders()->post(route('password.update'), [
             'token' => $token,
             'email' => 'taylor@example.com',
             'password' => 'correct horse battery staple',

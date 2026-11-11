@@ -34,7 +34,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - Checking a password can rehash it under the app's current settings. The new hash is only saved over the one that was checked, under a row lock, so a sign in that overlaps a reset can't write the old password back, and whatever device trust it was given is withdrawn when it's ended.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
-- Keyring's responses send `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`, and signing out sends `Clear-Site-Data`.
+- Keyring's responses send `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` (`no-referrer` on the pages emailed links open), and signing out sends `Clear-Site-Data`.
 
 ### Rate Limiting
 
@@ -133,7 +133,9 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 
 - Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
 - Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
-- Pages opened from emailed links (password resets, email changes, "this wasn't me") keep their token out of the `Referer` header other sites see, like every Keyring response. Your own app still receives it, so a failed form finds its way back.
+- Pages opened from emailed links (password resets, email changes, "this wasn't me") have the link's token in their URL, so they're sent with `Referrer-Policy: no-referrer`: nothing the page loads is told its URL, your own assets and analytics included. A failed form still finds its way back, because Keyring notes the page in the session.
+- Every other Keyring response sends `Referrer-Policy: same-origin`, so other sites never see its URL and your own app still does.
+- An Inertia app keeps the policy of the page it first loaded. So when the form on an emailed link's page succeeds, Keyring answers Inertia with a full page visit (`409` with `X-Inertia-Location`), and the next page comes with its own policy. Otherwise every page after it would send no `Referer` either, signed in or not.
 
 #### Emailed Links
 
