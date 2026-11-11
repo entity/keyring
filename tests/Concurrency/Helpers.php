@@ -1,5 +1,8 @@
 <?php
 
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Attributes\WithoutIncrementing;
+use Illuminate\Database\Eloquent\Attributes\WithoutTimestamps;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Process\FakeInvokedProcess;
 use Illuminate\Process\InvokedProcess;
@@ -18,6 +21,18 @@ use Keyring\Factors\WebAuthn;
 function useRaceFactors(): void
 {
     Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class]);
+}
+
+/**
+ * A registered session's row, to hold its lock: the registry has no model
+ * of its own.
+ */
+function sessionRow(string $id): Model
+{
+    return new #[Table(name: 'keyring_sessions', keyType: 'string')]
+    #[WithoutIncrementing]
+    #[WithoutTimestamps]
+    class extends Model {}->newQuery()->findOrFail($id);
 }
 
 /**
