@@ -72,9 +72,11 @@ mysql() {
     docker run -d --rm --name "$name" -e MYSQL_DATABASE=keyring -e MYSQL_ROOT_PASSWORD=password \
         -p "127.0.0.1:$port:3306" mysql:8.4 >/dev/null || return 1
 
-    # It answers a ping before it takes connections, so ask it a question.
+    # It answers a ping before it takes connections, so ask it a question,
+    # and over TCP: while it sets itself up it runs a first server that only
+    # listens on its socket, then stops it and starts the real one.
     for _ in $(seq 60); do
-        docker exec "$name" mysql -ppassword -e 'select 1' keyring >/dev/null 2>&1 && break
+        docker exec "$name" mysql --protocol=tcp -h127.0.0.1 -ppassword -e 'select 1' keyring >/dev/null 2>&1 && break
         sleep 2
     done
 
