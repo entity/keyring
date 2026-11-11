@@ -279,6 +279,7 @@ The suite checks that:
 - signing out revokes the registered session,
 - every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out doesn't keep working there,
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
+- the password broker Keyring uses has a `throttle`, so one account can't be sent [a reset link](protected-changes.md#resetting-the-password) as often as anyone asks (skipped without `Features::resetPasswords()`),
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
 If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password` and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.

@@ -140,6 +140,27 @@ trait KeyringConformance
         );
     }
 
+    /**
+     * Keyring's own limit on asking for a reset link is per sender. How
+     * often one account can be sent one is the broker's "throttle", which is
+     * Laravel's setting and yours: 60 seconds in a new app.
+     */
+    public function test_keyring_limits_how_often_an_account_is_sent_a_reset_link(): void
+    {
+        if (! Features::enabled(Features::resetPasswords())) {
+            $this->markTestSkipped('Password resets are off: turn on Features::resetPasswords().');
+        }
+
+        $option = 'auth.passwords.'.(config('keyring.passwords.broker') ?? config('auth.defaults.passwords')).'.throttle';
+
+        $this->assertGreaterThan(
+            0,
+            (int) config($option),
+            "The [{$option}] option is missing or zero, so one account can be sent a reset link as often as anyone asks, from as many addresses as they have. "
+            .'Set it to the seconds an account waits between links: 60 is what a new Laravel app has.',
+        );
+    }
+
     public function test_keyring_gives_the_same_error_for_wrong_passwords_and_unknown_accounts(): void
     {
         $user = $this->keyringUser();

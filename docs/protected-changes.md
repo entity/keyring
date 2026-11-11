@@ -319,7 +319,22 @@ The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent t
 - dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`,
 - redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.
 
-Resets use Laravel's password broker (`passwords.broker`, or your default), so its token expiry and throttling apply. A reset link stops working as soon as the password changes through Keyring, the account's email address changes, or the user is deleted. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
+Resets use Laravel's password broker (`passwords.broker`, or your default), so two of its settings in `config/auth.php` are part of the flow:
+
+```php
+'passwords' => [
+    'users' => [
+        'provider' => 'users',
+        'table' => 'password_reset_tokens',
+        'expire' => 60,
+        'throttle' => 60,
+    ],
+],
+```
+
+`throttle` is the seconds an account waits between reset links, and it's the only limit on how often one account is mailed. Keyring's own limit on `POST /forgot-password` is the [form limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute per sender, which does nothing about many senders asking for one account. A new Laravel app has 60 seconds; Keyring neither sets it nor checks it when the app runs, so keep it, and the [conformance suite](testing.md#the-conformance-suite) fails when it's missing or zero. A request the broker throttles gets the same `reset-link-sent` answer as any other. `expire` is the minutes a link works for. OWASP's Forgot Password Cheat Sheet asks for both, and NIST SP 800-63B-4 (Sec. 4.2.1.2) for a link that lasts 24 hours at most: Keyring doesn't cap `expire`, so don't raise it past 1440.
+
+A reset link stops working as soon as the password changes through Keyring, the account's email address changes, or the user is deleted. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
 
 ## Email Verification
 
