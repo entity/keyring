@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Facades\Keyring;
@@ -44,6 +45,9 @@ final class PasswordRules
         'fastmail', 'tutanota', 'yandex', 'zoho', 'mail', 'email',
     ];
 
+    /** Have I Been Pwned's range search: every breached hash that starts with five characters. */
+    private const string BREACHES = 'https://api.pwnedpasswords.com/range/';
+
     /** @var array<string, int>|null */
     private static ?array $common = null;
 
@@ -62,9 +66,13 @@ final class PasswordRules
     {
         $hasMfa = $user !== null && Keyring::for($user)->hasSecondFactor();
 
-        $rule = Password::min(self::min($hasMfa))->max(config('keyring.passwords.max'));
+        $rule = Password::min($min = self::min($hasMfa))->max(config('keyring.passwords.max'));
 
-        if (config('keyring.passwords.uncompromised') ?? app()->isProduction()) {
+        $breachCheck = config('keyring.passwords.uncompromised') ?? app()->isProduction();
+        $strict = $breachCheck && config('keyring.passwords.refuse_unchecked');
+
+        // Laravel's check, unless Keyring is to do its own, stricter one.
+        if ($breachCheck && ! $strict) {
             $rule->uncompromised();
         }
 
@@ -75,7 +83,11 @@ final class PasswordRules
         $site = [config('app.name'), ...config('keyring.passwords.context')];
         $personal = [...$context, $user?->getAttribute('name'), $user?->getAttribute(Keyring::username()), $user?->getAttribute(Keyring::email())];
 
-        return ['required', 'string', 'confirmed', $rule, self::notCommon(), self::withoutContext($site, $personal), self::bcryptLimit()];
+        return [
+            'required', 'string', 'confirmed', $rule,
+            self::notCommon(), self::withoutContext($site, $personal), self::bcryptLimit(),
+            ...$strict ? [self::notBreached($min)] : [],
+        ];
     }
 
     /**
@@ -113,6 +125,39 @@ final class PasswordRules
 
             if (is_string($value) && isset(self::$common[Str::lower(trim($value))])) {
                 $fail(__('keyring::keyring.password_common'));
+            }
+        };
+    }
+
+    /**
+     * Laravel's breach check lets a password through when Have I Been Pwned
+     * can't be reached: it reports the failure and answers "not breached".
+     * With passwords.refuse_unchecked on, Keyring asks itself, the same way
+     * (only the first five characters of the password's SHA-1 are sent), and
+     * refuses a password it got no answer about. One too short to be taken
+     * anyway isn't sent.
+     */
+    private static function notBreached(int $min): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($min) {
+            if (! is_string($value) || mb_strlen($value) < $min) {
+                return;
+            }
+
+            $hash = Str::upper(sha1($value));
+
+            $range = rescue(fn () => Http::withHeaders(['Add-Padding' => 'true'])->timeout(10)->get(self::BREACHES.substr($hash, 0, 5))->throw()->body());
+
+            // A range that was read always lists hashes, so anything else is no answer.
+            if (! is_string($range) || preg_match('/^[0-9A-F]{35}:\d/mi', $range) !== 1) {
+                $fail(__('keyring::keyring.password_unchecked'));
+
+                return;
+            }
+
+            // The padding added so an answer's size gives nothing away counts zero.
+            if (preg_match('/^'.substr($hash, 5).':0*[1-9]/mi', $range) === 1) {
+                $fail('validation.password.uncompromised')->translate();
             }
         };
     }

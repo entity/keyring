@@ -195,12 +195,12 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 ## Password Rules
 
-`Keyring\Support\PasswordRules::for($user)` returns validation rules that follow OWASP's guidance:
+`Keyring\Support\PasswordRules::for($user)` returns validation rules that follow the password requirements of OWASP ASVS 5.0.0 (section 6.2), which [Standards](security.md#standards) lists one by one:
 
 - at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)). Neither option can be set below 8: Keyring throws a `LogicException` rather than accept a shorter minimum,
 - at most `max` characters (128) with a hasher that reads a whole password, such as argon2id,
 - no composition rules (no "one uppercase, one symbol"): any characters are accepted, with spaces, punctuation and emoji among them,
-- breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),
+- breached passwords rejected, in production by default. Laravel's check lets a password through when Have I Been Pwned can't be reached; set [`passwords.refuse_unchecked`](configuration.md#passwords) to refuse it instead,
 - the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
 - no passwords containing [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
 - with bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. That's 72 plain characters but as few as 18 emoji, so 64 characters don't always fit. Set `HASH_DRIVER=argon2id` to accept every password up to `max`, which is what OWASP ASVS 6.2.9 needs (see [Passwords](configuration.md#passwords)),

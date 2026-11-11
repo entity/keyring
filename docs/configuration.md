@@ -223,6 +223,7 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
     'min_without_mfa' => 15,
     'max' => 128,
     'uncompromised' => null,
+    'refuse_unchecked' => false,
     'context' => [],
     'broker' => null,
 ],
@@ -245,6 +246,12 @@ Keyring doesn't hash a password before bcrypt to get around the limit: the hashe
 `context` is your list of words a password mustn't contain: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 6.1.2 asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
 
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
+
+The check is Laravel's (`Password::uncompromised()`), and it fails open: when Have I Been Pwned can't be reached, times out or answers with an error, Laravel reports the exception and lets the password through. On those requests only the [bundled list](protected-changes.md#password-rules) of common passwords stands between a user and a breached password.
+
+Set `refuse_unchecked` to `true` to refuse instead. Keyring then makes the request itself, the same way (only the first five characters of the password's SHA-1 leave your server), and a password it gets no answer about is refused with `keyring::keyring.password_unchecked`, which asks the user to try again in a moment. The cost is that nobody can register, or change or reset a password, while the service is unreachable from your servers. It only applies where `uncompromised` runs, and waits up to 10 seconds for an answer.
+
+Laravel's check goes through whatever `Illuminate\Contracts\Validation\UncompromisedVerifier` is bound in the container, so you can bind one of your own, say for a copy of the breach data you host yourself. `refuse_unchecked` doesn't use it, since a verifier can only answer yes or no: leave the option off, and have your verifier answer `false` when it can't check.
 
 ## Risk
 

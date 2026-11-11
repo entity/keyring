@@ -235,7 +235,10 @@ return [
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
-    | no network calls.
+    | no network calls. Laravel's check lets a password through when the
+    | service can't be reached, which leaves only the list of common
+    | passwords that ships with Keyring. Set "refuse_unchecked" to refuse
+    | the password instead, and ask the user to try again.
     |
     | "context" is your list of words a password mustn't contain: names of
     | your organisation, products, systems, projects and teams. Your app's
@@ -248,6 +251,7 @@ return [
         'min_without_mfa' => 15,
         'max' => 128,
         'uncompromised' => null,
+        'refuse_unchecked' => false,
         'context' => [],
         'broker' => null,
     ],

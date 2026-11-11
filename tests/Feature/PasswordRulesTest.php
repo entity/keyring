@@ -2,7 +2,12 @@
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Hashing\HashManager;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
@@ -244,6 +249,99 @@ it('checks the breach list in production only, unless told otherwise', function 
 
     config(['keyring.passwords.uncompromised' => false]);
     expect($breachCheck())->toBeFalse();
+});
+
+describe('when the breach check can\'t be reached', function () {
+    beforeEach(function () {
+        config(['keyring.passwords.uncompromised' => true]);
+
+        $this->password = 'a long passphrase for me';
+        $this->hash = strtoupper(sha1($this->password));
+
+        $this->errors = fn (?string $password = null) => Validator::make(
+            ['password' => $password ?? $this->password, 'password_confirmation' => $password ?? $this->password],
+            ['password' => PasswordRules::for()],
+        )->errors()->all();
+
+        // A range as Have I Been Pwned sends it: other hashes, and padding that counts zero.
+        $this->range = fn (string ...$lines) => Http::response(implode("\r\n", [
+            '0018A45C4D1DEF81644B54AB7F969B88D65:21',
+            '00D4F6E8FA6EECAD2A3AA415EEC418D38EC:2',
+            '011053FD0102E94D6AE2F8B83D76FAF94F6:0',
+            ...$lines,
+        ]));
+    });
+
+    dataset('no answer', [
+        'the service is down' => [fn () => Http::response('', 503)],
+        'it limits the app' => [fn () => Http::response('Rate limit is exceeded.', 429)],
+        'the connection fails' => [fn () => throw new ConnectionException('Could not resolve host.')],
+        'something else answers' => [fn () => Http::response('<html>Sign in to the wifi</html>')],
+        'nothing comes back' => [fn () => Http::response('')],
+    ]);
+
+    it('lets the password through by default, as laravel does', function (Closure $answer) {
+        Http::fake(['api.pwnedpasswords.com/*' => $answer]);
+        Exceptions::fake();
+
+        expect(($this->errors)())->toBe([]);
+    })->with('no answer');
+
+    it('refuses the password instead when told to, and says why', function (Closure $answer) {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake(['api.pwnedpasswords.com/*' => $answer]);
+        Exceptions::fake();
+
+        expect(($this->errors)())->toBe([__('keyring::keyring.password_unchecked')]);
+    })->with('no answer');
+
+    it('still tells a breached password from a clean one', function (?string $count, bool $breached) {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        $listed = $count === null ? [] : [substr($this->hash, 5).':'.$count];
+
+        Http::fake(['api.pwnedpasswords.com/*' => ($this->range)(...$listed)]);
+        expect(($this->errors)())->toBe($breached ? [__('validation.password.uncompromised', ['attribute' => 'password'])] : []);
+
+        // However the service writes its hashes.
+        Http::swap(new Factory);
+        Http::fake(['api.pwnedpasswords.com/*' => ($this->range)(...array_map(strtolower(...), $listed))]);
+        expect(($this->errors)())->toBe($breached ? [__('validation.password.uncompromised', ['attribute' => 'password'])] : []);
+    })->with([
+        'not listed' => [null, false],
+        // Padding can't name a real hash, but a zero is never a breach.
+        'listed as padding' => ['0', false],
+        'seen once' => ['1', true],
+        'seen often' => ['3861493', true],
+        'seen ten times' => ['10', true],
+    ]);
+
+    it('only sends the first five characters of the hash', function () {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake(['api.pwnedpasswords.com/*' => ($this->range)()]);
+
+        ($this->errors)();
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn (Request $request) => $request->url() === 'https://api.pwnedpasswords.com/range/'.substr($this->hash, 0, 5)
+            && $request->hasHeader('Add-Padding', 'true')
+            && ! str_contains($request->url().$request->body(), substr($this->hash, 5)));
+    });
+
+    it('asks nothing about a password too short to be taken, or with the breach check off', function () {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake(['api.pwnedpasswords.com/*' => Http::response('', 503)]);
+
+        expect(($this->errors)('too short'))->toHaveCount(1)->not->toContain(__('keyring::keyring.password_unchecked'));
+
+        config(['keyring.passwords.uncompromised' => false]);
+        expect(($this->errors)())->toBe([]);
+
+        // Null is production only.
+        config(['keyring.passwords.uncompromised' => null]);
+        expect(($this->errors)())->toBe([]);
+
+        Http::assertNothingSent();
+    });
 });
 
 describe('how long a password can be', function () {
