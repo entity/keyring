@@ -10,6 +10,7 @@
     - [Account Changes](#account-changes)
     - [Links and Headers](#links-and-headers)
     - [Storage](#storage)
+    - [Logging](#logging)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
@@ -19,7 +20,7 @@ Keyring follows OWASP's authentication, session management and forgot password g
 
 The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration.
 
-Guarantees about a [feature](quick-start.md#adding-features), such as devices, email changes or the security log, apply once that feature is on.
+Guarantees about a [feature](quick-start.md#adding-features), such as devices or email changes, apply once that feature is on.
 
 ## Guarantees
 
@@ -133,7 +134,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 ### Links and Headers
 
 - Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
-- Signed links are signed over the path and query only, and checked with `signed:relative`, so a forged `Host` header can't redirect them.
+- Signed links are signed over the path and query only, and checked with `keyring.signed:relative` (Laravel's `signed` middleware, with refused links logged), so a forged `Host` header can't redirect them.
 - Pages opened from emailed links (password resets, email changes, "this wasn't me") keep their token out of the `Referer` header other sites see, like every Keyring response. Your own app still receives it, so a failed form finds its way back.
 
 #### Emailed Links
@@ -155,6 +156,16 @@ Work it out from something the server knows. The request's `Host` header is what
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
 - WebAuthn user handles are an HMAC of the user ID, never the ID or email.
 - The security log never holds passwords, codes, tokens or session IDs.
+
+### Logging
+
+- Sign ins, failed factors, lockouts, session starts and ends, and every change to how an account signs in are recorded as shipped: in the [security log](security-log-and-emails.md) table, which is on by default, or in your app's log when you turn the table off. There is no setting that records nothing.
+- What was refused is recorded too: a request for someone else's authenticator, device or verification link, a sign-in method that wasn't added, a removal that would have left the account unable to sign in, an emailed link with a wrong, ended or expired token or signature, and a verification the pipeline's final gate turned away. None of it changes the answer the requester gets.
+- No entry holds a password, code, token, signature, session ID or request body, in the table or in the app's log. Form validation errors aren't logged.
+- Every entry carries a severity and the ID of the request that wrote it.
+- A refused request can't fill the log. A lock is logged once when it starts, not for each request it refuses, and refusals are capped per account or IP address, with one entry to say where the log stopped. See [Refusals That Repeat](security-log-and-emails.md#refusals-that-repeat).
+- A log write that fails never fails the sign in, with one exception: `Keyring::withoutProtection()` doesn't run unless its entry was written.
+- Old entries, devices, ended email changes and ended sessions are deleted every day by a task Keyring schedules itself, and a force deleted user's records are deleted with them.
 
 ## Standards
 
@@ -179,6 +190,8 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
+| Logging sign ins, failures, lockouts and session ends by default, and what was refused: someone else's record, a link's token or signature, a skipped pipeline step | OWASP ASVS 16.3.1 to 16.3.3 |
+| A severity and a request ID on every entry, no secrets in any, and a cap on entries a refused request can cause | OWASP's Logging Cheat Sheet |
 | A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 
 ## Known Limitations

@@ -55,16 +55,16 @@ use Keyring\Features;
 'features' => [
     Features::registration(),
     Features::resetPasswords(),
+    Features::securityLog(),
     // Features::emailVerification(),
     // Features::updatePasswords(),
     // Features::manageAuthenticators(),
     // Features::devices(),
     // Features::emailChanges(),
-    // Features::securityLog(),
 ],
 ```
 
-Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration and password resets. What each feature adds is in [Adding Features](quick-start.md#adding-features).
+Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration, password resets and the security log. The list is replaced whole by yours, so keep `Features::securityLog()` in it unless you'd rather have those events in [your app's log](security-log-and-emails.md#without-the-table). What each feature adds is in [Adding Features](quick-start.md#adding-features).
 
 Check for a feature in your own code with `Features::enabled(Features::devices())`. `Features::all()` lists them all, which is handy in tests.
 
@@ -250,11 +250,25 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 ```php
 'security_log' => [
     'keep_for' => '180d',
+    'channel' => env('KEYRING_LOG_CHANNEL'),
+    'context_key' => 'trace_id',
+    'refusals' => 20,
+    'refusals_per' => '1h',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
 ],
+
+'prune_at' => '03:00',
 ```
 
-`keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in. The log itself is turned on with `Features::securityLog()`. See [Security Log & Emails](security-log-and-emails.md). Without it, "was this you?" alerts and the `RepeatedFactorFailures` risk signal don't work, since both read from the log.
+`keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in.
+
+The table is `Features::securityLog()`, which is on by default. Without it the same events are written to the log `channel` (`null` is your default channel), and "was this you?" alerts and the `RepeatedFactorFailures` risk signal don't work, since both read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
+
+`context_key` is the key in Laravel's Context your app keeps a request's ID under, if it does, which every entry the request writes then carries. Without one Keyring makes an ID of its own for the request. `null` leaves it out. See [Request IDs](security-log-and-emails.md#request-ids).
+
+`refusals` is how many entries of one type are written about one account, or from one IP address when no account is known, every `refusals_per`, for things that were refused and can be asked for again without end. `null` writes them all. See [Refusals That Repeat](security-log-and-emails.md#refusals-that-repeat).
+
+`prune_at` is the time of day Keyring schedules `keyring:prune` for, which deletes everything that's past its time, not only log entries. `null` leaves scheduling it to you. See [Pruning](devices-and-sessions.md#pruning).
 
 ## Pending Logins, Timebox and Rate Limits
 

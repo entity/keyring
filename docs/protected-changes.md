@@ -239,7 +239,7 @@ Resets use Laravel's password broker (`passwords.broker`, or your default), so i
 
 ## Email Verification
 
-With `Features::emailVerification()` on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
+With `Features::emailVerification()` on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`keyring.signed:relative`, Laravel's `signed` middleware with [refused links logged](security-log-and-emails.md#refused-links)), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
 
 If you've already set `VerifyEmail::createUrlUsing()` yourself, Keyring leaves it alone.
 
@@ -255,6 +255,7 @@ In `Keyring\Events`:
 | `PasswordChanged` | `user` |
 | `PasswordReset` | `user` |
 | `ProtectionBypassed` | `reason` |
+| `LinkRefused` | `link`, `reason`, `user`: an email change link with a wrong or ended token, a reset with a token that wasn't the one sent, or a signed link that didn't check out |
 
 `change` is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden from serialisation, and the addresses are encrypted at rest.
 

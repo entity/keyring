@@ -207,5 +207,10 @@ In `Keyring\Events`:
 | `AuthenticatorRemoved` | `user`, `authenticator` |
 | `RecoveryCodesGenerated` | `user`, `authenticator` |
 | `RecoveryCodeUsed` | `authenticator`, `remaining` |
+| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid` or `not_allowed`) |
+| `AuthenticatorRemovalRefused` | `user`, `authenticator` |
+| `AccessRefused` | `user`, `resource`, `id` |
 
 Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.
+
+The last three are what was turned away: a confirmation whose code or key was wrong (or an account that may not enroll yet), a removal that would have left the user unable to sign in, and a request for an authenticator that isn't the user's. Each is answered as before, a 422, 403 or 404, and written to the [security log](security-log-and-emails.md#entry-types).
