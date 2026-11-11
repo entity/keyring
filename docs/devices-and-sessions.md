@@ -316,7 +316,7 @@ Then set `sessions.driver` to `custom`. Keyring calls `replace()`, `revokeAll()`
 |---|---|
 | `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime, or what a record was replaced by. |
 | `find($id)` | The session, or `null`. |
-| `forUser($user)` | The user's sessions that haven't expired, been revoked or been replaced, most recent first. |
+| `forUser($user)` | The user's sessions that haven't expired, been revoked or been replaced, most recent first. A session is a user's by the model as well as the ID: match on the record's `userType` (`RegisteredSession::typeOf($user)`) and its `userId`, here and in `revokeAll()` and `revokeDevice()`, or two user models with the same IDs would share sessions. `$session->belongsTo($user)` checks both. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |
 | `replace($id, $successor, $revoke = false)` | Moves a session to a new record: stores `$successor` and sets the old record's `replacedBy` and `replacedAt` (and revokes it, with `$revoke`). It only does so for a record that is neither revoked nor replaced, and returns whether it did. Of two calls for the same record at the same moment exactly one may return `true`, and the other's record must not be left behind: "remember me" being single use rests on this. The database driver uses one conditional `UPDATE` in a transaction, the cache driver the store's `add()`. |
@@ -518,8 +518,9 @@ That isn't enough where the whole app is meant to be AAL2, or where you want NIS
 - A session ends on the first request after the level it **signed in at** runs out: after that level's `idle` without a request, or its `absolute` after the factors were proved. The user is signed out as for any other timeout, with the reason `idle` or `expired` on `SessionEnded`.
 - Proving every factor for that level again before then (any [step-up](step-up.md) that asks for them all) starts both limits over, as reauthenticating does in NIST.
 - A level reached later by a step-up still lapses on its own and takes nothing with it. A session that signed in with a password and stepped up for one page stays an AAL1 session.
+- A [risk response](risk.md#responding-to-risk) that asks a signed-in session to step up ends it too: forgetting what the session proved is its level running out. The reason on `SessionEnded` is `risk`.
 - "Remember me" brings nothing back. Its cookie proves nothing, so there's no level for the session to carry on at: the browser signs in again. NIST doesn't accept such a cookie in place of authenticating either (Sec. 5.1), so leave the checkbox off your login page.
-- Sessions signed in at AAL1 are unaffected: `idle` and `absolute` already end those.
+- The timeouts leave sessions signed in at AAL1 as they were: `idle` and `absolute` already end those.
 
 [Recipes](recipes.md#an-app-whose-every-page-needs-aal2) has the full setup for an app whose every page needs AAL2.
 

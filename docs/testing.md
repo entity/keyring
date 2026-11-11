@@ -28,7 +28,7 @@ abstract class TestCase extends BaseTestCase
 
 New passwords are only checked against Have I Been Pwned in production, so tests make no network calls. See [Passwords](configuration.md#passwords).
 
-`InteractsWithKeyring` also swaps in an instant timebox for every test that uses it, so failed factor checks don't wait the usual 250ms. Tests without the trait wait the full `timebox` on every failed verification.
+`InteractsWithKeyring` also swaps in an instant timebox for every test that uses it, so failed factor checks don't wait the usual 500ms. Tests without the trait wait the full `timebox` on every failed verification.
 
 ## Acting at an Assurance Level
 
@@ -281,6 +281,7 @@ The suite checks that:
 - every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out doesn't keep working there,
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - the password broker Keyring uses has a `throttle`, so one account can't be sent [a reset link](protected-changes.md#resetting-the-password) as often as anyone asks (skipped without `Features::resetPasswords()`),
+- one password hash takes less time than [`timebox`](configuration.md#pending-logins-timebox-and-rate-limits), which is what keeps a refusal that hashes from taking longer than one that doesn't. It times a hash where the tests run, so it's a guide to your servers and not a measurement of them. Bcrypt is timed at 12 rounds, or yours if higher, since a test suite usually runs with fewer: return what production hashes with from `keyringProductionHashOptions()` if that isn't it,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
 If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password` and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.

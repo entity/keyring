@@ -442,14 +442,27 @@ What this gives you:
 
 **Match on the provider's ID, never on the email address.** Some providers let an account carry an address its owner hasn't proven, so matching on it would let someone sign in to whoever has that address in your app.
 
-To link an account, send a signed-in user through the same redirect to a second callback that saves the ID. Put it behind `keyring.fresh`, since it adds a way to sign in:
+To link an account, send a signed-in user through the same redirect to a second callback that saves the ID. It adds a way to sign in, so give it what Keyring's own routes for that have: `keyring.fresh`, and the rule that [the account's address is verified first](authenticators.md#who-may-enroll). Without the second, someone who registers an address that isn't theirs could link their own GitHub account to it, and still sign in after the real owner had reset the password:
 
 ```php
 Route::get('/settings/github/callback', function (Request $request) {
+    abort_unless(Keyring::allowsEnrollment($request->user()), 403);
+
     $request->user()->forceFill(['github_id' => Socialite::driver('github')->user()->getId()])->save();
 
     return to_route('security.edit');
 })->middleware(['auth', 'keyring.fresh:15m']);
+```
+
+Keyring doesn't know about the link, so nothing of Keyring's removes it. A password reset and an [undone email change](protected-changes.md#changing-the-email-address) take away the sign-in methods Keyring holds and leave `github_id` where it is. Clear it when the account is recovered, by listening for `PasswordReset` and `EmailChangeReverted`:
+
+```php
+use Keyring\Events\EmailChangeReverted;
+use Keyring\Events\PasswordReset;
+
+Event::listen([PasswordReset::class, EmailChangeReverted::class], function (PasswordReset|EmailChangeReverted $event) {
+    $event->user->forceFill(['github_id' => null])->save();
+});
 ```
 
 To let people sign up with GitHub, create and link the user in the login callback before calling `Keyring::attempt()`, when no user has that ID yet.

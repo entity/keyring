@@ -231,7 +231,7 @@ While a user is held:
 
 - They can still sign in. Every signed-in request in the `web` group sends them to `password_change_url` with the `change-password` status. JSON requests get a `403` with that status and the URL as `redirect`. Without a `password_change_url`, they get a plain `403`.
 - That page is let through, for any method, and so are `PUT /user/password`, the [confirm page](step-up.md#the-confirm-flow) it may send them to, signing out and email verification. Nothing else is, including Keyring's other routes.
-- The hold ends when the password changes: through `PUT /user/password`, or a [password reset](#resetting-the-password). If your app saves passwords itself, without `Features::updatePasswords()`, call `Keyring::cancelPasswordChange($user)` once it has saved a new one.
+- The hold ends when the password changes: through `PUT /user/password`, or a [password reset](#resetting-the-password). It has to be a different password. `PUT /user/password` refuses the current one as the new one, for every user, and a reset to the same password goes through like any other but leaves the hold in place, so the form doesn't tell whoever holds the link that they guessed it. If your app saves passwords itself, without `Features::updatePasswords()`, call `Keyring::cancelPasswordChange($user)` once it has saved a new one, and check it's a new one first: nothing in that call does.
 - Signing out and in again changes nothing. The hold is a row in `keyring_password_holds`, not something in the session or the cache.
 - A hold placed by a request reaches that request's session at once. Other sessions that are already signed in hear of it within a minute.
 

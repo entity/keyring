@@ -222,7 +222,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 |---|---|
 | `driver` | `database`, `cache`, or the name of a driver you've added. |
 | `connection`, `table` | Used by the `database` driver. |
-| `store` | The cache store used by the `cache` driver. `null` is your default store. |
+| `store` | The cache store used by the `cache` driver. `null` is your default store. Use one that keeps its keys until they expire: a store that evicts under memory pressure can drop the list of a user's sessions, and a sign-out everywhere then misses the ones it listed. The `database` driver has no such store to depend on. |
 | `max` | How many sessions one account can have at once. A sign in beyond that ends the one unused longest. `null` for no limit. See [How Many Sessions](devices-and-sessions.md#how-many-sessions). |
 | `idle` | Inactivity allowed before a session ends. `null` leaves it to Laravel's session lifetime. |
 | `remember_idle` | The same, for a browser that ticked "remember me": how long it may stay away and still be signed back in, with nothing proved. `null` lets it stay away for the whole `absolute` limit. See [Inactivity and "Remember Me"](devices-and-sessions.md#inactivity-and-remember-me). |
@@ -335,7 +335,7 @@ The table is `Features::securityLog()`, which is on by default. Without it the s
     'keep_for' => '10m',
 ],
 
-'timebox' => '250ms',
+'timebox' => '500ms',
 
 'limits' => [
     'per_account' => 5,
@@ -355,7 +355,9 @@ The table is `Features::securityLog()`, which is on by default. Without it the s
 
 `pending_logins.keep_for` is how long a half-finished login or confirmation stays valid, as a [duration](#durations). It's also the `expiresAt` shown on the challenge page.
 
-`timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too. Verifications that go through return straight away.
+`timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too, and a registration and a refused password reset are held for it as well. Verifications that go through return straight away.
+
+It only hides what's shorter than it. The slowest thing a refusal does is hash a password, and not every refusal hashes one at the same cost: an account's password is checked at the cost its stored hash was made with, which differs from today's while old hashes are being moved to a new one, and a reset token is only checked for an address with a link outstanding. So keep `timebox` comfortably longer than one password hash takes on your servers. Bcrypt at 12 rounds takes around 200ms on current hardware and more on a small instance. Keyring tells you when it isn't: a refusal that took longer than `timebox` writes a warning to your app's log, at most once an hour, which is the check that sees your real hashing cost on your real servers. The [conformance suite](testing.md#the-conformance-suite) also times a hash where your tests run and fails when it doesn't fit, as an early guide.
 
 `limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B-4 allows, Sec. 3.2.2). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
 
