@@ -34,19 +34,20 @@ return [
     |
     | Signing in and out, challenges and step-up are always on. Add the rest
     | as your app needs them. Each one brings its routes, and anything else
-    | it needs, only once it's here.
+    | it needs, only once it's here. Take the security log out and its
+    | events are written to your app's log instead.
     |
     */
 
     'features' => [
         Features::registration(),
         Features::resetPasswords(),
+        Features::securityLog(),
         // Features::emailVerification(),
         // Features::updatePasswords(),
         // Features::manageAuthenticators(),
         // Features::devices(),
         // Features::emailChanges(),
-        // Features::securityLog(),
     ],
 
     /*
@@ -267,14 +268,25 @@ return [
     | Security Log
     |--------------------------------------------------------------------------
     |
-    | With Features::securityLog(), sign ins, failures, lockouts, changes and
-    | automatic actions are logged to keyring_events. Prune with
-    | `php artisan keyring:prune`.
+    | With Features::securityLog(), sign ins, failures, lockouts, refusals,
+    | changes and automatic actions are logged to keyring_events and kept for
+    | "keep_for". Without it they're written to the log "channel" instead
+    | (null for your default one), so they're always recorded somewhere.
+    |
+    | "context_key" is where your app keeps a request's ID in Laravel's
+    | Context, if it does. Entries carry it, or an ID Keyring makes itself.
+    | What's refused can be asked for again without end, so only "refusals"
+    | entries of one type are written every "refusals_per" about an account,
+    | or from an IP address when nobody is known (null for no limit).
     |
     */
 
     'security_log' => [
         'keep_for' => '180d',
+        'channel' => env('KEYRING_LOG_CHANNEL'),
+        'context_key' => 'trace_id',
+        'refusals' => 20,
+        'refusals_per' => '1h',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
         'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
