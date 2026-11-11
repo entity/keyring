@@ -35,6 +35,17 @@ class EnsureNotThrottled
         [$shared, $named] = Arr::partition($announced, fn (Limit $limit) => $limit instanceof SharedLimit);
         [$shared, $named] = [array_values($shared), array_values($named)];
 
+        // With no quiet limit there's nothing behind the ones that say so:
+        // they're asked together, and an attempt one of them refuses is
+        // counted against none, the address's included.
+        if ($quiet === []) {
+            if (($refusing = $this->throttle->hit($announced)) !== null) {
+                return $this->lockedOut($context, $refusing);
+            }
+
+            return $this->counted($context, $next, $announced);
+        }
+
         // The address first, so an attempt it refuses is never counted
         // against the account.
         if (($refusing = $this->throttle->hit($shared)) !== null) {
@@ -49,11 +60,6 @@ class EnsureNotThrottled
         // password gets in with it under a name someone else got refused,
         // and everyone without the password is answered as the name is.
         $held = $this->throttle->hit($named);
-
-        if ($held !== null && $quiet === []) {
-            return $this->lockedOut($context, $held);
-        }
-
         $limits = [...$shared, ...($held === null ? $named : [])];
 
         $context->throttleChecked = true;
@@ -72,6 +78,27 @@ class EnsureNotThrottled
             $limits = [...$limits, ...$quiet];
         }
 
+        // A name that was refused stays so when the attempt goes through:
+        // what it answers isn't changed by the account behind it signing in.
+        $context = $this->counted($context, $next, $limits);
+
+        // A quiet refusal has been announced to the app already, where the
+        // proof would have been checked.
+        return $held !== null && $context->outcome === Outcome::Failed
+            ? $this->lockedOut($context, $held, announce: ! $context->refused)
+            : $context;
+    }
+
+    /**
+     * Carry on down the pipeline with the attempt counted against these
+     * limits, and settle them by how it went.
+     *
+     * @param  list<Limit>  $limits
+     */
+    protected function counted(Context $context, Closure $next, array $limits): Context
+    {
+        $context->throttleChecked = true;
+
         try {
             $context = $next($context);
         } catch (Throwable $e) {
@@ -82,17 +109,11 @@ class EnsureNotThrottled
 
         match ($context->outcome) {
             Outcome::Failed => $this->failed($context, $limits),
-            // A name that was refused stays so: what it answers isn't
-            // changed by the account behind it signing in.
             Outcome::Challenge, Outcome::Complete => $this->throttle->succeeded($limits),
             default => $this->throttle->release($limits),
         };
 
-        // A quiet refusal has been announced to the app already, where the
-        // proof would have been checked.
-        return $held !== null && $context->outcome === Outcome::Failed
-            ? $this->lockedOut($context, $held, announce: ! $context->refused)
-            : $context;
+        return $context;
     }
 
     protected function lockedOut(Context $context, Limit $refusing, bool $announce = true): Context

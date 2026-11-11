@@ -102,7 +102,7 @@ class Throttle
         return [
             SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($factor->key().'|ip|'.$request->ip().($known ? '|account|'.$account : '')),
             ...($typed === '' ? [] : [
-                $this->perMinute($factor, 'typed:'.$typed, $known),
+                $this->perMinute($factor, 'typed:'.$typed, $known)->typed(),
                 ...($consecutive === null ? [] : [NameLimit::of($consecutive->share ?? PHP_INT_MAX, $factor->key(), 'typed:'.$typed, $known)]),
             ]),
             ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== '')->unowned($user === null), [
@@ -224,9 +224,11 @@ class Throttle
      */
     public function failed(array $limits): bool
     {
-        // The account's hold, and the typed name's. The name is only held
-        // for lockouts made under it: holding it for the account's would
-        // tell whoever typed it that another name is the same account's.
+        // The account's hold, and the typed name's, each for its own
+        // lockouts. Holding the name for the account's would tell whoever
+        // typed it that another name is the same account's. Holding the
+        // account for the name's would count lockouts from before its
+        // limits were cleared, which a name's count outlasts.
         $hold = $named = false;
 
         foreach ($limits as $limit) {
@@ -254,8 +256,8 @@ class Throttle
 
             $reached = $limit instanceof AccountLimit && $limit->holdAfter !== null && $lockouts >= $limit->holdAfter;
 
-            $hold = $hold || $reached;
-            $named = $named || ($reached && ! $limit->quiet);
+            $hold = $hold || ($reached && ! $limit->typed);
+            $named = $named || ($reached && $limit->typed);
         }
 
         $refused = false;

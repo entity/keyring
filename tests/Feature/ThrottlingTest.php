@@ -144,6 +144,30 @@ it('limits guesses at a username nobody has like guesses at a real one', functio
     expect($statuses)->toBe([422, 422, 429]);
 });
 
+// A request the account's own limit refuses on a challenge is counted against
+// nothing, the address included, or one person's retries would hold up
+// everyone behind that address.
+it('does not count a challenge the account\'s limit refuses against the address', function () {
+    config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 6]);
+    $user = account('taylor@example.com');
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+    $neighbour = account('abigail@example.com');
+    $theirs = Authenticator::factory()->totp()->for($neighbour, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+    foreach (range(1, 8) as $attempt) {
+        $this->postJson(route('keyring.login.verify', 'totp'), ['code' => '000000', 'authenticator' => $totp->id])
+            ->assertStatus($attempt <= 2 ? 422 : 429);
+    }
+
+    // Someone else at the same address, with a wrong code of their own.
+    $this->flushSession();
+    $this->app['auth']->forgetGuards();
+    $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+    $this->postJson(route('keyring.login.verify', 'totp'), ['code' => '000000', 'authenticator' => $theirs->id])->assertStatus(422);
+});
+
 it('counts overlapping attempts before verifying them', function () {
     config(['keyring.limits.per_account' => 5, 'keyring.limits.per_ip' => 100]);
     account('taylor@example.com');
@@ -879,6 +903,29 @@ describe('an account locked out again and again', function () {
         $this->assertGuest();
         Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->user->is($this->user));
     });
+
+    // A name's count outlasts a reset, so that what the name answers doesn't
+    // change with the account behind it. The account's hold goes by its
+    // own lockouts, which a reset starts over.
+    it('starts the count of lockouts over when the account\'s limits are cleared', function (Closure $clear, string $password) {
+        Event::fake([AccountLocked::class]);
+
+        lockOut(2);
+        $clear($this->user);
+        $this->travel(10)->minutes();
+
+        // The first lockout since: an old browser still trying the old password.
+        lockOut(1, password: 'the old password');
+        $this->travel(1)->hours();
+        $this->flushSession();
+        $this->app['auth']->forgetGuards();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => $password])->assertRedirect('/dashboard');
+        Event::assertNotDispatched(AccountLocked::class);
+    })->with([
+        'a reset' => [fn (User $user) => completeReset($user), 'a brand new passphrase'],
+        'an unlock' => [fn (User $user) => Keyring::unlock($user), 'password'],
+    ]);
 
     it('lifts each lock by itself until there have been that many in a day', function () {
         lockOut(2);
