@@ -220,6 +220,6 @@ These are part of the foundation. You don't need to set them up, but you can cha
 | Failed checks take the same time | 250ms | `timebox` |
 | Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
 | A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after 30 days, and "remember me" only brings back a session that hasn't ended | `sessions` in [Configuration](configuration.md#sessions) |
-| Assurance levels lapse, as NIST asks | AAL2 after an hour idle or 24 hours, AAL3 after 15 minutes or 12 hours | `sessions.levels` |
+| Assurance levels lapse, as NIST asks | AAL2 after an hour idle or 24 hours, AAL3 after 15 minutes or 12 hours. The session stays signed in at the level that's left, unless `sessions.end_on_lapse` ends it | `sessions.levels` |
 | Browsers are told to clear their cache and storage on sign out | On | A custom [`LogoutResponse`](sign-in-flow.md#responses) |
 | Step-up middleware | `keyring:aal2` and `keyring.fresh:15m`, for your routes | [Step-Up](step-up.md) |

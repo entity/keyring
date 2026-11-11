@@ -299,14 +299,36 @@ With an `idle` limit set, a remembered browser that stays away for longer than i
         'aal2' => ['idle' => '1h', 'absolute' => '24h'],
         'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
+    'end_on_lapse' => false,
 ],
 ```
 
 - **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
 - **`absolute`** ends a session this long after sign in, however active it is. A browser that comes back on ["remember me"](#remember-me) carries the same session on, so that doesn't start the limit again. The browser is asked to keep Laravel's "remember me" cookie no longer either, unless you set your guard's `remember` (in minutes) yourself. That only changes how long the browser holds it: it still stops working when its session ends.
-- **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
+- **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B-4's reauthentication limits (Sec. 2.2.3 and 2.3.3).
+- **`end_on_lapse`** ends a session when the level it signed in at runs out. See [below](#ending-a-session-with-its-level).
 
 A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.
+
+### Ending a Session With Its Level
+
+NIST SP 800-63B-4 (Sec. 5.2) says a session is terminated when its inactivity or overall timeout passes. It also lets a session be treated as a lower level than it was authenticated at (Sec. 5.1), and that's what Keyring does by default: a session that signed in with two factors stops being AAL2 after an hour idle or 24 hours, and carries on as the AAL1 session its password alone would have started, under `idle` and `absolute`. Nothing behind `keyring:aal2` or `keyring.fresh` is reachable meanwhile. It's the default because ending those sessions would sign out the people who set up a second factor after an hour away, and leave everyone who didn't signed in for 30 days.
+
+That isn't enough where the whole app is meant to be AAL2, or where you want NIST's wording to the letter. Turn the lapse into the end of the session:
+
+```php
+'sessions' => [
+    'end_on_lapse' => true,
+],
+```
+
+- A session ends on the first request after the level it **signed in at** runs out: after that level's `idle` without a request, or its `absolute` after the factors were proved. The user is signed out as for any other timeout, with the reason `idle` or `expired` on `SessionEnded`.
+- Proving every factor for that level again before then (any [step-up](step-up.md) that asks for them all) starts both limits over, as reauthenticating does in NIST.
+- A level reached later by a step-up still lapses on its own and takes nothing with it. A session that signed in with a password and stepped up for one page stays an AAL1 session.
+- "Remember me" brings nothing back. Its cookie proves nothing, so there's no level for the session to carry on at: the browser signs in again. NIST doesn't accept such a cookie in place of authenticating either (Sec. 5.1), so leave the checkbox off your login page.
+- Sessions signed in at AAL1 are unaffected: `idle` and `absolute` already end those.
+
+[Recipes](recipes.md#an-app-whose-every-page-needs-aal2) has the full setup for an app whose every page needs AAL2.
 
 ## Pruning
 

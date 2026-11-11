@@ -179,6 +179,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
         'aal2' => ['idle' => '1h', 'absolute' => '24h'],
         'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
+    'end_on_lapse' => false,
     'middleware' => true,
     'remember_cookie' => 'keyring_remember',
 ],
@@ -192,6 +193,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `idle` | Inactivity allowed before a session ends. `null` leaves it to Laravel's session lifetime. |
 | `absolute` | The longest a session can last, however active it is. |
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
+| `end_on_lapse` | Whether a session ends when the level it signed in at runs out, where it would otherwise carry on at a lower one. See [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level). |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
 | `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. |
 

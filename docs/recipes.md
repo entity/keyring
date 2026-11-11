@@ -10,6 +10,7 @@
 - [Links for Apps on Several Domains](#links-for-apps-on-several-domains)
 - [Storing Less About Requests](#storing-less-about-requests)
 - [Accounts an Admin Approves](#accounts-an-admin-approves)
+- [An App Whose Every Page Needs AAL2](#an-app-whose-every-page-needs-aal2)
 
 ## Introduction
 
@@ -551,3 +552,57 @@ Keyring::allowEnrollmentWhen(fn (User $user) => $user->approved_at !== null);
 ```
 
 That replaces Keyring's own rule, so only use it when approving an account means you know it's its owner's. See [Who May Enroll](authenticators.md#who-may-enroll).
+
+## An App Whose Every Page Needs AAL2
+
+Some apps can't show anything to a session that hasn't proved two factors: NIST SP 800-63B-4 (Sec. 2) asks for AAL2 wherever personal information is shown, for one. By default Keyring signs users in with what they have and lets a level lapse without ending the session, so three settings make AAL2 the floor.
+
+First, the policy and the factors. Don't register email codes, which [aren't a factor](factors.md#what-turning-email-codes-on-means):
+
+```php
+// app/Providers/KeyringServiceProvider.php
+Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, WebAuthn::passkeys()]);
+
+Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
+```
+
+`ifEnrolled()` stays, so a new user can sign in once with their password to set a second factor up. The middleware keeps them from anything else until they have, and asks every other session for AAL2:
+
+```php
+// bootstrap/app.php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->web(append: ['keyring.enrolled']);
+})
+```
+
+```php
+// routes/web.php
+Route::middleware(['auth', 'keyring:aal2'])->group(function () {
+    // Every page of the app, except the one users add a second factor on.
+});
+
+Route::get('/settings/security', [SecurityController::class, 'edit'])->middleware('auth');
+```
+
+```php
+// config/keyring.php
+'enrollment_url' => '/settings/security',
+```
+
+Last, end the session when AAL2 runs out, where it would otherwise carry on as AAL1:
+
+```php
+// config/keyring.php
+'sessions' => [
+    'end_on_lapse' => true,
+],
+```
+
+With that:
+
+- A session that signed in with two factors ends after an hour without a request, or 24 hours after they were proved, and the user signs in again with both. Change the numbers in `sessions.levels.aal2`.
+- A new user's first session signed in with one factor, so it isn't ended. It reaches the enrollment page and Keyring's own routes, and nothing in the group above. Adding the second factor proves it, which takes that session to AAL2 for as long as the level lasts, and then `keyring:aal2` asks for both again.
+- "Remember me" brings no session back, so leave it off your login form.
+- Laravel's own `session.lifetime` still ends an idle session sooner if it's shorter than an hour. Set it to 60 or more.
+
+Each of those was checked against a test of this setup. What Keyring can't do for you is the rest of what NIST asks at AAL2: phishing-resistant sign in has to be on offer (register passkeys, as above), and a federal agency's server cryptography has to be validated.

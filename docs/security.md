@@ -107,7 +107,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 
 - Every signed-in Keyring route checks Keyring's guard (`auth:{guard}`), and the step-up middleware reads the user from it, so another guard's user can't stand in.
 - Every signed-in session is in Keyring's registry and is checked on every `web` request (and any other group you add `keyring.session` to), so revoking one takes effect on its next request with any session driver.
-- Sessions have idle and absolute timeouts, and each assurance level lapses on NIST SP 800-63B's clock (AAL2: 1 hour idle or 24 hours; AAL3: 15 minutes or 12 hours) until the user verifies again.
+- Sessions have idle and absolute timeouts, and each assurance level lapses on NIST SP 800-63B-4's clock (AAL2: 1 hour idle or 24 hours; AAL3: 15 minutes or 12 hours) until the user verifies again. A session past its level's limits is treated as the lower level, which NIST allows (Sec. 5.1), and stays signed in. With `sessions.end_on_lapse` it ends instead when the level it signed in at runs out, as Sec. 5.2 words it, and "remember me" brings nothing back.
 - "Remember me" can't outlast the session it was ticked for. Laravel's cookie alone signs nobody in: the browser also holds a Keyring cookie naming that session's registry record, and coming back carries the same record on, with the limits it started with and nothing proved. Once the record has timed out, been revoked or been ended by a risk response, both cookies are refused, even from a client that kept them after being told to delete them.
 - A session whose registry record has gone missing is signed out rather than started over.
 - A revocation can't be undone by a request saving a stale copy of its session.
@@ -164,7 +164,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | What Keyring does | From |
 |---|---|
 | Assurance levels, and what reaches AAL2 and AAL3, as far as a library can check. AAL3 takes an attested key that can't leave its device, with its own user verification or a password. Validated authenticators and verifier cryptography, which NIST AAL3 also needs, are yours to supply | NIST SP 800-63B-4, Sec. 2 and Appendix B |
-| Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours) | NIST SP 800-63B, reauthentication |
+| Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours). The session carries on at the level that's left, or ends with `sessions.end_on_lapse` | NIST SP 800-63B-4, Sec. 2.2.3, 2.3.3, 5.1 and 5.2 |
 | A cap of 100 failures in a row on an account's factor | NIST SP 800-63B, rate limiting |
 | Proving the strongest combination the account can give before adding a sign-in method, whatever the sign-in policy asks | NIST SP 800-63B-4, Sec. 4.1.2.1 |
 | Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |

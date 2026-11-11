@@ -1,9 +1,12 @@
 <?php
 
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
+use Keyring\Events\SessionEnded;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -14,6 +17,7 @@ use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
@@ -385,6 +389,118 @@ describe('levels lapsing, as nist sp 800-63b asks', function () {
     });
 });
 
+// NIST SP 800-63B-4, Sec. 5.2: when the overall or the inactivity timeout
+// passes, the session is terminated.
+describe('ending a session with the level it signed in at', function () {
+    beforeEach(function () {
+        config(['keyring.sessions.end_on_lapse' => true]);
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        Event::fake([SessionEnded::class]);
+
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    });
+
+    /**
+     * Sign in with the password and the authenticator app: an AAL2 session.
+     */
+    function signInWithBoth(): void
+    {
+        signIn();
+        test()->post(route('keyring.login.verify', 'totp'), ['code' => totpCode(test()->totp->secret)])->assertRedirect('/dashboard');
+    }
+
+    it('ends an aal2 session after an hour idle', function () {
+        signInWithBoth();
+        $session = session(Sessions::KEY);
+
+        $this->travel(59)->minutes();
+        $this->get('/home')->assertOk();
+
+        $this->travel(61)->minutes();
+        $this->get('/home')->assertRedirect('/login')->assertSessionHas('status', 'signed-out');
+
+        $this->assertGuest();
+        expect(app(SessionRegistry::class)->find($session)->revokedAt)->not->toBeNull();
+        Event::assertDispatched(SessionEnded::class, fn (SessionEnded $event) => $event->reason === 'idle');
+    });
+
+    it('answers a json request for a lapsed session with a 401', function () {
+        signInWithBoth();
+        $this->travel(61)->minutes();
+
+        $this->getJson('/home')->assertUnauthorized()->assertJsonPath('status', 'signed-out');
+    });
+
+    it('ends an aal2 session after 24 hours however active it is', function () {
+        signInWithBoth();
+
+        foreach (range(1, 28) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        $this->travel(50)->minutes();
+        $this->get('/home')->assertRedirect('/login');
+
+        $this->assertGuest();
+        Event::assertDispatched(SessionEnded::class, fn (SessionEnded $event) => $event->reason === 'expired');
+    });
+
+    it('starts both limits over when the user proves both factors again', function () {
+        signInWithBoth();
+
+        foreach (range(1, 27) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        // Twenty-two and a half hours in.
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+
+        foreach (range(1, 20) as $request) {
+            $this->travel(50)->minutes();
+            $this->get('/home')->assertOk();
+        }
+
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('leaves a session that signed in with one factor alone, whatever it stepped up to', function () {
+        Keyring::require(Requirement::aal1());
+        signIn();
+
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect('/billing');
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+
+        $this->travel(90)->minutes();
+        $this->get('/home')->assertOk();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('doesn\'t end a session because the authenticator it signed in with was removed', function () {
+        signInWithBoth();
+        $this->totp->delete();
+
+        $this->get('/home')->assertOk();
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('carries on at a lower level when the option is off', function () {
+        config(['keyring.sessions.end_on_lapse' => false]);
+        signInWithBoth();
+
+        $this->travel(61)->minutes();
+        $this->get('/home')->assertOk();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+    });
+});
+
 it('reports an expired confirmation on the field the confirm page asks for next', function () {
     $this->user->forceFill(['password' => null])->saveQuietly();
     Authenticator::factory()->totp()->default()->for($this->user, 'authenticatable')->create();
@@ -607,5 +723,49 @@ describe('asking for the strongest combination the account can give', function (
         $this->verifiedWith($this->totp);
 
         expect($this->postJson(route('keyring.authenticators.store', 'security-key'))->status())->toBe(200);
+    });
+});
+
+// docs/recipes.md, "An App Whose Every Page Needs AAL2".
+describe('an app whose every page needs aal2', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, WebAuthn::passkeys()]);
+        Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
+        config(['keyring.sessions.end_on_lapse' => true, 'keyring.enrollment_url' => '/settings/security']);
+
+        $this->app['router']->pushMiddlewareToGroup('web', 'keyring.enrolled');
+        Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/app', fn () => 'app');
+        Route::middleware(['web', 'auth'])->get('/settings/security', fn () => 'security');
+    });
+
+    it('lets a new user in to add a second factor, and nowhere else until they have', function () {
+        signIn();
+
+        $this->get('/app')->assertRedirect('/settings/security');
+        $this->get('/settings/security')->assertOk();
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        // Adding it proved it, so the session is at AAL2 from here.
+        $this->get('/app')->assertOk();
+
+        // It signed in with one factor, so it isn't ended when AAL2 runs
+        // out: the app's pages ask for both factors again.
+        $this->travel(61)->minutes();
+        $this->get('/app')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('ends a session that signed in with both factors once aal2 runs out', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        signIn();
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+        $this->get('/app')->assertOk();
+
+        $this->travel(61)->minutes();
+        $this->get('/app')->assertRedirect('/login');
+        $this->assertGuest();
     });
 });
