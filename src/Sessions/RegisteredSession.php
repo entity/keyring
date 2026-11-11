@@ -8,6 +8,10 @@ use Keyring\Enums\Assurance;
 /**
  * A signed-in session. Its ID is Keyring's own, kept inside the session, so
  * Laravel's session ID is never stored or logged.
+ *
+ * A session that moves to a new record leaves the old one behind, naming
+ * the new one (replacedBy). It's no longer a session, but its ID can be
+ * told from one never issued, and followed to the session it became.
  */
 final readonly class RegisteredSession
 {
@@ -23,11 +27,13 @@ final readonly class RegisteredSession
         public int $lastActivityAt,
         public int $expiresAt,
         public ?int $revokedAt = null,
+        public ?string $replacedBy = null,
+        public ?int $replacedAt = null,
     ) {}
 
     public function isActive(int $now): bool
     {
-        return $this->revokedAt === null && $this->expiresAt > $now;
+        return $this->revokedAt === null && $this->replacedBy === null && $this->expiresAt > $now;
     }
 
     /**
@@ -56,6 +62,8 @@ final readonly class RegisteredSession
             'last_activity_at' => $this->lastActivityAt,
             'expires_at' => $this->expiresAt,
             'revoked_at' => $this->revokedAt,
+            'replaced_by' => $this->replacedBy,
+            'replaced_at' => $this->replacedAt,
         ];
     }
 
@@ -89,6 +97,8 @@ final readonly class RegisteredSession
             lastActivityAt: (int) $data['last_activity_at'],
             expiresAt: (int) $data['expires_at'],
             revokedAt: $data['revoked_at'] === null ? null : (int) $data['revoked_at'],
+            replacedBy: $data['replaced_by'] ?? null,
+            replacedAt: isset($data['replaced_at']) ? (int) $data['replaced_at'] : null,
         );
     }
 }

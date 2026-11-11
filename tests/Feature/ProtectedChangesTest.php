@@ -232,6 +232,34 @@ describe('changing password', function () {
         Event::assertDispatched(PasswordChanged::class);
     });
 
+    it('needs the current password however the session was verified', function (array $input) {
+        // A fresh verification by passkey or code proves who's there, not
+        // that they know the password they're replacing.
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+            ->putJson(route('user-password.update'), [
+                ...$input,
+                'password' => 'correct horse battery staple',
+                'password_confirmation' => 'correct horse battery staple',
+            ])->assertJsonValidationErrors('current_password');
+
+        expect(Hash::check('password', $this->user->fresh()->password))->toBeTrue();
+    })->with([
+        'none sent' => [[]],
+        'a wrong one' => [['current_password' => 'not-the-password']],
+    ]);
+
+    it('lets a user without a password set one with the fresh verification alone', function () {
+        $this->user->forceFill(['password' => null])->saveQuietly();
+
+        $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)
+            ->putJson(route('user-password.update'), [
+                'password' => 'correct horse battery staple',
+                'password_confirmation' => 'correct horse battery staple',
+            ])->assertOk();
+
+        expect(Hash::check('correct horse battery staple', $this->user->fresh()->password))->toBeTrue();
+    });
+
     it('asks for longer passwords without a second factor', function () {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 

@@ -67,26 +67,77 @@ class Sessions
 
     /**
      * Carry a remembered session on in the new session its "remember me"
-     * cookie signed in. It's the same record, so it keeps the limits it
-     * started with. The cookie proved nothing, so the level starts again.
+     * cookie signed in, under a new record and a new cookie. The cookie that
+     * came is used up: a copy of it brings nothing back. The new record is a
+     * copy of the old, so it keeps the limits it started with, but its
+     * address and browser are this request's. The cookie proved nothing, so
+     * the level starts again.
+     *
+     * Null when the record couldn't be replaced: a request sent alongside
+     * this one used the cookie first, or the session was just revoked.
      */
-    public function resume(Request $request, RegisteredSession $session, ?Device $device): void
+    public function resume(Request $request, RegisteredSession $session): ?RegisteredSession
     {
-        $this->registry->update($session->id, [
-            'deviceId' => $device->id ?? $session->deviceId,
+        $current = $session->with([
+            'id' => Str::random(40),
             'assurance' => Assurance::None,
             'ip' => $this->keyring->recordedIp($request),
             'userAgent' => UserAgent::from($request),
             'lastActivityAt' => now()->getTimestamp(),
         ]);
 
-        // The browser already holds the cookie for this record. One from
-        // before the app was served over HTTPS is given back under today's name.
-        if (Cookies::earlier($request, $this->rememberCookie()) !== null) {
-            $this->queueRememberCookie($request, $session);
+        if (! $this->registry->replace($session->id, $current)) {
+            return null;
         }
 
-        $request->session()->put([self::KEY => $session->id, self::REMEMBERED => true]);
+        $this->bind($request, $current, remembered: true);
+
+        return $current;
+    }
+
+    /**
+     * The session a request may join when the cookie it came with was used
+     * up a moment ago. A browser coming back often sends several requests at
+     * once, all with the same cookie. The first replaces it, and the rest
+     * belong on that session, not signed out.
+     *
+     * Only within "sessions.remember_grace" of the cookie being replaced,
+     * however often it's sent, and only for the browser that replaced it:
+     * the same cookie from two browsers is two holders, however close
+     * together. Null for anything else.
+     */
+    public function overlapped(Request $request, RegisteredSession $replaced): ?RegisteredSession
+    {
+        if ($replaced->replacedBy === null || now()->getTimestamp() - (int) $replaced->replacedAt >= Duration::seconds(config('keyring.sessions.remember_grace') ?? 0)) {
+            return null;
+        }
+
+        $session = $this->registry->find($replaced->replacedBy);
+
+        return $session?->userAgent === UserAgent::from($request) ? $session : null;
+    }
+
+    /**
+     * Put a request on the session one sent alongside it resumed
+     * (overlapped). Nothing is registered and the record stays as that
+     * request left it, so a used cookie can't start a session of its own.
+     */
+    public function join(Request $request, RegisteredSession $session): void
+    {
+        $this->bind($request, $session, remembered: true);
+    }
+
+    /**
+     * The session a replaced record became, however many times it has moved
+     * since. Null when that record is gone.
+     */
+    public function latest(RegisteredSession $session): ?RegisteredSession
+    {
+        while ($session?->replacedBy !== null) {
+            $session = $this->registry->find($session->replacedBy);
+        }
+
+        return $session;
     }
 
     /**
@@ -158,7 +209,9 @@ class Sessions
      * Swap the session's registry record for a new one and revoke the old.
      * Only this request's copy of the session learns the new ID, so any
      * other copy from before now (an older cookie, a request that overlapped
-     * and saves later) is signed out when it's next used.
+     * and saves later) is signed out when it's next used. The old record
+     * names the new one, so a "remember me" cookie used up before the swap
+     * can still be followed to the session it became (latest).
      *
      * @param  array<string, mixed>  $changes
      */
@@ -166,12 +219,10 @@ class Sessions
     {
         $session = $this->current($request);
 
-        if ($session === null) {
+        // One that has ended, or moved on without this request, isn't brought back.
+        if ($session === null || ! $this->registry->replace($session->id, $current = $session->with(['id' => Str::random(40), ...$changes]), revoke: true)) {
             return;
         }
-
-        $this->registry->save($current = $session->with(['id' => Str::random(40), ...$changes]));
-        $this->registry->revoke($session->id);
 
         // The browser's "remember me" moves to the new record with it.
         $this->bind($request, $current, $request->session()->get(self::REMEMBERED) === true);

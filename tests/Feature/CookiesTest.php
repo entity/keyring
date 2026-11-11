@@ -167,23 +167,31 @@ describe('a browser holding the cookies from before the app was served over HTTP
             ->get('/home')
             ->assertOk();
 
+        // Coming back replaces the record and its cookie, which goes out
+        // under the new name.
         $cookie = $response->getCookie('__Host-keyring_remember');
+        $carried = session(Sessions::KEY);
 
-        expect(session(Sessions::KEY))->toBe($this->remembered)
-            ->and($cookie->getValue())->toBe($this->remembered)
+        expect($carried)->not->toBe($this->remembered)
+            ->and(app(SessionRegistry::class)->find($this->remembered)->replacedBy)->toBe($carried)
+            ->and($cookie->getValue())->toBe($carried)
             ->and($cookie->isSecure())->toBeTrue()
-            ->and($cookie->getExpiresTime())->toBe(app(SessionRegistry::class)->find($this->remembered)->expiresAt)
+            ->and($cookie->getExpiresTime())->toBe(app(SessionRegistry::class)->find($carried)->expiresAt)
             ->and($response->getCookie('__Host-keyring_device')->getValue())->toBe($this->device)
             ->and(Device::count())->toBe(1);
 
         $response->assertCookieExpired('keyring_remember')->assertCookieExpired('keyring_device');
 
+        // From then on the new names are the ones that count.
         $this->travel(3)->hours();
 
-        browserHolding([...$this->recaller, '__Host-keyring_remember' => $this->remembered, '__Host-keyring_device' => $this->device])
+        browserHolding([...$this->recaller, '__Host-keyring_remember' => $carried, '__Host-keyring_device' => $this->device])
             ->get('/home')
             ->assertOk()
-            ->assertCookieMissing('__Host-keyring_remember');
+            ->assertCookieMissing('keyring_remember')
+            ->assertCookieMissing('keyring_device');
+
+        expect(Device::count())->toBe(1);
     });
 
     it('has both names taken back when it signs out', function () {

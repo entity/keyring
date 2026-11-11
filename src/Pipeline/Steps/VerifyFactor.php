@@ -75,7 +75,7 @@ class VerifyFactor
         if ($context->verification === null) {
             FactorFailed::dispatch($context->attempt, $context->authenticator, $context->factor->key(), $context->request);
 
-            // Keep factor state, like a code's remaining guesses.
+            // Keep what the failure changed, like a code running out of guesses.
             if (! $context->identifying && $context->attempt !== null) {
                 $this->attempts->save($context->attempt);
             }

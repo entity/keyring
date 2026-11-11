@@ -371,8 +371,8 @@ describe('coming back with a "remember me" cookie', function () {
         ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
 
         expect(Device::count())->toBe(1)
-            ->and(session(Sessions::KEY))->toBe($this->registered)
-            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe(Device::sole()->id);
+            ->and(app(SessionRegistry::class)->find($this->registered)->replacedBy)->toBe(session(Sessions::KEY))
+            ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->deviceId)->toBe(Device::sole()->id);
         Event::assertNotDispatched(NewDeviceSignedIn::class);
     });
 
@@ -382,8 +382,10 @@ describe('coming back with a "remember me" cookie', function () {
 
         ($this->comeBack)()->assertOk()->assertCookie('keyring_device');
 
+        // The record left behind keeps the device its cookie was issued on.
         expect(Device::count())->toBe(2)
-            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe(Device::query()->whereKeyNot($first->id)->sole()->id);
+            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe($first->id)
+            ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->deviceId)->toBe(Device::query()->whereKeyNot($first->id)->sole()->id);
         Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
     });
 

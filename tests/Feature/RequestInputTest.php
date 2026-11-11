@@ -90,8 +90,12 @@ it('takes no token or password from the query string of a reset', function () {
 it('takes no password from the query string of a password change', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-    $this->put(route('user-password.update').'?'.http_build_query(['current_password' => 'password', 'password' => 'a-long-new-password', 'password_confirmation' => 'a-long-new-password']))
-        ->assertSessionHasErrors(['current_password', 'password']);
+    $new = ['password' => 'a-long-new-password', 'password_confirmation' => 'a-long-new-password'];
+
+    $this->put(route('user-password.update').'?'.http_build_query(['current_password' => 'password']), $new)->assertSessionHasErrors('current_password');
+
+    // The action's own rules only see the body too.
+    $this->put(route('user-password.update').'?'.http_build_query($new), ['current_password' => 'password'])->assertSessionHasErrors('password');
 
     expect(Hash::check('password', $this->user->fresh()->password))->toBeTrue();
 });

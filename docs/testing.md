@@ -146,7 +146,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | State | Creates |
 |---|---|
 | `totp($secret = null)` | An authenticator app with a random (or the given) secret. This is also the default state. |
-| `recoveryCodes($codes = ['aaaaa-11111', 'bbbbb-22222', 'ccccc-33333'])` | A set of recovery codes that accepts the given codes. |
+| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb', 'cccc-cccc-cccc-cccc-cccc-cccc'])` | A set of recovery codes that accepts the given codes. Each must be in the form Keyring makes them, 24 base32 characters (`a`-`z` and `2`-`7`), with or without dashes: anything else throws an `InvalidArgumentException`. |
 | `emailCode()` | Email codes. |
 | `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. Only one that isn't synced reaches AAL3. |
 | `securityKey($userVerified = false)` | A security key. |
@@ -274,8 +274,18 @@ The suite checks that:
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
+- passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
 If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
+
+A new Laravel app hashes with bcrypt, so the password length check fails until you set `HASH_DRIVER=argon2id` (see [Passwords](configuration.md#passwords)). If your tests run on bcrypt for speed and production doesn't, set the driver for this test class. To keep bcrypt and its limit, say so:
+
+```php
+protected function keyringAcknowledgesBcryptLimit(): bool
+{
+    return true;
+}
+```
 
 `KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

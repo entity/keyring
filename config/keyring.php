@@ -176,7 +176,10 @@ return [
     | user stays signed in, and routes that need the level ask them to verify
     | again. "remember_cookie" names the cookie that ties "remember me" to
     | the session it was ticked for: null is keyring_remember, prefixed over
-    | HTTPS like the device cookie.
+    | HTTPS like the device cookie. Each one works once and is replaced.
+    | For "remember_grace" a browser's other requests, sent with the one
+    | that used it, are still let in on the same session. Used after that,
+    | the session ends for everyone holding it.
     |
     */
 
@@ -193,6 +196,7 @@ return [
         ],
         'middleware' => true,
         'remember_cookie' => null,
+        'remember_grace' => '10s',
     ],
 
     /*
@@ -229,13 +233,27 @@ return [
     |--------------------------------------------------------------------------
     |
     | At least 8 characters with a second factor and 15 without, any
-    | characters, and no composition rules. Bcrypt silently ignores anything
-    | past 72 bytes, so with bcrypt longer passwords are rejected rather than
-    | truncated.
+    | characters, and no composition rules. Neither minimum can go below 8:
+    | Keyring throws on a lower one rather than raise it quietly.
+    |
+    | "max" is in characters, and is only reached with a hasher that reads a
+    | whole password. Bcrypt, Laravel's default, silently ignores anything
+    | past 72 bytes, so with bcrypt Keyring refuses a longer password rather
+    | than truncate it: the real limit is then 72 bytes, which is 72 plain
+    | characters but only 36 accented or Cyrillic ones, 24 Chinese, Japanese
+    | or Korean ones, or 18 emoji. Set HASH_DRIVER=argon2id to take every
+    | password up to "max", as OWASP ASVS 6.2.9 asks (at least 64 characters).
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
-    | no network calls.
+    | no network calls. Laravel's check lets a password through when the
+    | service can't be reached, which leaves only the list of common
+    | passwords that ships with Keyring. Set "refuse_unchecked" to refuse
+    | the password instead, and ask the user to try again.
+    |
+    | "context" is your list of words a password mustn't be made up of: names
+    | of your organisation, products, systems, projects and teams. Your app's
+    | name, and each user's name and address, are checked without listing.
     |
     */
 
@@ -244,6 +262,8 @@ return [
         'min_without_mfa' => 15,
         'max' => 128,
         'uncompromised' => null,
+        'refuse_unchecked' => false,
+        'context' => [],
         'broker' => null,
     ],
 
@@ -280,7 +300,7 @@ return [
         'keep_for' => '180d',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
-        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
+        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
     ],
 
     /*

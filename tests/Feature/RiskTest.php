@@ -24,6 +24,7 @@ use Keyring\Devices\UserAgent;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
+use Keyring\Features;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
@@ -31,13 +32,16 @@ use Keyring\Risk\Action;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
+use Keyring\Risk\Risk;
 use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
 use Keyring\Risk\Signals\ImpossibleTravel;
+use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Risk\Signals\SuccessAfterFailures;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 
@@ -595,4 +599,208 @@ it('doesn\'t call every browser new when devices are off', function () {
 
     signInAs()->assertRedirect('/dashboard');
     $this->assertAuthenticatedAs($this->user);
+});
+
+describe('a sign in after a long quiet period', function () {
+    /**
+     * Sign in, then leave the account alone for that long.
+     */
+    function lastSignedIn(int $daysAgo): string
+    {
+        $cookie = signInAs()->assertRedirect('/dashboard')->getCookie('keyring_device')->getValue();
+        test()->post('/logout');
+        test()->travel($daysAgo)->days();
+
+        return $cookie;
+    }
+
+    it('is found after ninety days, and asks for the second factor', function () {
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        Keyring::require(Requirement::aal1());
+        Keyring::risk()->signals([InactiveAccount::class]);
+        $cookie = lastSignedIn(daysAgo: 91);
+
+        Event::listen(RiskAssessed::class, function (RiskAssessed $event) use (&$assessed) {
+            $assessed = $event;
+        });
+
+        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect(route('keyring.login.challenge'));
+
+        expect($assessed->risk->has('inactive_account'))->toBeTrue()
+            ->and($assessed->risk->score)->toBe(30)
+            ->and($assessed->risk->reasons())->toBe(['The first sign in for 91 days.']);
+    });
+
+    it('is not found before then', function () {
+        Keyring::risk()->signals([InactiveAccount::class])->respond(fn (Risk $risk) => $risk->has('inactive_account') ? Action::deny() : Action::allow());
+        $cookie = lastSignedIn(daysAgo: 89);
+
+        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+    });
+
+    it('takes the period the app gives it', function () {
+        Keyring::risk()->signals([app()->make(InactiveAccount::class, ['after' => '30d', 'score' => 95])]);
+        lastSignedIn(daysAgo: 31);
+
+        signInAs()->assertSessionHasErrors('email');
+        $this->assertGuest();
+    });
+
+    it('goes by the account, whichever browser it comes back in', function () {
+        Keyring::risk()->signals([app()->make(InactiveAccount::class, ['score' => 95])]);
+        lastSignedIn(daysAgo: 91);
+
+        signInAs(CHROME)->assertSessionHasErrors('email');
+    });
+
+    it('is only quiet until the next sign in', function () {
+        Keyring::risk()->signals([InactiveAccount::class])->respond(fn (Risk $risk) => $risk->has('inactive_account') ? Action::allow()->notify() : Action::allow());
+        sendNotifications(['suspicious_activity']);
+        $cookie = lastSignedIn(daysAgo: 91);
+
+        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+        $this->post('/logout');
+        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+
+        Notification::assertSentToTimes($this->user, SuspiciousActivity::class, 1);
+    });
+
+    it('says nothing about an account it has never seen sign in', function () {
+        Keyring::risk()->signals([app()->make(InactiveAccount::class, ['score' => 95])]);
+        $this->user->forceFill(['created_at' => now()->subYears(2)])->save();
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+
+    it('does not call an account quiet while one of its sessions is in use', function () {
+        config(['keyring.sessions.absolute' => '365d']);
+        Keyring::risk()->signals([app()->make(InactiveAccount::class, ['score' => 95])]);
+
+        signInAs()->assertRedirect('/dashboard');
+        $session = session(Sessions::KEY);
+        $this->flushSession();
+        app('auth')->forgetGuards();
+
+        $this->travel(91)->days();
+        app(SessionRegistry::class)->update($session, ['lastActivityAt' => now()->subDay()->getTimestamp()]);
+
+        signInAs(CHROME)->assertRedirect('/dashboard');
+    });
+
+    it('does nothing without devices, which is where it reads the last sign in', function () {
+        Keyring::risk()->signals([app()->make(InactiveAccount::class, ['score' => 95])]);
+        lastSignedIn(daysAgo: 91);
+        withFeatures([]);
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+});
+
+describe('a sign in that follows several failed attempts', function () {
+    it('is found after five failures since the account last signed in', function () {
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        Keyring::require(Requirement::aal1());
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([SuccessAfterFailures::class]);
+
+        Event::listen(RiskAssessed::class, function (RiskAssessed $event) use (&$assessed) {
+            $assessed = $event;
+        });
+
+        foreach (range(1, 5) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        signInAs()->assertRedirect(route('keyring.login.challenge'));
+
+        expect($assessed->risk->has('success_after_failures'))->toBeTrue()
+            ->and($assessed->risk->score)->toBe(30)
+            ->and($assessed->risk->reasons())->toBe(['Signed in after 5 failed attempts in the last 1h.']);
+    });
+
+    it('is not found after fewer', function () {
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([app()->make(SuccessAfterFailures::class, ['score' => 95])]);
+
+        foreach (range(1, 4) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+
+    it('counts from the last sign in, so one run of failures is only followed once', function () {
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([app()->make(SuccessAfterFailures::class, ['threshold' => 3])])
+            ->respond(fn (Risk $risk) => $risk->has('success_after_failures') ? Action::allow()->notify() : Action::allow());
+        sendNotifications(['suspicious_activity']);
+
+        foreach (range(1, 3) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+        $this->post('/logout');
+        signInAs(password: 'nope');
+        signInAs()->assertRedirect('/dashboard');
+
+        Notification::assertSentToTimes($this->user, SuspiciousActivity::class, 1);
+    });
+
+    it('forgets failures older than the time it looks back', function () {
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([app()->make(SuccessAfterFailures::class, ['score' => 95, 'within' => '10m'])]);
+
+        foreach (range(1, 5) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        $this->travel(11)->minutes();
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+
+    it('leaves another account\'s failures out of it', function () {
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([app()->make(SuccessAfterFailures::class, ['score' => 95])]);
+        taylor(['email' => 'abigail@example.com']);
+
+        foreach (range(1, 5) as $guess) {
+            $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'nope']);
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+
+    it('does nothing without the security log, which is where it reads the failures', function () {
+        withFeatures([Features::devices()]);
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([app()->make(SuccessAfterFailures::class, ['score' => 95])]);
+
+        foreach (range(1, 5) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+});
+
+it('tells the user about either, and refuses neither, when both are found at once', function () {
+    config(['keyring.limits.per_account' => 100]);
+    sendNotifications(['suspicious_activity']);
+    Keyring::risk()->signals([InactiveAccount::class, SuccessAfterFailures::class]);
+
+    $cookie = signInAs()->getCookie('keyring_device')->getValue();
+    $this->post('/logout');
+    $this->travel(91)->days();
+
+    foreach (range(1, 5) as $guess) {
+        signInAs(password: 'nope');
+    }
+
+    signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+
+    $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
+
+    expect($notice->reasons)->toBe('The first sign in for 91 days. Signed in after 5 failed attempts in the last 1h.');
 });
