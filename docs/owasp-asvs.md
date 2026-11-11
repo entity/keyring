@@ -37,8 +37,8 @@ Both standards verify an application or a service, not a package. Keyring can me
 
 `php artisan keyring:install` with every default accepted, or with `--no-interaction`, sets up:
 
-- the password, with [Keyring's password rules](protected-changes.md#password-rules), and an authenticator app as a second factor that every user must set up before going further, with recovery codes,
-- six features: `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators` and `security-log`,
+- the password as the only sign-in method, with [Keyring's password rules](protected-changes.md#password-rules),
+- five features: `registration`, `reset-passwords`, `email-verification`, `update-passwords` and `security-log`,
 - [registration that doesn't reveal who has an account](sign-in-flow.md#without-revealing-who-has-an-account),
 - eleven [security emails](security-log-and-emails.md#security-emails): new device, password changed, sign-in method added, sign-in method removed, second factor failed, recovery code used, new recovery codes, suspicious activity, account locked, email address changed, and email change undone,
 - three [risk signals](risk.md): a session turning up in another browser, repeated failed second factors, and a sign in that follows several failures,
@@ -46,9 +46,9 @@ Both standards verify an application or a service, not a package. Keyring can me
 
 That covers Level 1, apart from what your own pages have to do and two things below: passwords are normalised before they're hashed ([6.2.8](#v62-password-security)), and an account you disable should be signed out everywhere by your own code ([7.4.2](#v74-session-termination)).
 
-It also has the main thing Level 2 adds: everyone signs in with a second factor ([6.3.3](#v63-general-authentication-security)). The rest of [Level 2](#level-2) is yours to set. Installing with `--factor=none`, unticking the authenticator app, or answering no to "Require a second factor for everyone?" gives that up, and leaves Level 1.
+It doesn't cover Level 2. Keyring starts with the password and leaves the rest for you to turn on, so nothing in a default install asks for a second factor: there isn't one to set up. That is the one thing you have to choose. Pick a second sign-in method when installing and the installer's next question, "Require a second factor for everyone?", defaults to yes ([6.3.3](#v63-general-authentication-security)). The other sign-in methods are in the published provider, commented out, for an app that adds one later.
 
-Two of those emails have nothing to announce in a default install: new device needs `Features::devices()`, and email change undone needs `Features::emailChanges()`.
+Three of those emails have nothing to announce in a default install: new device needs `Features::devices()`, second factor failed needs a sign-in method besides the password, and email change undone needs `Features::emailChanges()`.
 
 An app that doesn't use the published `KeyringServiceProvider` gets the config defaults and the security emails, which are Keyring's own, and no risk signals until it registers some.
 
@@ -69,15 +69,15 @@ Don't turn on `registration.reveal_taken`, add composition rules to the password
 
 Everything in Level 1, and:
 
-1. **Require a second factor** ([6.3.3](#v63-general-authentication-security)). A default install does. If you installed without one, install again with an authenticator app, passkeys or security keys and answer yes to "Require a second factor for everyone?", or set it up yourself ([Requiring a Second Factor](policies.md#requiring-a-second-factor)):
+1. **Require a second factor** ([6.3.3](#v63-general-authentication-security)). Install with an authenticator app, passkeys or security keys and answer yes to "Require a second factor for everyone?". In an app that's already installed, uncomment the sign-in methods and the `keyring.enrolled` line in your provider, and turn on `Features::manageAuthenticators()` ([Requiring a Second Factor](policies.md#requiring-a-second-factor)):
 
     ```php
     // app/Providers/KeyringServiceProvider.php
     Keyring::factors([
-        Password::class,
-        Totp::class,
-        RecoveryCodes::class,
-        WebAuthn::passkeys(),
+        Factors\Password::class,
+        Factors\Totp::class,
+        Factors\RecoveryCodes::class,
+        Factors\WebAuthn::passkeys(),
     ]);
 
     Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
@@ -197,9 +197,9 @@ Everything in Level 2, and:
 |---|---|---|---|
 | 6.3.1 Credential stuffing and brute force controls | 1 | Met by default | Per account, per typed username, per IP address and in a row, all inside the timebox. Every number is an option with no floor: keep the `limits` options near their defaults (`consecutive => null` removes the cap), and keep the limiter's cache store somewhere that holds its keys and that your deploys don't clear. Removing the pipeline step fails the conformance suite. See [Rate Limiting](security.md#rate-limiting). |
 | 6.3.2 No default accounts | 1 | Met | Keyring creates no users. Don't seed any in production. |
-| 6.3.3 Multi-factor authentication is required; a hardware factor at Level 3 | 2 | Met by default | A default install registers an authenticator app and adds `keyring.enrolled`, so every user must set one up. Installing with `--factor=none`, or answering no to requiring a second factor, undoes it, as does taking the middleware out of your provider. Level 2: a second factor registered and `keyring.enrolled`. Level 3: `Requirement::aal3()`, `keyring.enrolled:aal3` and `requireAttestation()`. See [Level 2](#level-2) and [Level 3](#level-3). Until a user enrolls they are signed in, and held at your enrollment page. `keyring.enrolled` checks the account, not the session: see "remember me" in [Level 2](#level-2). |
+| 6.3.3 Multi-factor authentication is required; a hardware factor at Level 3 | 2 | Needs setup | A default install has no second factor to require. Level 2: a second factor registered and `keyring.enrolled`, which the installer sets up when you pick one and answer yes to requiring it, and which are in the published provider to uncomment otherwise. Level 3: `Requirement::aal3()`, `keyring.enrolled:aal3` and `requireAttestation()`. See [Level 2](#level-2) and [Level 3](#level-3). Until a user enrolls they are signed in, and held at your enrollment page. `keyring.enrolled` checks the account, not the session: see "remember me" in [Level 2](#level-2). |
 | 6.3.4 No undocumented pathways, and consistent strength across them | 2 | Met | Every proof runs one pipeline. Three things don't go through it: "remember me", which carries a session on at no level; registration with `registration.reveal_taken`, which signs the new user in on their password without asking the policy; and your own `Auth::login()`, registered at no level. Start a social login with [`Keyring::attempt()`](sign-in-flow.md#starting-a-sign-in-yourself) instead. |
-| 6.3.5 Users are notified of suspicious authentication attempts | 3 | Partly | As installed, Keyring emails `second_factor_failed`, when the password was right and the next factor wasn't; `suspicious_activity`, when a sign in follows several failures, or what the risk signals find adds up to a level that notifies ([Telling the User](risk.md#telling-the-user)); and `account_locked`, when the password or a passkey is refused until a reset (at the cap on failures in a row, or sooner with `limits.lock_after`; an ordinary lockout that lifts by itself emails nobody). Left to you: a new client (`new_device`) and a sign in after a long quiet period (`InactiveAccount`) need `Features::devices()`, and a sign in from an unusual place needs a [locator](devices-and-sessions.md#locations) and a location signal. A responder of your own replaces Keyring's, so have it notify for these too. See [Level 3](#level-3). Each kind is capped at five an hour per account. |
+| 6.3.5 Users are notified of suspicious authentication attempts | 3 | Partly | As installed, Keyring emails `suspicious_activity`, when a sign in follows several failures, or what the risk signals find adds up to a level that notifies ([Telling the User](risk.md#telling-the-user)); and `account_locked`, when the password or a passkey is refused until a reset (at the cap on failures in a row, or sooner with `limits.lock_after`; an ordinary lockout that lifts by itself emails nobody). `second_factor_failed`, when the password was right and the next factor wasn't, is sent once there's a sign-in method besides the password. Left to you: a new client (`new_device`) and a sign in after a long quiet period (`InactiveAccount`) need `Features::devices()`, and a sign in from an unusual place needs a [locator](devices-and-sessions.md#locations) and a location signal. A responder of your own replaces Keyring's, so have it notify for these too. See [Level 3](#level-3). Each kind is capped at five an hour per account. |
 | 6.3.6 Email isn't an authentication factor | 3 | Met by default | Don't register `EmailCode::asExtraStep()`. The factor throws without that explicit opt-in, and an emailed code never counts toward a level. |
 | 6.3.7 Users are notified when authentication details change | 3 | Met by default | Keyring mails a changed or reset password, a sign-in method added or removed, new recovery codes, a recovery code used and a changed email address, and an undone email change once `Features::emailChanges()` is on. Renaming a sign-in method or changing the default one sends nothing. An account whose address isn't verified is sent none of these, except the notice of the reset that proves it. A password your own code sets with `Keyring::withoutProtection()` is logged, not announced: dispatch `Keyring\Events\PasswordChanged` yourself if users should hear of it. Setting one of these to `null` in `Keyring::notifications()` stops it being sent, and nothing warns. |
 | 6.3.8 Valid users can't be deduced from sign in, registration or forgot password | 3 | Met by default | All three answer the same for every address, in the same time. Keep `registration.reveal_taken` off: with it on, registration says when an address is taken, and the conformance check is skipped, not failed. A username of your own that must be unique will still say when it's taken, and mail that bounces is outside the request. See [Registration](sign-in-flow.md#without-revealing-who-has-an-account). |
@@ -370,7 +370,7 @@ Where Keyring doesn't meet a section whatever you configure. Sections that aren'
 |---|---|---|
 | 2.1.3 A definite overall timeout at AAL1, 30 days at most | Met by default | `sessions.absolute` is 30 days. A longer one is accepted. |
 | 2.2.1 AAL2 takes a physical authenticator | Met | `Requirement::aal2()` needs a possession factor. A factor of your own that reports only inherence leaves a session at AAL1. `Requirement::factors(2)` is any two kinds, and isn't AAL2. |
-| 2.2.2 A phishing-resistant option is offered at AAL2 | Yours | Passkeys and security keys ship with Keyring. A default install registers an authenticator app, which a phishing page can relay, so offer one of them beside it. |
+| 2.2.2 A phishing-resistant option is offered at AAL2 | Yours | Passkeys and security keys ship with Keyring. A default install registers only the password, so offer one. |
 | 2.2.3 AAL2 lapses after an hour idle or 24 hours | Met by default | `sessions.levels.aal2`. Longer limits are accepted. |
 | 2.3.2 AAL3 authenticators and verifier cryptography are validated to FIPS 140 | Yours | Everything a library can check about the key is checked. The validation is yours to buy and to run on. |
 | 2.3.3 AAL3 lapses after 12 hours at most | Met by default | `sessions.levels.aal3`. A longer `absolute` is accepted, and breaks the rule. |
@@ -418,8 +418,8 @@ Keyring follows OWASP's Authentication, Session Management, Multifactor Authenti
 | Session Management | Idle and absolute timeouts on the server | Met by default | `sessions.idle => null` removes Keyring's idle limit. |
 | Session Management | `no-store` on sensitive responses, `Clear-Site-Data` at sign out | Met by default | On Keyring's routes, through `keyring.middleware`. |
 | Session Management | Bind the session to client properties and notice changes | Met by default | The `SessionFingerprintChanged` signal in the published provider. |
-| Multifactor Authentication | Offer TOTP, and require MFA where you can | Met by default | A default install registers an authenticator app that everyone must set up. Installing with `--factor=none` gives it up: see [Level 2](#level-2). |
-| Multifactor Authentication | Tell the user when a second factor fails after the right password | Met by default | The "was this you?" alert and the `second_factor_failed` email. An install with `--factor=none` has no second factor to fail. |
+| Multifactor Authentication | Offer TOTP, and require MFA where you can | Needs setup | A default install has the password alone. Pick a second sign-in method: see [Level 2](#level-2). |
+| Multifactor Authentication | Tell the user when a second factor fails after the right password | Met by default | The "was this you?" alert, and the `second_factor_failed` email once there's a second sign-in method. A default install has no second factor to fail. |
 | Multifactor Authentication | Re-authenticate and notify when a factor changes | Met by default | `changes_middleware`, and the `authenticator_added` and `authenticator_removed` emails. Emptying the first or setting the emails to `null` undoes it. |
 | Multifactor Authentication | No fallback from a phishing-resistant factor to a weaker one | Met by default | `noDowngrade()`, in the policy the installer writes. A policy of your own has to say it. Recovery codes stay on offer. |
 | Password Storage | Argon2id, or bcrypt for legacy systems | Yours | Your `hashing.driver`. Laravel's default is bcrypt. |

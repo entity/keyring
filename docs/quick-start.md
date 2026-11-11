@@ -25,7 +25,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), and which features to turn on. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, an authenticator app that everyone must set up, registration, password resets, email verification, password changes, managing sign-in methods and the security log. Pass `--factor=none` for the password alone. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
+`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), and which features to turn on. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes and the security log. You can add the rest later by uncommenting a line: every sign-in method is in your provider, every feature is in the config, and every action is published, so each works as soon as it's on.
 
 Add the trait to your user model, and keep Laravel's `hashed` cast on the password. Registration leaves a new user signed out until they've verified their address, so nobody can use the form to find out who has an account. That needs `MustVerifyEmail` (the installer turns on email verification for you):
 
@@ -51,7 +51,7 @@ Keyring renders nine pages. You only need the ones for what you've turned on:
 |---|---|
 | `login` | Always. |
 | `challenge` | When you add a second sign-in method. It asks for the next factor. |
-| `confirm` | When you use step-up, which the routes for adding sign-in methods do. It's the challenge page for confirming, and can render the same component. |
+| `confirm` | When you use step-up, which changing the password and adding sign-in methods do: a user who signed in more than 15 minutes ago confirms it's them first. It's the challenge page for confirming, and can render the same component. |
 | `register` | With `Features::registration()`. It posts `name`, `email`, `password` and `password_confirmation` to `/register`. The answer sends the user to your `login` page with a status to show: check your inbox. See [Registration](sign-in-flow.md#registration). |
 | `forgot-password`, `reset-password` | With `Features::resetPasswords()`. |
 | `verify-email` | With `Features::emailVerification()`, for a signed-in user who hasn't verified yet. It asks them to click the link they were sent, with a button to send another. With the default registration nobody is signed in before verifying, so you only need it if you set `registration.reveal_taken`. |
@@ -192,25 +192,30 @@ A few more things aren't in the features list:
 
 ## Adding Sign-In Methods
 
-List them in `app/Providers/KeyringServiceProvider.php`, and turn on `Features::manageAuthenticators()` so users can set them up:
+They're all in `app/Providers/KeyringServiceProvider.php`, and the ones you didn't pick when installing are commented out. Uncomment the ones you want, and recovery codes with them:
 
 ```php
 use Keyring\Facades\Keyring;
-use Keyring\Factors\Password;
-use Keyring\Factors\RecoveryCodes;
-use Keyring\Factors\Totp;
-use Keyring\Factors\WebAuthn;
+use Keyring\Factors;
 use Keyring\Login\Requirement;
 
 Keyring::factors([
-    Password::class,
-    Totp::class,
-    RecoveryCodes::class,
-    WebAuthn::passkeys(),
+    Factors\Password::class,
+    Factors\Totp::class,
+    Factors\RecoveryCodes::class,
+    Factors\WebAuthn::passkeys(),
+    // Factors\WebAuthn::securityKeys(),
+    // Factors\EmailCode::asExtraStep(),
 ]);
 
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
+
+Then:
+
+1. Turn on `Features::manageAuthenticators()` in `config/keyring.php`, so users can set them up.
+2. Build the `challenge` and `confirm` pages, and the part of [your settings page](#your-settings-page) that adds and removes them.
+3. To make everyone set one up, uncomment the `keyring.enrolled` line below them and set `enrollment_url` to that page. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
 
 `Requirement::aal2()->ifEnrolled()` asks for a second factor once a user has set one up, as Fortify does. `noDowngrade()` means a user with a passkey can't be talked into using something weaker. See [Factors](factors.md) and [Policies](policies.md).
 

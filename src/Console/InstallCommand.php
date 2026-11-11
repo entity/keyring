@@ -24,9 +24,9 @@ use function Laravel\Prompts\multiselect;
 #[AsCommand(name: 'keyring:install')]
 #[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
-        {--factor=* : A sign-in method to add besides the password: totp (the default), passkeys, security-keys or email-codes, or none for the password alone}
+        {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes. Without one, or with none, users sign in with the password alone}
         {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords, email-verification, update-passwords and security-log): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
-        {--require-second-factor : Make every user set up a second factor (the default with an authenticator app, passkeys or security keys)}
+        {--require-second-factor : Make every user set up a second factor (the default once you add an authenticator app, passkeys or security keys)}
         {--optional-second-factor : Leave setting up a second factor to each user}
         {--force : Overwrite files that already exist}')]
 class InstallCommand extends Command
@@ -38,30 +38,41 @@ class InstallCommand extends Command
     protected const array FEATURES = ['registration', 'reset-passwords', 'email-verification', 'update-passwords', 'security-log'];
 
     /**
-     * Sign-in methods besides the password, and how the lines each adds to
-     * the provider's Keyring::factors() call end. Recovery codes come with
-     * any of them, so losing the only one isn't the end of the account.
+     * Sign-in methods besides the password, and each one's line in the
+     * provider's Keyring::factors() call. The ones that aren't picked stay
+     * there commented out, so adding one later is uncommenting its line.
+     * None is picked unless asked for: a new app starts with the password.
      *
      * An emailed code is named for what it is: a step at sign in. NIST
      * SP 800-63B-4 takes email as no authenticator, so a password and a
      * code is still AAL1, and the provider says so above its line.
      */
     protected const array FACTORS = [
-        'totp' => ['Authenticator app', 'Totp::class,'],
-        'passkeys' => ['Passkeys', 'WebAuthn::passkeys(),'],
-        'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
-        'email-codes' => ['Email codes, as an extra step at sign in (not a second factor)', 'EmailCode::asExtraStep(),', 'a password and an emailed code is AAL1.'],
+        'totp' => ['Authenticator app', 'Factors\Totp::class,'],
+        'passkeys' => ['Passkeys', 'Factors\WebAuthn::passkeys(),'],
+        'security-keys' => ['Security keys, as a second factor', 'Factors\WebAuthn::securityKeys(),'],
+        'email-codes' => ['Email codes, as an extra step at sign in (not a second factor)', 'Factors\EmailCode::asExtraStep(),'],
     ];
 
     /**
-     * The sign-in method picked unless another is: a second factor anyone
-     * can set up, with an app they may already have. OWASP ASVS 5.0.0
-     * (6.3.3) has every user sign in with more than a password from Level 2.
+     * The provider's line for recovery codes. They come with any of the
+     * sign-in methods above, so losing the only one isn't the end of the
+     * account, and they're no use to an account that has none.
      */
-    protected const array DEFAULT_FACTORS = ['totp'];
+    protected const string RECOVERY_CODES = 'Factors\RecoveryCodes::class,';
 
-    /** What --factor takes to mean the password alone. */
+    /** What --factor takes to mean the password alone, without being asked. */
     protected const string NO_FACTORS = 'none';
+
+    /**
+     * The provider's comment above the line that makes everyone set up a
+     * second factor, and what replaces it when that line is commented out.
+     * The line then names the kernel in full, so uncommenting it works in an
+     * app whose code style has since removed the import.
+     */
+    protected const array ENROLLMENT = [
+        "        // Everyone needs a second factor: until they've set one up, every page\n        // sends them to the \"enrollment_url\" in config/keyring.php.\n        \$this->app->make(Kernel::class)" => "        // To make everyone set up a second factor, uncomment this and set\n        // \"enrollment_url\" in config/keyring.php to your page for adding one.\n        // \$this->app->make(\\Illuminate\\Contracts\\Http\\Kernel::class)",
+    ];
 
     /**
      * The sign-in methods that count as a second factor everyone can be made
@@ -162,11 +173,12 @@ class InstallCommand extends Command
             match (true) {
                 $enrolled && config('keyring.enrollment_url') === null && ! $writesConfig => 'Set <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> to your page for adding a sign-in method: users are sent there until they have a second factor',
                 $enrolled => 'Build your page for adding a sign-in method at <comment>'.self::ENROLLMENT_URL.'</comment>, or point <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> at yours: users are sent there until they have a second factor',
+                $writesProvider && $factors === [] => 'Users sign in with a password alone. To add an authenticator app, passkeys or security keys, uncomment its line in your KeyringServiceProvider and <comment>Features::manageAuthenticators()</comment> in <comment>config/keyring.php</comment>',
                 $writesProvider => 'Nothing makes users set up a second factor. To require one, see "Requiring a Second Factor" in the "Policies" docs',
                 default => null,
             },
             $writesProvider && in_array('email-codes', $factors, true) ? 'Email codes are an extra step at sign in, not a second factor: a password and an emailed code is still AAL1. See "Email Codes" in the "Factors" docs' : null,
-            'Add features later in <comment>config/keyring.php</comment>, and sign-in methods in your KeyringServiceProvider',
+            'Add features later by uncommenting them in <comment>config/keyring.php</comment>',
         ]));
 
         // What whoever runs the app will want to know before it's live.
@@ -222,13 +234,12 @@ class InstallCommand extends Command
     {
         $chosen = (array) $this->option('factor');
 
-        if ($chosen === []) {
-            $chosen = $this->input->isInteractive() ? multiselect(
+        if ($chosen === [] && $this->input->isInteractive()) {
+            $chosen = multiselect(
                 label: 'Which sign-in methods besides the password?',
                 options: array_map(fn (array $factor) => $factor[0], self::FACTORS),
-                default: self::DEFAULT_FACTORS,
-                hint: 'You can add more later in app/Providers/KeyringServiceProvider.php.',
-            ) : self::DEFAULT_FACTORS;
+                hint: 'None is fine. Each one stays in app/Providers/KeyringServiceProvider.php, commented out, to add later.',
+            );
         }
 
         // "none" is in no list, so it leaves the password alone.
@@ -300,61 +311,53 @@ class InstallCommand extends Command
     }
 
     /**
-     * The provider with only the chosen sign-in methods, the middleware that
-     * makes everyone set up a second factor when that was asked for, and the
-     * risk signals the features can feed.
+     * The provider with the chosen sign-in methods on and the rest commented
+     * out, the middleware that makes everyone set up a second factor when
+     * that was asked for, and the risk signals the features can feed.
      *
      * @param  list<string>  $factors
      * @param  list<string>  $features
      */
     protected function provider(Filesystem $files, array $factors, bool $enrolled, array $features = self::FEATURES): string
     {
-        $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
+        $provider = $files->get(self::STUBS.'/app/Providers/KeyringServiceProvider.php');
 
-        foreach (self::FACTORS as $key => $factor) {
-            if (! in_array($key, $factors, true)) {
-                $remove = [...$remove, ...array_slice($factor, 1)];
-            }
+        if (! $enrolled) {
+            $provider = strtr($provider, self::ENROLLMENT);
         }
 
-        $lines = array_filter(
-            explode("\n", $files->get(self::STUBS.'/app/Providers/KeyringServiceProvider.php')),
-            fn (string $line) => match (true) {
-                str_contains($line, 'Keyring::require(') => $factors !== [],
-                str_contains($line, "'keyring.enrolled'") => $enrolled,
-                default => array_all($remove, fn (string $needle) => ! str_ends_with(trim($line), $needle)),
-            },
-        );
+        // A signal whose feature is off would find nothing.
+        $signals = array_keys(array_filter(self::SIGNALS, fn (?string $feature) => $feature !== null && ! in_array($feature, $features, true)));
 
-        return $this->withSignals($this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $features);
+        return $this->withoutUnusedImports($this->commentedOut($provider, [
+            ...array_column(array_diff_key(self::FACTORS, array_flip($factors)), 1),
+            ...$factors === [] ? [self::RECOVERY_CODES] : [],
+            ...array_map(fn (string $signal) => "Signals\\{$signal}::class,", $signals),
+        ]));
     }
 
     /**
-     * Comment out each risk signal whose feature is off: it would find
-     * nothing, and it's there to turn on with the feature.
+     * Comment out the provider's lines that read exactly these, leaving each
+     * one there to turn on later.
      *
-     * @param  list<string>  $features
+     * @param  list<string>  $lines
      */
-    protected function withSignals(string $provider, array $features): string
+    protected function commentedOut(string $provider, array $lines): string
     {
-        $off = array_keys(array_filter(self::SIGNALS, fn (?string $feature) => $feature !== null && ! in_array($feature, $features, true)));
-
-        return $off === []
+        return $lines === []
             ? $provider
-            : (string) preg_replace('/^( +)(Signals\\\\(?:'.implode('|', $off).')::class,)$/m', '$1// $2', $provider);
+            : (string) preg_replace('/^( +)('.implode('|', array_map(fn (string $line) => preg_quote($line, '/'), $lines)).')$/m', '$1// $2', $provider);
     }
 
     /**
-     * Comments whose code was removed, and the blank line before them.
+     * Drop the imports only a commented-out line names: the app's code style
+     * would, and the lines that need one name their class in full.
      */
-    protected function withoutOrphanedComments(string $code): string
-    {
-        return (string) preg_replace('/\n(?:\n(?: +\/\/[^\n]*\n)+)+(?=\n| *})/', "\n", $code);
-    }
-
     protected function withoutUnusedImports(string $code): string
     {
-        return (string) preg_replace_callback('/^use [\w\\\\]+\\\\(\w+);\n/m', fn (array $import) => preg_match_all('/\b'.$import[1].'\b/', $code) > 1 ? $import[0] : '', $code);
+        $live = (string) preg_replace('/^ *\/\/.*$/m', '', $code);
+
+        return (string) preg_replace_callback('/^use [\w\\\\]+\\\\(\w+);\n/m', fn (array $import) => preg_match_all('/\b'.$import[1].'\b/', $live) > 1 ? $import[0] : '', $code);
     }
 
     /**

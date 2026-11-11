@@ -58,7 +58,7 @@ The first release. Nothing is tagged yet.
 
 ### Tooling
 
-- `keyring:install`, which asks which sign-in methods and features you want and publishes a config, a provider and your actions. Its defaults give an authenticator app that every user must set up, and `--factor=none` the password alone. Also `keyring:import fortify`, and `keyring:prune`, scheduled daily.
+- `keyring:install`, which asks which sign-in methods and features you want and publishes a config, a provider and your actions. Its defaults give the password alone, and every other sign-in method is in the provider, commented out, to turn on later. Also `keyring:import fortify`, and `keyring:prune`, scheduled daily.
 - Security headers on Keyring's responses: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin-allow-popups` and a referrer policy.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite that checks your setup still keeps Keyring's guarantees.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment, sessions and the challenge page, with Vue and React bindings.
