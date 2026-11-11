@@ -1,19 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\PasswordBroker;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Events\LinkRefused;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Support\Input;
+use Keyring\Support\PasswordRules;
 
 use function Illuminate\Support\defer;
 
@@ -39,7 +44,7 @@ class PasswordResetController
 
     public function store(Request $request): StatusResponse
     {
-        $request->validate([$this->keyring->email() => ['required', 'string', 'email', 'max:255']]);
+        Input::validate($request, [$this->keyring->email() => ['required', 'string', 'email', 'max:255']]);
 
         // After the response, so how long it takes doesn't give away whether
         // the address has an account.
@@ -62,7 +67,7 @@ class PasswordResetController
         // account (shorter with MFA). They only run once the broker has
         // accepted the token: checking them first would tell anyone whether
         // an address has an account, and MFA.
-        $request->validate([
+        $input = Input::validate($request, [
             'token' => ['required', 'string'],
             $this->keyring->email() => ['required', 'string', 'email'],
             'password' => ['required', 'string'],
@@ -70,15 +75,17 @@ class PasswordResetController
 
         $status = $this->broker()->reset([
             ...$this->credentials($request),
-            ...$request->only('token', 'password'),
+            ...Arr::only($input, ['token', 'password']),
         ], fn (Authenticatable&Model $user) => $this->passwords->reset(
             $user,
-            fn () => $resetter->reset($user, $request->all()),
+            fn () => $resetter->reset($user, PasswordRules::normalizeInput(Input::all($request))),
         ));
 
         // Laravel says "no user with that address" for unknown accounts. Answer
         // every failure like a bad token instead.
         if ($status !== PasswordBroker::PASSWORD_RESET) {
+            LinkRefused::dispatch('password_reset', 'token');
+
             throw ValidationException::withMessages([$this->keyring->email() => __(PasswordBroker::INVALID_TOKEN)]);
         }
 

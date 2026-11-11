@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Auth\EloquentUserProvider;
@@ -16,6 +18,8 @@ use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Login\Verification;
+use Keyring\Support\Input;
+use Keyring\Support\PasswordRules;
 
 class RegisteredUserController
 {
@@ -39,7 +43,7 @@ class RegisteredUserController
             throw_unless(Route::has('verification.verify'), EmailVerificationRequired::forRegistration($provider->getModel()));
         }
 
-        $user = $creator->create($request->all());
+        $user = $creator->create(PasswordRules::normalizeInput(Input::all($request)));
 
         event(new Registered($user));
 

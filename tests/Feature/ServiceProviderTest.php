@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\RateLimiter as Limiter;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -15,7 +17,9 @@ use Keyring\Exceptions\MissingPage;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Exceptions\UnknownFeature;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
 use Keyring\Factors\FactorRegistry;
+use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
 use Keyring\Features;
 use Keyring\KeyringManager;
@@ -171,4 +175,12 @@ it('keeps a rate limiter the app defines in place of its own', function () {
     RateLimiter::for('keyring', fn () => Limit::perMinute(10));
 
     expect(RateLimiter::limiter('keyring')(request())->maxAttempts)->toBe(10);
+});
+
+it('registers a factor that sends codes before the cache store its codes are kept in exists', function () {
+    withALateCacheStoreForRateLimits();
+
+    Keyring::factors([Password::class, EmailCode::asSecondFactor()]);
+
+    expect(Keyring::registered()->keys()->all())->toBe(['password', 'email-code']);
 });

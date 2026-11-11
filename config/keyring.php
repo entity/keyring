@@ -1,8 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
-use Keyring\Http\Middleware\PreventCaching;
+use Keyring\Http\Middleware\AddSecurityHeaders;
 
 return [
 
@@ -34,19 +36,20 @@ return [
     |
     | Signing in and out, challenges and step-up are always on. Add the rest
     | as your app needs them. Each one brings its routes, and anything else
-    | it needs, only once it's here.
+    | it needs, only once it's here. Take the security log out and its
+    | events are written to your app's log instead.
     |
     */
 
     'features' => [
         Features::registration(),
         Features::resetPasswords(),
+        Features::securityLog(),
         // Features::emailVerification(),
         // Features::updatePasswords(),
         // Features::manageAuthenticators(),
         // Features::devices(),
         // Features::emailChanges(),
-        // Features::securityLog(),
     ],
 
     /*
@@ -63,8 +66,9 @@ return [
     |--------------------------------------------------------------------------
     |
     | Keyring registers its routes under these middleware. Set "routes" to
-    | false to register them yourself with Keyring::routes(). PreventCaching
-    | keeps auth pages out of caches and their URLs out of Referer headers.
+    | false to register them yourself with Keyring::routes(). AddSecurityHeaders
+    | keeps auth pages out of caches, their URLs out of Referer headers and
+    | their responses from being read as another content type.
     |
     */
 
@@ -74,7 +78,7 @@ return [
 
     'domain' => null,
 
-    'middleware' => ['web', PreventCaching::class],
+    'middleware' => ['web', AddSecurityHeaders::class],
 
     /*
     |--------------------------------------------------------------------------
@@ -83,10 +87,18 @@ return [
     |
     | The relying party ID defaults to your APP_URL host, and the allowed
     | origins to your APP_URL. The timeout is how long the browser waits.
+    | "login_options_for" is how long the challenge for a usernameless sign in
+    | can be answered: the login page asks for one as it loads, for autofill.
     |
     | "attestation_roots" are the root certificates a key's attestation has
     | to chain to, for a factor set up with requireAttestation(): PEM
     | certificates, or paths to PEM files.
+    |
+    | "algorithms" are the signatures keys may use, in order of preference:
+    | ES256, EdDSA and RS256. RS256 is all some Windows Hello setups sign
+    | with, and is left out because OWASP ASVS doesn't approve it. With it
+    | on, an RSA key shorter than "minimum_rsa_bits" is refused (2048 at
+    | the least).
     |
     */
 
@@ -97,7 +109,10 @@ return [
         ],
         'origins' => [],
         'timeout' => '60s',
+        'login_options_for' => '5m',
         'attestation_roots' => [],
+        'algorithms' => ['ES256', 'EdDSA'],
+        'minimum_rsa_bits' => 2048,
     ],
 
     /*
@@ -136,8 +151,10 @@ return [
     | Devices
     |--------------------------------------------------------------------------
     |
-    | Devices are recognised by a long-lived cookie. "trust_for" enables the
-    | "don't ask again on this device" option (set to null to turn it off).
+    | Devices are recognised by a long-lived cookie. With "cookie" null it's
+    | named keyring_device, and __Host-keyring_device once the app is served
+    | over HTTPS; a name you set is used exactly as it is. "trust_for" enables
+    | the "don't ask again on this device" option (set to null to turn it off).
     | A trusted device is only an input to your policy, never a factor.
     | An account keeps its "limit" most recently seen devices (null for no
     | limit): a new one beyond that takes the place of the oldest.
@@ -145,7 +162,7 @@ return [
     */
 
     'devices' => [
-        'cookie' => 'keyring_device',
+        'cookie' => null,
         'cookie_lifetime' => '400d',
         'limit' => 50,
         'trust_for' => '30d',
@@ -169,7 +186,11 @@ return [
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
     | again. "remember_cookie" names the cookie that ties "remember me" to
-    | the session it was ticked for.
+    | the session it was ticked for: null is keyring_remember, prefixed over
+    | HTTPS like the device cookie. Each one works once and is replaced.
+    | For "remember_grace" a browser's other requests, sent with the one
+    | that used it, are still let in on the same session. Used after that,
+    | the session ends for everyone holding it.
     |
     */
 
@@ -185,7 +206,8 @@ return [
             'aal3' => ['idle' => '15m', 'absolute' => '12h'],
         ],
         'middleware' => true,
-        'remember_cookie' => 'keyring_remember',
+        'remember_cookie' => null,
+        'remember_grace' => '10s',
     ],
 
     /*
@@ -222,13 +244,27 @@ return [
     |--------------------------------------------------------------------------
     |
     | At least 8 characters with a second factor and 15 without, any
-    | characters, and no composition rules. Bcrypt silently ignores anything
-    | past 72 bytes, so with bcrypt longer passwords are rejected rather than
-    | truncated.
+    | characters, and no composition rules. Neither minimum can go below 8:
+    | Keyring throws on a lower one rather than raise it quietly.
+    |
+    | "max" is in characters, and is only reached with a hasher that reads a
+    | whole password. Bcrypt, Laravel's default, silently ignores anything
+    | past 72 bytes, so with bcrypt Keyring refuses a longer password rather
+    | than truncate it: the real limit is then 72 bytes, which is 72 plain
+    | characters but only 36 accented or Cyrillic ones, 24 Chinese, Japanese
+    | or Korean ones, or 18 emoji. Set HASH_DRIVER=argon2id to take every
+    | password up to "max", as OWASP ASVS 6.2.9 asks (at least 64 characters).
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
-    | no network calls.
+    | no network calls. Laravel's check lets a password through when the
+    | service can't be reached, which leaves only the list of common
+    | passwords that ships with Keyring. Set "refuse_unchecked" to refuse
+    | the password instead, and ask the user to try again.
+    |
+    | "context" is your list of words a password mustn't be made up of: names
+    | of your organisation, products, systems, projects and teams. Your app's
+    | name, and each user's name and address, are checked without listing.
     |
     */
 
@@ -237,6 +273,8 @@ return [
         'min_without_mfa' => 15,
         'max' => 128,
         'uncompromised' => null,
+        'refuse_unchecked' => false,
+        'context' => [],
         'broker' => null,
     ],
 
@@ -263,18 +301,43 @@ return [
     | Security Log
     |--------------------------------------------------------------------------
     |
-    | With Features::securityLog(), sign ins, failures, lockouts, changes and
-    | automatic actions are logged to keyring_events. Prune with
-    | `php artisan keyring:prune`.
+    | With Features::securityLog(), sign ins, failures, lockouts, refusals,
+    | changes and automatic actions are logged to keyring_events and kept for
+    | "keep_for". Without it they're written to the log "channel" instead
+    | (null for your default one), so they're always recorded somewhere.
+    |
+    | "context_key" is where your app keeps a request's ID in Laravel's
+    | Context, if it does. Entries carry it, or an ID Keyring makes itself.
+    | What's refused can be asked for again without end, so only "refusals"
+    | entries of one type are written every "refusals_per" about an account,
+    | or from an IP address when nobody is known (null for no limit).
     |
     */
 
     'security_log' => [
         'keep_for' => '180d',
+        'channel' => env('KEYRING_LOG_CHANNEL'),
+        'context_key' => 'trace_id',
+        'refusals' => 20,
+        'refusals_per' => '1h',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
-        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
+        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pruning
+    |--------------------------------------------------------------------------
+    |
+    | `php artisan keyring:prune` deletes what's past its time: old log
+    | entries, devices, ended email changes and ended sessions. Keyring adds
+    | it to Laravel's scheduler to run every day at this time, so it happens
+    | wherever `schedule:run` does. Null leaves scheduling it to you.
+    |
+    */
+
+    'prune_at' => '03:00',
 
     /*
     |--------------------------------------------------------------------------

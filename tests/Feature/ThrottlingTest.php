@@ -1,10 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
+use App\Notifications\Keyring\AccountLocked as AccountLockedNotice;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Timebox;
 use Illuminate\Testing\TestResponse;
@@ -830,11 +834,11 @@ describe('an account locked out again and again', function () {
     /**
      * Guess until the account locks, then wait the lock out.
      */
-    function lockOut(int $times, string $email = 'taylor@example.com'): void
+    function lockOut(int $times, string $email = 'taylor@example.com', string $password = 'nope'): void
     {
         foreach (range(1, $times) as $lockout) {
-            test()->post('/login', ['email' => $email, 'password' => 'nope']);
-            test()->post('/login', ['email' => $email, 'password' => 'nope']);
+            test()->post('/login', ['email' => $email, 'password' => $password]);
+            test()->post('/login', ['email' => $email, 'password' => $password]);
             test()->travel(2 ** $lockout)->minutes();
         }
     }
@@ -862,6 +866,45 @@ describe('an account locked out again and again', function () {
         completeReset($this->user);
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])->assertRedirect('/dashboard');
+    });
+
+    it('tells the owner it is locked and how to unlock it, once the app registers the notice', function () {
+        Notification::fake();
+
+        lockOut(3);
+        Notification::assertNothingSent();
+        completeReset($this->user);
+
+        sendNotifications(['account_locked']);
+        $this->travel(2)->days();
+        lockOut(3, password: 'not this either');
+
+        $notice = Notification::sent($this->user, AccountLockedNotice::class)->sole();
+        $mail = renderedMail($notice->toMail($this->user));
+
+        expect($notice->url)->toBe('http://localhost/forgot-password')
+            ->and($notice->ip)->toBe('127.0.0.1')
+            ->and($mail['text'])->toContain('Too many failed attempts to sign in have locked your account. Reset your password to unlock it.')
+            ->toContain('Reset your password: http://localhost/forgot-password');
+    });
+
+    it('leaves the reset link out of the notice when the app has no reset form', function () {
+        withFeatures([Features::registration(), Features::securityLog()]);
+        Notification::fake();
+        sendNotifications(['account_locked']);
+
+        lockOut(3);
+
+        expect(Notification::sent($this->user, AccountLockedNotice::class)->sole()->url)->toBeNull();
+    });
+
+    it('sends no notice for a name nobody has', function () {
+        Notification::fake();
+        sendNotifications(['account_locked']);
+
+        lockOut(3, 'nobody@example.com');
+
+        Notification::assertNothingSent();
     });
 
     it('logs it against the account', function () {
@@ -1563,10 +1606,10 @@ describe('a second factor at the cap', function () {
     });
 
     it('keeps the user able to sign in another way', function () {
-        Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
-        $this->postJson(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertOk();
+        $this->postJson(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertOk();
 
         $this->assertAuthenticatedAs($this->user);
     });

@@ -1,13 +1,20 @@
 <?php
 
+declare(strict_types=1);
+
+use App\Notifications\Keyring\AccountLocked;
 use App\Notifications\Keyring\ConfirmEmailChange;
 use App\Notifications\Keyring\EmailChangeNotice;
 use App\Notifications\Keyring\NewDevice;
 use App\Notifications\Keyring\PasswordChanged;
+use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
+use Keyring\Events\AccountLocked as AccountLockedEvent;
 use Keyring\Events\PasswordChanged as PasswordChangedEvent;
+use Keyring\Events\RecoveryCodesGenerated;
+use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Tests\Fixtures\User;
@@ -76,6 +83,31 @@ describe('security notices', function () {
 
         Notification::assertNothingSentTo($this->user);
         expect(SecurityEvent::query()->where('type', 'new_device')->count())->toBe(1);
+    });
+
+    it('holds the newer notices to the same budget, with every event still logged', function () {
+        $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        foreach (range(1, 7) as $event) {
+            RecoveryCodesGenerated::dispatch($this->user, $codes);
+            AccountLockedEvent::dispatch($this->user, 'password');
+        }
+
+        Notification::assertSentToTimes($this->user, RecoveryCodesGeneratedNotice::class, 5);
+        Notification::assertSentToTimes($this->user, AccountLocked::class, 5);
+        expect(SecurityEvent::query()->where('type', 'recovery_codes_generated')->count())->toBe(7)
+            ->and(SecurityEvent::query()->where('type', 'account_locked')->count())->toBe(7);
+    });
+
+    it('sends the newer notices to no address nobody has verified either', function () {
+        $this->user->forceFill(['email_verified_at' => null])->save();
+        $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        RecoveryCodesGenerated::dispatch($this->user->fresh(), $codes);
+        AccountLockedEvent::dispatch($this->user->fresh(), 'password');
+
+        Notification::assertNothingSent();
+        expect(SecurityEvent::query()->whereIn('type', ['recovery_codes_generated', 'account_locked'])->count())->toBe(2);
     });
 
     it('takes its numbers from the limits options', function () {

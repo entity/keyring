@@ -40,9 +40,9 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `GET` | `/user/email` | `keyring.email.show` | `auth` |
 | `DELETE` | `/user/email` | `keyring.email.destroy` | `auth` |
 | `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | limited |
-| `POST` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm.store` | limited |
+| `POST` | `/email-changes/{change}/confirm` | `keyring.email.confirm.store` | limited |
 | `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited |
-| `POST` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert.store` | limited |
+| `POST` | `/email-changes/{change}/revert` | `keyring.email.revert.store` | limited |
 | `PUT` | `/user/password` | `user-password.update` | `auth`, `changes_middleware`, limited |
 | `GET` | `/forgot-password` | `password.request` | guest |
 | `POST` | `/forgot-password` | `password.email` | guest, limited |
@@ -50,6 +50,7 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `POST` | `/reset-password` | `password.update` | guest, limited |
 | `GET` | `/email/verify` | `verification.notice` | `auth` |
 | `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, limited |
+| `POST` | `/email/verify/{id}/{hash}` | `verification.verify.store` | `auth`, signature in the body, limited |
 | `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
 `auth` here is `auth:{guard}`, Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute by default. The email routes exist only with `Features::emailChanges()`, the password route with `Features::updatePasswords()`, the reset routes with `Features::resetPasswords()`, and the verification routes with `Features::emailVerification()`.
@@ -120,8 +121,20 @@ Applying also signs out the account's other sessions and changes the "remember m
 
 Mail scanners open links on their own. So the emailed links open a page with a button, and only the button changes anything:
 
-- `GET /email-changes/{change}/confirm/{token}` and `.../revert/{token}` render the `email-change` page with `action` (`confirm` or `revert`) and `url` (where the button posts). They change nothing.
-- `POST` to the same URL makes the change.
+- `GET /email-changes/{change}/confirm/{token}` and `.../revert/{token}` render the `email-change` page with `action` (`confirm` or `revert`), `url` (where the button posts) and `token`. They change nothing.
+- `POST` to `url` with `token` in the body makes the change.
+
+The link has to carry its token in the URL. The request that acts doesn't, so `url` is `/email-changes/{change}/confirm` or `.../revert` without it, and the token isn't written to access logs and proxies a second time. Post it as a field:
+
+```html
+<form method="POST" action="{{ $url }}">
+    @csrf
+    <input type="hidden" name="token" value="{{ $token }}">
+    <button>{{ $action === 'confirm' ? 'Confirm the change' : 'Undo the change' }}</button>
+</form>
+```
+
+With Inertia, post `{ token }` to `url`. A token that's missing, wrong, used or expired answers with the `email-change-invalid` status.
 
 Links are built from `APP_URL`, never from the request's `Host` header. They work signed out, since they may open in another browser.
 
@@ -146,7 +159,7 @@ While a change can still be reverted, nobody else can take the address it replac
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
 ```
 
-With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`, even inside `Keyring::withoutProtection()`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. To check an address yourself, use `app(Keyring\Changes\ReservedAddresses::class)->has($address)`. The address is looked up by a keyed hash (`APP_KEY` and `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
+With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`, even inside `Keyring::withoutProtection()`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. To check an address yourself, use `app(Keyring\Changes\ReservedAddresses::class)->has($address)`. The address is looked up by a keyed hash (under a key derived from `APP_KEY`, and from each of `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
 
 ### Checking and Cancelling
 
@@ -171,16 +184,15 @@ However a change is cancelled, the old address's "this wasn't me" link keeps wor
 
 ## Changing the Password
 
-`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification). It passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates it and saves the new password. The published action takes these fields:
+`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification) and, when the user has a password, their current one. Keyring checks both before it passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates the new password and saves it.
 
 | Field | |
 |---|---|
-| `current_password` | Required when the user has a password. Checked with the `Keyring\Rules\CurrentPassword` rule. |
-| `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
+| `current_password` | Required when the user has a password. Keyring checks it itself, with the `Keyring\Rules\CurrentPassword` rule, so a change always takes the current password whatever your action does (OWASP ASVS 6.2.3). A fresh verification can be a passkey or a code, which doesn't show the user knows the password they're replacing. |
+| `password`, `password_confirmation` | The new password, checked by the published action against the [password rules](#password-rules). |
+| `sign_out_others` | Optional boolean, `true` by default. Read by Keyring. |
 
-Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`.
-
-`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one. Use it wherever your own code asks for the current password:
+`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one, without reaching the hasher. Use it wherever your own code asks for the current password:
 
 ```php
 use Keyring\Rules\CurrentPassword;
@@ -188,7 +200,7 @@ use Keyring\Rules\CurrentPassword;
 $request->validate(['current_password' => ['required', 'string', new CurrentPassword($request->user())]]);
 ```
 
-For an action that still uses Laravel's rule, Keyring replaces an over-long `current_password` with a random value before the action sees it.
+Your action doesn't need to check `current_password` again. One that still does, such as an action carried over from Fortify, keeps working: it's given the same input.
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
@@ -196,18 +208,54 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 ## Password Rules
 
-`Keyring\Support\PasswordRules::for($user)` returns validation rules that follow OWASP's guidance:
+`Keyring\Support\PasswordRules::for($user)` returns validation rules that follow the password requirements of OWASP ASVS 5.0.0 (section 6.2), which [Standards](security.md#standards) lists one by one:
 
-- at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)),
-- at most `max` characters (128),
-- no composition rules by default (no "one uppercase, one symbol"),
-- breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),
-- the most common passwords rejected always, from a list bundled with Keyring (the long-enough entries of SecLists' 10,000 most common, MIT licensed),
-- no passwords containing the site's name, or the user's name or email username (words of four characters or more),
-- with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
+- at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)). Neither option can be set below 8: Keyring throws a `LogicException` rather than accept a shorter minimum,
+- at most `max` characters (128) with a hasher that reads a whole password, such as argon2id,
+- no composition rules (no "one uppercase, one symbol"): any characters are accepted, with spaces, punctuation and emoji among them,
+- breached passwords rejected, in production by default. Laravel's check lets a password through when Have I Been Pwned can't be reached; set [`passwords.refuse_unchecked`](configuration.md#passwords) to refuse it instead,
+- the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
+- no passwords made up of [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
+- with bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. That's 72 plain characters but as few as 18 emoji, so 64 characters don't always fit. Set `HASH_DRIVER=argon2id` to accept every password up to `max`, which is what OWASP ASVS 6.2.9 needs (see [Passwords](configuration.md#passwords)),
 - and `confirmed`, so the request needs `password_confirmation`.
 
-`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+Passwords may hold any Unicode characters, and Keyring puts each one in Unicode's NFC form before it's measured, hashed or checked, as NIST SP 800-63B recommends. The same "é" is one code point from some keyboards and two from others, and without this a password set on one device could fail on another. The rules above count what will be hashed: a character is one code point of the NFC form. Keyring's routes do this for the input they hand your actions (`password`, `password_confirmation` and `current_password`) and for every password they check. If your own code sets a password some other way, such as a seeder, an admin tool or a route of your own, pass it through `PasswordRules::normalize()` first:
+
+```php
+$user->password = Hash::make(PasswordRules::normalize($password));
+```
+
+A password hashed without it only matters when it has characters that aren't already in NFC: that hash then never matches, because Keyring only ever checks the NFC form. There's no second try with the password as typed. Keyring has had this from its first release, so no hash it made needs one.
+
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass theirs yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+
+### Context-Specific Words
+
+A password that is just the name of your app, your company or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 6.1.2 asks you to keep a list of such words, and 6.2.11 to use it to stop easy-to-guess passwords. The list goes in the `passwords.context` option:
+
+```php
+'passwords' => [
+    'context' => ['Acme', 'Acme Rockets', 'Roadrunner', 'Wile E'],
+],
+```
+
+Put in the names of your organisation, products, systems, projects, departments and roles. Keyring adds what it can work out itself, and refuses a password made up of nothing but these:
+
+| | From |
+|---|---|
+| Your app's name | `app.name` |
+| The words you list | `passwords.context` |
+| The user's name | Their `name` attribute, or the `context` argument at registration |
+| Their email username | What's before the `@` in their username and email attributes |
+| The organisation they're at | The first label of their email domain: `megacorp` in `megacorp.example`. Skipped for providers anyone can have an address at (Gmail, Googlemail, Outlook, Hotmail, Live, Yahoo, Ymail, iCloud, Proton, Fastmail, Tutanota, Yandex, Zoho, and any domain starting `mail.` or `email.`). |
+
+How they're compared:
+
+- The whole password is compared, not the words inside it, as NIST SP 800-63B asks (Sec. 3.1.1.2). A password is refused when, with its digits, spaces and punctuation taken out, it is one of these words or several of them run together: `acme2026!`, `Taylor.Otwell.1990` and `acmeacmeacme` are refused. A passphrase that happens to have one in it is as hard to guess as any other, so `acme sells the best anvils` passes. Refusing it would be a composition rule by another name.
+- Case doesn't matter, and each value is also taken word by word, split at anything that isn't a letter or a digit: `Acme Rockets` counts `acme` and `rockets`.
+- Characters that stand in for letters count as those letters: `0` as `o`, `1` and `l` as `i`, `3` as `e`, `4` and `@` as `a`, `5` and `$` as `s`, `7` as `t`. So `k3yr1ng` is `keyring`.
+- Words under four characters don't count, because they turn up by chance. The exception is your app's name or a listed entry as a whole, which counts from three characters, so an app called `IBM` refuses `ibm-ibm-ibm`. Two characters or fewer never count.
+- A name of several words also counts run together: `My App` counts as `myapp`, though `my` and `app` alone are too short to.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:
 
@@ -216,15 +264,18 @@ use Illuminate\Validation\Rules\Password;
 
 protected function passwordRules((Authenticatable&Model)|null $user = null, array $context = []): array
 {
-    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule, $context);
+    // Administrators need 20 characters, second factor or not.
+    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->rules(['min:20']) : $rule, $context);
 }
 ```
+
+Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 6.2.5, which wants passwords of any composition accepted, and NIST SP 800-63B says the same. People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
 
 ## Resetting the Password
 
 `POST /forgot-password` with `email` sends a reset link when the address has an account. The answer is the same either way: the `reset-link-sent` [status response](sign-in-flow.md#status-responses). The email is sent after the response, so timing doesn't give it away either.
 
-The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent through your user model's `sendPasswordResetNotification()`, so you change it the usual Laravel way. Keyring sets its link with `ResetPassword::createUrlUsing()`, built from `APP_URL`, never the `Host` header. If you've already set `createUrlUsing()` yourself, Keyring leaves it alone. The reset page is sent with `Referrer-Policy: same-origin`, so the token doesn't leak to other sites through the referrer.
+The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent through your user model's `sendPasswordResetNotification()`, so you change it the usual Laravel way. Keyring sets its link with `ResetPassword::createUrlUsing()`, built from `APP_URL`, never the `Host` header. If you've already set `createUrlUsing()` yourself, Keyring leaves it alone. The reset page is sent with `Referrer-Policy: no-referrer`, so the token in its URL doesn't reach anything the page loads through the referrer.
 
 `POST /reset-password` takes `token`, `email`, `password` and `password_confirmation`. A bad token, or an address without an account, always gets the same error on `email`. Only once the token is accepted does Keyring pass the request to your `ResetsUserPasswords` action (published to `app/Actions/Keyring/ResetUserPassword.php`), which checks the password rules and saves the password, so the form doesn't reveal which addresses have accounts or MFA. As with changes, the action may only change the password, and must save one or throw. Then Keyring:
 
@@ -239,7 +290,25 @@ Resets use Laravel's password broker (`passwords.broker`, or your default), so i
 
 ## Email Verification
 
-With `Features::emailVerification()` on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
+With `Features::emailVerification()` on, Keyring provides Laravel's verification routes, the `verify-email` page that asks the user to check their inbox, and the `email-verification` page the emailed link opens. Verification links are built from `APP_URL` and signed over the path only (`keyring.signed:relative`, Laravel's `signed` middleware with [refused links logged](security-log-and-emails.md#refused-links)), so a forged `Host` header can't redirect them.
+
+Laravel verifies the address as soon as the link is opened. Keyring doesn't: like its other emailed links, the link opens a page with a button, and only the button changes anything. So nothing that fetches the link by itself verifies an address, and no `GET` in Keyring changes state.
+
+- `GET /email/verify/{id}/{hash}` renders the `email-verification` page with `email` (the address being verified), `url`, `expires` and `signature`. It changes nothing. Someone already verified is sent on to `home`.
+- `POST` to `url` with `expires` and `signature` in the body verifies the address. `url` is the link's path without its query string, so the signature isn't in the URL of the request that acts.
+
+```html
+<form method="POST" action="{{ $url }}">
+    @csrf
+    <input type="hidden" name="expires" value="{{ $expires }}">
+    <input type="hidden" name="signature" value="{{ $signature }}">
+    <button>Verify {{ $email }}</button>
+</form>
+```
+
+Both need the user to be signed in, as the account the link was sent to: anyone else gets a `403`, and a signed-out browser goes to the login page and comes back. The link stops working when it expires (`auth.verification.expire`, 60 minutes) or the account's address changes. After verifying, users go to `home` with `?verified=1`, and Laravel's `Illuminate\Auth\Events\Verified` event is dispatched as usual.
+
+Laravel's own `VerifyEmail` notification and the `MustVerifyEmail` contract work unchanged. Only what the link's `GET` does is different.
 
 If you've already set `VerifyEmail::createUrlUsing()` yourself, Keyring leaves it alone.
 
@@ -255,6 +324,7 @@ In `Keyring\Events`:
 | `PasswordChanged` | `user` |
 | `PasswordReset` | `user` |
 | `ProtectionBypassed` | `reason` |
+| `LinkRefused` | `link`, `reason`, `user`: an email change link with a wrong or ended token, a reset with a token that wasn't the one sent, or a signed link that didn't check out |
 
 `change` is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden from serialisation, and the addresses are encrypted at rest.
 

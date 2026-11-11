@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Devices;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -8,7 +10,6 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Events\DeviceRevoked;
 use Keyring\Features;
@@ -16,6 +17,7 @@ use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Cookies;
 use Keyring\Support\Duration;
 
 /**
@@ -45,7 +47,7 @@ class DeviceManager
      */
     public function forBrowser(Request $request): EloquentCollection
     {
-        $token = Features::enabled(Features::devices()) ? $this->token($request) : null;
+        $token = Features::enabled(Features::devices()) ? $this->token($request) ?? $this->earlierToken($request) : null;
 
         return $token === null ? new EloquentCollection : $this->keyring->deviceModel()::query()
             ->withToken($token)
@@ -79,6 +81,10 @@ class DeviceManager
 
         if ($provedSecondFactor) {
             $this->rotateToken($request, $device);
+        } elseif ($device->exists && ($earlier = $this->earlierToken($request)) !== null) {
+            // Found by the cookie from before the app was served over HTTPS:
+            // the browser gets its token back under today's name.
+            $this->queueCookie($request, $earlier);
         }
 
         if ($provedSecondFactor && $trust && ($for = config('keyring.devices.trust_for')) !== null) {
@@ -139,7 +145,7 @@ class DeviceManager
             'first_seen_at' => now(),
         ]);
 
-        $this->queueCookie($token);
+        $this->queueCookie($request, $token);
 
         return $device->authenticatable()->associate($user);
     }
@@ -190,14 +196,31 @@ class DeviceManager
 
     public function token(Request $request): ?string
     {
-        $token = $request->cookie($this->cookie());
-
-        return is_string($token) && strlen($token) === 40 ? $token : null;
+        return $this->tokenFrom($request->cookie($this->cookie()));
     }
 
+    /**
+     * The token of the cookie this browser was given before the app was
+     * served over HTTPS, when that is the one it still holds. It finds the
+     * devices that have it, and is never the token of a new one.
+     */
+    protected function earlierToken(Request $request): ?string
+    {
+        return $this->tokenFrom(Cookies::earlier($request, $this->cookie()));
+    }
+
+    protected function tokenFrom(mixed $value): ?string
+    {
+        return is_string($value) && strlen($value) === 40 ? $value : null;
+    }
+
+    /**
+     * "devices.cookie", or keyring_device with the prefix the app's setup
+     * allows: __Host-keyring_device over HTTPS.
+     */
     public function cookie(): string
     {
-        return config('keyring.devices.cookie');
+        return Cookies::name(config('keyring.devices.cookie'), 'keyring_device');
     }
 
     /**
@@ -229,25 +252,18 @@ class DeviceManager
         $token = Str::random(40);
         $hash = $this->keyring->deviceModel()::hashToken($token);
 
-        if (($presented = $this->token($request)) !== null) {
+        if (($presented = $this->token($request) ?? $this->earlierToken($request)) !== null) {
             $this->keyring->deviceModel()::query()->withToken($presented)->active()->update(['token_hash' => $hash]);
         }
 
         $device->token_hash = $hash;
 
-        $this->queueCookie($token);
+        $this->queueCookie($request, $token);
     }
 
-    protected function queueCookie(#[\SensitiveParameter] string $token): void
+    protected function queueCookie(Request $request, #[\SensitiveParameter] string $token): void
     {
-        Cookie::queue(Cookie::make(
-            $this->cookie(),
-            $token,
-            minutes: intdiv(Duration::seconds(config('keyring.devices.cookie_lifetime')), 60),
-            secure: config('session.secure'),
-            httpOnly: true,
-            sameSite: 'lax',
-        ));
+        Cookies::queue($request, $this->cookie(), $token, minutes: intdiv(Duration::seconds(config('keyring.devices.cookie_lifetime')), 60));
     }
 
     /**

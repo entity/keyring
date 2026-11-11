@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Notifications;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -7,10 +9,12 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Keyring\Events;
 use Keyring\KeyringManager;
 use Keyring\Support\Throttle;
+use Keyring\Support\Url;
 
 /**
  * Sends the app's notification for each security notice it has registered
@@ -35,8 +39,10 @@ class SendSecurityNotifications
             Events\AuthenticatorRemoved::class => 'authenticatorRemoved',
             Events\FactorFailed::class => 'factorFailed',
             Events\RecoveryCodeUsed::class => 'recoveryCodeUsed',
+            Events\RecoveryCodesGenerated::class => 'recoveryCodesGenerated',
             Events\RiskAssessed::class => 'riskAssessed',
             Events\CloneSuspected::class => 'cloneSuspected',
+            Events\AccountLocked::class => 'accountLocked',
             Events\EmailChanged::class => 'emailChanged',
             Events\EmailChangeReverted::class => 'emailChangeReverted',
         ];
@@ -79,6 +85,15 @@ class SendSecurityNotifications
         $this->send($event->authenticator->user(), 'recovery_code_used', ['remaining' => $event->remaining]);
     }
 
+    /**
+     * New codes end the old ones, whether the user asked for them or they
+     * came with a sign-in method.
+     */
+    public function recoveryCodesGenerated(Events\RecoveryCodesGenerated $event): void
+    {
+        $this->send($event->user, 'recovery_codes_generated');
+    }
+
     public function riskAssessed(Events\RiskAssessed $event): void
     {
         if ($event->action->notify) {
@@ -89,6 +104,16 @@ class SendSecurityNotifications
     public function cloneSuspected(Events\CloneSuspected $event): void
     {
         $this->send($event->authenticator->user(), 'clone_suspected', ['name' => $event->authenticator->name]);
+    }
+
+    /**
+     * The account stays locked until its password is reset, so the notice
+     * carries the way to the reset form when the app has one. The device
+     * and IP are those of the attempt that locked it.
+     */
+    public function accountLocked(Events\AccountLocked $event): void
+    {
+        $this->send($event->user, 'account_locked', Route::has('password.request') ? ['url' => Url::route('password.request')] : []);
     }
 
     /**

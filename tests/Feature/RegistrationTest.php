@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
@@ -52,11 +54,16 @@ it('verifies email addresses', function () {
 
     $this->actingAs($user)->inertia()->get('/email/verify')->assertJsonPath('component', 'auth/verify-email');
 
-    $this->post('/email/verification-notification')->assertSessionHas('status', 'verification-link-sent');
+    $this->flushHeaders()->post('/email/verification-notification')->assertSessionHas('status', 'verification-link-sent');
 
     $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
 
-    $this->get($url)->assertRedirect('/dashboard?verified=1');
+    // Opening the link only shows a page. Its button is what verifies.
+    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/email-verification');
+    expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
+    $this->flushHeaders();
+
+    postSignedLink($url)->assertRedirect('/dashboard?verified=1');
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
 });
 
@@ -66,7 +73,9 @@ it('adds the verified flag to a home url that has a query of its own', function 
 
     $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
 
-    $this->actingAs($user)->get($url)->assertRedirect('/dashboard?tab=security&verified=1');
+    $this->actingAs($user);
+
+    postSignedLink($url)->assertRedirect('/dashboard?tab=security&verified=1');
 });
 
 it('can turn registration off', function () {

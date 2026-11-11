@@ -1,9 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
 use App\Providers\KeyringServiceProvider;
+use Illuminate\Console\Scheduling\Event;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\Encrypter;
@@ -60,7 +64,7 @@ describe('keyring:install', function () {
             ->and($provider)->toContain("            'verification_code' => Notifications\VerificationCode::class,")
             ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
-            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(15)
+            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(17)
             ->and($provider)->toContain('Password::class,')
             ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
             // Every action, so turning a feature on later works.
@@ -199,7 +203,7 @@ describe('keyring:import fortify', function () {
 
         DB::table('users')->update([
             'two_factor_secret' => encrypt($secret),
-            'two_factor_recovery_codes' => encrypt(json_encode(['abcde-12345', 'fghij-67890'])),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2', 'ZyXwVuTsR9-qPoNmLkJi8'])),
             'two_factor_confirmed_at' => now(),
         ]);
 
@@ -216,7 +220,41 @@ describe('keyring:import fortify', function () {
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
         $this->get(route('keyring.login.challenge', ['recovery']));
-        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcde-12345'])->assertRedirect('/dashboard');
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aBcDeFgHi1-JkLmNoPqR2'])->assertRedirect('/dashboard');
+    });
+
+    it('keeps the case of fortify\'s recovery codes, which is what makes them long enough to store hashed', function () {
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2'])),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcdefghi1-jklmnopqr2'])->assertSessionHasErrors('code');
+        $this->assertGuest();
+
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aBcDeFgHi1 JkLmNoPqR2'])->assertRedirect('/dashboard');
+    });
+
+    it('leaves behind recovery codes too short to store hashed, and says so', function () {
+        $secret = app(Google2FA::class)->generateSecretKey();
+
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt($secret),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2', 'abcde-12345'])),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Skipped the recovery codes of user {$this->user->id}: they aren't the 20 letters and digits Fortify makes")
+            ->assertSuccessful();
+
+        $keyring = $this->user->keyring->refresh();
+        expect($keyring->of('totp')->sole()->secret)->toBe($secret)
+            ->and($keyring->of('recovery'))->toBeEmpty();
     });
 
     it('imports unconfirmed secrets only when asked', function () {
@@ -236,7 +274,7 @@ describe('keyring:import fortify', function () {
     it('never brings back what a user removed, or adds to what they set up in keyring', function () {
         DB::table('users')->update([
             'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
-            'two_factor_recovery_codes' => encrypt(json_encode(['abcde-12345'])),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2'])),
             'two_factor_confirmed_at' => now(),
         ]);
         $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
@@ -505,6 +543,28 @@ it('prunes old devices, email changes, security events and ended sessions', func
         ->and($registry->find('ended'))->toBeNull()
         ->and($registry->find('live'))->not->toBeNull();
 });
+
+it('schedules the prune itself, every day, so nothing is kept because a line was left out', function () {
+    $pruning = collect(app(Schedule::class)->events())->filter(fn (Event $event) => str_contains((string) $event->command, 'keyring:prune'));
+
+    expect($pruning)->toHaveCount(1)
+        ->and($pruning->first()->expression)->toBe('0 3 * * *');
+
+    // The scheduled command is the one that prunes.
+    $this->artisan('schedule:list')->expectsOutputToContain('keyring:prune')->assertSuccessful();
+});
+
+it('lets the app move the daily prune, or schedule it for itself', function (?string $at, array $expressions) {
+    config(['keyring.prune_at' => $at]);
+    app()->forgetInstance(Schedule::class);
+
+    expect(collect(app(Schedule::class)->events())
+        ->filter(fn (Event $event) => str_contains((string) $event->command, 'keyring:prune'))
+        ->map(fn (Event $event) => $event->expression)->values()->all())->toBe($expressions);
+})->with([
+    'another time' => ['01:30', ['30 1 * * *']],
+    'not at all' => [null, []],
+]);
 
 it('describes the setup in artisan about', function () {
     $this->artisan('about', ['--only' => 'keyring'])

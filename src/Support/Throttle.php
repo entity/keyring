@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Support;
 
 use Illuminate\Cache\RateLimiter;
@@ -374,11 +376,14 @@ class Throttle
      * in, so starting again doesn't buy more, and sign ins, step-ups and
      * enrollments share the count.
      *
+     * The key is hashed so it stays short whatever the factor is called and
+     * however long the account's ID is: see key().
+     *
      * @throws ValidationException
      */
     public function sending(string $factor, int|string $userId): void
     {
-        $key = 'keyring-send:'.$factor.'|'.$userId;
+        $key = 'keyring-send:'.sha1($factor.'|'.$userId);
 
         if ($this->limiter->tooManyAttempts($key, config('keyring.limits.codes'))) {
             throw static::exception('code', $this->limiter->availableIn($key));
@@ -399,7 +404,7 @@ class Throttle
      */
     public function notifying(string $type, string $recipient): ?int
     {
-        $key = 'keyring-notice:'.$type.'|'.sha1($recipient);
+        $key = 'keyring-notice:'.sha1($type.'|'.$recipient);
 
         if ($this->limiter->tooManyAttempts($key, config('keyring.limits.notices'))) {
             return $this->limiter->availableIn($key);
@@ -460,9 +465,12 @@ class Throttle
      */
     protected function perMinute(Factor $factor, string $account, bool $known): AccountLimit
     {
+        // Numbers set from the environment arrive as strings.
+        $lockAfter = $this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null;
+
         return AccountLimit::perMinute(config('keyring.limits.per_account'))
             ->by($this->bucket($factor->key(), $account, $known))
-            ->holdAfter($this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null);
+            ->holdAfter($lockAfter === null ? null : (int) $lockAfter);
     }
 
     /**
@@ -483,7 +491,7 @@ class Throttle
 
         $elsewhere = $known || ! Features::enabled(Features::devices()) ? null : config('keyring.limits.consecutive_elsewhere');
 
-        return ConsecutiveLimit::of($user, $factor->key(), $known, $cap, $elsewhere);
+        return ConsecutiveLimit::of($user, $factor->key(), $known, $cap === null ? null : (int) $cap, $elsewhere === null ? null : (int) $elsewhere);
     }
 
     protected function typedUsername(Request $request): string
@@ -515,7 +523,10 @@ class Throttle
     }
 
     /**
-     * The rate limiter key for a limit.
+     * The rate limiter key for a limit. Every key Keyring counts under is a
+     * short prefix and a hash, so that with what the rate limiter adds
+     * (":timer") it fits a store with short keys: the Swoole table behind
+     * Octane's "octane" store holds 63 bytes, and refuses a longer one.
      */
     protected function key(Limit $limit): string
     {

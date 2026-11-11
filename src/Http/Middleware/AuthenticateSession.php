@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Middleware;
 
 use Closure;
@@ -10,6 +12,7 @@ use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
 use Keyring\Events\NewDeviceSignedIn;
+use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionEnded;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -90,7 +93,9 @@ class AuthenticateSession
         $now = now()->getTimestamp();
 
         if (($ended = $this->ended($session, $user, $now)) !== null) {
-            return $this->signOut($request, $ended);
+            // Still open on a record "remember me" has carried on from, so
+            // this isn't the browser that did.
+            return $ended === 'replaced' ? $this->reused($request, $user, $session) : $this->signOut($request, $ended);
         }
 
         // Before anything checks the level, so inactivity lapses it first.
@@ -108,9 +113,10 @@ class AuthenticateSession
     }
 
     /**
-     * Why this user can't carry on with a record, if they can't.
+     * Why this user can't carry on with a record, if they can't. "replaced"
+     * is one "remember me" has already carried on from.
      *
-     * @return 'revoked'|'expired'|'idle'|'other_user'|null
+     * @return 'revoked'|'expired'|'idle'|'other_user'|'replaced'|null
      */
     protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
@@ -118,8 +124,9 @@ class AuthenticateSession
 
         return match (true) {
             $session->revokedAt !== null => 'revoked',
-            ! $session->isActive($now) => 'expired',
+            $session->expiresAt <= $now => 'expired',
             $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
+            $session->replacedBy !== null => 'replaced',
             $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
             default => null,
         };
@@ -151,8 +158,12 @@ class AuthenticateSession
      * start a new session with a whole new window. The browser's Keyring
      * cookie names the record it goes with, and the record has to still be
      * good. Returns a response when it isn't.
+     *
+     * The cookie works once: the session moves to a new record with a new
+     * cookie, so a copy of the pair brings nothing back, and gives itself
+     * away when it's tried (reused).
      */
-    protected function resume(Request $request, Authenticatable&Model $user): ?Response
+    protected function resume(Request $request, Authenticatable&Model $user, bool $retry = true): ?Response
     {
         // The cookie signs in with nothing proved, so a risk lock refuses it
         // like any other sign in.
@@ -168,7 +179,21 @@ class AuthenticateSession
             return $this->signOut($request, 'expired');
         }
 
-        if (($ended = $this->ended($session, $user, now()->getTimestamp())) !== null) {
+        $now = now()->getTimestamp();
+        $ended = $this->ended($session, $user, $now);
+
+        // A browser's first requests back arrive together, all with the
+        // cookie the first of them uses up. The rest join the session that
+        // one resumed, if it's still good.
+        if ($joining = $ended === 'replaced' && ($resumed = $this->sessions->overlapped($request, $session)) !== null) {
+            $ended = $this->ended($session = $resumed, $user, $now);
+        }
+
+        if ($ended === 'replaced') {
+            return $this->reused($request, $user, $session);
+        }
+
+        if ($ended !== null) {
             // An idle session ends for good, as when its own request shows it.
             if ($ended === 'idle') {
                 $this->sessions->registry()->revoke($session->id);
@@ -177,13 +202,33 @@ class AuthenticateSession
             return $this->signOut($request, $ended);
         }
 
-        // Recorded like a sign in, so a browser the account hasn't used is
-        // announced as a new device.
-        $device = $this->devices->signIn($request, $user);
-
         // Whatever this session held, the cookie proved none of it.
         $this->assurance->flush();
-        $this->sessions->resume($request, $session, $device);
+
+        if ($joining) {
+            $this->sessions->join($request, $session);
+            $this->assurance->touch();
+
+            return null;
+        }
+
+        $current = $this->sessions->resume($request, $session);
+
+        // A request sent alongside this one used the cookie first, or the
+        // session was revoked a moment ago. Looking again says which.
+        if ($current === null) {
+            return $retry ? $this->resume($request, $user, retry: false) : $this->signOut($request, 'revoked');
+        }
+
+        // Recorded like a sign in, so a browser the account hasn't used is
+        // announced as a new device. Only the request that resumed records
+        // one, so the session's device is the one it came from.
+        $device = $this->devices->signIn($request, $user);
+
+        if ($device !== null && $device->id !== $current->deviceId) {
+            $this->sessions->registry()->update($current->id, ['deviceId' => $device->id]);
+        }
+
         $this->assurance->touch();
 
         if ($device?->wasRecentlyCreated) {
@@ -191,6 +236,32 @@ class AuthenticateSession
         }
 
         return null;
+    }
+
+    /**
+     * A record "remember me" already carried on from has turned up again:
+     * as its cookie, too late or from another browser to be a request sent
+     * alongside, or as a session still open on it. Two browsers held the
+     * same cookies, and nothing says which is the owner's, so the session
+     * ends for both: this request is signed out, and the record the other
+     * one holds now is revoked.
+     *
+     * The user's remember token is left alone. Neither browser's cookies
+     * lead to a record that works any more, and changing the token would
+     * sign out every other browser the user ticked "remember me" in.
+     */
+    protected function reused(Request $request, Authenticatable $user, RegisteredSession $session): Response
+    {
+        $current = $this->sessions->latest($session);
+
+        // Already ended some other way: there's nothing left to end.
+        if ($current?->isActive(now()->getTimestamp())) {
+            $this->sessions->registry()->revoke($current->id);
+
+            RememberMeReused::dispatch($user, $current);
+        }
+
+        return $this->signOut($request, 'reused');
     }
 
     /**
@@ -228,15 +299,16 @@ class AuthenticateSession
     }
 
     /**
-     * @param  'revoked'|'expired'|'idle'|'other_user'|'risk'|'not_allowed'  $reason
+     * @param  'revoked'|'expired'|'idle'|'other_user'|'reused'|'risk'|'not_allowed'  $reason
      */
     protected function signOut(Request $request, string $reason): Response
     {
         // An account that's kept out or locked loses the session its
         // "remember me" would carry on, too. Otherwise the same cookies
-        // would sign it in again the moment it's let back.
+        // would sign it in again the moment it's let back. A cookie that was
+        // used a moment ago stands for the session it was used for.
         if (in_array($reason, ['not_allowed', 'risk'], true) && ($remembered = $this->sessions->remembered($request)) !== null) {
-            $this->sessions->registry()->revoke($remembered->id);
+            $this->sessions->registry()->revoke(($this->sessions->latest($remembered) ?? $remembered)->id);
         }
 
         if ($user = $this->signIn->out($request, onlyThisBrowser: true)) {

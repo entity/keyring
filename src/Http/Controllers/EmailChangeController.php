@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -13,6 +15,7 @@ use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Enums\EmailConfirmation;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Support\Input;
 use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 
@@ -75,7 +78,8 @@ class EmailChangeController
     /**
      * The page an emailed link opens. It changes nothing: mail scanners fetch
      * links on their own, so the change only happens when the person presses
-     * the button, which POSTs back to the same URL.
+     * the button. That posts the link's token in the body, to a URL without
+     * it: the link had to carry it in the URL, the request that acts doesn't.
      */
     public function page(Request $request, string $change, #[\SensitiveParameter] string $token): mixed
     {
@@ -84,7 +88,8 @@ class EmailChangeController
 
         return $this->keyring->render('email-change', [
             'action' => $action,
-            'url' => Url::route("keyring.email.{$action}.store", ['change' => $change, 'token' => $token]),
+            'url' => Url::route("keyring.email.{$action}.store", ['change' => $change]),
+            'token' => $token,
         ]);
     }
 
@@ -92,11 +97,11 @@ class EmailChangeController
      * Confirm from either address. Works signed out, since the link may open
      * in another browser.
      */
-    public function confirm(string $change, #[\SensitiveParameter] string $token): StatusResponse
+    public function confirm(Request $request, string $change): StatusResponse
     {
-        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
+        $change = $this->changes->fromLink($change, 'email_change_confirm');
 
-        $status = match ($this->changes->confirm($change, $token)) {
+        $status = match ($this->changes->confirm($change, Input::text($request, 'token'))) {
             EmailConfirmation::Applied => 'email-changed',
             EmailConfirmation::NeedsOtherAddress => 'email-change-confirmed',
             EmailConfirmation::Invalid => 'email-change-invalid',
@@ -105,12 +110,12 @@ class EmailChangeController
         return $this->status($status, redirect: $this->keyring->guard()->check() ? config('keyring.home') : route('login'));
     }
 
-    public function revert(string $change, #[\SensitiveParameter] string $token): StatusResponse
+    public function revert(Request $request, string $change): StatusResponse
     {
-        $change = $this->keyring->pendingChangeModel()::query()->findOrFail($change);
+        $change = $this->changes->fromLink($change, 'email_change_revert');
 
         // Send them to reset their password, when the app has that flow.
-        return $this->changes->revert($change, $token)
+        return $this->changes->revert($change, Input::text($request, 'token'))
             ? $this->status('email-change-reverted', redirect: route(Route::has('password.request') ? 'password.request' : 'login'))
             : $this->status('email-change-invalid', redirect: route('login'));
     }

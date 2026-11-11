@@ -1,6 +1,9 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\VerificationCode;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
@@ -421,4 +424,179 @@ it('only takes email codes as a second factor when the app accepts the risk', fu
     Keyring::factors([Password::class, EmailCode::class]);
 
     expect(fn () => Keyring::registered())->toThrow(InvalidArgumentException::class, 'EmailCode::asSecondFactor()');
+});
+
+it('refuses a code shorter than six digits, the least that resists guessing', function (int $length) {
+    EmailCode::asSecondFactor(length: $length);
+})->with([1, 5])->throws(LogicException::class, 'Keyring refuses codes shorter than 6 digits');
+
+it('refuses a code that lasts longer than ten minutes', function (string $expireAfter) {
+    EmailCode::asSecondFactor(expireAfter: $expireAfter);
+})->with(['601', '11m', '30d'])->throws(LogicException::class, 'Keyring refuses a code that lasts longer than 600 seconds');
+
+it('refuses a code that lasts no time at all', function () {
+    EmailCode::asSecondFactor(expireAfter: '0s');
+})->throws(LogicException::class, 'or no time at all');
+
+it('takes six digits and ten minutes, the edges of what it allows', function () {
+    Keyring::factors([Password::class, EmailCode::asSecondFactor(length: 6, expireAfter: '10m')]);
+
+    expect(Keyring::registered()->keys()->all())->toBe(['password', 'email-code']);
+});
+
+// Laravel's "cookie" session driver keeps the session in the browser, which
+// can send back an earlier copy of it. A code's state is kept on the server,
+// so what the copy says about a code changes nothing.
+describe('a browser that sends back an earlier copy of its session', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 100]);
+    });
+
+    it('cannot sign in with a code a second time', function () {
+        emailAuthenticator($this->user);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'email-code'));
+        $code = sentCode($this->user);
+        $unspent = session()->all();
+
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code])->assertRedirect('/dashboard');
+        $this->post('/logout');
+
+        sendBackSession($unspent);
+
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code])
+            ->assertSessionHasErrors(['code' => __('keyring::keyring.invalid')]);
+        $this->assertGuest();
+    });
+
+    it('cannot confirm with a code a second time', function () {
+        emailAuthenticator($this->user);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+        $this->get(route('keyring.confirm.challenge', 'email-code'));
+        $this->post(route('keyring.confirm.send', 'email-code'));
+        $code = sentCode($this->user);
+        $unspent = session()->all();
+
+        $this->post(route('keyring.confirm.verify', 'email-code'), ['code' => $code])->assertSessionHasNoErrors();
+
+        sendBackSession($unspent);
+
+        $this->actingAs($this->user)->post(route('keyring.confirm.verify', 'email-code'), ['code' => $code])
+            ->assertSessionHasErrors(['code' => __('keyring::keyring.invalid')]);
+    });
+
+    it('cannot enroll with a code a second time', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        $code = sentCode($this->user);
+        $unspent = session()->all();
+
+        $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk();
+        // Removed again, with the recovery codes that came with it.
+        Authenticator::query()->delete();
+        $this->user->keyring->refresh();
+
+        sendBackSession($unspent);
+
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.invalid')]);
+
+        expect($this->user->keyring->refresh()->of('email-code'))->toBeEmpty();
+    });
+
+    it('does not get its wrong guesses back', function () {
+        emailAuthenticator($this->user);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'email-code'));
+        $code = sentCode($this->user);
+        $unguessed = session()->all();
+
+        foreach (range(1, 4) as $guess) {
+            $this->post(route('keyring.login.verify', 'email-code'), ['code' => '00000000'])
+                ->assertSessionHasErrors(['code' => __('keyring::keyring.invalid')]);
+        }
+
+        sendBackSession($unguessed);
+
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => '00000000'])
+            ->assertSessionHasErrors(['code' => __('keyring::keyring.too_many_codes')]);
+
+        sendBackSession($unguessed);
+
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code])
+            ->assertSessionHasErrors(['code' => __('keyring::keyring.too_many_codes')]);
+        $this->assertGuest();
+    });
+
+    it('is sent no new code once the guesses have run out', function () {
+        emailAuthenticator($this->user);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'email-code'));
+        $unguessed = session()->all();
+
+        foreach (range(1, 5) as $guess) {
+            $this->post(route('keyring.login.verify', 'email-code'), ['code' => '00000000']);
+        }
+
+        sendBackSession($unguessed);
+        Notification::fake();
+
+        $this->post(route('keyring.login.send', 'email-code'))
+            ->assertRedirect(route('login'))
+            ->assertSessionHasErrors(['email' => __('keyring::keyring.too_many_codes')]);
+
+        Notification::assertNothingSent();
+    });
+
+    it('cannot use a code that a newer one replaced', function () {
+        emailAuthenticator($this->user);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'email-code'));
+        $first = sentCode($this->user);
+        $beforeResend = session()->all();
+
+        Notification::fake();
+        $this->post(route('keyring.login.send', 'email-code'));
+        $second = sentCode($this->user);
+
+        sendBackSession($beforeResend);
+
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => $first])->assertSessionHasErrors('code');
+        $this->assertGuest();
+
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => $second])->assertRedirect('/dashboard');
+    });
+
+    it('does not get its wrong enrollment guesses back', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        $code = sentCode($this->user);
+        $unguessed = session()->all();
+
+        foreach (range(1, 5) as $guess) {
+            $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
+        }
+
+        sendBackSession($unguessed);
+
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_too_many_codes')]);
+
+        expect($this->user->keyring->refresh()->of('email-code'))->toBeEmpty();
+    });
+
+    it('finds nothing of a code in the session to send back', function () {
+        emailAuthenticator($this->user);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'email-code'));
+        $this->post(route('keyring.login.verify', 'email-code'), ['code' => '00000000']);
+
+        $attempt = json_decode(Crypt::decryptString(session('keyring.attempt.login')), true);
+
+        expect($attempt['state'])->toBe([]);
+    });
 });

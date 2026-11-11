@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Console;
 
 use ErrorException;
@@ -27,6 +29,10 @@ use Symfony\Component\Console\Attribute\AsCommand;
  * in users with no sign-in methods in Keyring yet, so a later run can't
  * bring back one a user removed. It never deletes Fortify's data, so drop
  * its columns yourself when you're happy.
+ *
+ * Recovery codes come across as keyed hashes of the codes exactly as
+ * Fortify showed them, case included, which is what keeps them above the
+ * 112 random bits OWASP ASVS 6.5.2 asks of a code stored that way.
  */
 #[AsCommand(name: 'keyring:import')]
 #[Description('Import authenticators from Fortify (TOTP, recovery codes and passkeys)')]
@@ -179,6 +185,15 @@ class ImportCommand extends Command
             $this->failTwoFactor($user, 'its two factor secret or recovery codes are in an unexpected format');
 
             return;
+        }
+
+        // Fortify's codes are long enough to keep as keyed hashes (20 letters
+        // and digits, 119 random bits). Anything else in that column would be
+        // too easy to guess stored that way, so the set stays behind and the
+        // user makes a new one.
+        if (! array_all($codes, app(RecoveryCodes::class)->accepts(...))) {
+            $this->issues['skipped'][] = "the recovery codes of user {$user->getKey()}: they aren't the 20 letters and digits Fortify makes, and shorter codes are too easy to guess to store as Keyring does. Their authenticator app is imported, and they can make new codes";
+            $codes = [];
         }
 
         $this->counts['totp']++;

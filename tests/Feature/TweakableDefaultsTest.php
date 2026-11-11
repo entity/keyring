@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Notification;
@@ -42,6 +44,7 @@ it('sends as many codes as the app allows, as often as it allows', function () {
 
 it('gives users as long to finish adding a sign-in method as the app says', function () {
     config(['keyring.enrollments.keep_for' => '1h']);
+    $this->freezeSecond();
 
     expect(Enrollment::make('totp')->expiresAt)->toBe(now()->addHour()->getTimestamp());
 });
@@ -63,6 +66,7 @@ it('prunes devices on the app\'s schedule', function () {
 
 it('signs "this wasn\'t me" links for as long as the app says', function () {
     config(['keyring.devices.report_link_for' => '2d']);
+    $this->freezeSecond();
     $device = device(taylor());
 
     parse_str((string) parse_url($device->revokeUrl(), PHP_URL_QUERY), $query);

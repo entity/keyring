@@ -68,7 +68,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
 
 | Factor | Request fields | `enrollment` |
 |---|---|---|
-| `totp` | `name` (optional) | `secret`, `url` (`otpauth://`), `qr` (an SVG string) |
+| `totp` | `name` (optional) | `secret`, `algorithm` (`SHA1` unless the factor is [set up with another](factors.md#authenticator-apps-totp)), `url` (`otpauth://`), `qr` (an SVG string) |
 | `email-code` | `name` (optional) | `length`, `sent: true`. A code is sent to the current address. |
 | `recovery` | none | `codes`: the new plain codes, shown once |
 | `passkey`, `security-key` | none | `options`: WebAuthn creation options for the browser |
@@ -79,6 +79,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
   "factor": "totp",
   "enrollment": {
     "secret": "JBSWY3DPEHPK3PXP...",
+    "algorithm": "SHA1",
     "url": "otpauth://totp/Example:taylor%40example.com?secret=...",
     "qr": "<svg ...>...</svg>"
   }
@@ -97,7 +98,7 @@ Authenticator apps and email codes take an optional `name` when beginning or con
 | `recovery` | none: confirming means "I've saved these" |
 | `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 
-A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
+A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment, or one that was already confirmed, with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
 
 On success, the response contains the new authenticator, presented the same way as on the challenge page:
 
@@ -105,7 +106,7 @@ On success, the response contains the new authenticator, presented the same way 
 {
   "status": "authenticator-added",
   "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
-  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp", "..."]
+  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp-eh", "..."]
 }
 ```
 
@@ -209,5 +210,10 @@ In `Keyring\Events`:
 | `AuthenticatorRemoved` | `user`, `authenticator` |
 | `RecoveryCodesGenerated` | `user`, `authenticator` |
 | `RecoveryCodeUsed` | `authenticator`, `remaining` |
+| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid` or `not_allowed`) |
+| `AuthenticatorRemovalRefused` | `user`, `authenticator` |
+| `AccessRefused` | `user`, `resource`, `id` |
 
 Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.
+
+The last three are what was turned away: a confirmation whose code or key was wrong (or an account that may not enroll yet), a removal that would have left the user unable to sign in, and a request for an authenticator that isn't the user's. Each is answered as before, a 422, 403 or 404, and written to the [security log](security-log-and-emails.md#entry-types).

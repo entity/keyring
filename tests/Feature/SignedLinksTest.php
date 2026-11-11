@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\NewDevice;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
@@ -30,7 +32,7 @@ it('builds the "this wasn\'t me" link from APP_URL, not the Host header', functi
     expect($url)->toStartWith('https://app.example.com/devices/');
 
     // The relative signature still works however the app is reached.
-    $this->post(parse_url($url, PHP_URL_PATH).'?'.parse_url($url, PHP_URL_QUERY))->assertRedirect(route('login'));
+    postSignedLink($url)->assertRedirect(route('login'));
     expect(Device::sole()->isRevoked())->toBeTrue();
 });
 
@@ -50,7 +52,7 @@ it('builds email verification links from APP_URL, not the Host header', function
 
     expect($url)->toStartWith('https://app.example.com/email/verify/');
 
-    $this->get(parse_url($url, PHP_URL_PATH).'?'.parse_url($url, PHP_URL_QUERY))->assertRedirect();
+    postSignedLink($url)->assertRedirect();
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
 });
 
@@ -113,9 +115,9 @@ describe('with a forwarded prefix the app trusts', function () {
             return true;
         });
 
-        $this->withHeader('X-Forwarded-Prefix', '/app')
-            ->post(parse_url($url, PHP_URL_PATH).'?'.parse_url($url, PHP_URL_QUERY))
-            ->assertRedirect();
+        $this->withHeader('X-Forwarded-Prefix', '/app');
+
+        postSignedLink($url)->assertRedirect();
 
         expect(Device::sole()->isRevoked())->toBeTrue();
     });

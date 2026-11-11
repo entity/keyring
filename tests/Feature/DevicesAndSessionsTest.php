@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -181,11 +183,12 @@ it('gives new device events a working "this wasn\'t me" link', function () {
     $this->get('/home')->assertOk();
 
     // Opening the link only shows a page, so mail scanners can't sign anyone out.
-    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report');
+    // Its URL is the signed link, so the page sends no Referer to anyone.
+    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report')->assertHeader('Referrer-Policy', 'no-referrer');
     $this->flushHeaders();
     expect(Device::sole()->isRevoked())->toBeFalse();
 
-    $this->post($url)->assertRedirect('/login');
+    postSignedLink($url)->assertRedirect('/login');
 
     $this->get('/home')->assertRedirect('/login');
     expect(Device::sole()->isRevoked())->toBeTrue();
@@ -370,8 +373,8 @@ describe('coming back with a "remember me" cookie', function () {
         ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
 
         expect(Device::count())->toBe(1)
-            ->and(session(Sessions::KEY))->toBe($this->registered)
-            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe(Device::sole()->id);
+            ->and(app(SessionRegistry::class)->find($this->registered)->replacedBy)->toBe(session(Sessions::KEY))
+            ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->deviceId)->toBe(Device::sole()->id);
         Event::assertNotDispatched(NewDeviceSignedIn::class);
     });
 
@@ -381,8 +384,10 @@ describe('coming back with a "remember me" cookie', function () {
 
         ($this->comeBack)()->assertOk()->assertCookie('keyring_device');
 
+        // The record left behind keeps the device its cookie was issued on.
         expect(Device::count())->toBe(2)
-            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe(Device::query()->whereKeyNot($first->id)->sole()->id);
+            ->and(app(SessionRegistry::class)->find($this->registered)->deviceId)->toBe($first->id)
+            ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->deviceId)->toBe(Device::query()->whereKeyNot($first->id)->sole()->id);
         Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
     });
 
@@ -416,11 +421,19 @@ it('never lets auth pages be cached', function () {
     $this->get('/login')->assertHeader('Cache-Control', 'no-store, private');
 });
 
+it('tells the browser not to guess the type of a page, a redirect or JSON', function () {
+    $this->inertia()->get('/login')->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->flushHeaders()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->getJson('/user/devices')->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->postJson('/logout')->assertNoContent()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertUnprocessable()->assertHeader('X-Content-Type-Options', 'nosniff');
+});
+
 it('leaves caching to an app that takes the middleware out of the config', function () {
     config(['keyring.middleware' => ['web']]);
     withFeatures(Features::all());
 
-    $this->get('/login')->assertHeaderMissing('Referrer-Policy');
+    $this->get('/login')->assertHeaderMissing('Referrer-Policy')->assertHeaderMissing('X-Content-Type-Options');
 });
 
 it('cycles the remember token when a device is revoked', function () {

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -17,6 +19,8 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Duration;
+use Keyring\Support\Input;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
 use ParagonIE\ConstantTime\Base64UrlSafe;
@@ -137,16 +141,45 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     {
         $options = $this->ceremonies()->requestOptions([], AuthenticatorSelectionCriteria::USER_VERIFICATION_REQUIREMENT_REQUIRED);
 
-        $request->session()->put(static::LOGIN_OPTIONS.'.'.$this->key(), $this->ceremonies()->toJson($options));
+        $request->session()->put(static::LOGIN_OPTIONS.'.'.$this->key(), [
+            'options' => $this->ceremonies()->toJson($options),
+            'expires_at' => now()->getTimestamp() + $this->loginOptionsLifetime(),
+        ]);
 
         return $this->ceremonies()->toBrowser($options);
     }
 
+    /**
+     * Seconds a usernameless challenge can be answered for. The session
+     * that holds it can last for days, and a challenge is only meant for
+     * the prompt it was issued to. Never shorter than the browser is told
+     * to wait, or a prompt still open would be answered too late.
+     */
+    protected function loginOptionsLifetime(): int
+    {
+        return max(
+            Duration::seconds(config('keyring.webauthn.login_options_for')),
+            (int) ceil(Duration::milliseconds(config('keyring.webauthn.timeout')) / 1000),
+        );
+    }
+
+    /**
+     * Take the usernameless challenge out of the session, if it's still
+     * good. Only identify() may spend one, and trying spends it even when
+     * no key matches.
+     */
+    protected function pullLoginOptions(Request $request): ?string
+    {
+        $issued = $request->session()->pull(static::LOGIN_OPTIONS.'.'.$this->key());
+
+        return is_array($issued) && is_string($issued['options'] ?? null) && ($issued['expires_at'] ?? 0) >= now()->getTimestamp()
+            ? $issued['options']
+            : null;
+    }
+
     public function identify(Request $request): ?Authenticator
     {
-        // Only this path may spend a usernameless challenge, and trying it
-        // spends it even when no key matches.
-        $request->attributes->set(static::LOGIN_OPTIONS, $request->session()->pull(static::LOGIN_OPTIONS.'.'.$this->key()));
+        $request->attributes->set(static::LOGIN_OPTIONS, $this->pullLoginOptions($request));
 
         $id = $this->profile->primary ? $this->ceremonies()->credentialId($this->credential($request)) : null;
 
@@ -188,7 +221,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         $id = $this->ceremonies()->credentialId($credential);
         $actual = $authenticator->credential_id === $id
             ? $authenticator
-            : $attempt->keyring()->of($this->key())->firstWhere('credential_id', $id);
+            : $attempt->keyring()->of($this->key())->firstWhere('credential_id', '===', $id);
 
         if (! is_string($options) || $actual === null) {
             return null;
@@ -209,8 +242,9 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
                     return false;
                 }
 
-                // Whether the key may sync is reported again on every sign in.
-                $locked->withMeta('backup_eligible', $result['backupEligible'])->forceFill([
+                // Whether the key may sync, and whether it has been backed up
+                // yet, are reported again on every sign in.
+                $locked->withMeta('backup_eligible', $result['backupEligible'])->withMeta('backed_up', $result['backedUp'])->forceFill([
                     'public_key' => $this->ceremonies()->toJson($result['record']),
                     'sign_count' => $result['record']->counter,
                 ]);
@@ -286,6 +320,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             'meta' => [
                 'user_verified' => (bool) $record->uvInitialized,
                 'backup_eligible' => (bool) $record->backupEligible,
+                'backed_up' => (bool) $record->backupStatus,
             ],
         ]);
     }
@@ -315,7 +350,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
      */
     protected function credential(Request $request): string
     {
-        $credential = $request->input('credential');
+        $credential = Input::get($request, 'credential');
 
         return is_string($credential) ? $credential : (string) json_encode($credential);
     }

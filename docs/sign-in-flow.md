@@ -69,6 +69,8 @@ Post the username and password to `/login`:
 
 A wrong password and an unknown account produce the same error, on the username field, using Laravel's `auth.failed` message. Both take the same time.
 
+Send them in the body, as a form or as JSON. Keyring doesn't read a `POST`'s query string for these, so `POST /login?password=...` fails as if no password was sent. See [Request Input](security.md#request-input).
+
 ### Finding the User
 
 By default Keyring looks the user up by the `username` attribute, trimmed and lowercased. Change either in your `KeyringServiceProvider`:
@@ -320,7 +322,7 @@ Keyring::pipeline(fn (Steps $steps) => $steps
 
 `dangerouslyReplace()` and `dangerouslyRemove()` log a warning when `Keyring::pipeline()` is called, and the [conformance suite](testing.md#the-conformance-suite) fails until you acknowledge the step. Whatever that step checked is then up to you.
 
-Before signing anyone in, `CompleteAttempt` also confirms that this request was throttled, verified and checked for a risk lock, and that the requirement is met. If one of those didn't happen, it logs an error and refuses with the usual generic error. It doesn't ask this of a step you took out with `dangerouslyReplace()` or `dangerouslyRemove()`, but the requirement must always be met.
+Before signing anyone in, `CompleteAttempt` also confirms that this request was throttled, verified and checked for a risk lock, and that the requirement is met. If one of those didn't happen, it logs an error, dispatches `VerificationRefused` (a `verification_refused` entry in the [security log](security-log-and-emails.md#entry-types)) and refuses with the usual generic error. It doesn't ask this of a step you took out with `dangerouslyReplace()` or `dangerouslyRemove()`, but the requirement must always be met.
 
 ### Writing a Step
 
@@ -474,8 +476,9 @@ Keyring renders these pages:
 | `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` (a translated message) |
-| `email-change` | `action` (`confirm` or `revert`) and `url` (where its button posts). See [Protected Changes](protected-changes.md#the-emailed-links). |
-| `device-report` | `device` (a description) and `url` (where its button posts). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
+| `email-verification` | `email` (the address being verified), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [Email Verification](protected-changes.md#email-verification). |
+| `email-change` | `action` (`confirm` or `revert`), `url` (where its button posts) and `token` (posted in the body). See [Protected Changes](protected-changes.md#the-emailed-links). |
+| `device-report` | `device` (a description), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 
 With Inertia installed, each renders the component `auth/{name}`, such as `auth/login`. Without Inertia, Keyring renders the Blade view `auth.{name}`, such as `resources/views/auth/login.blade.php`, with the props as view data. Keyring doesn't ship Blade views, so you write them. Until you do, the page throws a `Keyring\Exceptions\MissingPage` exception naming the view to create and the data it receives.
 
@@ -509,7 +512,8 @@ All in `Keyring\Events`:
 | `FactorChallenged` | The challenge page shows a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (nullable), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit. | `request`, `factor`, `retryAfter` (`null` when waiting won't help) |
+| `Lockout` | A rate limit was hit. Dispatched for each request it refuses. | `request`, `factor`, `retryAfter` (`null` when waiting won't help) |
+| `VerificationRefused` | The final gate refused because a [mandatory step](#mandatory-steps) hadn't run. | `attempt`, `factor`, `skipped` |
 | `AccountLocked` | A factor that can start a sign in is refused for the account until a password reset: it reached the cap on failures in a row, or `limits.lock_after` held it. | `user`, `factor` |
 | `Authenticated` | A login completed. | `user`, `attempt`, `device` |
 | `Confirmed` | A step-up completed. | `user`, `attempt` |
@@ -521,5 +525,5 @@ Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyr
 | Laravel event | Dispatched with |
 |---|---|
 | `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
-| `Illuminate\Auth\Events\Lockout` | `Lockout`. |
+| `Illuminate\Auth\Events\Lockout` | `Lockout`, so once for every refused request. |
 | `Illuminate\Auth\Events\PasswordReset` | Keyring's `PasswordReset`. |

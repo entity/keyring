@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\Request;
@@ -10,10 +12,14 @@ use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SendsCodes;
+use Keyring\Enrollment\Enrollment;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Events\EnrollmentRefused;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use Keyring\Support\Throttle;
 
 /**
@@ -60,10 +66,15 @@ class AuthenticatorController
         $enrollment = $this->enrollments->get($factor->key())
             ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
 
-        $request->validate($factor->enrollmentRules());
+        Input::validate($request, $factor->enrollmentRules());
 
-        $authenticator = $factor->confirmEnrollment($this->keyring->user(), $enrollment, $request)
-            ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.invalid')]);
+        $authenticator = $this->confirmed($factor, $enrollment, $request);
+
+        // Each enrollment adds its authenticator once, whichever copy of the
+        // session it comes back in.
+        if (! $this->enrollments->claim($enrollment)) {
+            throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
+        }
 
         $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
 
@@ -96,11 +107,30 @@ class AuthenticatorController
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
         // Only asked for when this is the last second factor.
-        $request->validate(['password' => ['nullable', 'string']]);
+        Input::validate($request, ['password' => ['nullable', 'string']]);
 
-        $this->changes->remove($this->keyring->user(), $authenticator, $request->input('password'));
+        $this->changes->remove($this->keyring->user(), $authenticator, Input::get($request, 'password'));
 
         return $this->status('authenticator-removed');
+    }
+
+    /**
+     * The authenticator the user just proved works. A proof the factor
+     * turns down is answered as before and goes on record, whether the
+     * factor says no or throws its own message.
+     *
+     * @throws ValidationException
+     */
+    protected function confirmed(Enrollable $factor, Enrollment $enrollment, Request $request): Authenticator
+    {
+        try {
+            return $factor->confirmEnrollment($this->keyring->user(), $enrollment, $request)
+                ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.invalid')]);
+        } catch (ValidationException $e) {
+            EnrollmentRefused::dispatch($this->keyring->user(), $factor->key(), 'invalid');
+
+            throw $e;
+        }
     }
 
     /**
@@ -110,7 +140,11 @@ class AuthenticatorController
      */
     protected function enrollable(Request $request, string $key): Enrollable
     {
-        abort_unless($this->keyring->allowsEnrollment($this->keyring->user()), 403, __('keyring::keyring.verify_email_first'));
+        if (! $this->keyring->allowsEnrollment($this->keyring->user())) {
+            EnrollmentRefused::dispatch($this->keyring->user(), $key, 'not_allowed');
+
+            abort(403, __('keyring::keyring.verify_email_first'));
+        }
 
         $factor = $this->keyring->factor($key);
 

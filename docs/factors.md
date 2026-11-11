@@ -49,7 +49,7 @@ The list accepts class names (resolved from the container), instances, and closu
 ```php
 Keyring::factors([
     Password::class,
-    fn ($app) => $app->make(Totp::class, ['window' => 2, 'issuer' => 'Acme Staff']),
+    fn ($app) => $app->make(Totp::class, ['window' => 0, 'issuer' => 'Acme Staff']),
     new RecoveryCodes(count: 10),
 ]);
 ```
@@ -83,13 +83,39 @@ The password stays in your `users` table, so password resets and Laravel's own h
 
 When a login starts with an unknown address, Keyring still runs a password hash, so the response takes the same time either way. A correct password is rehashed if your hashing settings changed.
 
+A typed password is put in Unicode's NFC form before it's checked, like every password Keyring's routes set, so it matches whichever way the device composed its characters. See [Password Rules](protected-changes.md#password-rules).
+
 ### Authenticator Apps (TOTP)
 
-Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code. Codes are accepted one time step either side of now by default (the `window` constructor argument), so a code works for up to 90 seconds and a phone whose clock is a little off still works. OWASP ASVS prefers a single 30 second step: register `fn ($app) => $app->make(Totp::class, ['window' => 0])` for that.
+Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code.
+
+By default a code is accepted one 30 second time step either side of now (the `window` constructor argument), so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps it because RFC 6238 (section 5.2) recommends allowing one step for clocks that have drifted and for the time a code takes to arrive, and with none a code typed near the end of its step is refused, which is a large share of honest sign ins.
+
+To meet 6.5.5 to the letter, give the factor a window of zero, so a code only works during its own step:
+
+```php
+Keyring::factors([
+    Password::class,
+    fn ($app) => $app->make(Totp::class, ['window' => 0]),
+    RecoveryCodes::class,
+]);
+```
+
+One step is the widest window there is (`Totp::MAX_WINDOW`). Anything else throws a `LogicException` when the factor is built.
 
 Each authenticator remembers the last time step it accepted, under a row lock, so a code can't be used twice, even by two requests at the same moment.
 
 A user can have several authenticator apps.
+
+Codes are made with HMAC-SHA1 by default. That's a compatibility choice, not a preference: it's what RFC 6238 defaults to and the only digest every authenticator app makes. Some widely used apps have ignored a request for anything else (Google Authenticator's own key format notes said so for years) and gone on showing SHA-1 codes, which then never match, so the user can't finish adding the app. OWASP ASVS lists HMAC-SHA-1 as a legacy algorithm, allowed for compatibility like this. The weakness that retired SHA-1 for signatures is finding two inputs with the same hash, which doesn't help anyone guess a code keyed with a secret they don't have.
+
+If you control which apps your users have, set the factor up with SHA-256 or SHA-512:
+
+```php
+fn ($app) => $app->make(Totp::class, ['algorithm' => 'sha256']),
+```
+
+The `otpauth://` URL and the QR code then say `algorithm=SHA256`, and enrolling returns it as `algorithm` to show beside the secret for anyone typing it in. Each authenticator keeps the digest it was set up with, so changing the setting only affects apps added afterwards and nobody has to enroll again. The secret is 160 random bits whichever digest is used.
 
 ### Email Codes
 
@@ -105,6 +131,8 @@ Codes are eight digits, last ten minutes and allow five wrong guesses. To change
 EmailCode::asSecondFactor(length: 6, expireAfter: '5m', maxGuesses: 3)
 ```
 
+Six digits is the shortest a code can be and ten minutes the longest it can last, the bounds OWASP ASVS 5.0.0 sets for codes sent out of band (requirements 6.5.4 and 6.5.5). Asking for less or for longer throws a `LogicException` on that line.
+
 The code goes out in your `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs), which `keyring:install` publishes and registers.
 
 A code:
@@ -113,21 +141,26 @@ A code:
 - expires after 10 minutes,
 - allows five wrong guesses per sign in, across every code sent for it,
 - is replaced by any newer code,
+- works once,
 - is stored as a keyed hash, never in plain text.
 
 Sending a new code doesn't reset the wrong guess count. Once the limit is reached the attempt is over, and the user has to start signing in again.
 
-Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until the enrollment's 15 minutes run out. Email codes are only as strong as the inbox, so they aren't phishing resistant.
+The code, its guess count and the fact that it was used are kept on the server, in the cache store your rate limits use (`cache.limiter`), not in the session. So all of the above holds on any session driver, including Laravel's `cookie` driver, where a browser can send back an earlier copy of its session. That store has to keep its keys from one request to the next, as the rate limits already need: with the `array` store a code is forgotten before it can be typed. Clearing it drops the codes that are waiting, and the user asks for another.
+
+Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)) after the first wrong guess. They're counted per user, so another browser doesn't get guesses of its own. Email codes are only as strong as the inbox, so they aren't phishing resistant.
 
 ### Recovery Codes
 
-Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx`, shown once. Each carries 120 random bits, above the 112 OWASP ASVS asks for, and they're stored as keyed hashes. Codes from before this format keep working. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
+Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx`, shown once. Each is 16 random bytes, the 128 bits OWASP ASVS asks of a value that mustn't be guessed, written as 26 base32 characters, and is stored as a keyed hash (HMAC-SHA-256 under a key derived from `APP_KEY` for recovery codes alone). OWASP ASVS 5.0.0 requirement 6.5.2 allows that for a code with 112 random bits or more, and asks for a slow, salted password hash below it, so Keyring stores and accepts nothing shorter: `secretFor()` throws an `InvalidArgumentException` for a code in any other form, and one typed in another form never matches. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
+
+The one other form is Fortify's, for sets [`keyring:import`](upgrading-from-fortify.md#importing-two-factor-data) brings across: 20 letters and digits, 119 random bits. Those have that many only while their case counts, so an imported code has to be typed as it was shown.
 
 A user has at most one set. Generating a new set replaces the old one. Users get a set automatically with their first extra factor. Recovery codes are a fallback, so they can never be the default authenticator. See [Recovery Codes](authenticators.md#recovery-codes).
 
 The factor's key is available as `RecoveryCodes::KEY` (`recovery`), for code that looks the set up.
 
-The hashes are keyed with `APP_KEY`. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
+The hashes are keyed with a key derived from `APP_KEY` for recovery codes alone. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
 
 Once every code is used, the set no longer counts as a factor, so policies and step-up stop asking for it.
 
@@ -151,7 +184,7 @@ A factor declares the categories it expects in `categories()`, which Keyring use
 
 [Recipes](recipes.md#sms-codes) has a complete SMS factor, and [a social login](recipes.md#social-login-with-socialite) written as a factor that starts a sign in.
 
-Factors that send a one-time code extend `Keyring\Factors\CodeFactor`. It implements sending, checking, expiry, guess limits, resending and enrollment. A code only verifies the authenticator it was sent to, so a user with two phones can't send to one and type the code against the other. You provide a key, a default name and the delivery:
+Factors that send a one-time code extend `Keyring\Factors\CodeFactor`. It implements sending, checking, expiry, single use, guess limits, resending and enrollment, and keeps each code's state on the server (`Keyring\Factors\SentCodes`) as it does for [email codes](#email-codes). A code only verifies the authenticator it was sent to, so a user with two phones can't send to one and type the code against the other. You provide a key, a default name and the delivery:
 
 ```php
 namespace App\Keyring;
@@ -195,9 +228,11 @@ You can override these properties:
 
 | Property | Default | Means |
 |---|---|---|
-| `$length` | `8` | Digits per code. |
-| `$ttl` | `600` | Seconds a code stays valid. |
+| `$length` | `8` | Digits per code, `6` at least. |
+| `$ttl` | `600` | Seconds a code stays valid, `600` at most. |
 | `$maxGuesses` | `5` | Wrong guesses allowed per sign in or enrollment, however many codes it sends. |
+
+Keyring checks `$length` and `$ttl` when it resolves your factors, and throws a `LogicException` naming the factor when a code would be shorter than six digits or last longer than ten minutes (OWASP ASVS 5.0.0, requirements 6.5.4 and 6.5.5). The bounds are `CodeFactor::MIN_LENGTH` and `CodeFactor::MAX_TTL`.
 
 Code factors count as possession and have priority 30. Override `categories()`, `priority()` or `present()` to change that.
 
@@ -252,9 +287,9 @@ class HardwareToken extends Factor
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $valid = $this->consume($authenticator, function (Authenticator $locked) use ($request) {
-            // Check $request->input('code') against $locked, and record that
-            // it was used (for example in $locked->withMeta(...)).
-            return app(TokenServer::class)->check($locked->secret, (string) $request->input('code'));
+            // Check the posted code against $locked, and record that it was
+            // used (for example in $locked->withMeta(...)).
+            return app(TokenServer::class)->check($locked->secret, (string) $request->post('code'));
         });
 
         return $valid ? $this->verified($authenticator) : null;
@@ -274,7 +309,7 @@ The contract's methods:
 | `priority()` | `50` | Higher is offered first. |
 | `authenticators($user, $stored)` | the stored rows with this key | The user's authenticators. Return virtual ones for state kept elsewhere. |
 | `challenge($attempt, $authenticator)` | `[]` | Extra props for the challenge page. Called every time the page loads, so it must be safe to repeat. |
-| `rules()` | `code` required, up to 64 characters | Validation for a verification request. |
+| `rules()` | `code` required, up to 64 characters | Validation for a verification request. Keyring checks them against the request's body, not the query string of a `POST`, so a field you require can't arrive in the URL. |
 | `limits($request, $attempt)` | per account and per IP, from config | Rate limits. See [Rate Limiting](security.md#rate-limiting). |
 | `errorKey()` | `code` | The form field failures are reported on. |
 | `present($authenticator)` | `factor`, `id`, `name` | How the authenticator appears on the challenge page and in "try another way". |
@@ -300,7 +335,7 @@ Implement these as well when they apply:
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment()`, `enrollmentRules()`, `confirmEnrollment()` and `multiple()`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |
 
-An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
+An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it, once: an enrollment that has added its authenticator can't be confirmed again, even from an earlier copy of the session. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
 
 `enrollmentRules()` validates the confirm request. On `Keyring\Factors\Factor` it defaults to the factor's `rules()` plus an optional `name`, so a name can be given when confirming as well as when beginning.
 

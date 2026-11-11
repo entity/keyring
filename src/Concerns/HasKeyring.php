@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Concerns;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -46,7 +48,8 @@ trait HasKeyring
         // that was signed in before gets back in afterwards: "remember me"
         // cookies and trusted devices end too. Once really gone, the sign-in
         // methods go as well, so a passkey can be registered again on a new
-        // account.
+        // account, and so do their security log entries, which hold the IP
+        // addresses and browsers they used.
         static::deleted(function (self $user) {
             app(ResetTokens::class)->forget($user);
 
@@ -61,6 +64,7 @@ trait HasKeyring
             $user->devices()->delete();
             Keyring::pendingChangeModel()::query()->ownedBy($user)->delete();
             Keyring::failureCountModel()::query()->ownedBy($user)->delete();
+            Keyring::securityEventModel()::query()->ownedBy($user)->delete();
         });
     }
 

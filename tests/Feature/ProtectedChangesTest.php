@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\ConfirmEmailChange;
 use App\Notifications\Keyring\EmailAddressInUse;
 use App\Notifications\Keyring\EmailChangeNotice;
@@ -60,14 +62,14 @@ function signInWithTotp(User $user): void
 
 /**
  * Open an emailed change link the way a person would: the GET shows a page,
- * and pressing its button POSTs back to the same URL.
+ * and pressing its button posts the link's token to the URL the page names.
  */
 function follow(string $url): TestResponse
 {
-    test()->inertia()->get($url)->assertOk();
+    $props = test()->inertia()->get($url)->assertOk()->json('props');
     test()->flushHeaders();
 
-    return test()->post($url);
+    return test()->post($props['url'], ['token' => $props['token']]);
 }
 
 function linkIn(object $notification, string $text): string
@@ -78,7 +80,7 @@ function linkIn(object $notification, string $text): string
         return $mail->actionUrl;
     }
 
-    return collect([...$mail->introLines, ...$mail->outroLines])->first(fn ($line) => str_starts_with($line, 'http'));
+    return collect([...$mail->introLines, ...$mail->outroLines])->first(fn (mixed $line) => is_string($line) && str_starts_with($line, 'http'));
 }
 
 describe('protected attributes', function () {
@@ -232,6 +234,34 @@ describe('changing password', function () {
         Event::assertDispatched(PasswordChanged::class);
     });
 
+    it('needs the current password however the session was verified', function (array $input) {
+        // A fresh verification by passkey or code proves who's there, not
+        // that they know the password they're replacing.
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+            ->putJson(route('user-password.update'), [
+                ...$input,
+                'password' => 'correct horse battery staple',
+                'password_confirmation' => 'correct horse battery staple',
+            ])->assertJsonValidationErrors('current_password');
+
+        expect(Hash::check('password', $this->user->fresh()->password))->toBeTrue();
+    })->with([
+        'none sent' => [[]],
+        'a wrong one' => [['current_password' => 'not-the-password']],
+    ]);
+
+    it('lets a user without a password set one with the fresh verification alone', function () {
+        $this->user->forceFill(['password' => null])->saveQuietly();
+
+        $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)
+            ->putJson(route('user-password.update'), [
+                'password' => 'correct horse battery staple',
+                'password_confirmation' => 'correct horse battery staple',
+            ])->assertOk();
+
+        expect(Hash::check('correct horse battery staple', $this->user->fresh()->password))->toBeTrue();
+    });
+
     it('asks for longer passwords without a second factor', function () {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
@@ -285,10 +315,11 @@ describe('resetting password', function () {
             return true;
         });
 
+        // The token is in the page's URL, so not even the app gets a Referer.
         $this->inertia()->get(route('password.reset', ['token' => $token, 'email' => 'taylor@example.com']))
-            ->assertHeader('Referrer-Policy', 'same-origin');
+            ->assertHeader('Referrer-Policy', 'no-referrer');
 
-        $this->post(route('password.update'), [
+        $this->flushHeaders()->post(route('password.update'), [
             'token' => $token,
             'email' => 'taylor@example.com',
             'password' => 'correct horse battery staple',

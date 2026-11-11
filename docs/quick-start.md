@@ -55,6 +55,7 @@ Keyring renders nine pages. You only need the ones for what you've turned on:
 | `register` | With `Features::registration()`. It posts `name`, `email`, `password` and `password_confirmation` to `/register`. |
 | `forgot-password`, `reset-password` | With `Features::resetPasswords()`. |
 | `verify-email` | With `Features::emailVerification()`. It asks the user to click the link they were sent, with a button to send another. |
+| `email-verification` | With `Features::emailVerification()`. The emailed verification link lands here, on a page with one button. |
 | `email-change` | With `Features::emailChanges()`. The emailed confirm and undo links land here, on a page with one button. |
 | `device-report` | With `Features::devices()`. The "this wasn't me" link lands here, on a page with one button. |
 
@@ -173,12 +174,12 @@ use Keyring\Features;
 |---|---|---|
 | `registration()` | `/register`, through your `CreateNewUser` action. | [Registration](sign-in-flow.md#registration) |
 | `resetPasswords()` | Forgot and reset password, through your `ResetUserPassword` action. | [Resetting the Password](protected-changes.md#resetting-the-password) |
-| `emailVerification()` | Laravel's email verification routes and the `verify-email` page. | [Email Verification](protected-changes.md#email-verification) |
+| `emailVerification()` | Laravel's email verification routes, the `verify-email` page and the `email-verification` page its link opens. | [Email Verification](protected-changes.md#email-verification) |
 | `updatePasswords()` | `PUT /user/password`. Changing the password elsewhere then throws. | [Changing the Password](protected-changes.md#changing-the-password) |
 | `manageAuthenticators()` | Adding, renaming and removing sign-in methods. Needed for users to set any up. | [Managing Authenticators](authenticators.md) |
 | `devices()` | A device cookie, "trust this device", a list of where users are signed in, and "this wasn't me" links. | [Devices & Sessions](devices-and-sessions.md) |
 | `emailChanges()` | Email changes confirmed by the new address and undoable from the old one. Changing the email elsewhere then throws. | [Protected Changes](protected-changes.md#changing-the-email-address) |
-| `securityLog()` | A log of sign ins, failures and changes, and "was this you?" alerts. | [Security Log & Emails](security-log-and-emails.md) |
+| `securityLog()` | A log of sign ins, failures, refusals and changes in `keyring_events`, and "was this you?" alerts. On unless you take it out, and then the events go to your app's log instead. | [Security Log & Emails](security-log-and-emails.md) |
 
 A few more things are opt-in, but aren't in the features list:
 

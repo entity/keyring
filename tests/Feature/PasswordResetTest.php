@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Hashing\BcryptHasher;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
@@ -48,7 +50,7 @@ it('renders the reset page with a custom non-inertia page', function () {
     $this->get(route('password.reset', ['token' => 'abc', 'email' => 'plain@example.com']))
         ->assertOk()
         ->assertSee('reset page for plain@example.com')
-        ->assertHeader('Referrer-Policy', 'same-origin');
+        ->assertHeader('Referrer-Policy', 'no-referrer');
 });
 
 it('renders the reset page whatever the query string holds', function () {
