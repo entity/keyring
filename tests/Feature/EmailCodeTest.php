@@ -664,7 +664,7 @@ describe('a step, not a factor', function () {
         emailAuthenticator($this->user);
         $keyring = $this->user->keyring;
 
-        expect($keyring->hasExtraStep())->toBeFalse()
+        expect($keyring->hasSecondFactor())->toBeFalse()
             ->and($keyring->has(Category::Possession))->toBeFalse()
             ->and($keyring->has(Category::Address))->toBeTrue()
             ->and($keyring->canMeet(Requirement::aal2()))->toBeFalse()
@@ -759,7 +759,7 @@ describe('a step, not a factor', function () {
         $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         expect($response->json('recoveryCodes'))->toHaveCount(8)
-            ->and($this->user->keyring->refresh()->hasExtraStep())->toBeTrue();
+            ->and($this->user->keyring->refresh()->hasSecondFactor())->toBeTrue();
     });
 
     it('doesn\'t stand in for the possession factor a fresh verification asks of an account that has one', function () {
@@ -814,7 +814,7 @@ describe('a step, not a factor', function () {
         $this->post(route('keyring.login.verify', 'magic-word'), ['code' => 'please'])->assertRedirect('/dashboard');
 
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
-            ->and($this->user->keyring->hasExtraStep())->toBeFalse();
+            ->and($this->user->keyring->hasSecondFactor())->toBeFalse();
     });
 });
 

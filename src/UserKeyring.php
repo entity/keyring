@@ -103,7 +103,7 @@ class UserKeyring
      * may be shorter. Recovery codes aren't one to rely on, and an emailed
      * code isn't a factor at all (Category::Address).
      */
-    public function hasExtraStep(): bool
+    public function hasSecondFactor(): bool
     {
         return $this->withoutFallbacks()->canMeet(Requirement::aal2());
     }
