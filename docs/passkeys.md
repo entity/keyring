@@ -66,6 +66,7 @@ When planning what to offer, Keyring assumes a security key will verify the user
     ],
     'origins' => [],
     'timeout' => '60s',
+    'login_options_for' => '5m',
     'attestation_roots' => [],
 ],
 ```
@@ -74,6 +75,7 @@ When planning what to offer, Keyring assumes a security key will verify the user
 - **`relying_party.name`** is shown by some browsers when creating a key. It defaults to `APP_NAME`.
 - **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL: if none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If you set a relying party ID that covers several subdomains, list each origin here.
 - **`timeout`** is how long the browser waits, as a [duration](configuration.md#durations).
+- **`login_options_for`** is how long the server takes an answer to the challenge of a [usernameless sign in](#signing-in-without-a-username), also a duration.
 - **`attestation_roots`** are the certificates a key's attestation has to chain to, for a factor that [requires attestation](#requiring-attestation).
 
 For local development, `APP_URL` must match the address in your browser, for example `http://localhost:8000`. Browsers only allow WebAuthn on `https` origins and on `localhost`.
@@ -194,6 +196,10 @@ Passkeys sign in on their own:
 The same options work for autofill, where the browser lists passkeys in the email field (give the field `autocomplete="username webauthn"`). The browser package's `usePasskeyLogin({ autofill: true })` starts that for you. See [Frontend](frontend.md#signing-in-with-a-passkey). The client in Laravel's starter kits can sign in through these two routes as well. See [Laravel's Passkeys Client](#laravels-passkeys-client).
 
 A challenge works once, for this kind of sign in only: trying it spends it, even if the sign in fails, and it can't finish the second factor of a password login or a step-up. Those use the challenge their own page issued.
+
+It also runs out. The session it's kept in can last for days, so Keyring notes when each challenge was issued and refuses an answer that comes more than `webauthn.login_options_for` later (five minutes by default, and never less than `webauthn.timeout`). The other challenges need no clock of their own: a second factor's and a step-up's are kept in the pending login, which ends after `pending_logins.keep_for` (10 minutes), and a new key's in its enrollment, which ends after `enrollments.keep_for` (15 minutes).
+
+With autofill the login page asks for its options as it loads, and the browser's own timeout doesn't apply while it waits for someone to pick a passkey. So a page left open for longer than `login_options_for` answers with a challenge that has run out. That sign in fails like any refused passkey, the browser package asks for new options straight away, and picking the passkey again works. Raise `login_options_for` if your users leave the login page open for long.
 
 These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket every user shares. Fetching the options has its own limit of 60 requests a minute per IP address, so a login page that reloads (and an office sharing one address) doesn't run out.
 

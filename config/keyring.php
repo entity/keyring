@@ -84,6 +84,8 @@ return [
     |
     | The relying party ID defaults to your APP_URL host, and the allowed
     | origins to your APP_URL. The timeout is how long the browser waits.
+    | "login_options_for" is how long the challenge for a usernameless sign in
+    | can be answered: the login page asks for one as it loads, for autofill.
     |
     | "attestation_roots" are the root certificates a key's attestation has
     | to chain to, for a factor set up with requireAttestation(): PEM
@@ -98,6 +100,7 @@ return [
         ],
         'origins' => [],
         'timeout' => '60s',
+        'login_options_for' => '5m',
         'attestation_roots' => [],
     ],
 
