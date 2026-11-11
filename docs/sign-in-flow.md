@@ -123,10 +123,14 @@ Failed attempts count against the user your finder returns, however the username
 
 Passkeys can sign in without a username. The browser asks for options, runs the WebAuthn ceremony, and posts the result:
 
-1. `GET /login/passkey/options` returns WebAuthn request options as JSON, with an empty `allowCredentials`. Keyring keeps the challenge in the session.
+1. `GET /login/passkey/options` returns WebAuthn request options as JSON, under `options` and with an empty `allowCredentials`. Keyring keeps the challenge in the session.
 2. `POST /login/passkey` with `credential` (the browser's response as JSON) and optionally `remember`.
 
-The same options work for autofill ("conditional UI"), where the browser offers passkeys in the email field. The browser package's `usePasskeyLogin()` does all of this. See [Frontend](frontend.md#signing-in-with-a-passkey).
+```json
+{ "options": { "challenge": "...", "timeout": 60000, "rpId": "example.com", "allowCredentials": [], "userVerification": "required" } }
+```
+
+The same options work for autofill ("conditional UI"), where the browser offers passkeys in the email field. The browser package's `usePasskeyLogin()` does all of this. See [Frontend](frontend.md#signing-in-with-a-passkey). The two requests are also the ones Laravel's `@laravel/passkeys` client makes, so [it can sign in here too](passkeys.md#laravels-passkeys-client).
 
 A passkey sign in still goes through the policy, so a policy like `Requirement::factors(3)` would still ask for more.
 

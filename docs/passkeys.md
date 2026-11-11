@@ -187,11 +187,11 @@ Synced passkeys usually report a counter of zero every time, so this check doesn
 
 Passkeys sign in on their own:
 
-1. The browser fetches `GET /login/passkey/options`. The options have an empty `allowCredentials` and require user verification. Keyring keeps the challenge in the session.
-2. The user picks a passkey, and the browser posts the response to `POST /login/passkey`.
+1. The browser fetches `GET /login/passkey/options`, which answers `{ "options": { ... } }`. The options have an empty `allowCredentials` and require user verification. Keyring keeps the challenge in the session.
+2. The user picks a passkey, and the browser posts the response to `POST /login/passkey` as `credential`.
 3. Keyring finds the passkey by its credential ID, among those of the model behind its guard, checks the signature, and continues with the [policy](policies.md) as for any login.
 
-The same options work for autofill, where the browser lists passkeys in the email field (give the field `autocomplete="username webauthn"`). The browser package's `usePasskeyLogin({ autofill: true })` starts that for you. See [Frontend](frontend.md#signing-in-with-a-passkey).
+The same options work for autofill, where the browser lists passkeys in the email field (give the field `autocomplete="username webauthn"`). The browser package's `usePasskeyLogin({ autofill: true })` starts that for you. See [Frontend](frontend.md#signing-in-with-a-passkey). The client in Laravel's starter kits can sign in through these two routes as well. See [Laravel's Passkeys Client](#laravels-passkeys-client).
 
 A challenge works once, for this kind of sign in only: trying it spends it, even if the sign in fails, and it can't finish the second factor of a password login or a step-up. Those use the challenge their own page issued.
 
@@ -201,17 +201,80 @@ Security keys can't do this. `/login/security-key` and `/login/security-key/opti
 
 ## Laravel's Passkeys Client
 
-Keyring's passkey routes are driven by [`@entity/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package and can't be pointed at Keyring's. Each call lets you change its two paths, but not the method it uses or the JSON it reads. Checked against `@laravel/passkeys` 0.4.1 and `laravel/passkeys` 0.3.0:
+Keyring's passkey routes are driven by [`@entity/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package. Each call lets you change its two paths, but not the method it uses or the JSON it reads. That's enough for signing in, which works against Keyring's two login routes. Adding a passkey and step-up don't fit. Checked against `@laravel/passkeys` 0.2.0 and 0.4.1, and `laravel/passkeys` 0.3.0:
 
 | What the client does | What Keyring does |
 |---|---|
-| Signing in, it reads `options` from the JSON of `GET /passkeys/login/options`. | `GET /login/passkey/options` returns the options themselves, with nothing around them, so the client finds none. |
-| It posts `{ credential, remember }` to `/passkeys/login` and reads `redirect`. | The same. `POST /login/passkey` is the one request that fits as it is. |
+| Signing in, it reads `options` from the JSON of `GET /passkeys/login/options`. | The same. `GET /login/passkey/options` answers `{ "options": { ... } }`. |
+| It posts `{ credential, remember }` to `/passkeys/login` and reads `redirect`. | The same. `POST /login/passkey` answers `{ "status": "authenticated", "redirect": "..." }`. |
 | Adding a passkey, it reads `options` from `GET /user/passkeys/options`. | Enrolling begins with a `POST` to `/user/authenticators/passkey`, and the options are under `enrollment.options`. |
 | It posts `{ name, credential }` to `/user/passkeys`. `usePasskeyRegister()` doesn't pass the response on. | `POST /user/authenticators/passkey/confirm` takes those fields, but its response can carry [recovery codes](authenticators.md#recovery-codes) that are only shown once. |
 | Confirming, it reads `options` from `GET /passkeys/confirm/options`. | [Step-up](step-up.md) has no options route. The confirm page gets the options as props, for whichever of the user's authenticators comes next. |
 
-Fitting it would take a second set of routes for the same ceremonies, so Keyring doesn't try. Use [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey) to sign in, [`enroll()`](frontend.md#managing-authenticators) to add a passkey and [`useChallenge()`](frontend.md#the-challenge-page) for the challenge and confirm pages. Passkeys made with `laravel/passkeys` keep working once [imported](upgrading-from-fortify.md#importing-two-factor-data).
+### Signing In With It
+
+Give the client Keyring's two login routes:
+
+```ts
+import { Passkeys } from '@laravel/passkeys'
+
+const { redirect } = await Passkeys.verify({
+  routes: { options: '/login/passkey/options', submit: '/login/passkey' },
+  remember: true,
+})
+
+if (redirect) {
+  window.location.href = redirect
+}
+```
+
+The React and Vue hooks take the same `routes`, for the button and for autofill:
+
+```tsx
+import { usePasskeyVerify } from '@laravel/passkeys/react'
+
+const { verify, isLoading, error, isSupported } = usePasskeyVerify({
+  autofill: true,
+  remember: () => form.data.remember,
+  routes: { options: '/login/passkey/options', submit: '/login/passkey' },
+  onSuccess: ({ redirect }) => {
+    if (redirect) {
+      window.location.href = redirect
+    }
+  },
+})
+```
+
+```vue
+<script setup lang="ts">
+import { usePasskeyVerify } from '@laravel/passkeys/vue'
+
+const { verify, isLoading, error, isSupported } = usePasskeyVerify({
+  autofill: true,
+  remember: () => form.remember,
+  routes: { options: '/login/passkey/options', submit: '/login/passkey' },
+  onSuccess: ({ redirect }) => {
+    if (redirect) {
+      window.location.href = redirect
+    }
+  },
+})
+</script>
+```
+
+A few things to know:
+
+- Always go to `redirect`. It's the page the user was after, or the [challenge page](sign-in-flow.md#the-challenge-page) when your [policy](policies.md) asks for another factor after the passkey.
+- A passkey that's refused answers `422`, and a rate limit `429`. The client throws either with the message in the answer, which the hooks return as `error`. That goes for autofill too, so a login page reloaded past the options limit shows that message, where Keyring's helper stays quiet.
+- For autofill, the email field needs `autocomplete="username webauthn"`. The client expects a field whose `autocomplete` ends in `webauthn`.
+- `remember` came in `@laravel/passkeys` 0.4. Older versions leave it out, and the user isn't remembered.
+- If you [changed the route prefix](configuration.md#routes), put it in front of both paths.
+
+Every check is the same as for Keyring's own helper: the per-IP limits, the single-use challenge and the policy.
+
+### Adding a Passkey and Step-Up
+
+These still need `@entity/keyring`. Fitting the client would take a second set of routes for the same ceremonies, so Keyring doesn't try. Use [`enroll()`](frontend.md#managing-authenticators) to add a passkey and [`useChallenge()`](frontend.md#the-challenge-page) for the challenge and confirm pages. [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey) signs in through the same two routes, as an Inertia visit, if you'd rather use one package for everything. Passkeys made with `laravel/passkeys` keep working once [imported](upgrading-from-fortify.md#importing-two-factor-data).
 
 ## Customising a Profile
 
