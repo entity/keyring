@@ -127,6 +127,17 @@ class UserKeyring
     }
 
     /**
+     * Whether a recovery code has been used since the set was made. NIST
+     * SP 800-63B-4 (Sec. 4.2.1.1) has a used code replaced with a new one.
+     * Only the user can save new codes, so this is for the app to send them
+     * to make a new set, and stays true until they have.
+     */
+    public function shouldReplaceRecoveryCodes(): bool
+    {
+        return $this->of(RecoveryCodes::KEY)->contains(fn (Authenticator $set) => $set->meta(RecoveryCodes::USED_AT) !== null);
+    }
+
+    /**
      * The keyring without recovery codes: a way back in, not a factor to
      * rely on.
      */

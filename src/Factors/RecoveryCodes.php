@@ -26,6 +26,9 @@ class RecoveryCodes extends Factor implements Enrollable
 {
     public const string KEY = 'recovery';
 
+    /** Where a set keeps when one of its codes was last used. */
+    public const string USED_AT = 'code_used_at';
+
     public function __construct(
         protected int $count = 8,
     ) {}
@@ -67,6 +70,10 @@ class RecoveryCodes extends Factor implements Enrollable
             unset($hashes[$match]);
             $locked->secret = json_encode(array_values($hashes), JSON_THROW_ON_ERROR);
 
+            // Kept on the set until a new one takes its place, so the app
+            // can keep asking the user to make one.
+            $locked->withMeta(static::USED_AT, now()->getTimestamp());
+
             return true;
         });
 
@@ -80,9 +87,17 @@ class RecoveryCodes extends Factor implements Enrollable
         return $this->verified($authenticator, [Category::Possession]);
     }
 
+    /**
+     * With how many codes are left, and whether one has been used, which is
+     * when the user should be asked to make a new set.
+     */
     public function present(Authenticator $authenticator): array
     {
-        return [...parent::present($authenticator), 'remaining' => count($this->hashes($authenticator))];
+        return [
+            ...parent::present($authenticator),
+            'remaining' => count($this->hashes($authenticator)),
+            'replace' => $authenticator->meta(static::USED_AT) !== null,
+        ];
     }
 
     public function multiple(): bool

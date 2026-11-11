@@ -180,7 +180,7 @@ The page (`challenge` for logins, `confirm` for step-up) receives:
 |---|---|
 | `purpose` | `login` or `confirm`. |
 | `factor` | The key of the factor to verify now. |
-| `authenticator` | How the factor presents this authenticator. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`. |
+| `authenticator` | How the factor presents this authenticator. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`, and `replace`: whether a code has been used, so the user should [make a new set](authenticators.md#recovery-codes). |
 | `challenge` | Factor-specific props. See below. |
 | `alternatives` | The user's other authenticators that would help, for "try another way". Same shape as `authenticator`. |
 | `canTrustDevice` | Whether to show "don't ask again on this device". `true` for logins with `Features::devices()` on and `devices.trust_for` not `null`. |

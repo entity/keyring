@@ -121,7 +121,22 @@ The first time a user adds an extra factor and has no recovery codes, or has use
 
 To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor (an email code isn't one) fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored.
 
-Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count, so you can suggest new codes when they run low. Users with no codes left keep the (empty) set until they make a new one, add another factor (which replaces it with a new set) or it's removed along with their last factor. An empty set is never offered as a way in.
+Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count.
+
+NIST SP 800-63B-4 (Sec. 4.2.1.1) says a new code is issued once one is used. A new code is only worth something once the user has seen and saved it, so Keyring doesn't make one up behind their back. It marks the set and tells your app, and your app sends the user to make a new set:
+
+- `$user->keyring->shouldReplaceRecoveryCodes()` is true from the moment a code is used until the set is replaced, however many times they sign in meanwhile.
+- The set's [presentation](sign-in-flow.md#page-props) carries the same answer as `replace`, next to `remaining`, wherever you list authenticators.
+
+Share it with your pages and show a banner that links to where they generate codes, or redirect there after a sign in:
+
+```php
+// app/Http/Middleware/HandleInertiaRequests.php
+'replaceRecoveryCodes' => fn () => (bool) $request->user()?->keyring->shouldReplaceRecoveryCodes(),
+```
+
+It loads the user's authenticators, so keep it lazy as above. A session that just signed in with a recovery code and its password is fresh, so it can generate the new set straight away without confirming again. Until your app does this, a used code is used up and nothing takes its place: NIST's rule is only met once the user has their new set.
+ Users with no codes left keep the (empty) set until they make a new one, add another factor (which replaces it with a new set) or it's removed along with their last factor. An empty set is never offered as a way in.
 
 ## Renaming and Choosing the Default
 

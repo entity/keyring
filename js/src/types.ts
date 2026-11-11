@@ -6,6 +6,7 @@ export interface AuthenticatorSummary {
   name: string
   hint?: string
   remaining?: number
+  replace?: boolean
 }
 
 /**
