@@ -2,14 +2,17 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Validation\UncompromisedVerifier;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Severity;
 use Keyring\Events\PasswordChangeRequired;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
+use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PasswordHold;
 use Keyring\Risk\Action;
@@ -17,6 +20,7 @@ use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\Risk;
+use Keyring\Risk\Signals\BreachedPassword;
 use Keyring\Risk\Signals\Signal;
 
 // NIST SP 800-63B-4, Sec. 3.1.1.2: no periodic changes, and a forced one
@@ -235,6 +239,75 @@ describe('as a risk response', function () {
         $this->post(route('keyring.login.factor', 'passkey'), ['credential' => ['id' => $this->user->keyring->of('passkey')->sole()->credential_id]]);
 
         expect(PasswordHold::query()->exists())->toBeFalse();
+    });
+
+    describe('by default, when the password just used is found in a breach', function () {
+        beforeEach(function () {
+            // Have I Been Pwned knows every password.
+            $this->app->instance(UncompromisedVerifier::class, new class implements UncompromisedVerifier
+            {
+                public function verify($data): bool
+                {
+                    return false;
+                }
+            });
+
+            Keyring::risk()->signals([BreachedPassword::class]);
+        });
+
+        it('holds the user until they choose another, and logs that it did', function () {
+            signInWithPassword();
+
+            expect(app(PasswordHolds::class)->reason($this->user))->toBe('breached_password')
+                ->and(logEntry('risk_password_change'))
+                ->severity->toBe(Severity::Notice)
+                ->meta->toMatchArray(['checkpoint' => 'login', 'reasons' => ['The password appears in a known data breach.']]);
+
+            $this->get('/home')->assertRedirect('/settings/password');
+
+            chooseNewPassword();
+            $this->get('/home')->assertOk();
+        });
+
+        it('does so whatever the finding scores', function () {
+            Keyring::risk()->signals([app()->make(BreachedPassword::class, ['score' => 1])]);
+
+            signInWithPassword();
+
+            expect(Keyring::requiresPasswordChange($this->user))->toBeTrue();
+        });
+
+        it('still asks for the second factor the level calls for', function () {
+            $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+            Keyring::require(Requirement::aal1());
+
+            $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+
+            $this->get('/home')->assertRedirect('/settings/password');
+        });
+
+        it('leaves the answer to a responder of the app\'s own', function () {
+            Keyring::risk()->respond(fn (Risk $risk) => $risk->isElevated() ? Action::stepUp() : Action::allow());
+
+            signInWithPassword();
+
+            expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
+        });
+    });
+
+    it('holds nobody by default for a finding that isn\'t about the password', function () {
+        Keyring::risk()->signals([new class extends Signal
+        {
+            public function assess(Assessment $assessment): ?Finding
+            {
+                return new Finding('new_country', 40, 'Signing in from a new country (FR).');
+            }
+        }]);
+
+        signInWithPassword();
+
+        expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
     });
 
     it('says what it does', function () {

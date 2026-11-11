@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Signal;
 use Keyring\Events\RiskAssessed;
+use Keyring\Risk\Signals\BreachedPassword;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Sessions\Sessions;
@@ -84,17 +85,31 @@ class RiskEngine
     {
         $action = $this->responder !== null
             ? ($this->responder)($risk, $checkpoint)
-            : match ($risk->level) {
-                Level::Low => Action::allow(),
-                Level::Medium => Action::stepUp(),
-                Level::High => Action::stepUp()->notify(),
-                Level::Critical => Action::deny()->revokeAllSessions()->notify(),
-            };
+            : $this->defaultResponse($risk);
 
         // A login attempt hasn't proved who's behind it. If it could revoke
         // anything, someone with only the password could sign the owner out
         // as often as they liked.
         return $checkpoint === Checkpoint::Login ? $action->withoutRevokingSessions() : $action;
+    }
+
+    /**
+     * Keyring's own answer, until the app gives one with respond(): by
+     * level, and a hold for a new password whenever the one just used was
+     * found in a breach, whatever that scored. A step-up or a notice leaves
+     * a password someone else knows as the password, and NIST SP 800-63B-4
+     * (Sec. 3.1.1.2) has one changed when there's evidence it's compromised.
+     */
+    protected function defaultResponse(Risk $risk): Action
+    {
+        $action = match ($risk->level) {
+            Level::Low => Action::allow(),
+            Level::Medium => Action::stepUp(),
+            Level::High => Action::stepUp()->notify(),
+            Level::Critical => Action::deny()->revokeAllSessions()->notify(),
+        };
+
+        return $risk->has(BreachedPassword::FINDING) ? $action->requirePasswordChange() : $action;
     }
 
     /**

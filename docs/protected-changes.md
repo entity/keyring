@@ -209,7 +209,7 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 ## Requiring a Password Change
 
-Keyring never expires passwords. When there's evidence one is known to someone else, it can hold the user until they choose another, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). Place a hold from your own code, or from a [risk response](risk.md#requiring-a-new-password):
+Keyring never expires passwords. When there's evidence one is known to someone else, it can hold the user until they choose another, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). Keyring places a hold itself in one case: with the [`BreachedPassword`](risk.md#requiring-a-new-password) signal on, when the password someone just signed in with is found in a breach. Place one from your own code for anything else you learn, or from a [risk response](risk.md#requiring-a-new-password) of your own:
 
 ```php
 use Keyring\Facades\Keyring;

@@ -84,7 +84,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `password_reset` | notice | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |
 | `protection_bypassed` | warning | `Keyring::withoutProtection()` was used. Linked to the signed-in user who did it. | `reason` |
 | `clone_suspected` | critical | A passkey or security key's counter went backwards. | `name` |
-| `risk_step_up`, `risk_reauthenticate`, `risk_notified` | notice | A risk action did something. | `checkpoint`, `score`, `reasons` |
+| `risk_step_up`, `risk_reauthenticate`, `risk_notified`, `risk_password_change` | notice | A risk action did something. `risk_password_change` is the user being [held until they choose a new password](protected-changes.md#requiring-a-password-change). | `checkpoint`, `score`, `reasons` |
 | `risk_denied`, `risk_locked`, `risk_revoked_sessions` | warning | A risk action refused, locked or signed out. | `checkpoint`, `score`, `reasons` |
 | `access_refused` | warning | A signed-in user asked for an authenticator, device or session that isn't theirs, or that doesn't exist (a 404 either way), or opened an email verification link made for another account (a 403). | `resource` (`authenticator`, `device`, `session` or `email_verification`), `id` (what was asked for, cut to 64 characters; for a session, its [handle](devices-and-sessions.md#listing-and-ending-sessions), never its registry ID) |
 | `enrollment_refused` | warning | A sign-in method wasn't added. | `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account [may not add one yet](authenticators.md#who-may-enroll)) |

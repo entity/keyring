@@ -463,7 +463,9 @@ class KeyringManager
      * every page sends them to keyring.password_change_url until the
      * password changes, by them or by a reset. Signing out doesn't shake it
      * off. Returns false for an account with no password, which is left
-     * alone. A risk response does the same with requirePasswordChange().
+     * alone. A risk response does the same with requirePasswordChange(),
+     * as Keyring's own does when the BreachedPassword signal finds the
+     * password just used in a breach.
      */
     public function requirePasswordChange(Authenticatable&Model $user, ?string $reason = null): bool
     {

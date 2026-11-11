@@ -15,10 +15,14 @@ use Keyring\Support\PasswordRules;
 /**
  * The password that was just used appears in known breaches (Have I Been
  * Pwned, via k-anonymity, so the password never leaves the server). Makes a
- * network call at sign in, so it isn't on by default.
+ * network call at sign in, so it isn't on by default. Keyring's own response
+ * to it holds the user until they choose another (RiskEngine).
  */
 class BreachedPassword extends Signal
 {
+    /** What its finding is called, in Risk::has() and a password hold's reason. */
+    public const string FINDING = 'breached_password';
+
     public function __construct(
         protected UncompromisedVerifier $verifier,
         protected int $score = 40,
@@ -37,6 +41,6 @@ class BreachedPassword extends Signal
         // As it was hashed, which is the form a breach list would have too.
         return $this->verifier->verify(['value' => PasswordRules::normalize($password), 'threshold' => 0])
             ? null
-            : new Finding('breached_password', $this->score, 'The password appears in a known data breach.');
+            : new Finding(self::FINDING, $this->score, 'The password appears in a known data breach.');
     }
 }

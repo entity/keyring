@@ -42,7 +42,7 @@ In `Keyring\Risk\Signals`:
 | `InactiveAccount` | The account last signed in 90 days ago or more (the `after` option), and none of its sessions has been used since. | 30 | login |
 | `SuccessAfterFailures` | The first factor was right after five or more failed attempts on the account (the `threshold` option) in the last hour (`within`), counted since it last signed in. | 30 | login |
 | `SessionFingerprintChanged` | A signed-in session now comes from a different browser or platform than the one it was last seen in. IP changes alone don't count. | 60 | every request |
-| `BreachedPassword` | The password just used appears in a public breach list. Not on by default: it makes a network call at sign in. | 40 | login |
+| `BreachedPassword` | The password just used appears in a public breach list. It makes a network call at sign in. Whatever it scores, Keyring's own response to it [holds the user until they choose a new password](#requiring-a-new-password). | 40 | login |
 
 `SessionFingerprintChanged` compares with the browser the session was last seen in, and acts on each change once. A cookie used by two browsers at once flips back and forth, so with the default response the owner is asked to verify again, and emailed, on every switch. To end such a session instead, have [your responder](#actions) answer `Action::reauthenticate()` at `Checkpoint::Request`.
 
@@ -101,6 +101,8 @@ Without your own responder, Keyring does this at every checkpoint:
 
 At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's turned on, but the owner stays signed in everywhere else.
 
+One finding is answered whatever the level: when `BreachedPassword` finds the password that was just used in a breach, `->requirePasswordChange()` is added to the action above. See [Requiring a New Password](#requiring-a-new-password).
+
 Set your own in `KeyringServiceProvider`:
 
 ```php
@@ -146,7 +148,23 @@ Locks are kept in the cache store named in `risk.store`. Clearing that store lif
 
 ### Requiring a New Password
 
-NIST SP 800-63B-4 (Sec. 3.1.1.2) never has passwords changed on a schedule, and always has one changed when there's evidence it was compromised. Stepping up, notifying and locking don't do that: the password someone else knows is still the password. `requirePasswordChange()` holds the user on your change-password page until it isn't, which is the response for a signal about the password itself:
+NIST SP 800-63B-4 (Sec. 3.1.1.2) never has passwords changed on a schedule, and always has one changed when there's evidence it was compromised. Stepping up, notifying and locking don't do that: the password someone else knows is still the password. `requirePasswordChange()` holds the user on your change-password page until it isn't, which is the response for a signal about the password itself.
+
+Keyring's own response does this for `BreachedPassword`. Turn the signal on, tell Keyring where your change-password form is, and a user who signs in with a password found in a breach is held until they choose another:
+
+```php
+// app/Providers/KeyringServiceProvider.php
+use Keyring\Risk\Signals\BreachedPassword;
+
+Keyring::risk()->push(BreachedPassword::class);
+
+// config/keyring.php
+'password_change_url' => '/settings/password',
+```
+
+The sign in itself goes ahead as the level says (a second factor at the signal's own score of 40, when the user has one), and the hold is logged as `risk_password_change`. Without a `password_change_url` a held user gets a `403` on every page, so set it before turning the signal on.
+
+A responder of your own replaces all of Keyring's response, this part included. Keep it by answering for the finding:
 
 ```php
 use Keyring\Risk\Signals\BreachedPassword;
@@ -154,7 +172,7 @@ use Keyring\Risk\Signals\BreachedPassword;
 Keyring::risk()
     ->push(BreachedPassword::class)
     ->respond(fn (Risk $risk) => match (true) {
-        $risk->has('breached_password') => Action::stepUp()->requirePasswordChange()->notify(),
+        $risk->has(BreachedPassword::FINDING) => Action::stepUp()->requirePasswordChange()->notify(),
         $risk->level === Level::Critical => Action::deny()->revokeAllSessions()->notify(),
         $risk->isElevated() => Action::stepUp(),
         default => Action::allow(),
@@ -275,4 +293,4 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->risk?->has('new_
 
 ## Events and Logging
 
-When an action does anything, Keyring dispatches `Keyring\Events\RiskAssessed` with `user`, `risk`, `action` and `checkpoint` (the `Checkpoint` enum, `Checkpoint::Login` or `Checkpoint::Request`), and logs it under the strongest thing it did: `risk_denied`, `risk_reauthenticate`, `risk_locked`, `risk_step_up`, `risk_revoked_sessions` or `risk_notified`, with the checkpoint (`login` or `request`), score and reasons.
+When an action does anything, Keyring dispatches `Keyring\Events\RiskAssessed` with `user`, `risk`, `action` and `checkpoint` (the `Checkpoint` enum, `Checkpoint::Login` or `Checkpoint::Request`), and logs it under the strongest thing it did: `risk_denied`, `risk_reauthenticate`, `risk_locked`, `risk_password_change`, `risk_step_up`, `risk_revoked_sessions` or `risk_notified`, with the checkpoint (`login` or `request`), score and reasons.
