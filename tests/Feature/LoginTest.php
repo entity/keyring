@@ -215,6 +215,41 @@ it('answers a username that is not text with a validation error', function () {
     $this->assertGuest();
 });
 
+it('takes a totp code from one step either side of now, and none from further off', function (int $step, bool $accepted) {
+    $totp = totpFor(taylor());
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret, $step)]);
+
+    $accepted ? $this->assertAuthenticated() : $this->assertGuest();
+})->with([
+    'two steps back' => [-2, false],
+    'the step before' => [-1, true],
+    'this step' => [0, true],
+    'the step after' => [1, true],
+    'two steps on' => [2, false],
+]);
+
+it('takes only this step\'s totp code with a window of zero, as asvs 6.5.5 asks', function (int $step, bool $accepted) {
+    Keyring::factors([Password::class, fn ($app) => $app->make(Totp::class, ['window' => 0])]);
+    $totp = totpFor(taylor());
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret, $step)]);
+
+    $accepted ? $this->assertAuthenticated() : $this->assertGuest();
+})->with([
+    'the step before' => [-1, false],
+    'this step' => [0, true],
+    'the step after' => [1, false],
+]);
+
+it('refuses a totp window wider than one step either side', function (int $window) {
+    Keyring::factors([Password::class, fn ($app) => $app->make(Totp::class, ['window' => $window])]);
+
+    expect(fn () => Keyring::registered())->toThrow(LogicException::class, "The [totp] factor was given a window of {$window}. Keyring accepts 0");
+})->with([2, 20, -1]);
+
 it('does not accept the same totp code twice', function () {
     $user = taylor();
     $totp = totpFor($user);

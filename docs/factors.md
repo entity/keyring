@@ -49,7 +49,7 @@ The list accepts class names (resolved from the container), instances, and closu
 ```php
 Keyring::factors([
     Password::class,
-    fn ($app) => $app->make(Totp::class, ['window' => 2, 'issuer' => 'Acme Staff']),
+    fn ($app) => $app->make(Totp::class, ['window' => 0, 'issuer' => 'Acme Staff']),
     new RecoveryCodes(count: 10),
 ]);
 ```
@@ -85,7 +85,21 @@ When a login starts with an unknown address, Keyring still runs a password hash,
 
 ### Authenticator Apps (TOTP)
 
-Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code. Codes are accepted one time step either side of now by default (the `window` constructor argument), so a code works for up to 90 seconds and a phone whose clock is a little off still works. OWASP ASVS prefers a single 30 second step: register `fn ($app) => $app->make(Totp::class, ['window' => 0])` for that.
+Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code.
+
+By default a code is accepted one 30 second time step either side of now (the `window` constructor argument), so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps it because RFC 6238 (section 5.2) recommends allowing one step for clocks that have drifted and for the time a code takes to arrive, and with none a code typed near the end of its step is refused, which is a large share of honest sign ins.
+
+To meet 6.5.5 to the letter, give the factor a window of zero, so a code only works during its own step:
+
+```php
+Keyring::factors([
+    Password::class,
+    fn ($app) => $app->make(Totp::class, ['window' => 0]),
+    RecoveryCodes::class,
+]);
+```
+
+One step is the widest window there is (`Totp::MAX_WINDOW`). Anything else throws a `LogicException` when the factor is built.
 
 Each authenticator remembers the last time step it accepted, under a row lock, so a code can't be used twice, even by two requests at the same moment.
 

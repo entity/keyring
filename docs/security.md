@@ -82,6 +82,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 ### Single-Use Codes
 
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
+- A TOTP code is accepted one 30 second step either side of now at most, and only during its own step with a [window of zero](factors.md#authenticator-apps-totp). No wider window can be set.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
 - Email codes are random, eight digits (shown as two groups of four, `1234 5678`; spaces are ignored), expire after 10 minutes, allow five wrong guesses per pending attempt, and are replaced by any newer code. A newer code doesn't reset the count, and at the limit the user has to start signing in again. A sent code only verifies the authenticator it was sent to.
 - No factor that sends codes, the built-in email codes or [one of your own](factors.md#writing-a-code-factor), can be registered with codes shorter than six digits or that last longer than ten minutes. Keyring throws a `LogicException` instead.
@@ -176,6 +177,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last | OWASP's Authentication Cheat Sheet |
 | Sent codes of at least six digits | OWASP ASVS 5.0.0, requirement 6.5.4 |
 | Sent codes that last ten minutes at most | OWASP ASVS 5.0.0, requirement 6.5.5 |
+| TOTP codes accepted one time step either side of now, and no further | RFC 6238, section 5.2. This default deviates from OWASP ASVS 5.0.0, requirement 6.5.5 (a 30 second maximum), which a window of zero meets: see [Known Limitations](#known-limitations) |
 | Password resets: the same answer for every address, links built from `APP_URL`, no automatic sign in, every session signed out | OWASP's Forgot Password Cheat Sheet |
 | Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
@@ -184,6 +186,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 ## Known Limitations
 
 - **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked by guessing faster than the per-minute limit. If they guess under one of the account's names and the owner types another, the owner is told the password is wrong rather than to wait, because saying more would tell a stranger the two names are one account. With `Features::devices()` on, browsers the owner has signed in from before keep their own limit and keep working. Without devices, the lock reaches every browser while the guessing goes on. A password reset clears the password's counts and locks, but not a second factor's.
+- **By default a TOTP code works for longer than OWASP ASVS allows.** ASVS 5.0.0 requirement 6.5.5 gives a time-based one-time password a maximum lifetime of 30 seconds. Keyring accepts a code one time step either side of now unless told otherwise, so one code can work for up to about 90 seconds, and as shipped it does not meet that requirement. The default follows RFC 6238 (section 5.2), which recommends allowing one step for clock drift and delay: with none, a code typed near the end of its 30 seconds fails, and so does every code from a phone whose clock is half a minute out. A code still works only once. To meet 6.5.5 exactly, register the factor with [a window of zero](factors.md#authenticator-apps-totp). A window wider than one step is refused.
 - **Attestation is off unless you ask for it, and only covers hardware keys.** By default any WebAuthn authenticator is accepted and AAGUIDs aren't verified. A factor set up with `requireAttestation()` checks `packed` and `fido-u2f` attestation against root certificates you list, and can then be limited to certain models. Platform formats (`tpm`, `android-key`, `apple`) aren't read, and certificates aren't looked up for revocation. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
