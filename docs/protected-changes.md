@@ -171,16 +171,15 @@ However a change is cancelled, the old address's "this wasn't me" link keeps wor
 
 ## Changing the Password
 
-`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification). It passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates it and saves the new password. The published action takes these fields:
+`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification) and, when the user has a password, their current one. Keyring checks both before it passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates the new password and saves it.
 
 | Field | |
 |---|---|
-| `current_password` | Required when the user has a password. Checked with the `Keyring\Rules\CurrentPassword` rule. |
-| `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
+| `current_password` | Required when the user has a password. Keyring checks it itself, with the `Keyring\Rules\CurrentPassword` rule, so a change always takes the current password whatever your action does (OWASP ASVS 6.2.3). A fresh verification can be a passkey or a code, which doesn't show the user knows the password they're replacing. |
+| `password`, `password_confirmation` | The new password, checked by the published action against the [password rules](#password-rules). |
+| `sign_out_others` | Optional boolean, `true` by default. Read by Keyring. |
 
-Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`.
-
-`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one. Use it wherever your own code asks for the current password:
+`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one, without reaching the hasher. Use it wherever your own code asks for the current password:
 
 ```php
 use Keyring\Rules\CurrentPassword;
@@ -188,7 +187,7 @@ use Keyring\Rules\CurrentPassword;
 $request->validate(['current_password' => ['required', 'string', new CurrentPassword($request->user())]]);
 ```
 
-For an action that still uses Laravel's rule, Keyring replaces an over-long `current_password` with a random value before the action sees it.
+Your action doesn't need to check `current_password` again. One that still does, such as an action carried over from Fortify, keeps working: it's given the same input.
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 

@@ -125,6 +125,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - Reverting an email change signs out every session, ends any sign in still waiting for its second factor, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
+- A password change takes the current password as well as a fresh verification, checked by Keyring itself rather than by your action. A user with no password yet sets one with the fresh verification alone.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
 - New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
 

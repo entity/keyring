@@ -142,7 +142,7 @@ Things to know:
 |---|---|
 | `Fortify::createUsersUsing(CreateNewUser::class)` | `Keyring::createUsersUsing(CreateNewUser::class)`, with an action implementing `Keyring\Contracts\CreatesNewUsers`. Your existing action's `create()` body mostly carries over. |
 | `Fortify::resetUserPasswordsUsing()` | `Keyring::resetUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\ResetsUserPasswords`. Your existing `reset()` body carries over; type the user as `Authenticatable&Model $user` (with a `@param User $user` docblock) to match the contract. |
-| `Fortify::updateUserPasswordsUsing()` | `Keyring::updateUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\UpdatesUserPasswords`. Same as above: keep the body, change the signature. |
+| `Fortify::updateUserPasswordsUsing()` | `Keyring::updateUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\UpdatesUserPasswords`. Same as above: keep the body, change the signature. Keyring checks `current_password` before your action runs, so the action's own check is no longer needed. |
 | `PasswordValidationRules` trait | The published `PasswordValidationRules` trait, built on [Keyring's rules](protected-changes.md#password-rules). |
 | `Fortify::updateUserProfileInformationUsing()` | Your own code. Email changes go through [Keyring's flow](protected-changes.md#changing-the-email-address), because `email` is protected; your `ValidateEmailChange` action holds their validation. |
 | `Fortify::authenticateUsing()` | `Keyring::findUsersUsing()` finds the user; Keyring checks the password itself. See [Finding the User](sign-in-flow.md#finding-the-user). |
