@@ -299,7 +299,7 @@ describe('as a risk response', function () {
     it('holds nobody by default for a finding that isn\'t about the password', function () {
         Keyring::risk()->signals([new class extends Signal
         {
-            public function assess(Assessment $assessment): ?Finding
+            public function assess(Assessment $assessment): Finding
             {
                 return new Finding('new_country', 40, 'Signing in from a new country (FR).');
             }

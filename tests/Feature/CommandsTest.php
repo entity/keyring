@@ -16,6 +16,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as Events;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -479,7 +480,7 @@ describe('the risk signals a new provider starts with', function () {
         file_put_contents($path, (fn () => $this->provider(new Filesystem, [], true, false, $features))->call(new InstallCommand));
 
         expectValidPhp($path);
-        unlink($path);
+        File::delete($path);
     })->with(['none of them' => [[]], 'all of them' => [Features::all()]]);
 
     it('makes no network call and needs no locator', function () {

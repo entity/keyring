@@ -91,7 +91,9 @@ describe('security notices', function () {
     // The reset link went to the address, so whoever finished the reset
     // reads its mailbox: the notice goes there whoever typed it at first.
     it('tells an address nobody had verified that its password was reset', function (bool $hidden) {
-        $hidden || revealTakenAddresses();
+        if (! $hidden) {
+            revealTakenAddresses();
+        }
         $this->user->forceFill(['email_verified_at' => null])->save();
         $token = Password::broker()->createToken($this->user);
 

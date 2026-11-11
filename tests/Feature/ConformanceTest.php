@@ -186,6 +186,9 @@ class ConformanceTest extends TestCase
         $this->test_keyring_takes_passwords_of_64_characters();
     }
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     #[DataProvider('brokersWithoutAThrottle')]
     public function test_the_suite_fails_when_reset_links_are_not_limited_per_account(array $config, string $names): void
     {
