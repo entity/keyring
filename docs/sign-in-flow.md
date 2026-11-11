@@ -71,6 +71,8 @@ Post the username and password to `/login`:
 
 A wrong password and an unknown account produce the same error, on the username field, using Laravel's `auth.failed` message. Both take the same time.
 
+Send them in the body, as a form or as JSON. Keyring doesn't read a `POST`'s query string for these, so `POST /login?password=...` fails as if no password was sent. See [Request Input](security.md#request-input).
+
 ### Finding the User
 
 By default Keyring looks the user up by the `username` attribute, trimmed and lowercased. Change either in your `KeyringServiceProvider`:
@@ -273,7 +275,7 @@ A new user can't sign in until their address is verified. If they could, anyone 
 Verifying takes the emailed link and the password together:
 
 1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session and sends them to the login page with the `sign-in-to-verify` status. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
-2. They sign in. From the browser that followed the link, their account may sign in, and doing so verifies the address (Laravel's `Verified` event fires). They land where the link would have taken them: `home` with `?verified=1`.
+2. They sign in. From the browser that followed the link, their account may sign in, and doing so verifies the address (Laravel's `Verified` event fires). They're sent back to the link, which has nothing left to do and sends them on to `home`.
 
 From then on they sign in anywhere, like anyone else. A link works until it expires (`auth.verification.expire`, 60 minutes), and registering again with the same address sends a new one. A finished [password reset](protected-changes.md#resetting-the-password) verifies the address too, since its link went to the same inbox. That's the way in for the owner of an address someone else registered first: they can't verify an account whose password they don't know, and whoever registered it never sees the link.
 
@@ -524,8 +526,9 @@ Keyring renders these pages:
 | `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` (a translated message) |
-| `email-change` | `action` (`confirm` or `revert`) and `url` (where its button posts). See [Protected Changes](protected-changes.md#the-emailed-links). |
-| `device-report` | `device` (a description) and `url` (where its button posts). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
+| `email-verification` | `email` (the address being verified), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [Email Verification](protected-changes.md#email-verification). |
+| `email-change` | `action` (`confirm` or `revert`), `url` (where its button posts) and `token` (posted in the body). See [Protected Changes](protected-changes.md#the-emailed-links). |
+| `device-report` | `device` (a description), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 
 With Inertia installed, each renders the component `auth/{name}`, such as `auth/login`. Without Inertia, Keyring renders the Blade view `auth.{name}`, such as `resources/views/auth/login.blade.php`, with the props as view data. Keyring doesn't ship Blade views, so you write them. Until you do, the page throws a `Keyring\Exceptions\MissingPage` exception naming the view to create and the data it receives.
 

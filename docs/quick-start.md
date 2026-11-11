@@ -55,6 +55,7 @@ Keyring renders nine pages. You only need the ones for what you've turned on:
 | `register` | With `Features::registration()`. It posts `name`, `email`, `password` and `password_confirmation` to `/register`. The answer sends the user to your `login` page with a status to show: check your inbox. See [Registration](sign-in-flow.md#registration). |
 | `forgot-password`, `reset-password` | With `Features::resetPasswords()`. |
 | `verify-email` | With `Features::emailVerification()`, for a signed-in user who hasn't verified yet. It asks them to click the link they were sent, with a button to send another. With the default registration nobody is signed in before verifying, so you only need it if you set `registration.reveal_taken`. |
+| `email-verification` | With `Features::emailVerification()`. The emailed verification link lands here for a signed-in user, on a page with one button. With the default registration the link sends a new user to sign in instead, and signing in verifies their address, so this page is only needed with `registration.reveal_taken` too. |
 | `email-change` | With `Features::emailChanges()`. The emailed confirm and undo links land here, on a page with one button. |
 | `device-report` | With `Features::devices()`. The "this wasn't me" link lands here, on a page with one button. |
 
@@ -176,7 +177,7 @@ use Keyring\Features;
 |---|---|---|
 | `registration()` | `/register`, through your `CreateNewUser` action. Needs `emailVerification()` unless you set `registration.reveal_taken`. | [Registration](sign-in-flow.md#registration) |
 | `resetPasswords()` | Forgot and reset password, through your `ResetUserPassword` action. | [Resetting the Password](protected-changes.md#resetting-the-password) |
-| `emailVerification()` | Laravel's email verification routes and the `verify-email` page. | [Email Verification](protected-changes.md#email-verification) |
+| `emailVerification()` | Laravel's email verification routes, the `verify-email` page and the `email-verification` page its link opens. | [Email Verification](protected-changes.md#email-verification) |
 | `updatePasswords()` | `PUT /user/password`. Changing the password elsewhere then throws. | [Changing the Password](protected-changes.md#changing-the-password) |
 | `manageAuthenticators()` | Adding, renaming and removing sign-in methods. Needed for users to set any up. | [Managing Authenticators](authenticators.md) |
 | `devices()` | A device cookie, "trust this device", a list of where users are signed in, and "this wasn't me" links. | [Devices & Sessions](devices-and-sessions.md) |

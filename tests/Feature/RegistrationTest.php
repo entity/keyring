@@ -456,7 +456,8 @@ describe('hiding who has an account', function () {
         expect($user->fresh()->hasVerifiedEmail())->toBeTrue()
             ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
 
-        $this->get($link)->assertRedirect('/dashboard?verified=1');
+        // The link they're sent back to has nothing left to do.
+        $this->get($link)->assertRedirect('/dashboard');
         Event::assertDispatchedTimes(Verified::class, 1);
 
         // And like anyone else afterwards, from any browser.
@@ -700,25 +701,35 @@ describe('saying when an address is taken', function () {
 
         $this->actingAs($user)->inertia()->get('/email/verify')->assertJsonPath('component', 'auth/verify-email');
 
-        $this->post('/email/verification-notification')->assertSessionHas('status', 'verification-link-sent');
+        $this->flushHeaders()->post('/email/verification-notification')->assertSessionHas('status', 'verification-link-sent');
 
         $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
 
-        $this->get($url)->assertRedirect('/dashboard?verified=1');
+        // Opening the link only shows a page. Its button is what verifies.
+        $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/email-verification');
+        expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
+        $this->flushHeaders();
+
+        postSignedLink($url)->assertRedirect('/dashboard?verified=1');
         expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     });
 
-    it('sends a signed-out browser that follows the link to sign in, and back to it', function () {
+    it('sends a signed-out browser that follows the link to sign in, and back to its page', function () {
         $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
         $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
 
         $this->get($url)->assertRedirect(route('login'))->assertSessionMissing('status');
         $this->getJson($url)->assertUnauthorized();
+        postSignedLink($url)->assertRedirect(route('login'));
 
+        // Signing in verifies nothing here: the page's button does.
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(url($url));
         expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
 
-        $this->get($url)->assertRedirect('/dashboard?verified=1');
+        $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/email-verification');
+        $this->flushHeaders();
+
+        postSignedLink($url)->assertRedirect('/dashboard?verified=1');
         expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     });
 
@@ -729,8 +740,11 @@ describe('saying when an address is taken', function () {
         $link = fn (User $for, string $email) => URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $for->id, 'hash' => sha1($email)], absolute: false);
 
         $this->actingAs($user)->get($link($other, $other->email))->assertForbidden();
+        postSignedLink($link($other, $other->email))->assertForbidden();
         $this->get($link($user, 'an-older-address@example.com'))->assertForbidden();
+        postSignedLink($link($user, 'an-older-address@example.com'))->assertForbidden();
         $this->get($link($user, $user->email).'0')->assertForbidden();
+        postSignedLink($link($user, $user->email).'0')->assertForbidden();
 
         expect($user->fresh()->hasVerifiedEmail())->toBeFalse()
             ->and($other->fresh()->hasVerifiedEmail())->toBeFalse();
@@ -742,7 +756,9 @@ describe('saying when an address is taken', function () {
 
         $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);
 
-        $this->actingAs($user)->get($url)->assertRedirect('/dashboard?tab=security&verified=1');
+        $this->actingAs($user);
+
+        postSignedLink($url)->assertRedirect('/dashboard?tab=security&verified=1');
     });
 
     describe('email verification', function () {

@@ -8,11 +8,13 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\Http\Requests\VerifyEmailRequest;
 use Keyring\KeyringManager;
 use Keyring\Login\VerificationLink;
+use Keyring\Support\Input;
 
 class EmailVerificationController
 {
@@ -30,12 +32,18 @@ class EmailVerificationController
     }
 
     /**
-     * The emailed link, which the route has checked the signature of. A
-     * browser that isn't signed in is sent to sign in and comes back, as
+     * The page the emailed link opens. It verifies nothing: a GET changes
+     * nothing in Keyring, and whatever opens the link before the person
+     * does (a mail scanner, a browser loading it ahead) shouldn't be what
+     * verifies the address. The page's button posts the link's signature
+     * in the body (ValidatePostedSignature).
+     *
+     * A browser that isn't signed in is sent to sign in and comes back, as
      * the auth middleware would send it. Where registration hides who has
-     * an account, the link is what lets an unverified user sign in at all.
+     * an account, having followed the link is what lets an unverified user
+     * sign in at all, and signing in is what verifies their address.
      */
-    public function verify(Request $request, VerificationLink $link, string $id, string $hash): mixed
+    public function page(Request $request, VerificationLink $link, string $id, string $hash): mixed
     {
         if ($this->keyring->guard()->guest()) {
             if ($this->keyring->hidesRegisteredAddresses()) {
@@ -51,10 +59,25 @@ class EmailVerificationController
 
         // Laravel's check that the link is this user's own, made now that
         // there is a user to check it against.
-        $verification = app(VerifyEmailRequest::class);
+        $request = app(VerifyEmailRequest::class);
+        $user = $this->keyring->user();
 
+        if (! $user instanceof MustVerifyEmail || $user->hasVerifiedEmail()) {
+            return $this->keyring->response(VerifiedResponse::class);
+        }
+
+        return $this->keyring->render('email-verification', [
+            'email' => $user->getEmailForVerification(),
+            'url' => Str::before($request->getRequestUri(), '?'),
+            'expires' => Input::text($request, 'expires'),
+            'signature' => Input::text($request, 'signature'),
+        ]);
+    }
+
+    public function verify(VerifyEmailRequest $request): mixed
+    {
         if (! $this->verified($request)) {
-            $verification->fulfill();
+            $request->fulfill();
         }
 
         return $this->keyring->response(VerifiedResponse::class, justNow: true);

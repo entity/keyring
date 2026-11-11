@@ -152,7 +152,7 @@ class Registration
      */
     protected function input(Request $request): array
     {
-        return PasswordRules::normalizeInput($request->all());
+        return PasswordRules::normalizeInput(Input::all($request));
     }
 
     /**

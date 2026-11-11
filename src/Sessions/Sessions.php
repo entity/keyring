@@ -20,6 +20,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
+use Keyring\Support\Cookies;
 use Keyring\Support\Duration;
 use Keyring\Support\Throttle;
 
@@ -156,7 +157,7 @@ class Sessions
         }
 
         $request->session()->put(self::REMEMBERED, true);
-        $this->queueRememberCookie($session);
+        $this->queueRememberCookie($request, $session);
     }
 
     public function current(Request $request): ?RegisteredSession
@@ -236,7 +237,7 @@ class Sessions
      */
     public function remembered(Request $request): ?RegisteredSession
     {
-        $id = $request->cookie($this->rememberCookie());
+        $id = $request->cookie($this->rememberCookie()) ?? Cookies::earlier($request, $this->rememberCookie());
         $session = is_string($id) && strlen($id) === 40 ? $this->registry->find($id) : null;
 
         return $session?->guard === config('keyring.guard') ? $session : null;
@@ -274,9 +275,13 @@ class Sessions
         }
     }
 
+    /**
+     * "sessions.remember_cookie", or keyring_remember with the prefix the
+     * app's setup allows: __Host-keyring_remember over HTTPS.
+     */
     public function rememberCookie(): string
     {
-        return config('keyring.sessions.remember_cookie');
+        return Cookies::name(config('keyring.sessions.remember_cookie'), 'keyring_remember');
     }
 
     /**
@@ -285,25 +290,14 @@ class Sessions
      * names the record it was issued with, so "remember me" can only bring
      * that session back, and only for as long as the record lasts.
      */
-    protected function queueRememberCookie(RegisteredSession $session): void
+    protected function queueRememberCookie(Request $request, RegisteredSession $session): void
     {
-        Cookie::queue(Cookie::make(
-            $this->rememberCookie(),
-            $session->id,
-            minutes: max(1, (int) ceil(($session->expiresAt - now()->getTimestamp()) / 60)),
-            secure: config('session.secure'),
-            httpOnly: true,
-            sameSite: 'lax',
-        ));
+        Cookies::queue($request, $this->rememberCookie(), $session->id, minutes: max(1, (int) ceil(($session->expiresAt - now()->getTimestamp()) / 60)));
     }
 
     protected function forgetRememberCookie(Request $request): void
     {
-        Cookie::unqueue($this->rememberCookie());
-
-        if ($request->cookies->has($this->rememberCookie())) {
-            Cookie::queue(Cookie::forget($this->rememberCookie()));
-        }
+        Cookies::forget($request, $this->rememberCookie());
     }
 
     /**

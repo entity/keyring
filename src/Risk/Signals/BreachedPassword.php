@@ -9,6 +9,7 @@ use Keyring\Factors\Password;
 use Keyring\Login\Verification;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Finding;
+use Keyring\Support\Input;
 use Keyring\Support\PasswordRules;
 
 /**
@@ -27,7 +28,7 @@ class BreachedPassword extends Signal
     {
         $verifications = $assessment->attempt->verifications ?? [];
         $usedPassword = array_any($verifications, fn (Verification $verification) => $verification->factor === Password::KEY);
-        $password = $assessment->request->input('password');
+        $password = Input::get($assessment->request, 'password');
 
         if (! $usedPassword || ! is_string($password)) {
             return null;

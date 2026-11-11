@@ -70,7 +70,7 @@ it('records a wrong token on an email change link, against the account it was fo
     Event::fake([LinkRefused::class]);
     $change = pendingChange($this->user);
 
-    $this->post(route($route, [$change->id, 'a-wrong-token']))->assertSessionHas('status', 'email-change-invalid');
+    $this->post(route($route, $change->id), ['token' => 'a-wrong-token'])->assertSessionHas('status', 'email-change-invalid');
 
     Event::assertDispatched(fn (LinkRefused $event) => $event->link === $link && $event->reason === 'token' && $event->user->is($this->user));
 })->with([
@@ -81,8 +81,8 @@ it('records a wrong token on an email change link, against the account it was fo
 it('logs the link and the reason, never the token', function () {
     $change = pendingChange($this->user);
 
-    $this->post(route('keyring.email.confirm.store', [$change->id, 'a-wrong-token']));
-    $this->post(route('keyring.email.revert.store', [$change->id, 'a-wrong-token']));
+    $this->post(route('keyring.email.confirm.store', $change->id), ['token' => 'a-wrong-token']);
+    $this->post(route('keyring.email.revert.store', $change->id), ['token' => 'a-wrong-token']);
 
     $entries = SecurityEvent::query()->where('type', 'link_refused')->oldest('id')->get();
 
@@ -99,7 +99,7 @@ it('logs the link and the reason, never the token', function () {
 it('records the right token for a change that is over', function (array $attributes, string $route, string $token, string $link) {
     $change = pendingChange($this->user, $attributes);
 
-    $this->post(route($route, [$change->id, $token]))->assertSessionHas('status', 'email-change-invalid');
+    $this->post(route($route, $change->id), ['token' => $token])->assertSessionHas('status', 'email-change-invalid');
 
     expect(logEntry('link_refused')->meta)->toEqual(['link' => $link, 'reason' => 'ended']);
 })->with([
@@ -110,7 +110,7 @@ it('records the right token for a change that is over', function (array $attribu
 ]);
 
 it('records a link for a change that does not exist, with the same 404', function (string $route, string $link) {
-    $this->post(route($route, ['01jqzzzzzzzzzzzzzzzzzzzzzz', 'any-token']))->assertNotFound();
+    $this->post(route($route, '01jqzzzzzzzzzzzzzzzzzzzzzz'), ['token' => 'any-token'])->assertNotFound();
 
     expect(logEntry('link_refused'))->meta->toEqual(['link' => $link, 'reason' => 'unknown'])->authenticatable_id->toBeNull();
 })->with([
@@ -121,7 +121,7 @@ it('records a link for a change that does not exist, with the same 404', functio
 it('does not record a link that worked', function () {
     $change = pendingChange($this->user);
 
-    $this->post(route('keyring.email.revert.store', [$change->id, 'the-revert-token']))->assertSessionHas('status', 'email-change-reverted');
+    $this->post(route('keyring.email.revert.store', $change->id), ['token' => 'the-revert-token'])->assertSessionHas('status', 'email-change-reverted');
 
     expect(loggedTypes())->not->toContain('link_refused');
 });
@@ -130,10 +130,10 @@ it('records a "this wasn\'t me" link whose signature is wrong or out of date, wi
     $device = Device::make(['token_hash' => 'theirs']);
     $device->authenticatable()->associate($this->user)->save();
 
-    $forged = $this->post(route('keyring.devices.report.store', $device->id).'?expires=9999999999&signature=forged')->assertForbidden();
+    $forged = $this->post(route('keyring.devices.report.store', $device->id), ['expires' => '9999999999', 'signature' => 'forged'])->assertForbidden();
     $unsigned = $this->get(route('keyring.devices.report', $device->id))->assertForbidden();
     $expired = URL::temporarySignedRoute('keyring.devices.report.store', now()->subMinute(), ['device' => $device->id], absolute: false);
-    $this->post($expired)->assertForbidden();
+    postSignedLink($expired)->assertForbidden();
 
     expect(SecurityEvent::query()->where('type', 'link_refused')->oldest('id')->pluck('meta')->all())->toEqual([
         ['link' => 'keyring.devices.report.store', 'reason' => 'signature'],
@@ -150,7 +150,7 @@ it('lets a signed link that is good through without a word', function () {
     $device = Device::make(['token_hash' => 'theirs']);
     $device->authenticatable()->associate($this->user)->save();
 
-    $this->post(URL::temporarySignedRoute('keyring.devices.report.store', now()->addDay(), ['device' => $device->id], absolute: false))->assertRedirect(route('login'));
+    postSignedLink(URL::temporarySignedRoute('keyring.devices.report.store', now()->addDay(), ['device' => $device->id], absolute: false))->assertRedirect(route('login'));
 
     expect($device->fresh()->isRevoked())->toBeTrue()
         ->and(loggedTypes())->toBe(['device_reported']);

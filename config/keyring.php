@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
-use Keyring\Http\Middleware\PreventCaching;
+use Keyring\Http\Middleware\AddSecurityHeaders;
 
 return [
 
@@ -87,8 +87,9 @@ return [
     |--------------------------------------------------------------------------
     |
     | Keyring registers its routes under these middleware. Set "routes" to
-    | false to register them yourself with Keyring::routes(). PreventCaching
-    | keeps auth pages out of caches and their URLs out of Referer headers.
+    | false to register them yourself with Keyring::routes(). AddSecurityHeaders
+    | keeps auth pages out of caches, their URLs out of Referer headers and
+    | their responses from being read as another content type.
     |
     */
 
@@ -98,7 +99,7 @@ return [
 
     'domain' => null,
 
-    'middleware' => ['web', PreventCaching::class],
+    'middleware' => ['web', AddSecurityHeaders::class],
 
     /*
     |--------------------------------------------------------------------------
@@ -107,6 +108,8 @@ return [
     |
     | The relying party ID defaults to your APP_URL host, and the allowed
     | origins to your APP_URL. The timeout is how long the browser waits.
+    | "login_options_for" is how long the challenge for a usernameless sign in
+    | can be answered: the login page asks for one as it loads, for autofill.
     |
     | "attestation_roots" are the root certificates a key's attestation has
     | to chain to, for a factor set up with requireAttestation(): PEM
@@ -127,6 +130,7 @@ return [
         ],
         'origins' => [],
         'timeout' => '60s',
+        'login_options_for' => '5m',
         'attestation_roots' => [],
         'algorithms' => ['ES256', 'EdDSA'],
         'minimum_rsa_bits' => 2048,
@@ -168,8 +172,10 @@ return [
     | Devices
     |--------------------------------------------------------------------------
     |
-    | Devices are recognised by a long-lived cookie. "trust_for" enables the
-    | "don't ask again on this device" option (set to null to turn it off).
+    | Devices are recognised by a long-lived cookie. With "cookie" null it's
+    | named keyring_device, and __Host-keyring_device once the app is served
+    | over HTTPS; a name you set is used exactly as it is. "trust_for" enables
+    | the "don't ask again on this device" option (set to null to turn it off).
     | A trusted device is only an input to your policy, never a factor.
     | An account keeps its "limit" most recently seen devices (null for no
     | limit): a new one beyond that takes the place of the oldest.
@@ -177,7 +183,7 @@ return [
     */
 
     'devices' => [
-        'cookie' => 'keyring_device',
+        'cookie' => null,
         'cookie_lifetime' => '400d',
         'limit' => 50,
         'trust_for' => '30d',
@@ -201,7 +207,8 @@ return [
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
     | again. "remember_cookie" names the cookie that ties "remember me" to
-    | the session it was ticked for. Each one works once and is replaced.
+    | the session it was ticked for: null is keyring_remember, prefixed over
+    | HTTPS like the device cookie. Each one works once and is replaced.
     | For "remember_grace" a browser's other requests, sent with the one
     | that used it, are still let in on the same session. Used after that,
     | the session ends for everyone holding it.
@@ -220,7 +227,7 @@ return [
             'aal3' => ['idle' => '15m', 'absolute' => '12h'],
         ],
         'middleware' => true,
-        'remember_cookie' => 'keyring_remember',
+        'remember_cookie' => null,
         'remember_grace' => '10s',
     ],
 

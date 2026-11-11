@@ -183,7 +183,7 @@ it('records an email verification link that was made for another account, with t
         ->and($user->fresh()->hasVerifiedEmail())->toBeFalse();
 
     // Their own still works, and says nothing.
-    $this->get(URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false))->assertRedirect();
+    postSignedLink(URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false))->assertRedirect();
 
     expect($user->fresh()->hasVerifiedEmail())->toBeTrue()
         ->and(SecurityEvent::query()->where('type', 'access_refused')->count())->toBe(1);

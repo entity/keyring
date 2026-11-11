@@ -287,9 +287,9 @@ class HardwareToken extends Factor
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $valid = $this->consume($authenticator, function (Authenticator $locked) use ($request) {
-            // Check $request->input('code') against $locked, and record that
-            // it was used (for example in $locked->withMeta(...)).
-            return app(TokenServer::class)->check($locked->secret, (string) $request->input('code'));
+            // Check the posted code against $locked, and record that it was
+            // used (for example in $locked->withMeta(...)).
+            return app(TokenServer::class)->check($locked->secret, (string) $request->post('code'));
         });
 
         return $valid ? $this->verified($authenticator) : null;
@@ -309,7 +309,7 @@ The contract's methods:
 | `priority()` | `50` | Higher is offered first. |
 | `authenticators($user, $stored)` | the stored rows with this key | The user's authenticators. Return virtual ones for state kept elsewhere. |
 | `challenge($attempt, $authenticator)` | `[]` | Extra props for the challenge page. Called every time the page loads, so it must be safe to repeat. |
-| `rules()` | `code` required, up to 64 characters | Validation for a verification request. |
+| `rules()` | `code` required, up to 64 characters | Validation for a verification request. Keyring checks them against the request's body, not the query string of a `POST`, so a field you require can't arrive in the URL. |
 | `limits($request, $attempt)` | per account and per IP, from config | Rate limits. See [Rate Limiting](security.md#rate-limiting). |
 | `errorKey()` | `code` | The form field failures are reported on. |
 | `present($authenticator)` | `factor`, `id`, `name` | How the authenticator appears on the challenge page and in "try another way". |
