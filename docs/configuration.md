@@ -295,7 +295,7 @@ Laravel's check goes through whatever `Illuminate\Contracts\Validation\Uncomprom
 ],
 ```
 
-`levels` are the score thresholds. `recent_change` is how long after an email change the `RecentlyChangedRecovery` signal fires. `store` is the cache store for risk locks. See [Risk](risk.md).
+`levels` are the score thresholds. `recent_change` is how long after an email change the `RecentlyChangedRecovery` signal fires. `store` is the cache store for risk locks, `null` for your default store. Use a database or Redis store, not Octane's `octane` store: see [Octane's Cache Store](security.md#octanes-cache-store). See [Risk](risk.md).
 
 ## Security Log
 
@@ -352,6 +352,8 @@ The table is `Features::securityLog()`, which is on by default. Without it the s
 `timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too. Verifications that go through return straight away.
 
 `limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B allows). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
+
+The per-minute counts and their locks are kept in the cache store Laravel's rate limiter uses: `cache.limiter` in `config/cache.php`, or your default store. Point it at a database or Redis store. Octane's in-memory `octane` store fills up, isn't atomic across workers and is emptied by a restart: see [Octane's Cache Store](security.md#octanes-cache-store).
 
 Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. Set `lock_after` to refuse an account as it would be at the cap once it has been locked out of signing in that many times in a day, until its password is reset (see [Locking Until a Reset](security.md#locking-until-a-reset)). An account can be sent `codes` codes for one factor every `codes_per`, and `notices` security notices of one kind, or email change requests, every `notices_per`; an address is mailed that often by registration too. See [Rate Limiting](security.md#rate-limiting).
 

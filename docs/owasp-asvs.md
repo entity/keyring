@@ -45,7 +45,7 @@ That covers Level 1, apart from what your own pages have to do. Nothing in it as
 Start from the default install, then:
 
 1. Keep a server-side session driver (`SESSION_DRIVER=database`, Laravel's default, or `redis` or `file`). The `cookie` driver can't destroy an old session ([7.2.4](#v72-fundamental-session-management-security)).
-2. Keep the rate limiter's cache store (`cache.limiter`, or your default) somewhere that holds its keys between requests and that your deploys don't clear: the limits, the locks, sent codes and answered WebAuthn challenges all live there ([6.3.1](#v63-general-authentication-security)).
+2. Keep the rate limiter's cache store (`cache.limiter`, or your default) somewhere that holds its keys between requests and that your deploys don't clear, such as a database or Redis store and not [Octane's `octane` store](security.md#octanes-cache-store): the limits, the locks, sent codes and answered WebAuthn challenges all live there ([6.3.1](#v63-general-authentication-security)).
 3. Build your forms so passwords are masked and can be pasted and filled by a password manager ([6.2.6, 6.2.7](#v62-password-security)).
 4. Give users a form that posts to `PUT /user/password` ([6.2.2](#v62-password-security)).
 5. Put a sign-out button on every signed-in page, though ASVS only asks for it from Level 2.
