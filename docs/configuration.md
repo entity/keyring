@@ -229,6 +229,8 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
 See [Password Rules](protected-changes.md#password-rules). `broker` is the password broker used for resets; `null` is your default broker.
 
+`min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 6.2.1 and NIST SP 800-63B allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
+
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
 
 ## Risk

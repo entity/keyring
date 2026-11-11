@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Enums\Assurance;
+use Keyring\KeyringServiceProvider;
 use Keyring\Models\Authenticator;
 use Keyring\Rules\CurrentPassword;
 use Keyring\Support\PasswordRules;
@@ -16,6 +17,35 @@ function passes(string $password, mixed ...$arguments): bool
 {
     return Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for(...$arguments)])->passes();
 }
+
+it('refuses a configured minimum under eight characters, at boot and wherever it\'s read', function (string $option, mixed $min) {
+    config(["keyring.passwords.{$option}" => $min]);
+    $user = taylor();
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    $message = "[keyring.passwords.{$option}] option is ".json_encode($min).'. A password needs at least 8 characters';
+
+    expect(fn () => new KeyringServiceProvider(app())->boot())->toThrow(LogicException::class, $message)
+        ->and(fn () => PasswordRules::for($option === 'min_with_mfa' ? $user : null))->toThrow(LogicException::class, $message);
+})->with([
+    ['min_with_mfa', 4],
+    ['min_with_mfa', 7],
+    ['min_without_mfa', 4],
+    ['min_without_mfa', 0],
+    ['min_without_mfa', null],
+    ['min_without_mfa', 'twelve'],
+]);
+
+it('takes a configured minimum of eight or more, as a number or a string from the environment', function () {
+    config(['keyring.passwords.min_with_mfa' => 8, 'keyring.passwords.min_without_mfa' => '10']);
+
+    new KeyringServiceProvider(app())->boot();
+
+    expect(PasswordRules::min(withMfa: true))->toBe(8)
+        ->and(PasswordRules::min())->toBe(10)
+        ->and(passes('qz7vbn3k9x'))->toBeTrue()
+        ->and(passes('qz7vbn3k9'))->toBeFalse();
+});
 
 it('refuses the most common passwords even when the breach check doesn\'t run', function () {
     // With a second factor the minimum is 8, where most common passwords are.

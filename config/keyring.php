@@ -222,9 +222,10 @@ return [
     |--------------------------------------------------------------------------
     |
     | At least 8 characters with a second factor and 15 without, any
-    | characters, and no composition rules. Bcrypt silently ignores anything
-    | past 72 bytes, so with bcrypt longer passwords are rejected rather than
-    | truncated.
+    | characters, and no composition rules. Neither minimum can go below 8:
+    | Keyring throws on a lower one rather than raise it quietly. Bcrypt
+    | silently ignores anything past 72 bytes, so with bcrypt longer
+    | passwords are rejected rather than truncated.
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make

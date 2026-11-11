@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Facades\Keyring;
+use LogicException;
 
 /**
  * Password rules: length over complexity, no composition rules, breached
@@ -16,6 +17,9 @@ use Keyring\Facades\Keyring;
  */
 final class PasswordRules
 {
+    /** The shortest password any setting may allow (OWASP ASVS 6.2.1, NIST SP 800-63B). */
+    public const int SHORTEST = 8;
+
     /** The most common passwords long enough to pass the length rules (from SecLists, MIT). */
     private const string COMMON = __DIR__.'/../../resources/passwords/common.txt';
 
@@ -36,8 +40,7 @@ final class PasswordRules
     {
         $hasMfa = $user !== null && Keyring::for($user)->hasSecondFactor();
 
-        $rule = Password::min(config($hasMfa ? 'keyring.passwords.min_with_mfa' : 'keyring.passwords.min_without_mfa'))
-            ->max(config('keyring.passwords.max'));
+        $rule = Password::min(self::min($hasMfa))->max(config('keyring.passwords.max'));
 
         if (config('keyring.passwords.uncompromised') ?? app()->isProduction()) {
             $rule->uncompromised();
@@ -50,6 +53,28 @@ final class PasswordRules
         $context = [...$context, config('app.name'), $user?->getAttribute('name'), $user?->getAttribute(Keyring::username())];
 
         return ['required', 'string', 'confirmed', $rule, self::notCommon(), self::withoutContext($context), self::bcryptLimit()];
+    }
+
+    /**
+     * The fewest characters a new password needs, with a second factor beside
+     * it or on its own. A setting under eight is refused, not raised quietly:
+     * an app that asked for four should find out it can't have them.
+     *
+     * @throws LogicException
+     */
+    public static function min(bool $withMfa = false): int
+    {
+        $option = 'keyring.passwords.'.($withMfa ? 'min_with_mfa' : 'min_without_mfa');
+        $min = config($option);
+
+        if (! is_numeric($min) || $min < self::SHORTEST) {
+            throw new LogicException(sprintf(
+                'Keyring\'s [%s] option is %s. A password needs at least %d characters, so set it to %d or more.',
+                $option, json_encode($min), self::SHORTEST, self::SHORTEST,
+            ));
+        }
+
+        return (int) $min;
     }
 
     /**

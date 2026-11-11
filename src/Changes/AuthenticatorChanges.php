@@ -158,7 +158,7 @@ class AuthenticatorChanges
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
         }
 
-        $min = config('keyring.passwords.min_without_mfa');
+        $min = PasswordRules::min();
 
         if (mb_strlen($password) < $min) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_too_short_alone', ['min' => $min])]);
