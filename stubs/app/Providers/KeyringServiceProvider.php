@@ -11,11 +11,7 @@ use App\Actions\Keyring\ValidateEmailChange;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Facades\Keyring;
-use Keyring\Factors\EmailCode;
-use Keyring\Factors\Password;
-use Keyring\Factors\RecoveryCodes;
-use Keyring\Factors\Totp;
-use Keyring\Factors\WebAuthn;
+use Keyring\Factors;
 use Keyring\Login\Requirement;
 use Keyring\Risk\Signals;
 
@@ -23,15 +19,18 @@ class KeyringServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        // How your users can sign in. See "Factors" in the docs for more.
+        // How your users can sign in. A line that's commented out is one to
+        // add later: uncomment it, and turn on Features::manageAuthenticators()
+        // in config/keyring.php so users can set it up. See "Factors".
         Keyring::factors([
-            Password::class,
-            Totp::class,
-            RecoveryCodes::class,
-            WebAuthn::passkeys(),
-            WebAuthn::securityKeys(),
+            Factors\Password::class,
+            Factors\Totp::class,
+            // These go with any of the others, so losing one isn't the end of an account.
+            Factors\RecoveryCodes::class,
+            Factors\WebAuthn::passkeys(),
+            Factors\WebAuthn::securityKeys(),
             // A step at sign in, not a second factor: a password and an emailed code is AAL1.
-            EmailCode::asExtraStep(),
+            Factors\EmailCode::asExtraStep(),
         ]);
 
         // What they must prove: a second factor once they've set one up, and

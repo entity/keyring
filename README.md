@@ -17,7 +17,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 - **Built on OWASP ASVS 5.0.0 and NIST SP 800-63B-4:** [one page](docs/owasp-asvs.md) goes through both, requirement by requirement. Each is met, partly met, waiting on something you turn on, a deliberate deviation or your app's job, and the page says which and why.
 - **Headless:** like Fortify, Keyring renders your pages with props and answers JSON, with swappable responses and published actions. A browser package handles WebAuthn and the challenge page for Vue and React.
 
-Every feature and sign-in method beyond the password is opt-in. See [Adding Features](docs/quick-start.md#adding-features).
+Every feature and sign-in method beyond the password is opt-in. See [Start Small, Add What You Need](#start-small-add-what-you-need).
 
 > Work in progress: not tagged or production-tested yet.
 
@@ -65,6 +65,24 @@ npm install @entity/keyring
 ```
 
 > It isn't on npm yet either. Until it is, build it from the Composer package: see [Frontend](docs/frontend.md#introduction).
+
+## Start Small, Add What You Need
+
+A new install is password sign-in, registration, password resets, email verification and password changes. You build five pages: `login`, `register`, `forgot-password`, `reset-password`, and `confirm`, which asks for the password again before it's changed.
+
+What costs you nothing is on from the start: rate limits, password rules, session timeouts, the security log, security emails and the risk signals that need no setup.
+
+Everything else is already in your app, commented out. Adding it is uncommenting a line:
+
+| To add | Uncomment |
+|---|---|
+| An authenticator app, passkeys, security keys or email codes | Its line in `Keyring::factors([...])` in your provider, and `Features::manageAuthenticators()` in the config |
+| A second factor for everyone | The `keyring.enrolled` line in your provider |
+| "Trust this device", a list of where users are signed in, new-device emails | `Features::devices()` |
+| Email changes confirmed from the new address and undoable from the old one | `Features::emailChanges()` |
+| More risk signals: a new device, a breached password, a new country, impossible travel | Their lines in `Keyring::risk()->signals([...])` |
+
+See [Adding Features](docs/quick-start.md#adding-features) and [Adding Sign-In Methods](docs/quick-start.md#adding-sign-in-methods) for the pages each one needs.
 
 ## Documentation
 
