@@ -47,7 +47,6 @@ export function useChallenge(props: ChallengeProps, factors: Record<string, Comp
     form,
     props,
     component: computed(() => factors[props.factor] as Component | undefined),
-    alternatives: computed(() => props.alternatives),
     submit,
     verifyKey,
     switchTo: (option: AuthenticatorSummary) => switchTo(props, option),

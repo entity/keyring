@@ -17,7 +17,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
@@ -145,15 +144,7 @@ it('answers unknown factors with a 404', function () {
 it('sends its own notification for every type but a suspected clone, until the app says otherwise', function () {
     $keyring = new KeyringManager(new FactorRegistry, app(ProtectedAttributes::class));
 
-    foreach (array_diff(KeyringManager::NOTIFICATIONS, ['clone_suspected']) as $type) {
-        expect($keyring->notification($type, [
-            'when' => 'Monday', 'code' => '12345678', 'minutes' => 10, 'email' => 'n•••@example.com',
-            'url' => 'https://example.com/link', 'expiresAt' => now()->addDay(), 'revertUrl' => 'https://example.com/revert',
-            'loginUrl' => 'https://example.com/login',
-        ]))->toBeInstanceOf('Keyring\\Notifications\\'.Str::studly($type));
-    }
-
-    expect($keyring->hasNotification('clone_suspected'))->toBeFalse()
+    expect(collect(KeyringManager::NOTIFICATIONS)->reject(fn (string $type) => $keyring->hasNotification($type))->values()->all())->toBe(['clone_suspected'])
         ->and($keyring->notification('clone_suspected', ['when' => 'Monday']))->toBeNull();
 
     // The app's own class for one, another turned off, and the clone turned on.

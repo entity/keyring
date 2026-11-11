@@ -93,7 +93,8 @@ class KeyringManager
     }
 
     /**
-     * Set the factors users may sign in with.
+     * The factors users may sign in with. This replaces the list, so name
+     * the password too if it stays.
      *
      * @param  list<class-string<Factor>|Factor|Closure(Container): Factor>  $factors
      */

@@ -137,7 +137,6 @@ const challenge = useChallenge(props, factors)
 | `switchTo(option)` | Visits the challenge page for one of `props.alternatives`. |
 | `send()` | Asks the server to send a code, for factors that send one. |
 | `verifyKey()` | Runs the WebAuthn ceremony with `props.challenge.options` and submits the result. Calling it again while the prompt is open replaces that prompt. Closing the prompt does nothing; other browser errors are set on `form.errors.credential`. |
-| `alternatives` | `props.alternatives`. |
 
 Factor components receive `challenge`, and read the page from `challenge.props`.
 

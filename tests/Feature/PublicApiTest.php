@@ -8,16 +8,17 @@ use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\UserKeyring;
 
-// What apps build on, as the README's "What's Stable" lists it: the route
-// names, the middleware aliases, the methods of the Keyring facade and of
+// What apps build on, as the README's "What's Stable" lists it: the config
+// options and what each is until an app sets it, the route names, the
+// middleware aliases, the methods of the Keyring facade and of
 // Keyring::for($user), the contracts, the events and the email types. A
-// rename here breaks every app that uses it, and nothing else would notice
-// when the tests are renamed with it.
+// rename or a new default here changes every app that uses it, and nothing
+// else would notice when the tests are changed with it.
 //
 // A change that's meant: run UPDATE_PUBLIC_API=1 vendor/bin/pest
 // tests/Feature/PublicApiTest.php, commit tests/Fixtures/public-api.json
 // with it, and say so in UPGRADE.md.
-it('keeps the names apps build on, or says which changed', function () {
+it('keeps the names and defaults apps build on, or says which changed', function () {
     withFeatures(Features::all());
 
     $methods = fn (string $class) => collect(new ReflectionClass($class)->getMethods(ReflectionMethod::IS_PUBLIC))
@@ -30,6 +31,7 @@ it('keeps the names apps build on, or says which changed', function () {
         ->sort()->values();
 
     $api = [
+        'defaults' => require __DIR__.'/../../config/keyring.php',
         'routes' => collect(app('router')->getRoutes()->getRoutes())
             ->filter(fn ($route) => $route->getName() !== null)
             ->mapWithKeys(fn ($route) => [$route->getName() => implode('|', array_diff($route->methods(), ['HEAD'])).' /'.ltrim($route->uri(), '/')])
