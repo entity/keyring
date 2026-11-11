@@ -38,6 +38,7 @@ class RecordSecurityEvents
             Events\DeviceRevoked::class => 'deviceRevoked',
             Events\SessionsRevoked::class => 'sessionsRevoked',
             Events\SessionEnded::class => 'sessionEnded',
+            Events\RememberMeReused::class => 'rememberMeReused',
             Events\EmailChangeRequested::class => 'emailChangeRequested',
             Events\EmailChanged::class => 'emailChanged',
             Events\EmailChangeReverted::class => 'emailChangeReverted',
@@ -131,6 +132,17 @@ class RecordSecurityEvents
     public function sessionEnded(Events\SessionEnded $event): void
     {
         $this->log->record('session_ended', $event->user, meta: ['reason' => $event->reason]);
+    }
+
+    /**
+     * The entry's own address and browser are the request that brought the
+     * used cookie. The device is the one the ended session was on.
+     */
+    public function rememberMeReused(Events\RememberMeReused $event): void
+    {
+        $this->log->record('remember_me_reused', $event->user, device: $event->session->deviceId, meta: [
+            'device' => $this->keyring->describeDevice($event->session->userAgent),
+        ]);
     }
 
     public function emailChangeRequested(Events\EmailChangeRequested $event): void

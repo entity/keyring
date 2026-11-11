@@ -169,7 +169,10 @@ return [
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
     | again. "remember_cookie" names the cookie that ties "remember me" to
-    | the session it was ticked for.
+    | the session it was ticked for. Each one works once and is replaced.
+    | For "remember_grace" a browser's other requests, sent with the one
+    | that used it, are still let in on the same session. Used after that,
+    | the session ends for everyone holding it.
     |
     */
 
@@ -186,6 +189,7 @@ return [
         ],
         'middleware' => true,
         'remember_cookie' => 'keyring_remember',
+        'remember_grace' => '10s',
     ],
 
     /*
@@ -289,7 +293,7 @@ return [
         'keep_for' => '180d',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
-        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
+        'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
     ],
 
     /*

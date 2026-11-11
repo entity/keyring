@@ -117,8 +117,8 @@ List the makers' root certificates in `config/keyring.php`, as PEM text or as pa
 With that set, for this factor:
 
 - Keyring asks the browser for `direct` attestation. Some browsers ask the user before they pass it on, and a user who says no sends `none`.
-- A key is added only when its statement is valid and its certificates chain to one of the roots, each within its dates, each signed by a certificate that is allowed to sign others, with no SHA-1 signature or RSA key under 2048 bits on the way.
-- `none`, a key that attests for itself, a chain to any other root and a statement that doesn't match the response are refused with the same error as any other invalid key, and nothing is added.
+- A key is added only when its statement is valid and its certificates chain to one of the roots, each within its dates, each signed by a certificate that is allowed to sign others (a root itself is trusted as listed, whatever it says about signing), with no SHA-1 signature or RSA key under 2048 bits on the way.
+- `none`, a key that attests for itself, a chain to any other root and a statement that doesn't match the response are all refused the same way, and nothing is added. The error is `keyring::keyring.key_not_accepted`, which tells the person this isn't a key the site takes, since trying again wouldn't help.
 - If no root is listed, or one can't be read, every key is refused and Keyring reports an exception saying which.
 
 Two formats are read: `packed`, which FIDO2 keys use, and `fido-u2f`, which older keys use. Those are what hardware security keys send. The formats platforms use (`tpm`, `android-key`, `apple`) and `compound` are refused, as is any other.
