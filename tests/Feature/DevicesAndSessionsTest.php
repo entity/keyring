@@ -13,6 +13,7 @@ use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Assurance;
 use Keyring\Events\DeviceRevoked;
 use Keyring\Events\NewDeviceSignedIn;
+use Keyring\Events\SessionsRevoked;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
@@ -940,6 +941,161 @@ describe('ending trust', function () {
 
         expect(app(RiskLocks::class)->locked($this->user))->toBeTrue()
             ->and(Device::query()->whereNotNull('trusted_until')->exists())->toBeTrue();
+    });
+});
+
+describe('ending other sessions along with a change to how the user signs in', function () {
+    beforeEach(function () {
+        Event::fake([SessionsRevoked::class]);
+
+        /** Signed in here, having proved two factors, and on one other browser. */
+        $this->signInTwice = function (string $driver = 'database') {
+            config(['keyring.sessions.driver' => $driver]);
+
+            $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->get('/home')->assertOk();
+            $this->here = session(Sessions::KEY);
+
+            $now = now()->getTimestamp();
+            app(SessionRegistry::class)->save(new RegisteredSession('elsewhere', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+        };
+
+        $this->expectOnlyThisSessionLeft = function () {
+            $registry = app(SessionRegistry::class);
+
+            expect($registry->find('elsewhere')->revokedAt)->not->toBeNull()
+                ->and($registry->forUser($this->user)->map->id->all())->toBe([$this->here])
+                ->and(session(Sessions::KEY))->toBe($this->here);
+
+            Event::assertDispatched(SessionsRevoked::class, fn (SessionsRevoked $event) => $event->count === 1 && $event->user->is($this->user));
+            $this->get('/home')->assertOk();
+        };
+    });
+
+    it('ends them when adding an authenticator asks it to', function (string $driver) {
+        ($this->signInTwice)($driver);
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $id = session()->getId();
+
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), 'sign_out_others' => true])
+            ->assertOk()
+            ->assertJsonPath('status', 'authenticator-added');
+
+        // This session carries on under a new ID, as after "sign out everywhere else".
+        expect(session()->getId())->not->toBe($id)
+            ->and($this->user->authenticators()->where('factor', 'totp')->count())->toBe(1);
+        ($this->expectOnlyThisSessionLeft)();
+    })->with('registries');
+
+    it('ends them when removing an authenticator asks it to', function (string $driver) {
+        ($this->signInTwice)($driver);
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $backup = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $this->deleteJson(route('keyring.authenticators.destroy', $backup->id), ['sign_out_others' => true])
+            ->assertOk()
+            ->assertJsonPath('status', 'authenticator-removed');
+
+        expect($backup->fresh())->toBeNull();
+        ($this->expectOnlyThisSessionLeft)();
+    })->with('registries');
+
+    it('ends them when new recovery codes ask it to', function () {
+        ($this->signInTwice)();
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $old = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'), ['sign_out_others' => true])->assertOk();
+
+        expect($old->fresh())->toBeNull();
+        ($this->expectOnlyThisSessionLeft)();
+    });
+
+    it('leaves them alone unless asked', function (array $data) {
+        ($this->signInTwice)();
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $backup = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), ...$data])->assertOk();
+        $this->deleteJson(route('keyring.authenticators.destroy', $backup->id), $data)->assertOk();
+
+        expect(app(SessionRegistry::class)->find('elsewhere')->revokedAt)->toBeNull();
+        Event::assertNotDispatched(SessionsRevoked::class);
+    })->with([
+        'nothing said' => [[]],
+        'told not to' => [['sign_out_others' => false]],
+    ]);
+
+    it('changes nothing when the option makes no sense', function () {
+        ($this->signInTwice)();
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $backup = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), 'sign_out_others' => 'perhaps'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('sign_out_others');
+        $this->deleteJson(route('keyring.authenticators.destroy', $backup->id), ['sign_out_others' => 'perhaps'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('sign_out_others');
+
+        expect($this->user->authenticators()->count())->toBe(2)
+            ->and(app(SessionRegistry::class)->find('elsewhere')->revokedAt)->toBeNull();
+    });
+
+    it('does not end them when the change itself was refused', function () {
+        ($this->signInTwice)();
+        $only = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        // The last second factor needs the password typed again.
+        $this->deleteJson(route('keyring.authenticators.destroy', $only->id), ['sign_out_others' => true])->assertUnprocessable();
+
+        expect($only->fresh())->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find('elsewhere')->revokedAt)->toBeNull();
+    });
+});
+
+describe('signing out other sessions without the devices feature', function () {
+    beforeEach(function () {
+        withFeatures(array_values(array_diff(Features::all(), [Features::devices()])));
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+    });
+
+    it('has a route of its own', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Event::fake([SessionsRevoked::class]);
+        $registry = app(SessionRegistry::class);
+
+        expect(Route::has('keyring.devices.destroy-others'))->toBeFalse();
+
+        login();
+        $here = session(Sessions::KEY);
+        $id = session()->getId();
+        $now = now()->getTimestamp();
+        $registry->save(new RegisteredSession('elsewhere', (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+        $this->user->forceFill(['remember_token' => 'remembered'])->save();
+
+        $this->deleteJson(route('keyring.sessions.destroy-others'))->assertOk()->assertJsonPath('status', 'sessions-revoked');
+
+        expect($registry->find('elsewhere')->revokedAt)->not->toBeNull()
+            ->and($registry->find($here)->revokedAt)->toBeNull()
+            ->and($this->user->fresh()->remember_token)->not->toBe('remembered')
+            ->and(session()->getId())->not->toBe($id);
+
+        Event::assertDispatched(SessionsRevoked::class, fn (SessionsRevoked $event) => $event->count === 1);
+        $this->get('/home')->assertOk();
+    })->with('registries');
+
+    it('needs a fresh verification', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour())
+            ->deleteJson(route('keyring.sessions.destroy-others'))
+            ->assertStatus(423);
+    });
+
+    it('is not there for a guest', function () {
+        $this->deleteJson(route('keyring.sessions.destroy-others'))->assertUnauthorized();
     });
 });
 

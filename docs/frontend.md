@@ -256,7 +256,7 @@ await removeAuthenticator(added.authenticator.id)
 | `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
 | `renameAuthenticator(id, name)` | `PATCH` with `name`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. |
-| `removeAuthenticator(id, password?)` | `DELETE`. Removing the user's last second factor also needs their password. |
+| `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too; when adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them.
@@ -300,7 +300,7 @@ The same applies to any of your own routes behind `keyring:aal2` or `keyring.fre
 import { json } from '@entity/keyring'
 
 const { devices } = await json('GET', '/user/devices')
-await json('DELETE', '/user/devices')        // sign out everywhere else
+await json('DELETE', '/user/sessions')       // sign out everywhere else
 const { pending } = await json('GET', '/user/email')
 await json('PUT', '/user/password', { current_password, password, password_confirmation })
 ```

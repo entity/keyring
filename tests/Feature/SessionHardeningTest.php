@@ -88,6 +88,7 @@ dataset('session rotations', [
     'a password change that keeps other sessions' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1', 'sign_out_others' => false]],
     'a step-up' => ['postJson', '/confirm/password', ['password' => 'password']],
     'signing out everywhere else' => ['deleteJson', '/user/devices', []],
+    'signing out other sessions' => ['deleteJson', '/user/sessions', []],
 ]);
 
 it('stops the old session id working after :dataset, and keeps the user signed in', function (string $method, string $uri, array $data) {
@@ -155,6 +156,7 @@ it('signs out a copy of a cookie session after :dataset, and keeps the user sign
     'a password change' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1']],
     'a password change that keeps other sessions' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1', 'sign_out_others' => false]],
     'signing out everywhere else' => ['deleteJson', '/user/devices', []],
+    'signing out other sessions' => ['deleteJson', '/user/sessions', []],
 ]);
 
 it('signs out a copy of a cookie session from before a step-up, and keeps the user signed in', function (string $driver) {

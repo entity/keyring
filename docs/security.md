@@ -133,6 +133,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
+- Every change to how someone signs in can end their other sessions. A password reset and a reverted email change end every session. A password change and an applied email change end the others unless told not to (`sign_out_others` on the request, `email_changes.sign_out_others` in the config). Adding or removing an authenticator, or making new recovery codes, ends them when the request asks (`sign_out_others`). And "sign out everywhere else" (`DELETE /user/sessions`) is always registered, whatever features are on.
 - New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
 
 ### Links and Headers
@@ -186,6 +187,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
 | A stated number of sessions per account, and what happens at it | OWASP ASVS 7.1.2 |
 | A command for administrators to end one user's sessions or everyone's | OWASP ASVS 7.4.5 |
+| The option to end other sessions after any change to a sign-in method | OWASP ASVS 7.4.3 |
 | An idle and an absolute timeout on every session, kept on the server, with a longer idle one for "remember me" as a stated decision | OWASP ASVS 7.3.1 and 7.3.2, and OWASP's Session Management Cheat Sheet |
 | A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 

@@ -45,6 +45,7 @@ With devices on, Keyring sets its cookie on sign in, offers "don't ask again on 
 | `GET` | `/user/devices` | `keyring.devices.index` | `auth:{guard}` | Lists the user's devices as JSON. |
 | `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
 | `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
+| `DELETE` | `/user/sessions` | `keyring.sessions.destroy-others` | `auth:{guard}`, `changes_middleware` | The same, and there whether or not devices are on. |
 | `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
 | `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, `keyring` limiter | Signs the device out. |
 
@@ -190,15 +191,20 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 `DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::signOutEverywhere()`, which returns how many sessions it revoked, and `rotate()`, which gives the current session its new ID:
+`DELETE /user/devices` and `DELETE /user/sessions` are the same thing under two names. The second is registered whether or not `Features::devices()` is on, so "sign out everywhere else" is always there to offer. Either one signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::signOutOthers()`, which returns how many sessions it revoked and dispatches `SessionsRevoked`. It's `signOutEverywhere()` with the current session left out, then `rotate()`, which gives the current session its new ID:
 
 ```php
 use Keyring\Sessions\Sessions;
 
+app(Sessions::class)->signOutOthers($request, $user);
+
+// Or step by step.
 app(Sessions::class)->signOutEverywhere($user, except: app(Sessions::class)->current($request)?->id);
 
 app(Sessions::class)->rotate($request);
 ```
+
+A user can also ask for this [along with adding or removing a sign-in method](authenticators.md#signing-out-other-sessions), and a [password change](protected-changes.md#changing-the-password) does it unless told not to.
 
 `rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one. Keyring calls it after every step-up too, and a browser that signs in while it's already signed in has the session it was on revoked, so on any driver a copy of the session from before is signed out on its next request.
 

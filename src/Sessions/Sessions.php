@@ -17,6 +17,7 @@ use Keyring\Changes\PendingEmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
+use Keyring\Events\SessionsRevoked;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
@@ -453,6 +454,22 @@ class Sessions
         if ($user instanceof Model) {
             $this->emailChanges->cancel($user);
         }
+
+        return $count;
+    }
+
+    /**
+     * Sign the user out everywhere but here, and give this session a new ID,
+     * so someone who copied its cookie doesn't get to stay either. Returns
+     * how many sessions ended.
+     */
+    public function signOutOthers(Request $request, Authenticatable $user): int
+    {
+        $count = $this->signOutEverywhere($user, except: $this->current($request)?->id);
+
+        $this->rotate($request);
+
+        SessionsRevoked::dispatch($user, $count);
 
         return $count;
     }

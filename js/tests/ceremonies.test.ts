@@ -156,6 +156,26 @@ describe('enrolling', () => {
     expect(error.errors.password).toEqual(['Enter your password'])
     expect(requests[0]).toMatchObject({ method: 'DELETE', url: '/user/authenticators/a1', body: undefined })
   })
+
+  test('asks for the other sessions to end when removing, with or without the password', async () => {
+    await removeAuthenticator('a1', undefined, { signOutOthers: true })
+    await removeAuthenticator('a1', 'secret', { signOutOthers: false })
+    await removeAuthenticator('a1', 'secret')
+
+    expect(requests.map(request => request.body)).toEqual([
+      { sign_out_others: true },
+      { password: 'secret', sign_out_others: false },
+      { password: 'secret' },
+    ])
+  })
+
+  test('asks for the other sessions to end when adding', async () => {
+    answers.push({ status: 200, body: { factor: 'recovery', enrollment: { codes: ['a'] } } }, { status: 200, body: { authenticator: { id: 'r1' } } })
+
+    await enroll('recovery', { sign_out_others: true })
+
+    expect(requests[1]).toMatchObject({ method: 'POST', url: '/user/authenticators/recovery/confirm', body: { sign_out_others: true } })
+  })
 })
 
 test('base64url decoding accepts what the server sends', () => {
