@@ -73,6 +73,22 @@ class InstallCommand extends Command
     ];
 
     /**
+     * The risk signals the provider starts with, and the feature each reads
+     * from. One whose feature is off is left commented out, there to turn on
+     * with it. They need no network call and nothing the app hasn't got, and
+     * their scores can't add up to a refused sign in for a user with only a
+     * password. The rest are in the provider commented out, each with what
+     * it needs.
+     */
+    protected const array SIGNALS = [
+        'SessionFingerprintChanged' => null,
+        'RepeatedFactorFailures' => 'security-log',
+        'SuccessAfterFailures' => 'security-log',
+        'NewDevice' => 'devices',
+        'InactiveAccount' => 'devices',
+    ];
+
+    /**
      * Where users are sent to set up a second factor, as the Quick Start
      * names the settings page.
      */
@@ -129,7 +145,7 @@ class InstallCommand extends Command
 
         if ($writesProvider) {
             $files->ensureDirectoryExists(dirname($provider));
-            $files->put($provider, $this->provider($files, $factors, $this->emails($files), $enrolled));
+            $files->put($provider, $this->provider($files, $factors, $this->emails($files), $enrolled, $features));
         } else {
             $this->components->warn("Skipped {$provider}, it already exists.");
         }
@@ -304,12 +320,14 @@ class InstallCommand extends Command
 
     /**
      * The provider with only the chosen sign-in methods, the middleware that
-     * makes everyone set up a second factor when that was asked for, and the
-     * security notices left commented when they weren't wanted.
+     * makes everyone set up a second factor when that was asked for, the
+     * risk signals the features can feed, and the security notices left
+     * commented when they weren't wanted.
      *
      * @param  list<string>  $factors
+     * @param  list<string>  $features
      */
-    protected function provider(Filesystem $files, array $factors, bool $emails, bool $enrolled): string
+    protected function provider(Filesystem $files, array $factors, bool $emails, bool $enrolled, array $features = self::FEATURES): string
     {
         $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
 
@@ -328,7 +346,22 @@ class InstallCommand extends Command
             },
         );
 
-        return $this->withNotices($files, $this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $emails);
+        return $this->withNotices($files, $this->withSignals($this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $features), $emails);
+    }
+
+    /**
+     * Comment out each risk signal whose feature is off: it would find
+     * nothing, and it's there to turn on with the feature.
+     *
+     * @param  list<string>  $features
+     */
+    protected function withSignals(string $provider, array $features): string
+    {
+        $off = array_keys(array_filter(self::SIGNALS, fn (?string $feature) => $feature !== null && ! in_array($feature, $features, true)));
+
+        return $off === []
+            ? $provider
+            : (string) preg_replace('/^( +)(Signals\\\\(?:'.implode('|', $off).')::class,)$/m', '$1// $2', $provider);
     }
 
     /**

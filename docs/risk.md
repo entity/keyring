@@ -17,16 +17,35 @@
 
 Risk signals look for things that make a sign in or session suspicious: a new device, a new country, a session cookie turning up in another browser. Each signal that fires adds a score. The scores add up (capped at 100) to a **level**, and you decide what to do at each level.
 
-Risk is off until you pick signals in your `KeyringServiceProvider`:
+The signals are picked in your `KeyringServiceProvider`. The one `keyring:install` publishes starts with those that make no network call and need nothing your app hasn't got, each one on only when the feature it reads from is:
 
 ```php
-use Keyring\Risk\Signals\NewDevice;
-use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Risk\Signals;
 
-Keyring::risk()->signals([NewDevice::class, SessionFingerprintChanged::class]);
+Keyring::risk()->signals([
+    Signals\SessionFingerprintChanged::class,
+    // These two read the security log: Features::securityLog().
+    Signals\RepeatedFactorFailures::class,
+    Signals\SuccessAfterFailures::class,
+    // These two go by an account's devices: Features::devices().
+    Signals\NewDevice::class,
+    Signals\InactiveAccount::class,
+    // Signals\RecentlyChangedRecovery::class,
+    // Signals\BreachedPassword::class,
+    // Signals\NewCountry::class,
+    // Signals\ImpossibleTravel::class,
+]);
 ```
 
-Once signals are picked, Keyring responds to them as shown below unless you set your own responses. Without a [locator](devices-and-sessions.md#locations), the location signals never fire. The device signals and `InactiveAccount` need [`Features::devices()`](devices-and-sessions.md), and `RepeatedFactorFailures` and `SuccessAfterFailures` need [`Features::securityLog()`](security-log-and-emails.md).
+With the installer's default features that is `SessionFingerprintChanged`, `RepeatedFactorFailures` and `SuccessAfterFailures`; `NewDevice` and `InactiveAccount` are written commented out until you turn on [`Features::devices()`](devices-and-sessions.md). The other four stay off until you turn them on yourself:
+
+- `BreachedPassword` makes a network call at every sign in, and [holds a user whose password it finds](#requiring-a-new-password) until they choose another.
+- `NewCountry` and `ImpossibleTravel` need a [locator](devices-and-sessions.md#locations), and never fire without one.
+- `RecentlyChangedRecovery` needs `Features::emailChanges()`. It's left off because of what the scores add up to, below.
+
+Keyring responds to what the signals find [as shown below](#responding-to-risk) unless you set your own responses. The starting set is chosen so that those responses can't keep out a user who has only a password. A step-up asks for a second factor from a user who has one and does nothing to one who hasn't, and the signals that can fire for such a user (`NewDevice`, `InactiveAccount` and `SuccessAfterFailures`) add up to 75, short of the 90 at which a sign in is refused. `RepeatedFactorFailures` only counts failures that follow a correct password, so it takes someone who knows the password to raise it. Adding `RecentlyChangedRecovery`, or raising a score, can take a password-only user past 90: check the sums when you change the list.
+
+An app that doesn't use the published provider has no signals until it calls `Keyring::risk()->signals([...])`.
 
 ## Built-in Signals
 
@@ -42,7 +61,7 @@ In `Keyring\Risk\Signals`:
 | `InactiveAccount` | The account last signed in 90 days ago or more (the `after` option), and none of its sessions has been used since. | 30 | login |
 | `SuccessAfterFailures` | The first factor was right after five or more failed attempts on the account (the `threshold` option) in the last hour (`within`), counted since it last signed in. | 30 | login |
 | `SessionFingerprintChanged` | A signed-in session now comes from a different browser or platform than the one it was last seen in. IP changes alone don't count. | 60 | every request |
-| `BreachedPassword` | The password just used appears in a public breach list. It makes a network call at sign in. Whatever it scores, Keyring's own response to it [holds the user until they choose a new password](#requiring-a-new-password). | 40 | login |
+| `BreachedPassword` | The password just used appears in a public breach list. It makes a network call at sign in, so the published provider leaves it off. Whatever it scores, Keyring's own response to it [holds the user until they choose a new password](#requiring-a-new-password). | 40 | login |
 
 `SessionFingerprintChanged` compares with the browser the session was last seen in, and acts on each change once. A cookie used by two browsers at once flips back and forth, so with the default response the owner is asked to verify again, and emailed, on every switch. To end such a session instead, have [your responder](#actions) answer `Action::reauthenticate()` at `Checkpoint::Request`.
 
