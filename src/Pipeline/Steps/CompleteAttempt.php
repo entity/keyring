@@ -7,6 +7,7 @@ namespace Keyring\Pipeline\Steps;
 use Closure;
 use Illuminate\Support\Facades\Log;
 use Keyring\Enums\Purpose;
+use Keyring\Events\VerificationRefused;
 use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\SignIn;
@@ -49,6 +50,7 @@ class CompleteAttempt
 
         if ($skipped !== []) {
             Log::error('Keyring refused to complete a verification because these steps did not run before it: '.implode(', ', $skipped));
+            VerificationRefused::dispatch($attempt, $context->factor->key(), $skipped);
 
             return $context->fail();
         }
@@ -69,7 +71,7 @@ class CompleteAttempt
      * for this request. A step taken out with dangerouslyReplace() or
      * dangerouslyRemove() has given up its check.
      *
-     * @return list<string>
+     * @return list<class-string>
      */
     protected function skippedChecks(Context $context): array
     {

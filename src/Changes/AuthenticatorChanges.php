@@ -11,6 +11,7 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
+use Keyring\Events\AuthenticatorRemovalRefused;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Factors\RecoveryCodes;
@@ -109,8 +110,13 @@ class AuthenticatorChanges
      */
     public function remove(Authenticatable&Model $user, string $id, #[\SensitiveParameter] ?string $password = null): Authenticator
     {
-        $removed = RowLock::hold($user, function () use ($user, $id, $password) {
-            $authenticator = $this->find($user, $id);
+        [$authenticator, $removed] = RowLock::hold($user, function () use ($user, $id, $password) {
+            $authenticator = $this->owned($user, $id);
+
+            if ($authenticator === null) {
+                return [null, false];
+            }
+
             $keyring = $this->keyring->for($user);
             $remaining = $keyring->without($authenticator);
 
@@ -124,7 +130,7 @@ class AuthenticatorChanges
             $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
 
             if (! $left->canSignIn() || (! $policy->onlyIfEnrolled && ! $left->canMeet($policy))) {
-                throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
+                return [$authenticator, false];
             }
 
             if ($keyring->hasSecondFactor() && ! $left->hasSecondFactor()) {
@@ -134,12 +140,24 @@ class AuthenticatorChanges
             collect([$authenticator, ...$cascade])->each->delete();
             $this->sessions->distrustDevices($user);
 
-            return $authenticator;
+            return [$authenticator, true];
         });
 
-        AuthenticatorRemoved::dispatch($user, $removed);
+        // Refused out here, once the lock's transaction is over: a log entry
+        // written inside it would be rolled back with it.
+        if ($authenticator === null) {
+            $this->keyring->authenticatorModel()::refuse($user, $id);
+        }
 
-        return $removed;
+        if (! $removed) {
+            AuthenticatorRemovalRefused::dispatch($user, $authenticator);
+
+            throw ValidationException::withMessages(['authenticator' => __('keyring::keyring.last_factor')]);
+        }
+
+        AuthenticatorRemoved::dispatch($user, $authenticator);
+
+        return $authenticator;
     }
 
     /**
@@ -168,14 +186,20 @@ class AuthenticatorChanges
     }
 
     /**
-     * One of the user's authenticators.
+     * One of the user's authenticators. Asking for any other is a 404, and
+     * goes on record.
      */
     public function find(Authenticatable&Model $user, string $id): Authenticator
     {
+        return $this->owned($user, $id) ?? $this->keyring->authenticatorModel()::refuse($user, $id);
+    }
+
+    protected function owned(Authenticatable&Model $user, string $id): ?Authenticator
+    {
         return $this->keyring->authenticatorModel()::query()
             ->ownedBy($user)
-            ->findOrFail($id)
-            ->setRelation('authenticatable', $user);
+            ->find($id)
+            ?->setRelation('authenticatable', $user);
     }
 
     /**

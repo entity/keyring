@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
+use Keyring\Enums\Severity;
 use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Support\Duration;
 
@@ -20,10 +21,12 @@ use Keyring\Support\Duration;
  *
  * @property string $id
  * @property string $type
+ * @property Severity $severity
  * @property string|null $factor
  * @property string|null $device_id
  * @property string|null $ip
  * @property string|null $user_agent
+ * @property string|null $request_id The same for every entry one request wrote
  * @property array<string, mixed>|null $meta
  * @property CarbonInterface|null $seen_at
  * @property CarbonInterface $created_at
@@ -39,6 +42,7 @@ class SecurityEvent extends Model
     protected function casts(): array
     {
         return [
+            'severity' => Severity::class,
             'meta' => 'array',
             'seen_at' => 'datetime',
             'created_at' => 'datetime',

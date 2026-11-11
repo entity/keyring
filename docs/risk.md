@@ -46,7 +46,7 @@ In `Keyring\Risk\Signals`:
 
 `SessionFingerprintChanged` compares with the browser the session was last seen in, and acts on each change once. A cookie used by two browsers at once flips back and forth, so with the default response the owner is asked to verify again, and emailed, on every switch. To end such a session instead, have [your responder](#actions) answer `Action::reauthenticate()` at `Checkpoint::Request`.
 
-`RepeatedFactorFailures` only counts failures after a correct password. Anyone can type a wrong password for a known email, so counting those would let a stranger raise the owner's risk. It reads the [security log](security-log-and-emails.md), so it does nothing when the log is off or can't be read.
+`RepeatedFactorFailures` only counts failures after a correct password. Anyone can type a wrong password for a known email, so counting those would let a stranger raise the owner's risk. It reads the [security log](security-log-and-emails.md) table, so it does nothing when `Features::securityLog()` is off or the table can't be read.
 
 `InactiveAccount` goes by when the account's devices last signed in. It says nothing about an account Keyring has no sign in on record for, so turning it on doesn't flag every existing user's next sign in. Devices that go unseen for `devices.keep_unseen_for` (a year) are pruned: past that, a returning user's browser is a new device again, which `NewDevice` and the `new_device` email cover.
 

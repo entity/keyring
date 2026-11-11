@@ -6,7 +6,7 @@ namespace Keyring;
 
 /**
  * The features an app turns on in config/keyring.php. Signing in and out,
- * challenges and step-up are always there; everything else is opt-in.
+ * challenges and step-up are always there; everything else is a feature.
  *
  *     'features' => [
  *         Features::registration(),
@@ -100,8 +100,9 @@ final class Features
     }
 
     /**
-     * Record sign ins, failures and changes in keyring_events, and show
-     * "was this you?" alerts at the next sign in.
+     * Record sign ins, failures, refusals and changes in keyring_events, and
+     * show "was this you?" alerts at the next sign in. On by default.
+     * Without it the same events are written to the app's log instead.
      */
     public static function securityLog(): string
     {
