@@ -54,7 +54,7 @@ it('logs a lock for each address it turns away', function () {
         $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.9'])->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong']);
     }
 
-    expect(SecurityEvent::query()->where('type', 'locked_out')->pluck('ip')->all())->toBe(['127.0.0.1', '203.0.113.9']);
+    expect(SecurityEvent::query()->where('type', 'locked_out')->oldest('id')->pluck('ip')->all())->toBe(['127.0.0.1', '203.0.113.9']);
 });
 
 it('keeps only so many failures for names nobody has from one address', function () {

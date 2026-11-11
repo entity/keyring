@@ -45,7 +45,7 @@ it('logs it against the account that asked', function () {
     $this->patchJson(route('keyring.authenticators.update', $theirs->id), ['name' => 'Mine now'])->assertNotFound();
     $this->deleteJson(route('keyring.authenticators.destroy', $theirs->id))->assertNotFound();
 
-    $entries = SecurityEvent::query()->where('type', 'access_refused')->get();
+    $entries = SecurityEvent::query()->where('type', 'access_refused')->oldest('id')->get();
 
     expect($entries)->toHaveCount(2)
         ->and($entries[0]->user()->is($this->user))->toBeTrue()
