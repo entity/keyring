@@ -117,9 +117,8 @@ class PasswordChanges
             throw new LogicException('The password action returned without saving a new password. Throw a ValidationException to refuse it.');
         }
 
-        $changed = blank($before) || ! (
-            ($this->matches($old, $before) && $this->matches($old, $after)) || $this->matches($new, $before)
-        );
+        $same = ($this->matches($old, $before) && $this->matches($old, $after)) || $this->matches($new, $before);
+        $changed = blank($before) || ! $same;
 
         if (! $changed && ! $keepHold) {
             return false;
