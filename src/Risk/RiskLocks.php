@@ -6,6 +6,7 @@ namespace Keyring\Risk;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Temporary sign-in locks placed by risk actions. A password reset lifts
@@ -32,8 +33,13 @@ class RiskLocks
         $this->cache->forget($this->key($user));
     }
 
+    /**
+     * By the model as well as the ID: two user models can have the same IDs,
+     * and a lock on one account isn't a lock on the other. Hashed, so it
+     * stays short whatever the model is called.
+     */
     protected function key(Authenticatable $user): string
     {
-        return 'keyring:risk-lock:'.$user->getAuthIdentifier();
+        return 'keyring:risk-lock:'.sha1(($user instanceof Model ? $user->getMorphClass() : $user::class).'|'.$user->getAuthIdentifier());
     }
 }

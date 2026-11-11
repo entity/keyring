@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Testing\TestResponse;
@@ -191,5 +192,34 @@ describe('email change requests', function () {
 
         Notification::assertSentTimes(ConfirmEmailChange::class, 5);
         Notification::assertSentTimes(EmailChangeNotice::class, 7);
+    });
+});
+
+// The address an unverified account holds is whatever was typed when it
+// registered. Asking for the link again mails it out of the same count the
+// registration form has, not once for every time the form limit allows.
+describe('asking for the verification link again', function () {
+    beforeEach(function () {
+        revealTakenAddresses();
+    });
+
+    it('mails an unverified address five times an hour at most, registering included, and says when that is used up', function () {
+        $this->post('/register', ['name' => 'Someone', 'email' => 'Victim@Example.com', 'password' => 'a much longer passphrase', 'password_confirmation' => 'a much longer passphrase'])
+            ->assertSessionHasNoErrors();
+        $user = User::query()->where('email', 'victim@example.com')->sole();
+
+        foreach (range(1, 8) as $ask) {
+            $this->travel(2)->minutes();
+            $response = $this->actingAs($user)->postJson(route('verification.send'));
+
+            $ask <= 4 ? $response->assertOk() : $response->assertStatus(429)->assertJsonValidationErrors('email');
+        }
+
+        Notification::assertSentToTimes($user, VerifyEmail::class, 5);
+
+        $this->travel(61)->minutes();
+        $this->actingAs($user)->postJson(route('verification.send'))->assertOk();
+
+        Notification::assertSentToTimes($user, VerifyEmail::class, 6);
     });
 });

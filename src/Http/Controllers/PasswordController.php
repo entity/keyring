@@ -46,6 +46,7 @@ class PasswordController
             fn () => $updater->update($user, PasswordRules::normalizeInput(Input::all($request))),
             currentSession: $sessions->current($request)?->id,
             signOutOthers: $request->boolean('sign_out_others', true),
+            current: is_string($current = $request->input('current_password')) ? $current : null,
         );
 
         $sessions->rotate($request);

@@ -19,6 +19,16 @@ class AccountLimit extends Limit
     /** How many lockouts in a day it takes for the next lock to hold until the limits are cleared. */
     public ?int $holdAfter = null;
 
+    /** Whether it stands in for an account: the name it counts under found none. */
+    public bool $unowned = false;
+
+    public function unowned(bool $unowned = true): static
+    {
+        $this->unowned = $unowned;
+
+        return $this;
+    }
+
     public function quietly(bool $quiet = true): static
     {
         $this->quiet = $quiet;

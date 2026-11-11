@@ -76,6 +76,10 @@ it('drops a confirmation that started under another guard', function () {
 
     config(['auth.defaults.guard' => 'web', 'keyring.guard' => 'web']);
 
+    // The staff session's record isn't this user's, and would end the
+    // session before the confirmation is looked at. Leave only that.
+    session()->forget(Sessions::KEY);
+
     $this->actingAs($this->user, 'web')
         ->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])
         ->assertRedirect(route('keyring.confirm.challenge'))

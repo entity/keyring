@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Validation\UncompromisedVerifier;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Route;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Severity;
+use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordChangeRequired;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
@@ -95,6 +97,53 @@ it('holds a user on the change-password page until they choose a new password', 
     expect(Keyring::requiresPasswordChange($this->user))->toBeFalse()
         ->and(PasswordHold::query()->exists())->toBeFalse();
     $this->get('/home')->assertOk();
+});
+
+// A new hash of the same password is a different string, so the hash
+// changing says nothing about the password.
+it('keeps the hold when the password they were held for is saved again as the new one', function () {
+    Event::fake([PasswordChanged::class]);
+    $this->user->forceFill(['password' => Hash::make('a much longer passphrase 1')])->saveQuietly();
+    Keyring::requirePasswordChange($this->user);
+    signInWithPassword('a much longer passphrase 1');
+
+    $this->putJson(route('user-password.update'), [
+        'current_password' => 'a much longer passphrase 1',
+        'password' => 'a much longer passphrase 1',
+        'password_confirmation' => 'a much longer passphrase 1',
+    ])->assertUnprocessable()->assertJsonValidationErrors(['password' => __('keyring::keyring.password_unchanged')]);
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeTrue();
+    Event::assertNotDispatched(PasswordChanged::class);
+    $this->get('/home')->assertRedirect('/settings/password');
+
+    chooseNewPassword('a much longer passphrase 1', 'another passphrase altogether');
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
+    Event::assertDispatchedTimes(PasswordChanged::class, 1);
+});
+
+it('keeps the hold through a reset to the same password, without telling the link\'s holder it was the same', function () {
+    $this->user->forceFill(['password' => Hash::make('a much longer passphrase 1')])->saveQuietly();
+    Keyring::requirePasswordChange($this->user);
+
+    $reset = fn (string $password) => $this->post(route('password.update'), [
+        'token' => Password::broker()->createToken($this->user),
+        'email' => 'taylor@example.com',
+        'password' => $password,
+        'password_confirmation' => $password,
+    ]);
+
+    // Answered like any reset: whoever holds the link learns nothing of the
+    // password it replaced.
+    $reset('a much longer passphrase 1')->assertSessionHasNoErrors()->assertRedirect(route('login'));
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeTrue();
+
+    $this->travel(2)->minutes();
+    $reset('another passphrase altogether')->assertSessionHasNoErrors();
+
+    expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
 });
 
 it('holds one hold per user however often evidence turns up', function () {

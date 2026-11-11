@@ -15,7 +15,8 @@ return new class extends Migration
     {
         Schema::create('keyring_sessions', function (Blueprint $table) {
             $table->string('id', 64)->primary();
-            $table->string('user_id')->index();
+            $table->string('user_id');
+            $table->string('user_type');
             $table->string('guard');
             $table->string('device_id', 26)->nullable()->index();
             $table->unsignedTinyInteger('assurance')->default(0);
@@ -28,6 +29,8 @@ return new class extends Migration
             $table->string('replaced_by', 64)->nullable();
             $table->unsignedInteger('replaced_at')->nullable();
             $table->boolean('remembered')->default(false);
+
+            $table->index(['user_type', 'user_id']);
         });
     }
 

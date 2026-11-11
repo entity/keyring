@@ -8,6 +8,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -91,7 +92,16 @@ class DeviceManager
             $device->trusted_until = Duration::fromNow($for);
         }
 
-        $device->save();
+        try {
+            // In a transaction of its own, so a refused insert leaves one
+            // the caller has open usable.
+            $device->getConnection()->transaction(fn () => $device->save());
+        } catch (UniqueConstraintViolationException $e) {
+            // Two sign ins at once from a browser the account hadn't used,
+            // carrying the same cookie: the other stored the device first,
+            // and this one carries on with it.
+            $device = ($device->exists ? null : $this->query($user)->where('token_hash', $device->token_hash)->first()) ?? throw $e;
+        }
 
         if ($device->wasRecentlyCreated) {
             $this->forgetOldest($user, $device);

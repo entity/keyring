@@ -32,12 +32,19 @@ class ChallengeController
 {
     use RespondsWithStatus;
 
+    // A route keeps its controller once it has made one, and in a worker
+    // that serves many requests that can be longer than a request lasts.
+    // These hold the session they were made for, or reach something that
+    // does, so they're asked of the app handling the request each time.
+    protected AttemptStore $attempts { get => app(AttemptStore::class); }
+
+    protected StepUp $stepUp { get => app(StepUp::class); }
+
+    protected Verifier $verifier { get => app(Verifier::class); }
+
     public function __construct(
         protected KeyringManager $keyring,
-        protected AttemptStore $attempts,
-        protected StepUp $stepUp,
         protected Throttle $throttle,
-        protected Verifier $verifier,
     ) {}
 
     public function show(Request $request, ?string $factor = null): mixed
@@ -140,7 +147,7 @@ class ChallengeController
 
         $authenticator = $this->authenticatorFor($request, $attempt, $factor->key()) ?? abort(404);
 
-        $this->throttle->sending($factor->key(), $attempt->userId);
+        $this->throttle->sending($factor->key(), $attempt->user());
 
         $factor->send($attempt, $authenticator);
 

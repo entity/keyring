@@ -164,6 +164,10 @@ class Ceremonies
                 return null;
             }
 
+            if ($attested && $this->claimsMoreThanSigned($credential->response->attestationObject)) {
+                return null;
+            }
+
             $record = AuthenticatorAttestationResponseValidator::create($this->steps($attested)->creationCeremony())
                 ->check($credential->response, $options, $this->relyingPartyId());
 
@@ -443,6 +447,23 @@ class Ceremonies
         return $aaguid !== null
             && ($profile->aaguids === null || in_array($aaguid->toRfc4122(), $profile->aaguids, true))
             && app(Attestation::class)->verifies($attestation->attStmt, $aaguid);
+    }
+
+    /**
+     * Whether an attested registration says something about the key that its
+     * statement doesn't sign. A "packed" statement signs all of the
+     * authenticator data. A "fido-u2f" one signs the credential and leaves
+     * out the flags: that the user was verified, that the key may sync, that
+     * it has. A U2F key sets none of them, so one that arrives set was put
+     * there on the way, and is what the key would be trusted for from then
+     * on.
+     */
+    protected function claimsMoreThanSigned(AttestationObject $attestation): bool
+    {
+        $data = $attestation->authData;
+
+        return $attestation->attStmt->fmt === 'fido-u2f'
+            && ($data->isUserVerified() || $data->isBackupEligible() || $data->isBackedUp());
     }
 
     protected function steps(bool $attested = false): CeremonyStepManagerFactory

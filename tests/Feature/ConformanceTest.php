@@ -224,6 +224,35 @@ class ConformanceTest extends TestCase
         ];
     }
 
+    public function test_the_suite_fails_when_a_password_hash_takes_longer_than_the_timebox(): void
+    {
+        // Shorter than any hash at the cost production would run.
+        config(['keyring.timebox' => '1ms']);
+
+        try {
+            $this->test_keyring_holds_a_refusal_for_longer_than_a_password_hash_takes();
+        } catch (AssertionFailedError $failure) {
+            $this->assertStringContainsString('keyring.timebox is 1ms', $failure->getMessage());
+
+            return;
+        }
+
+        $this->fail('A timebox shorter than a password hash went unnoticed.');
+    }
+
+    public function test_the_suite_times_a_hash_at_the_cost_production_runs_not_the_test_suites(): void
+    {
+        // What phpunit.xml gives the tests, and a new app's own setting.
+        config(['hashing.bcrypt.rounds' => 4]);
+        $this->assertSame(['rounds' => 12], $this->keyringProductionHashOptions());
+
+        config(['hashing.bcrypt.rounds' => 14]);
+        $this->assertSame(['rounds' => 14], $this->keyringProductionHashOptions());
+
+        config(['hashing.driver' => 'argon2id']);
+        $this->assertSame([], $this->keyringProductionHashOptions());
+    }
+
     public function test_the_suite_reads_the_throttle_of_the_broker_keyring_uses(): void
     {
         // The default broker has none, and it isn't the one that sends Keyring's links.

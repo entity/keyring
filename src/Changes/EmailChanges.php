@@ -88,8 +88,21 @@ class EmailChanges
         $signedInAt = $this->signedInAt($request);
         $needsCurrent = ! $this->sessionProvedEstablishedSecondFactor($user, $signedInAt);
 
-        $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, $current, $tokens, $needsCurrent, $signedInAt) {
+        $change = $this->keyring->pendingChangeModel()::query()->getConnection()->transaction(function () use ($user, $email, &$current, $tokens, $needsCurrent, $signedInAt, $request) {
             $this->cancel($user);
+
+            // After the change rows and before the user's, the order a
+            // confirmation and an undo take them in. An undo ends every
+            // session once it has closed the changes it found: a request
+            // that was already under way is refused here, and one that got
+            // in first has saved its change where the undo's last look
+            // closes it. The address is the row's, not the one this request
+            // loaded before an undo moved it.
+            $current = (string) $this->sessions->stillSignedIn($request, $user)->getAttribute($this->attribute());
+
+            if ($email === $this->keyring->normalizeUsername($current)) {
+                return null;
+            }
 
             $change = new ($this->keyring->pendingChangeModel())([
                 'attribute' => $this->attribute(),
@@ -104,6 +117,10 @@ class EmailChanges
 
             return tap($change->authenticatable()->associate($user))->save();
         });
+
+        if ($change === null) {
+            return null;
+        }
 
         // After the response, so timing doesn't give away which case it was.
         defer(function () use ($change, $email, $current, $tokens, $needsCurrent, $taken) {
@@ -217,7 +234,9 @@ class EmailChanges
 
             $change->forceFill(['reverted_at' => now()])->save();
 
-            $this->removeAuthenticatorsAddedSince($user, $this->unestablishedSince($change));
+            // As the account now is: what's removed is announced to the
+            // address that was just put back, not the one taken off.
+            $this->removeAuthenticatorsAddedSince($change->owner() ?? $user, $this->unestablishedSince($change));
 
             return true;
         });
@@ -226,6 +245,14 @@ class EmailChanges
 
         if ($reverted && ($user = $change?->owner())) {
             $this->sessions->signOutEverywhere($user);
+
+            // Once more, now no session is left to make another. A request
+            // that was under way while the undo ran either waited for the
+            // sign-out and was refused, or saved what it was saving before
+            // it: a later change, or a sign-in method, that the first look
+            // was too early to find.
+            $this->closeLaterChanges($user, $change);
+            $this->removeAuthenticatorsAddedSince($user, $this->unestablishedSince($change));
 
             EmailChangeReverted::dispatch($user, $change);
         }

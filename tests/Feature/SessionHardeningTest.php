@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
+use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
@@ -20,6 +21,7 @@ use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SingleSignOn;
@@ -327,6 +329,33 @@ it('keeps a revoked session revoked after the cache is cleared', function () {
 
     $this->get('/home')->assertRedirect('/login');
 });
+
+// A store that evicts under memory pressure drops keys one at a time. That a
+// session ended is kept in its record and in a key beside it, so losing
+// either leaves it ended.
+it('keeps a session ended when the cache store loses one of the keys that say so', function (string $lost) {
+    config(['keyring.sessions.driver' => 'cache']);
+    signInWith();
+    $registry = app(SessionRegistry::class);
+    $id = session(Sessions::KEY);
+    $now = now()->getTimestamp();
+
+    $registry->revoke($id);
+    $next = new RegisteredSession('next', (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600);
+    $registry->save($replaced = $next->with(['id' => 'replaced']));
+    $registry->replace('replaced', $next->with(['id' => 'successor']));
+
+    Cache::forget('keyring:sessions:'.$id.$lost);
+    Cache::forget('keyring:sessions:replaced'.$lost);
+
+    expect($registry->find($id)->revokedAt)->not->toBeNull()
+        ->and($registry->find('replaced')->replacedBy)->toBe('successor')
+        ->and($registry->find('replaced')->isActive($now))->toBeFalse()
+        // A stale copy saved over the record doesn't undo it either.
+        ->and(tap($registry, fn (SessionRegistry $registry) => $registry->save($replaced))->find('replaced')->replacedBy)->toBe('successor');
+
+    $this->get('/home')->assertRedirect('/login');
+})->with(['its revoked marker' => ':revoked', 'its replaced marker' => ':replaced']);
 
 it('does not undo a revocation that lands while a request is being assessed', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);

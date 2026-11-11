@@ -131,7 +131,7 @@ class AuthenticateSession
         return match (true) {
             $session->revokedAt !== null => 'revoked',
             $session->expiresAt <= $now => 'expired',
-            $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
+            ! $session->belongsTo($user) => 'other_user',
             $session->replacedBy !== null => 'replaced',
             $this->sessions->idledOut($session, $now) => 'idle',
             default => null,
@@ -285,12 +285,9 @@ class AuthenticateSession
      */
     protected function reused(Request $request, Authenticatable $user, RegisteredSession $session): Response
     {
-        $current = $this->sessions->latest($session);
-
-        // Already ended some other way: there's nothing left to end.
-        if ($current?->isActive(now()->getTimestamp())) {
-            $this->sessions->registry()->revoke($current->id);
-
+        // Null when it had already ended some other way: there's nothing
+        // left to end.
+        if ($current = $this->sessions->endLatest($user, $session)) {
             RememberMeReused::dispatch($user, $current);
         }
 
@@ -307,6 +304,13 @@ class AuthenticateSession
         $action = $this->risk->enforce($user, $risk, Checkpoint::Request);
 
         if ($action->reauthenticate || $action->deny || $action->revokeSessions) {
+            return $this->signOut($request, 'risk');
+        }
+
+        // A step-up forgets what the session proved, which is the level it
+        // signed in at running out. Where that ends a session, it ends this
+        // one, as it does one "remember me" brings back with nothing proved.
+        if ($action->stepUp && $this->assurance->endsOnLapse()) {
             return $this->signOut($request, 'risk');
         }
 
@@ -340,8 +344,12 @@ class AuthenticateSession
         // "remember me" would carry on, too. Otherwise the same cookies
         // would sign it in again the moment it's let back. A cookie that was
         // used a moment ago stands for the session it was used for.
-        if (in_array($reason, ['not_allowed', 'risk'], true) && ($remembered = $this->sessions->remembered($request)) !== null) {
-            $this->sessions->registry()->revoke(($this->sessions->latest($remembered) ?? $remembered)->id);
+        // Only when it's this account's: the cookie is the browser's to
+        // send, and it may name someone else's.
+        $user = $this->keyring->guard()->user();
+
+        if (in_array($reason, ['not_allowed', 'risk'], true) && $user !== null && ($remembered = $this->sessions->remembered($request))?->belongsTo($user)) {
+            $this->sessions->endLatest($user, $remembered);
         }
 
         if ($user = $this->signIn->out($request, onlyThisBrowser: true)) {

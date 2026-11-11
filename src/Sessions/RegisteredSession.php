@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Keyring\Sessions;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Keyring\Enums\Assurance;
 
@@ -17,12 +19,17 @@ use Keyring\Enums\Assurance;
  *
  * A remembered session is one "remember me" may bring back once Laravel's
  * own session has gone, so it's allowed to sit unused for longer.
+ *
+ * Whose it is takes the model as well as the ID (userType is the user's
+ * morph class), as everything else Keyring keeps for a user does: two user
+ * models can have the same IDs.
  */
 final readonly class RegisteredSession
 {
     public function __construct(
         public string $id,
         public string $userId,
+        public string $userType,
         public string $guard,
         public ?string $deviceId,
         public Assurance $assurance,
@@ -36,6 +43,22 @@ final readonly class RegisteredSession
         public ?int $replacedAt = null,
         public bool $remembered = false,
     ) {}
+
+    /**
+     * Whether this is a session of that user: the same model and the same ID.
+     */
+    public function belongsTo(Authenticatable $user): bool
+    {
+        return $this->userId === (string) $user->getAuthIdentifier() && $this->userType === self::typeOf($user);
+    }
+
+    /**
+     * What a user's records carry as userType.
+     */
+    public static function typeOf(Authenticatable $user): string
+    {
+        return $user instanceof Model ? $user->getMorphClass() : $user::class;
+    }
 
     public function isActive(int $now): bool
     {
@@ -59,6 +82,7 @@ final readonly class RegisteredSession
         return [
             'id' => $this->id,
             'user_id' => $this->userId,
+            'user_type' => $this->userType,
             'guard' => $this->guard,
             'device_id' => $this->deviceId,
             'assurance' => $this->assurance->value,
@@ -95,6 +119,7 @@ final readonly class RegisteredSession
         return new self(
             id: $data['id'],
             userId: (string) $data['user_id'],
+            userType: $data['user_type'],
             guard: $data['guard'],
             deviceId: $data['device_id'],
             assurance: Assurance::from((int) $data['assurance']),

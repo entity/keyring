@@ -177,6 +177,11 @@ class InstallCommand extends Command
                 $writesProvider => 'Nothing makes users set up a second factor. To require one, see "Requiring a Second Factor" in the "Policies" docs',
                 default => null,
             },
+            // A config that was kept isn't changed, so it may not have what
+            // the provider just written needs.
+            $writesProvider && $factors !== [] && ! in_array(Features::manageAuthenticators(), $features, true)
+                ? 'Add <comment>Features::manageAuthenticators()</comment> to the features in <comment>config/keyring.php</comment>: without it nobody can set up the sign-in methods you picked'.($enrolled ? ', and everyone is sent to set one up' : '')
+                : null,
             $writesProvider && in_array('email-codes', $factors, true) ? 'Email codes are an extra step at sign in, not a second factor: a password and an emailed code is still AAL1. See "Email Codes" in the "Factors" docs' : null,
             'Add features later by uncommenting them in <comment>config/keyring.php</comment>',
         ]));

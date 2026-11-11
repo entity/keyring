@@ -15,6 +15,7 @@ use Keyring\Http\Requests\VerifyEmailRequest;
 use Keyring\KeyringManager;
 use Keyring\Login\VerificationLink;
 use Keyring\Support\Input;
+use Keyring\Support\Throttle;
 
 class EmailVerificationController
 {
@@ -83,7 +84,7 @@ class EmailVerificationController
         return $this->keyring->response(VerifiedResponse::class, justNow: true);
     }
 
-    public function send(Request $request): mixed
+    public function send(Request $request, Throttle $throttle): mixed
     {
         if ($this->verified($request)) {
             return $this->keyring->response(VerifiedResponse::class);
@@ -92,6 +93,16 @@ class EmailVerificationController
         $user = $this->keyring->user();
 
         if ($user instanceof MustVerifyEmail) {
+            // The address is whatever was typed at registration, and nobody
+            // has shown it's theirs. It's mailed no more often from here
+            // than from the registration form, and out of the same count.
+            // The account is its own, so it's told when that's used up.
+            $address = $this->keyring->normalizeUsername($user->getEmailForVerification());
+
+            if (($wait = $throttle->notifying('registration', 'mail:'.$address)) !== null) {
+                throw Throttle::exception($this->keyring->email(), $wait);
+            }
+
             $user->sendEmailVerificationNotification();
         }
 

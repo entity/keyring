@@ -56,13 +56,17 @@ function outcomes(array $results, mixed $value): int
  * @param  list<list<string|int>>  $operations  worker.php arguments
  * @param  (Closure(): void)|null  $meanwhile  work to finish, holding the lock, before letting go
  * @param  int|null  $waiting  how many of them should get as far as the lock, when the rest are turned away before it
+ * @param  (Closure(): void)|null  $hold  what to hold in place of the row's lock, inside the transaction
  * @return list<mixed>
  */
-function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null): array
+function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null, ?Closure $hold = null): array
 {
     $connection = $locked->getConnection();
     $connection->beginTransaction();
-    $locked->newQuery()->lockForUpdate()->find($locked->getKey());
+
+    // The row, unless what the operations wait on is something else: a
+    // row this side has stored and not yet committed, say.
+    $hold === null ? $locked->newQuery()->lockForUpdate()->find($locked->getKey()) : $hold();
 
     $env = ['DB_CONNECTION' => $connection->getName(), 'DB_DATABASE' => $connection->getDatabaseName()];
 

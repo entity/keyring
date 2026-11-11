@@ -89,14 +89,20 @@ class PendingChange extends Model
      * be registered and leave a revert nowhere to put the address back.
      * Folding too much only keeps a similar address back while the
      * reservation lasts.
+     *
+     * Collations don't agree on "ß": MySQL's utf8mb4_general_ci takes it for
+     * "s", and utf8mb4_unicode_ci and utf8mb4_0900_ai_ci for "ss". So a run
+     * of "s" folds to one, and "klauß", "klaus" and "klauss" are all found
+     * as each other.
      */
     public static function fold(string $value): string
     {
         $value = Keyring::normalizeUsername($value);
         $value = Normalizer::normalize($value, Normalizer::NFKD) ?: $value;
         $value = preg_replace('/[\p{M}\p{C}\s]+/u', '', $value) ?? $value;
+        $value = Str::lower(Str::transliterate($value, ''));
 
-        return Str::lower(Str::transliterate($value, ''));
+        return preg_replace('/s{2,}/', 's', $value) ?? $value;
     }
 
     protected function casts(): array

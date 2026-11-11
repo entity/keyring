@@ -82,7 +82,7 @@ class Throttle
      */
     public function limitsFor(Factor $factor, Request $request, ?Attempt $attempt): array
     {
-        $typed = $attempt === null && $factor instanceof PrimaryFactor ? $this->typedUsername($request) : '';
+        $typed = $attempt === null && $this->identifiesByUsername($factor) ? $this->typedUsername($request) : '';
         $user = $attempt?->user() ?? ($typed === '' ? null : $this->keyring->findUser($request));
 
         $account = match (true) {
@@ -102,10 +102,10 @@ class Throttle
         return [
             SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($factor->key().'|ip|'.$request->ip().($known ? '|account|'.$account : '')),
             ...($typed === '' ? [] : [
-                $this->perMinute($factor, 'typed:'.$typed.$since, $known),
-                ...($consecutive === null ? [] : [NameLimit::of($consecutive->share ?? PHP_INT_MAX, $factor->key(), 'typed:'.$typed.$since, $known)]),
+                $this->perMinute($factor, 'typed:'.$typed, $known),
+                ...($consecutive === null ? [] : [NameLimit::of($consecutive->share ?? PHP_INT_MAX, $factor->key(), 'typed:'.$typed, $known)]),
             ]),
-            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== ''), [
+            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== '')->unowned($user === null), [
                 $this->perMinute($factor, $account.$since, $known),
                 ...($consecutive === null ? [] : [$consecutive]),
             ]),
@@ -224,7 +224,10 @@ class Throttle
      */
     public function failed(array $limits): bool
     {
-        $hold = false;
+        // The account's hold, and the typed name's. The name is only held
+        // for lockouts made under it: holding it for the account's would
+        // tell whoever typed it that another name is the same account's.
+        $hold = $named = false;
 
         foreach ($limits as $limit) {
             $key = $this->key($limit);
@@ -249,7 +252,10 @@ class Throttle
             $this->limiter->hit($this->lock($limit), min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
             $this->limiter->clear($key);
 
-            $hold = $hold || ($limit instanceof AccountLimit && $limit->holdAfter !== null && $lockouts >= $limit->holdAfter);
+            $reached = $limit instanceof AccountLimit && $limit->holdAfter !== null && $lockouts >= $limit->holdAfter;
+
+            $hold = $hold || $reached;
+            $named = $named || ($reached && ! $limit->quiet);
         }
 
         $refused = false;
@@ -257,7 +263,7 @@ class Throttle
         // After the locks, which decide whether to hold. The typed name is
         // held in the cache, where it's counted, for as long as that lasts.
         foreach ($limits as $limit) {
-            if ($limit instanceof NameLimit && $hold) {
+            if ($limit instanceof NameLimit && $named) {
                 $this->limiter->hit($this->lock($limit), $limit->decaySeconds);
             }
 
@@ -376,14 +382,17 @@ class Throttle
      * in, so starting again doesn't buy more, and sign ins, step-ups and
      * enrollments share the count.
      *
+     * Give it the user: an account is its model and its ID, and two user
+     * models can have the same IDs. A bare ID counts under the ID alone.
+     *
      * The key is hashed so it stays short whatever the factor is called and
      * however long the account's ID is: see key().
      *
      * @throws ValidationException
      */
-    public function sending(string $factor, int|string $userId): void
+    public function sending(string $factor, (Authenticatable&Model)|int|string $user): void
     {
-        $key = 'keyring-send:'.sha1($factor.'|'.$userId);
+        $key = 'keyring-send:'.sha1($factor.'|'.($user instanceof Model ? $this->accountOf($user) : $user));
 
         if ($this->limiter->tooManyAttempts($key, config('keyring.limits.codes'))) {
             throw static::exception('code', $this->limiter->availableIn($key));
@@ -492,6 +501,16 @@ class Throttle
         $elsewhere = $known || ! Features::enabled(Features::devices()) ? null : config('keyring.limits.consecutive_elsewhere');
 
         return ConsecutiveLimit::of($user, $factor->key(), $known, $cap === null ? null : (int) $cap, $elsewhere === null ? null : (int) $elsewhere);
+    }
+
+    /**
+     * Whether the factor finds its user by the username field. A passkey
+     * doesn't: it goes by the credential, and a username sent along with
+     * one is nothing to count against the account it names.
+     */
+    protected function identifiesByUsername(Factor $factor): bool
+    {
+        return $factor instanceof PrimaryFactor && array_key_exists($this->keyring->username(), $factor->identificationRules());
     }
 
     protected function typedUsername(Request $request): string

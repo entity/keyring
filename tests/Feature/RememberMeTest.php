@@ -661,6 +661,32 @@ describe('a "remember me" cookie first sent to a route without the session middl
         expect(sessionEndedReasons())->toBe(['risk']);
     });
 
+    // The cookie is the browser's to send. Another account's value in it is
+    // no way to end that account's session.
+    it('ends only its own remembered session, whatever the cookie names', function (Closure $keepOut, string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $abigail = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+        $theirs = rememberedSignIn(email: 'abigail@example.com');
+        $mine = rememberedSignIn();
+        $keepOut($this->user);
+
+        $this->flushSession();
+        browser([...$mine, 'remembered_session' => $theirs['remembered_session']])->get('/home')->assertRedirect('/login');
+
+        expect(app(SessionRegistry::class)->find($theirs['remembered_session'])->revokedAt)->toBeNull()
+            ->and(app(SessionRegistry::class)->forUser($abigail))->toHaveCount(1);
+
+        // Its own is still ended when it's the one named.
+        $this->flushSession();
+        browser($mine)->get('/home')->assertRedirect('/login');
+
+        expect(app(SessionRegistry::class)->find($mine['remembered_session'])->revokedAt)->not->toBeNull();
+    })->with([
+        'a risk lock' => [fn (User $user) => app(RiskLocks::class)->lock($user, 3600)],
+        'the sign-in gate' => [fn (User $user) => Keyring::allowSignInWhen(fn (User $who) => ! $who->is($user))],
+    ])->with(['database', 'cache']);
+
     it('stays refused once the lock is lifted', function () {
         $cookies = rememberedSignIn();
         app(RiskLocks::class)->lock($this->user, 3600);
@@ -1046,7 +1072,7 @@ describe('a "remember me" cookie that has been used', function () {
 
 describe('replacing a session\'s record', function () {
     beforeEach(function () {
-        $this->session = fn (string $id, array $changes = []) => new RegisteredSession($id, (string) $this->user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp())->with($changes);
+        $this->session = fn (string $id, array $changes = []) => new RegisteredSession($id, (string) $this->user->id, $this->user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp())->with($changes);
     });
 
     it('happens once, and keeps only the record that did it', function (string $driver) {

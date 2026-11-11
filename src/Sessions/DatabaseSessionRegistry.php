@@ -133,7 +133,11 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     protected function activeFor(Authenticatable $user): Builder
     {
-        return $this->query()->where('user_id', (string) $user->getAuthIdentifier())->whereNull('revoked_at')->whereNull('replaced_by');
+        return $this->query()
+            ->where('user_type', RegisteredSession::typeOf($user))
+            ->where('user_id', (string) $user->getAuthIdentifier())
+            ->whereNull('revoked_at')
+            ->whereNull('replaced_by');
     }
 
     protected function query(): Builder

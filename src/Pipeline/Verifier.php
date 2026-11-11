@@ -6,14 +6,13 @@ namespace Keyring\Pipeline;
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Pipeline\Pipeline;
-use Illuminate\Support\Timebox;
 use Keyring\Contracts\Responses\AuthenticatedResponse;
 use Keyring\Contracts\Responses\ChallengeResponse;
 use Keyring\Contracts\Responses\FailedResponse;
 use Keyring\Contracts\Responses\LockoutResponse;
 use Keyring\Events\Attempting;
 use Keyring\KeyringManager;
-use Keyring\Support\Duration;
+use Keyring\Support\Refusal;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -35,18 +34,14 @@ class Verifier
         // Around every step, not just the one that checks the proof: what
         // the rate limits read and write, and what listeners do with a
         // failure, differ with whether the account exists and is locked.
-        return $this->container->make(Timebox::class)->call(function (Timebox $timebox) use ($context) {
+        return Refusal::timed(function () use ($context) {
             $context = new Pipeline($this->container)
                 ->send($context)
                 ->through($this->keyring->steps())
                 ->thenReturn();
 
-            if (in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true)) {
-                $timebox->returnEarly();
-            }
-
-            return $context;
-        }, Duration::milliseconds(config('keyring.timebox')) * 1000);
+            return [$context, in_array($context->outcome, [Outcome::Challenge, Outcome::Complete], true)];
+        });
     }
 
     /**

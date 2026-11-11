@@ -62,7 +62,7 @@ it('signs a soft deleted user out but keeps their sign-in methods', function () 
     Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
     $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
     Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
-    $session = new RegisteredSession('kept', (string) $user->id, 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
+    $session = new RegisteredSession('kept', (string) $user->id, $user->getMorphClass(), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp());
     app(SessionRegistry::class)->save($session);
 
     $user->delete();

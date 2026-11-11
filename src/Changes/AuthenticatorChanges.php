@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Keyring\Changes;
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
@@ -42,16 +44,26 @@ class AuthenticatorChanges
      * An emailed code isn't a factor, so it comes with none: there would be
      * nothing for them to recover.
      *
+     * With the request it came in, the session that asked has to still be
+     * signed in when it's saved: one ended while the request ran (an email
+     * change undone, say) adds nothing.
+     *
      * @return list<string>|null
+     *
+     * @throws AuthenticationException
      */
-    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator): ?array
+    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator, ?Request $request = null): ?array
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
         $recoverable = array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
         $recovery = ! $isRecovery && $recoverable && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
-        $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
+        $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery, $request) {
+            if ($request !== null) {
+                $this->sessions->stillSignedIn($request, $user);
+            }
+
             if (! $factor->multiple()) {
                 $replaced = $keyring->of($factor->key())->each->delete();
 
