@@ -3,6 +3,7 @@ import { enroll, removeAuthenticator } from '../src/enroll'
 import { KeyringRequestError } from '../src/http'
 import { endOtherSessions, endSession, listSessions } from '../src/sessions'
 import { createCredential, fromBase64Url, getCredential, toBase64Url } from '../src/webauthn'
+import { standIn } from './browser'
 
 // A browser without the JSON helpers (parse*FromJSON, toJSON), so the
 // conversions Keyring does itself run. Each call to navigator.credentials
@@ -25,13 +26,14 @@ const bytes = (...values: number[]) => Uint8Array.from(values).buffer
 let calls: Array<{ method: string, options: any }> = []
 let requests: Array<{ method: string, url: string, body: any }> = []
 let answers: Array<{ status: number, body: any }> = []
+let restore = () => {}
 
 beforeEach(() => {
   calls = []
   requests = []
   answers = []
 
-  Object.assign(globalThis, {
+  restore = standIn({
     window: globalThis,
     PublicKeyCredential: FakeCredential,
     document: { cookie: 'XSRF-TOKEN=abc%3D' },
@@ -62,11 +64,8 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
-  for (const name of ['window', 'PublicKeyCredential', 'navigator', 'document', 'fetch']) {
-    delete (globalThis as any)[name]
-  }
-})
+// Bun's own fetch and navigator come back, for whichever file runs next.
+afterEach(() => restore())
 
 describe('creating a credential', () => {
   test('turns the base64url fields into bytes, and the result back into json', async () => {

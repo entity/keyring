@@ -55,9 +55,10 @@ function outcomes(array $results, mixed $value): int
  *
  * @param  list<list<string|int>>  $operations  worker.php arguments
  * @param  (Closure(): void)|null  $meanwhile  work to finish, holding the lock, before letting go
+ * @param  int|null  $waiting  how many of them should get as far as the lock, when the rest are turned away before it
  * @return list<mixed>
  */
-function contend(Model $locked, array $operations, ?Closure $meanwhile = null): array
+function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null): array
 {
     $connection = $locked->getConnection();
     $connection->beginTransaction();
@@ -81,9 +82,17 @@ function contend(Model $locked, array $operations, ?Closure $meanwhile = null): 
     // Long enough for an operation that ignores the lock to finish.
     Sleep::usleep(500_000);
 
-    foreach ($workers as $worker) {
-        expect($worker->running())->toBeTrue('An operation ran without waiting for the lock: '.$worker->output().$worker->errorOutput());
+    $running = fn () => count(array_filter($workers, fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->running()));
+
+    // Those turned away before the lock get time to finish. The rest can't.
+    for ($deadline = microtime(true) + 15; $waiting !== null && $running() > $waiting && microtime(true) < $deadline;) {
+        Sleep::usleep(50_000);
     }
+
+    expect($running())->toBe($waiting ?? count($workers), 'An operation ran without waiting for the lock, or one that should have been turned away is waiting for it: '.implode('', array_map(
+        fn (InvokedProcess|FakeInvokedProcess $worker) => $worker->output().$worker->errorOutput(),
+        $workers,
+    )));
 
     if ($meanwhile !== null) {
         $meanwhile();

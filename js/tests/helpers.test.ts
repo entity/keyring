@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { isWebAuthn } from '../src/enroll'
 import { configureRoutes, routes } from '../src/routes'
 import { fromBase64Url, toBase64Url } from '../src/webauthn'
@@ -25,6 +25,12 @@ describe('enrollment', () => {
 })
 
 describe('routes', () => {
+  // The routes are one object for the whole process, so what a test sets
+  // here would still be set for the next test and the next file.
+  const challengeBase = routes.challengeBase
+
+  afterEach(() => configureRoutes({ prefix: '', login: undefined, challengeBase }))
+
   test('follow the server\'s route prefix, however its slashes are written', () => {
     configureRoutes({ prefix: 'account/' })
 
@@ -45,8 +51,6 @@ describe('routes', () => {
     configureRoutes({ prefix: 'account', login: '/sign-in' })
 
     expect(routes.login).toBe('/sign-in')
-
-    configureRoutes({ prefix: '', login: '/login' })
   })
 
   test('follow a changed challenge prefix', () => {

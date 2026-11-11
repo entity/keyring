@@ -39,15 +39,19 @@ class InstallCommand extends Command
     protected const array FEATURES = ['registration', 'reset-passwords', 'email-verification', 'update-passwords', 'security-log'];
 
     /**
-     * Sign-in methods besides the password, and the line each adds to the
-     * provider's Keyring::factors() call. Recovery codes come with any of
-     * them, so losing the only one isn't the end of the account.
+     * Sign-in methods besides the password, and how the lines each adds to
+     * the provider's Keyring::factors() call end. Recovery codes come with
+     * any of them, so losing the only one isn't the end of the account.
+     *
+     * An emailed code is named for what it is: a step at sign in. NIST
+     * SP 800-63B-4 takes email as no authenticator, so a password and a
+     * code is still AAL1, and the provider says so above its line.
      */
     protected const array FACTORS = [
         'totp' => ['Authenticator app', 'Totp::class,'],
         'passkeys' => ['Passkeys', 'WebAuthn::passkeys(),'],
         'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
-        'email-codes' => ['Email codes, as a second factor (the weakest option)', 'EmailCode::asSecondFactor(),'],
+        'email-codes' => ['Email codes, as an extra step at sign in (not a second factor)', 'EmailCode::asSecondFactor(),', 'a password and an emailed code is AAL1.'],
     ];
 
     /**
@@ -100,7 +104,7 @@ class InstallCommand extends Command
         // Nobody could meet it, and every page would send them to set up
         // a sign-in method the app doesn't offer.
         if ($this->option('require-second-factor') && array_intersect($factors, self::SECOND_FACTORS) === []) {
-            $this->components->error('Requiring a second factor needs one users can set up. Add --factor='.implode(', --factor=', self::SECOND_FACTORS).'.');
+            $this->components->error('Requiring a second factor needs one users can set up'.(in_array('email-codes', $factors, true) ? ', and an emailed code isn\'t one' : '').'. Add --factor='.implode(', --factor=', self::SECOND_FACTORS).'.');
 
             return self::FAILURE;
         }
@@ -154,8 +158,18 @@ class InstallCommand extends Command
                 $writesProvider => 'Nothing makes users set up a second factor. To require one, see "Requiring a Second Factor" in the "Policies" docs',
                 default => null,
             },
+            $writesProvider && in_array('email-codes', $factors, true) ? 'Email codes are an extra step at sign in, not a second factor: a password and an emailed code is still AAL1. See "Email Codes" in the "Factors" docs' : null,
             'Add features later in <comment>config/keyring.php</comment>, and sign-in methods and emails in your KeyringServiceProvider',
         ]));
+
+        // What whoever runs the app will want to know before it's live.
+        $this->components->info('Once it\'s running, see "After Installing" in the "Installation" docs.');
+        $this->components->bulletList([
+            'Sessions end after two hours unused. Set <comment>sessions.idle</comment> in <comment>config/keyring.php</comment> to change that',
+            'Run the Laravel scheduler (<comment>schedule:run</comment>): it prunes the security log and other old records every day',
+            'Signed-in routes outside the <comment>web</comment> group need the <comment>keyring.session</comment> middleware',
+            '<comment>php artisan keyring:sign-out</comment> signs one user out everywhere, or everyone with <comment>--all</comment>',
+        ]);
 
         return self::SUCCESS;
     }
@@ -313,9 +327,9 @@ class InstallCommand extends Command
     {
         $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
 
-        foreach (self::FACTORS as $key => [, $line]) {
+        foreach (self::FACTORS as $key => $factor) {
             if (! in_array($key, $factors, true)) {
-                $remove[] = $line;
+                $remove = [...$remove, ...array_slice($factor, 1)];
             }
         }
 

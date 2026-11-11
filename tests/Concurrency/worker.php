@@ -43,7 +43,13 @@ try {
 
             return Keyring::factor('recovery')->verify($attempt, $authenticator, Request::create('/', 'POST', ['code' => $value])) !== null;
         })(),
-        'use-passkey' => (function () use ($id, $value) {
+        'use-passkey', 'answer-challenge' => (function () use ($operation, $id, $value) {
+            // Answered challenges are remembered in the rate limiter's
+            // store. Kept in the database, every side of a race sees it.
+            if ($operation === 'answer-challenge') {
+                config(['cache.limiter' => 'database']);
+            }
+
             $authenticator = Authenticator::findOrFail($id);
             ['options' => $options, 'credential' => $credential] = json_decode($value, true);
             $attempt = Attempt::start(Purpose::Login, $authenticator->user());

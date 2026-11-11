@@ -103,7 +103,7 @@ Signed-out users are sent to the route named `login`.
 'middleware' => ['web', AddSecurityHeaders::class],
 ```
 
-Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\AddSecurityHeaders` sends `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` on every Keyring response, and `Referrer-Policy: no-referrer` on the pages emailed links open. See [Links and Headers](security.md#links-and-headers). Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
+Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\AddSecurityHeaders` sends `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: same-origin` on every Keyring response, and `Referrer-Policy: no-referrer` on the pages emailed links open. It leaves `X-Frame-Options` off a response that already says who may frame it, with a header of its own or a `frame-ancestors` directive, so a middleware listed after it here can allow framing. See [Links and Headers](security.md#links-and-headers). Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
 
 If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring::routes()` where you want them, for example inside your own group:
 
@@ -187,7 +187,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 ],
 ```
 
-`cookie` is the name of the device cookie: `null` is `keyring_device`, with the `__Host-` prefix once your app is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)), and a name you set is used exactly as it is. `cookie_lifetime` is how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
+`cookie` is the name of the device cookie: `null` is `known_device`, with the `__Host-` prefix once your app is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)), and a name you set is used exactly as it is. `cookie_lifetime` is how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
 
 ## Sessions
 
@@ -224,7 +224,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
 | `end_on_lapse` | Whether a session ends when the level it signed in at runs out, where it would otherwise carry on at a lower one. See [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level). |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
-| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `keyring_remember`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
+| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `remembered_session`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 | `remember_grace` | How long after that cookie is used the same browser's other requests, sent with it, are still let in on the same session. Each cookie works once; after this, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. `0` leaves no room at all, so requests a browser sends together end it too. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
@@ -295,7 +295,7 @@ Laravel's check goes through whatever `Illuminate\Contracts\Validation\Uncomprom
 ],
 ```
 
-`levels` are the score thresholds. `recent_change` is how long after an email change the `RecentlyChangedRecovery` signal fires. `store` is the cache store for risk locks. See [Risk](risk.md).
+`levels` are the score thresholds. `recent_change` is how long after an email change the `RecentlyChangedRecovery` signal fires. `store` is the cache store for risk locks, `null` for your default store. Use a database or Redis store, not Octane's `octane` store: see [Octane's Cache Store](security.md#octanes-cache-store). See [Risk](risk.md).
 
 ## Security Log
 
@@ -352,6 +352,8 @@ The table is `Features::securityLog()`, which is on by default. Without it the s
 `timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too. Verifications that go through return straight away.
 
 `limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B allows). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
+
+The per-minute counts and their locks are kept in the cache store Laravel's rate limiter uses: `cache.limiter` in `config/cache.php`, or your default store. Point it at a database or Redis store. Octane's in-memory `octane` store fills up, isn't atomic across workers and is emptied by a restart: see [Octane's Cache Store](security.md#octanes-cache-store).
 
 Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. Set `lock_after` to refuse an account as it would be at the cap once it has been locked out of signing in that many times in a day, until its password is reset (see [Locking Until a Reset](security.md#locking-until-a-reset)). An account can be sent `codes` codes for one factor every `codes_per`, and `notices` security notices of one kind, or email change requests, every `notices_per`; an address is mailed that often by registration too. See [Rate Limiting](security.md#rate-limiting).
 

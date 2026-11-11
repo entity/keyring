@@ -44,7 +44,7 @@ it('signs in without a device cookie or security log rows when those are off', f
 
     $this->post(route('login.store'), ['email' => $this->user->email, 'password' => 'password'])
         ->assertRedirect('/dashboard')
-        ->assertCookieMissing('keyring_device');
+        ->assertCookieMissing('known_device');
 
     $this->assertAuthenticatedAs($this->user);
     expect(Device::count())->toBe(0)
@@ -55,7 +55,7 @@ it('records the device and the sign in once those are on', function () {
     withFeatures([Features::devices(), Features::securityLog()]);
 
     $this->post(route('login.store'), ['email' => $this->user->email, 'password' => 'password'])
-        ->assertCookie('keyring_device');
+        ->assertCookie('known_device');
 
     expect(Device::count())->toBe(1)
         ->and(SecurityEvent::where('type', 'signed_in')->count())->toBe(1);

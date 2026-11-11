@@ -14,8 +14,10 @@ use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
+use Keyring\Factors\WebAuthn;
 use Keyring\Models\Authenticator;
 use Keyring\Support\Throttle;
+use Keyring\Testing\VirtualAuthenticator;
 
 // Octane's "octane" cache store is a Swoole table, and a key there holds 63
 // bytes. A longer one is refused with a warning, which Laravel throws. The
@@ -101,4 +103,23 @@ it('keeps a sent code, its guesses and an enrollment\'s confirmation under keys 
     $this->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
     $code = Notification::sent($this->user, VerificationCode::class)->last()->code;
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk();
+});
+
+it('remembers an answered WebAuthn challenge under a key a Swoole table can hold', function () {
+    Keyring::factors([Password::class, WebAuthn::passkeys()]);
+    $key = new VirtualAuthenticator;
+
+    // Adding the key answers one challenge, and signing in with it another.
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+    $this->post('/logout');
+
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+    $issued = session('keyring.webauthn.login.passkey.options');
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+
+    // A prefix and a hash, the same length whatever the options hold.
+    expect(Cache::store('table')->has('keyring:challenge:'.sha1($issued)))->toBeTrue()
+        ->and(strlen('keyring:challenge:'.sha1($issued)))->toBe(58);
 });

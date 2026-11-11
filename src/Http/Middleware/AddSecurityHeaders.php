@@ -22,6 +22,12 @@ use Symfony\Component\HttpFoundation\Response;
  * A page an emailed link opens has the link's token in its URL, so that one
  * sends no Referer to anyone: not to the app's own assets, and not to
  * whatever else the page loads.
+ *
+ * And none of them may be shown in a frame. Several of Keyring's pages act
+ * on one press of a button (confirming an email change, undoing one,
+ * reporting a device, verifying an address), which is what a page on
+ * another site lines its own button up over. An app that has said how its
+ * pages may be framed keeps its say.
  */
 class AddSecurityHeaders
 {
@@ -48,7 +54,24 @@ class AddSecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', $request->routeIs(...array_keys(self::EMAILED_LINKS)) ? 'no-referrer' : 'same-origin');
 
+        if (! $this->saysWhoMayFrameIt($response)) {
+            $response->headers->set('X-Frame-Options', 'DENY');
+        }
+
         return $response;
+    }
+
+    /**
+     * Whether the app has already decided how this response may be framed:
+     * with an X-Frame-Options of its own, or a Content-Security-Policy that
+     * has a frame-ancestors directive. A report-only policy decides nothing.
+     */
+    protected function saysWhoMayFrameIt(Response $response): bool
+    {
+        return $response->headers->has('X-Frame-Options') || array_any(
+            $response->headers->all('Content-Security-Policy'),
+            fn (?string $policy) => preg_match('/(?:^|[;,])\s*frame-ancestors(?=[\s;,]|$)/i', (string) $policy) === 1,
+        );
     }
 
     /**

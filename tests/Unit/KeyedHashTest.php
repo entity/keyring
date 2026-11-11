@@ -79,7 +79,7 @@ it('hashes each kind of stored value under its own purpose', function () {
     expect(json_decode($recovery))->toBe([KeyedHash::make(KeyedHash::RECOVERY_CODES, 'abcdefghijklmnopqrstuvwxyz')])
         ->and($code)->toBe(KeyedHash::make(KeyedHash::ONE_TIME_CODES, $factor->key().'|12345678'))
         ->and(PendingChange::lookupHash('Taylor@Example.com'))->toBe(KeyedHash::make(KeyedHash::RESERVED_ADDRESSES, 'taylor@example.com'))
-        ->and(app(Ceremonies::class)->userHandle($user))->toBe(KeyedHash::make(KeyedHash::USER_HANDLES, (string) $user->id));
+        ->and(app(Ceremonies::class)->userHandle($user))->toBe(KeyedHash::make(KeyedHash::USER_HANDLES, $user->getMorphClass().':'.$user->id));
 });
 
 it('will not take one kind of stored hash for another', function () {

@@ -225,7 +225,7 @@ it('lets the owner sign in from a known device while someone else is locked out'
     config(['keyring.limits.per_account' => 3, 'keyring.limits.per_ip' => 100]);
     account('taylor@example.com');
 
-    $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+    $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('known_device')->getValue();
     $this->post('/logout');
 
     foreach (range(1, 4) as $guess) {
@@ -236,7 +236,7 @@ it('lets the owner sign in from a known device while someone else is locked out'
     $error = $this->sessionErrors()->first('email');
     expect($error)->toContain('Too many');
 
-    $this->withCookie('keyring_device', $device)
+    $this->withCookie('known_device', $device)
         ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
         ->assertRedirect('/dashboard');
 });
@@ -255,7 +255,7 @@ describe('a shared address', function () {
 
     function deviceCookieFor(string $email): string
     {
-        $device = test()->post('/login', ['email' => $email, 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        $device = test()->post('/login', ['email' => $email, 'password' => 'password'])->getCookie('known_device')->getValue();
         test()->post('/logout');
         test()->flushSession();
 
@@ -304,7 +304,7 @@ describe('a shared address', function () {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
 
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     });
@@ -316,7 +316,7 @@ describe('a shared address', function () {
 
         fillAddress();
 
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => 'victim@example.com', 'password' => 'password']);
 
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
@@ -330,19 +330,19 @@ describe('a shared address', function () {
         expect($first)->not->toBe($second);
 
         foreach ([$first, $first, $second] as $device) {
-            $this->withCookie('keyring_device', $device)
+            $this->withCookie('known_device', $device)
                 ->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope'])
                 ->assertSessionHasErrors(['email' => __('auth.failed')]);
         }
 
-        $this->withCookie('keyring_device', $second)
+        $this->withCookie('known_device', $second)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
         $this->assertGuest();
 
         $this->travel(61)->seconds();
 
-        $this->withCookie('keyring_device', $first)
+        $this->withCookie('known_device', $first)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     });
@@ -371,14 +371,14 @@ describe('a shared address', function () {
 
         fillAddress();
 
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => 'victim@example.com', 'password' => 'password']);
 
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
         $this->assertGuest();
 
         // Its owner still gets through, however they type the address.
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => ' VICTIM@EXÄMPLE.COM ', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     })->skip(fn () => databaseIgnoresAccents(), 'The database treats the two addresses as one account, whose device this is.');
@@ -389,7 +389,7 @@ describe('a shared address', function () {
         $device->authenticatable()->associate(staff());
         $device->save();
 
-        $limits = Keyring::factor('totp')->limits(Request::create('/', 'POST', cookies: ['keyring_device' => $token]), Attempt::start(Purpose::Login, $user));
+        $limits = Keyring::factor('totp')->limits(Request::create('/', 'POST', cookies: ['known_device' => $token]), Attempt::start(Purpose::Login, $user));
 
         expect(collect($limits)->pluck('key')->implode(' '))->not->toContain('|known');
     });
@@ -408,7 +408,7 @@ describe('a shared address', function () {
 
         $queries = function (string $email) use ($token): int {
             DB::flushQueryLog();
-            Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => $email], ['keyring_device' => $token]), null);
+            Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => $email], ['known_device' => $token]), null);
 
             return count(DB::getQueryLog());
         };
@@ -417,7 +417,7 @@ describe('a shared address', function () {
 
         expect($queries('taylor@example.com'))->toBe($queries('nobody@example.com'));
 
-        $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => 'taylor@example.com'], ['keyring_device' => $token]), null);
+        $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => 'taylor@example.com'], ['known_device' => $token]), null);
 
         expect(collect($limits)->pluck('key')->implode(' '))->toContain('|known');
     });
@@ -429,7 +429,7 @@ describe('a shared address', function () {
         withFeatures([]);
         fillAddress();
 
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
@@ -517,7 +517,7 @@ describe('failures in a row, however slowly they come', function () {
         config(['keyring.limits.consecutive' => 6, 'keyring.limits.consecutive_elsewhere' => 3]);
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
-        $device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->getCookie('keyring_device')->getValue();
+        $device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->getCookie('known_device')->getValue();
         $this->post('/logout');
 
         guessTotp('000000');
@@ -526,7 +526,7 @@ describe('failures in a row, however slowly they come', function () {
         guessTotp();
         $this->assertGuest();
 
-        $this->withCookie('keyring_device', $device);
+        $this->withCookie('known_device', $device);
         guessTotp('000000');
         guessTotp('000000');
         guessTotp();
@@ -612,10 +612,10 @@ describe('a completed password reset', function () {
     });
 
     it('clears a known device\'s bucket under the typed username', function () {
-        $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('known_device')->getValue();
         $this->post('/logout');
 
-        $this->withCookie('keyring_device', $device);
+        $this->withCookie('known_device', $device);
         guessPassword(3);
         signInFrom('203.0.113.66', password: 'password')->assertSessionHasErrors('email');
         expect($this->sessionErrors()->first('email'))->toContain('Too many');
@@ -807,7 +807,7 @@ describe('an account with more than one name', function () {
     })->with(['dana@example.com', 'nobody@example.com']);
 
     it('keeps the owner\'s known browser working under any of the names', function () {
-        $device = $this->post('/login', ['email' => 'dana', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        $device = $this->post('/login', ['email' => 'dana', 'password' => 'password'])->getCookie('known_device')->getValue();
         $this->post('/logout');
         $this->flushSession();
 
@@ -818,7 +818,7 @@ describe('an account with more than one name', function () {
         $this->post('/login', ['email' => 'dana@example.com', 'password' => 'password'])->assertSessionHasErrors('email');
         $this->assertGuest();
 
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => 'dana@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     });
@@ -949,14 +949,14 @@ describe('an account locked out again and again', function () {
     });
 
     it('leaves the owner\'s known browser working', function () {
-        $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('keyring_device')->getValue();
+        $device = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->getCookie('known_device')->getValue();
         $this->post('/logout');
         $this->flushSession();
 
         $this->withUnencryptedCookies([]);
         lockOut(3);
 
-        $this->withCookie('keyring_device', $device)
+        $this->withCookie('known_device', $device)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     });
@@ -998,7 +998,7 @@ describe('the account\'s device cookies in someone else\'s hands', function () {
      */
     function guessWith(?string $device): void
     {
-        test()->withCookie('keyring_device', $device ?? 'a browser nobody has seen')
+        test()->withCookie('known_device', $device ?? 'a browser nobody has seen')
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
     }
 
@@ -1023,7 +1023,7 @@ describe('the account\'s device cookies in someone else\'s hands', function () {
             guessWith(null);
         }
 
-        $this->withCookie('keyring_device', $cookie)
+        $this->withCookie('known_device', $cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     });
@@ -1061,7 +1061,7 @@ describe('the account\'s device cookies in someone else\'s hands', function () {
         completeReset($this->user);
         $this->travel(5)->seconds();
 
-        $this->withCookie('keyring_device', $cookie)
+        $this->withCookie('known_device', $cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])
             ->assertRedirect('/dashboard');
         $this->post('/logout');
@@ -1071,7 +1071,7 @@ describe('the account\'s device cookies in someone else\'s hands', function () {
             guessWith(null);
         }
 
-        $this->withCookie('keyring_device', $cookie)
+        $this->withCookie('known_device', $cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])
             ->assertRedirect('/dashboard');
     });
@@ -1200,12 +1200,12 @@ describe('the cap on failures in a row', function () {
             guessWith(null);
         }
 
-        $this->withCookie('keyring_device', 'a browser nobody has seen')
+        $this->withCookie('known_device', 'a browser nobody has seen')
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertSessionHasErrors('email');
         $this->assertGuest();
 
-        $this->withCookie('keyring_device', $cookie)
+        $this->withCookie('known_device', $cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
     });
@@ -1216,7 +1216,7 @@ describe('the cap on failures in a row', function () {
         guessWith(null);
         guessWith(null);
 
-        $this->withCookie('keyring_device', $cookie)
+        $this->withCookie('known_device', $cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
         $this->post('/logout');
@@ -1234,7 +1234,7 @@ describe('the cap on failures in a row', function () {
         guessWith(null);
         guessWith(null);
 
-        $this->withCookie('keyring_device', 'a browser nobody has seen')
+        $this->withCookie('known_device', 'a browser nobody has seen')
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
 
@@ -1261,7 +1261,7 @@ describe('the cap on failures in a row', function () {
         Cache::flush();
         Cache::store(config('cache.limiter'))->flush();
 
-        $this->withCookie('keyring_device', 'a browser nobody has seen')
+        $this->withCookie('known_device', 'a browser nobody has seen')
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertSessionHasErrors(['email' => __('auth.failed')]);
 
@@ -1275,7 +1275,7 @@ describe('the cap on failures in a row', function () {
 
         $this->travel(2)->years();
 
-        $this->withCookie('keyring_device', 'a browser nobody has seen')
+        $this->withCookie('known_device', 'a browser nobody has seen')
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertSessionHasErrors(['email' => __('auth.failed')]);
 
@@ -1292,7 +1292,7 @@ describe('the cap on failures in a row', function () {
         $this->flushSession();
         $this->app['auth']->forgetGuards();
 
-        $this->withCookie('keyring_device', 'a browser nobody has seen')
+        $this->withCookie('known_device', 'a browser nobody has seen')
             ->post('/login', ['email' => 'taylor@example.com', 'password' => $password])
             ->assertRedirect('/dashboard');
 
@@ -1332,7 +1332,7 @@ describe('the cap on failures in a row', function () {
         guessWith(null);
         guessWith(null);
 
-        $statements = countStatements(fn () => $this->withCookie('keyring_device', $cookie)
+        $statements = countStatements(fn () => $this->withCookie('known_device', $cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard'));
 
@@ -1466,7 +1466,7 @@ describe('how long the defaults give someone guessing from elsewhere', function 
         $wrong = 0;
 
         while (true) {
-            $response = test()->withCookie('keyring_device', 'a browser nobody has seen')->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+            $response = test()->withCookie('known_device', 'a browser nobody has seen')->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
 
             if ($response->json('errors.email.0') === __('keyring::keyring.locked')) {
                 return [$wrong, (int) $started->diffInMinutes(now())];
@@ -1497,7 +1497,7 @@ describe('how long the defaults give someone guessing from elsewhere', function 
 
         expect(FailureCount::query()->sole()->locked_at)->not->toBeNull();
 
-        $this->withCookie('keyring_device', $this->cookie)
+        $this->withCookie('known_device', $this->cookie)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
         $this->assertAuthenticatedAs($this->user);

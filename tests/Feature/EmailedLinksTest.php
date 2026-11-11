@@ -231,6 +231,8 @@ describe('an email verification link', function () {
             ->assertOk()
             ->assertJsonPath('component', 'auth/email-verification')
             ->assertHeader('Referrer-Policy', 'no-referrer')
+            // One press of its button verifies the address, so it can't be framed.
+            ->assertHeader('X-Frame-Options', 'DENY')
             ->json('props');
 
         expect($props)->toMatchArray(['email' => 'abigail@example.com', 'url' => $this->path, 'expires' => $this->signed['expires'], 'signature' => $this->signed['signature']])
