@@ -30,9 +30,9 @@ A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possess
 | | Means |
 |---|---|
 | `Requirement::aal1()` | Any one category. |
-| `Requirement::aal2()` | Two categories. |
+| `Requirement::aal2()` | Two categories, one of them possession. See [Assurance Levels](#assurance-levels). |
 | `Requirement::aal3()` | Two categories from an attested, phishing-resistant key that can't leave its device, by itself or with a password. See [Assurance Levels](#assurance-levels). |
-| `Requirement::factors(3)` | That many categories (at least 1). |
+| `Requirement::factors(3)` | That many categories of any kind (at least 1). `factors(2)` is two without asking which, so it's less than `aal2()`. |
 | `Requirement::steps(2)` | That many categories of any kind, one of them a factor: a password and an email code will do. |
 | `Requirement::for(Assurance::AAL2)` | The requirement for an assurance level. |
 | `->including(Category::Possession)` | That category must be among those verified. |
@@ -45,7 +45,7 @@ A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possess
 Requirements are immutable. Each modifier returns a new instance, and PHP warns if you discard it:
 
 ```php
-$requirement = Requirement::aal2()->including(Category::Possession)->phishingResistant();
+$requirement = Requirement::aal2()->including(Category::Knowledge)->phishingResistant();
 ```
 
 ## Assurance Levels
@@ -64,6 +64,8 @@ Keyring works out an assurance level from what a user has proved in their sessio
 | An attested security key or passkey that stays on its device and verified the user (PIN or biometric) | AAL3 |
 
 A user-verified passkey proves possession and inherence in one step, so it reaches AAL2 on its own.
+
+AAL2 is two categories, one of which is possession: something the user has. NIST SP 800-63B-4 (Sec. 2.2.1) takes a password or a biometric only together with a physical authenticator, and never a biometric by itself (Sec. 3.2.3). Every factor Keyring ships fits: inherence only ever comes from a passkey or security key that verified the user, which is possession too. It matters for [a factor of your own](factors.md#categories): one that reports `Knowledge` and `Inherence`, or `Inherence` alone, leaves a session at AAL1 however it's combined with a password.
 
 AAL3 is narrower than "two factors with a hardware key". NIST asks for a key that can't be exported, with a second factor that is the key's own activation or a password (Sec. 2.3.1 and 2.3.2). So Keyring needs all of this:
 
@@ -91,7 +93,7 @@ Without `ifEnrolled()`, users who can't meet the requirement can't sign in at al
 
 ## Requiring a Second Factor
 
-`ifEnrolled()` lets users without a second factor carry on with just a password. To make everyone add one (OWASP ASVS 6.3.3 asks for this at level 2), add the `keyring.enrolled` middleware to the routes they must not reach without one, usually the whole app:
+`ifEnrolled()` lets users without a second factor carry on with just a password. To make everyone add one (OWASP ASVS 5.0.0 asks for this at Level 2, in requirement 6.3.3), add the `keyring.enrolled` middleware to the routes they must not reach without one, usually the whole app:
 
 ```php
 // bootstrap/app.php

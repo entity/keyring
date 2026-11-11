@@ -23,6 +23,46 @@ it('counts distinct categories, not verifications', function () {
         ->and(Requirement::aal1()->isMetBy([]))->toBeFalse();
 });
 
+it('takes aal2 to need something the user has', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $voice = verified('voice', [Category::Inherence]);
+    $spokenPhrase = verified('spoken-phrase', [Category::Knowledge, Category::Inherence]);
+    $totp = verified('totp', [Category::Possession]);
+    $passkey = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
+
+    // NIST takes a biometric only with the authenticator it unlocks, so a
+    // password and a factor that is nothing but one stays at AAL1.
+    expect(Requirement::aal2()->isMetBy([$password, $voice]))->toBeFalse()
+        ->and(Requirement::aal2()->isMetBy([$spokenPhrase]))->toBeFalse()
+        ->and(Assurance::of([$password, $voice]))->toBe(Assurance::AAL1)
+        ->and(Assurance::of([$spokenPhrase]))->toBe(Assurance::AAL1)
+        ->and(Requirement::named('aal2')->isMetBy([$password, $voice]))->toBeFalse()
+        // With a factor the user holds it is AAL2, whichever comes second.
+        ->and(Assurance::of([$password, $totp]))->toBe(Assurance::AAL2)
+        ->and(Assurance::of([$voice, $totp]))->toBe(Assurance::AAL2)
+        ->and(Assurance::of([$passkey]))->toBe(Assurance::AAL2)
+        // And two categories of any kind can still be asked for by name.
+        ->and(Requirement::factors(2)->isMetBy([$password, $voice]))->toBeTrue();
+});
+
+it('offers nothing that can\'t get an attempt to aal2, and asks for what there is where that is all a user has', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $voice = verified('voice', [Category::Inherence]);
+    $totp = verified('totp', [Category::Possession]);
+
+    expect(Requirement::aal2()->wouldProgress([$password], $voice))->toBeFalse()
+        ->and(Requirement::aal2()->wouldProgress([$password], $totp))->toBeTrue()
+        ->and(Requirement::aal2()->wouldProgress([$totp], $password))->toBeTrue()
+        ->and(Requirement::aal2()->wouldProgress([$totp], $voice))->toBeTrue()
+        // ifEnrolled(): both of what they have, which still isn't AAL2.
+        ->and(Requirement::aal2()->limitedTo([$password, $voice]))
+        ->factors->toBe(2)
+        ->categories->toBe([])
+        ->and(Requirement::aal2()->limitedTo([$password, $voice])->isMetBy([$password]))->toBeFalse()
+        ->and(Requirement::aal2()->limitedTo([$password, $voice])->isMetBy([$password, $voice]))->toBeTrue()
+        ->and(Requirement::fromArray(Requirement::aal2()->toArray()))->toEqual(Requirement::aal2());
+});
+
 it('lets a user verified passkey finish aal2 on its own, and aal3 only when it can\'t sync and was attested', function () {
     $synced = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true);
     $bound = verified('webauthn', [Category::Possession, Category::Inherence], phishingResistant: true, deviceBound: true);

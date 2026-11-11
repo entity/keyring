@@ -12,6 +12,7 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Pipeline\Steps;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
@@ -183,6 +184,56 @@ class ConformanceTest extends TestCase
         $this->expectExceptionMessage('keyring.passwords.max');
 
         $this->test_keyring_takes_passwords_of_64_characters();
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    #[DataProvider('brokersWithoutAThrottle')]
+    public function test_the_suite_fails_when_reset_links_are_not_limited_per_account(array $config, string $names): void
+    {
+        if (! Features::enabled(Features::resetPasswords())) {
+            $this->markTestSkipped('Password resets are off.');
+        }
+
+        config($config);
+
+        try {
+            $this->test_keyring_limits_how_often_an_account_is_sent_a_reset_link();
+        } catch (AssertionFailedError $failure) {
+            $this->assertStringContainsString($names, $failure->getMessage());
+
+            return;
+        }
+
+        $this->fail('A broker without a throttle went unnoticed.');
+    }
+
+    /**
+     * @return array<string, list<mixed>>
+     */
+    public static function brokersWithoutAThrottle(): array
+    {
+        $staff = ['provider' => 'users', 'table' => 'password_reset_tokens', 'expire' => 60];
+
+        return [
+            'no throttle' => [['auth.passwords.users.throttle' => null], 'auth.passwords.users.throttle'],
+            'a throttle of nothing' => [['auth.passwords.users.throttle' => 0], 'auth.passwords.users.throttle'],
+            'the setting left out' => [['auth.passwords.users' => ['provider' => 'users', 'table' => 'password_reset_tokens', 'expire' => 60]], 'auth.passwords.users.throttle'],
+            'the broker keyring was told to use' => [['auth.passwords.staff' => $staff, 'keyring.passwords.broker' => 'staff'], 'auth.passwords.staff.throttle'],
+        ];
+    }
+
+    public function test_the_suite_reads_the_throttle_of_the_broker_keyring_uses(): void
+    {
+        // The default broker has none, and it isn't the one that sends Keyring's links.
+        config([
+            'auth.passwords.users.throttle' => 0,
+            'auth.passwords.staff' => ['provider' => 'users', 'table' => 'password_reset_tokens', 'expire' => 60, 'throttle' => 30],
+            'keyring.passwords.broker' => 'staff',
+        ]);
+
+        $this->test_keyring_limits_how_often_an_account_is_sent_a_reset_link();
     }
 
     public function test_the_suite_fails_when_a_mandatory_step_was_taken_out(): void

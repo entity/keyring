@@ -65,11 +65,11 @@ An account keeps its 50 most recently seen devices (`devices.limit`). A sign in 
 
 Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The user agent is never a factor. It's only a weak risk signal: `SessionFingerprintChanged` notices when a session's browser or platform changes.
 
-A browser shared by several accounts has one cookie and a device for each account that signed in on it. Keyring only reuses a cookie that another account already has a device for. Anything else the browser sends is ignored and replaced with a new random token. Keyring can't tell which browser holds a cookie, so a value planted from another account's device is reused too, and the device counts as recognised, until a login on it proves a second factor. Every login that verifies two categories gives the browser a new cookie, so the previous one stops working.
+A browser shared by several accounts has one cookie and a device for each account that signed in on it. Keyring only reuses a cookie that another account already has a device for. Anything else the browser sends is ignored and replaced with a new random token. Keyring can't tell which browser holds a cookie, so a value planted from another account's device is reused too, and the device counts as recognised, until a login on it proves a second factor. Every login that reaches AAL2 gives the browser a new cookie, so the previous one stops working.
 
 ### Trusted Devices
 
-When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device trusted for that long (30 days by default), counted from the moment it's granted. It only counts when that login verified two factors, such as a password and an authenticator app's code, and, with `Features::emailVerification()` on, the email address is verified. An [emailed code](factors.md#email-codes) isn't a factor, so a login that used one beside the password isn't offered trust (`canTrustDevice` is false) and can't earn it. Sending it with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
+When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device trusted for that long (30 days by default), counted from the moment it's granted. It only counts when that login reached AAL2, with a password and an authenticator app's code, say, and, with `Features::emailVerification()` on, the email address is verified. An [emailed code](factors.md#email-codes) isn't a factor, so a login that used one beside the password isn't offered trust (`canTrustDevice` is false) and can't earn it. Sending it with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
 
 Trust on its own changes nothing. It's for your [policy](policies.md#deciding-per-user-and-attempt) to use:
 
@@ -83,7 +83,7 @@ Revoking a device stops trusting it. Signing out everywhere else stops trusting 
 
 ### New Device Sign Ins
 
-A sign in from a new device dispatches `Keyring\Events\NewDeviceSignedIn`. Turn on the `new_device` [security email](security-log-and-emails.md#security-emails), or send your own:
+A sign in from a new device dispatches `Keyring\Events\NewDeviceSignedIn`. The `new_device` [security email](security-log-and-emails.md#security-emails) tells the user, and `keyring:install` registers it when devices are on. Or send your own:
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -464,7 +464,7 @@ app(SessionRegistry::class)->revokeEveryone();    // everyone
 Keyring::unlock($user);                           // let a locked-out user try again
 ```
 
-`Keyring::unlock()` is the other half of looking after an account: it lifts a [risk lock](risk.md#actions) and the [sign-in lockouts](security.md#rate-limiting) on it, as a completed password reset does. To keep someone out for good, use [`Keyring::allowSignInWhen()`](sign-in-flow.md#who-may-sign-in), which also ends their sessions.
+`Keyring::unlock()` is the other half of looking after an account: it lifts a [risk lock](risk.md#actions) and the [sign-in lockouts](security.md#rate-limiting) on it, as a completed password reset does. To keep someone out for good, use [`Keyring::allowSignInWhen()`](sign-in-flow.md#who-may-sign-in) and call `signOutEverywhere()` as you set your flag: by itself the gate ends the account's sessions when the first of them next makes a request.
 
 Like every sign-out that isn't the browser's own, these take effect on a session's next request [where the session middleware runs](#the-session-middleware).
 
@@ -495,7 +495,7 @@ Ticking "remember me" asks to stay signed in on that browser between visits, so 
 
 - A remembered session isn't ended by `idle`. It's ended by `remember_idle`, 14 days without a request, and by `absolute`, 30 days after the sign in, which coming back never restarts.
 - Once it has been unused for `idle`, it keeps nothing it proved. A browser that comes back on its cookies starts with no level at all, and one whose Laravel session outlived the two hours has every level lapsed. Either way, routes behind [`keyring:aal2`](step-up.md#raising-assurance) or [`keyring.fresh`](step-up.md#fresh-verification) ask the user to verify again, and so do Keyring's own routes for changing how someone signs in.
-- So a remembered browser left unattended still opens whatever sits behind `auth` alone. Put anything that shouldn't be reachable that way behind a level or a fresh verification, or don't offer "remember me": leave the `remember` field off your login form, or set `remember_idle` to the same as `idle`.
+- So a remembered browser left unattended still opens whatever sits behind `auth` alone. Put anything that shouldn't be reachable that way behind a level or a fresh verification, or don't offer "remember me": leave the `remember` field off your login form, or set `remember_idle` to the same as `idle`. NIST SP 800-63B-4 (Sec. 5.1) doesn't take a cookie in place of authentication at all, so an app that follows it leaves the checkbox out: see [Known Limitations](security.md#where-keyring-departs-from-a-standard).
 
 Set `remember_idle` no shorter than `idle`, or ticking the box would sign people out sooner.
 
@@ -558,7 +558,7 @@ In `Keyring\Events`:
 |---|---|
 | `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = null)` |
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
-| `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, or an administrator's `keyring:sign-out` for one user |
+| `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the app keeps out |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
 | `AccessRefused` | `user`, `resource` (`device`), `id`: a request to sign out a device that isn't the user's, answered with a 404 |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`): a "this wasn't me" link that was refused |

@@ -44,6 +44,7 @@ use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use Keyring\Support\PasswordRules;
+use Keyring\Support\TooManyAttempts;
 use Keyring\Support\Url;
 use Keyring\WebAuthn\ConfiguredRoots;
 
@@ -224,7 +225,9 @@ class KeyringServiceProvider extends ServiceProvider
     /**
      * The limit on Keyring's form routes (registration, resets, enrollment),
      * and on usernameless login options. Define your own "keyring" or
-     * "keyring-login-options" limiter to change them.
+     * "keyring-login-options" limiter to change them. Each answers a refused
+     * request with TooManyAttempts, which is Laravel's 429 and what gets the
+     * refusal into the security log.
      */
     protected function configureRateLimiting(): void
     {
@@ -232,12 +235,16 @@ class KeyringServiceProvider extends ServiceProvider
         // cache store, and a provider that boots after this one may be what
         // registers that store (Octane's "octane" store).
         $this->callAfterResolving(RateLimiter::class, function (RateLimiter $limiter) {
-            $limiter->for('keyring', fn (Request $request) => Limit::perMinute(6)->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip()));
+            $limiter->for('keyring', fn (Request $request) => Limit::perMinute(6)
+                ->by($this->app->make(KeyringManager::class)->guard()->id() ?: $request->ip())
+                ->response(new TooManyAttempts('keyring')));
 
             // The login page asks for these on every load, for passkey autofill,
             // and an office shares one address, so six a minute would be too few.
             // One a second still limits how many challenges a script can make.
-            $limiter->for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)->by($request->ip()));
+            $limiter->for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)
+                ->by($request->ip())
+                ->response(new TooManyAttempts('keyring-login-options')));
         });
     }
 

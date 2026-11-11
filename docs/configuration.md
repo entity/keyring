@@ -26,7 +26,7 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `registration` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `registration`, `enrollment_url` and `support_contact`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
@@ -165,6 +165,12 @@ More routes those users can still reach meanwhile, by route name, with `*` as a 
 Where a user who has to choose a new password is sent from every other page until they have. Null answers `403`. See [Requiring a Password Change](protected-changes.md#requiring-a-password-change).
 
 ```php
+'support_contact' => null,
+```
+
+Where users can reach you about their account: a page's URL (`'https://example.com/support'`) or an email address (`'support@example.com'`). Every notification is handed it as `$contact`, and the published security notices, the emailed code and the email change notice end with "If this wasn't you and you need help, contact us" and a link to it. `null` leaves the line out. See [Security Emails](security-log-and-emails.md#a-support-contact).
+
+```php
 'enrollments' => [
     'keep_for' => '15m',
 ],
@@ -263,9 +269,9 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
 See [Password Rules](protected-changes.md#password-rules). `broker` is the password broker used for resets; `null` is your default broker.
 
-`min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 6.2.1 and NIST SP 800-63B allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
+`min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 5.0.0 (6.2.1) and NIST SP 800-63B-4 (Sec. 3.1.1.2) allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
 
-`max` is counted in characters, and how much of it you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password, so with bcrypt Keyring refuses anything longer instead of ignoring the end of it. That makes the real limit 72 bytes, not 128 characters: 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese or Korean ones, or 18 emoji. OWASP ASVS 6.2.9 asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. Hash with argon2id to take every password up to `max`:
+`max` is counted in characters, and how much of it you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password, so with bcrypt Keyring refuses anything longer instead of ignoring the end of it. That makes the real limit 72 bytes, not 128 characters: 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese or Korean ones, or 18 emoji. OWASP ASVS 5.0.0 (6.2.9) asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. Hash with argon2id to take every password up to `max`:
 
 ```ini
 HASH_DRIVER=argon2id
@@ -275,13 +281,13 @@ HASH_VERIFY=false
 
 Keyring doesn't hash a password before bcrypt to get around the limit: the hashes would no longer be ones Laravel's own hasher can check. The [conformance suite](testing.md#the-conformance-suite) fails on bcrypt until you switch or say you're keeping it.
 
-`context` is your list of words a password mustn't be made up of: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 6.1.2 asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
+`context` is your list of words a password mustn't be made up of: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 5.0.0 (6.1.2) asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
 
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
 
 The check is Laravel's (`Password::uncompromised()`), and it fails open: when Have I Been Pwned can't be reached, times out or answers with an error, Laravel reports the exception and lets the password through. On those requests only the [bundled list](protected-changes.md#password-rules) of common passwords stands between a user and a breached password.
 
-Set `refuse_unchecked` to `true` to refuse instead. Keyring then makes the request itself, the same way (only the first five characters of the password's SHA-1 leave your server), and a password it gets no answer about is refused with `keyring::keyring.password_unchecked`, which asks the user to try again in a moment. The cost is that nobody can register, or change or reset a password, while the service is unreachable from your servers. It only applies where `uncompromised` runs, and waits up to 10 seconds for an answer.
+Set `refuse_unchecked` to `true` to refuse instead. Keyring then makes the request itself, the same way (only the first five characters of the password's SHA-1 leave your server), and a password it gets no answer about is refused with `keyring::keyring.password_unchecked`, which asks the user to try again in a moment. The cost is that nobody can register, or change or reset a password, while the service is unreachable from your servers. It only applies where `uncompromised` runs, and waits up to 10 seconds for an answer. It asks `api.pwnedpasswords.com` and nowhere else: a redirect isn't followed, and counts as no answer.
 
 Laravel's check goes through whatever `Illuminate\Contracts\Validation\UncompromisedVerifier` is bound in the container, so you can bind one of your own, say for a copy of the breach data you host yourself. `refuse_unchecked` doesn't use it, since a verifier can only answer yes or no: leave the option off, and have your verifier answer `false` when it can't check.
 
@@ -351,7 +357,7 @@ The table is `Features::securityLog()`, which is on by default. Without it the s
 
 `timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too. Verifications that go through return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B allows). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
+`limits` are the default attempts per minute for each factor, per account and per IP address, and `consecutive`, the failures in a row one of an account's authenticators allows before it's refused for that account (`null` for no cap, and 100 is the most NIST SP 800-63B-4 allows, Sec. 3.2.2). Those are counted in the `keyring_failure_counts` table, and nothing brings a refused authenticator back by itself: see [At the Cap](security.md#at-the-cap). `consecutive_elsewhere` is how many of them may come from browsers the account hasn't signed in from, which keeps the rest for the owner's own. It only applies with `Features::devices()` on, and `null` keeps nothing back. `remember_names_for` is how long the cache keeps the failures in a row counted under each typed username, which is what the sign-in form answers from.
 
 The per-minute counts and their locks are kept in the cache store Laravel's rate limiter uses: `cache.limiter` in `config/cache.php`, or your default store. Point it at a database or Redis store. Octane's in-memory `octane` store fills up, isn't atomic across workers and is emptied by a restart: see [Octane's Cache Store](security.md#octanes-cache-store).
 
@@ -363,11 +369,16 @@ Keyring's form routes (registration, password reset, enrollment confirmation, em
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Keyring\Support\TooManyAttempts;
 
-RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
+RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)
+    ->by($request->user()?->id ?: $request->ip())
+    ->response(new TooManyAttempts('keyring')));
 ```
 
 `GET /login/{factor}/options` uses its own limiter, `keyring-login-options`, which allows 60 requests a minute per IP address. Login pages fetch the options on every load for passkey autofill, and when the limit is hit autofill stops offering passkeys until the next minute. Define the same limiter to change it.
+
+`TooManyAttempts` is what Keyring's own two limiters answer with: Laravel's usual `429`, after dispatching `Keyring\Events\RateLimited`, which the security log records as [`rate_limited`](security-log-and-emails.md#entry-types). Laravel has no event of its own for a refused request, so a limiter you define without that `response()` still limits and writes nothing to the log.
 
 ## Messages and Translations
 

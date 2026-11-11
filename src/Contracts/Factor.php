@@ -102,7 +102,9 @@ interface Factor
     public function errorKey(): string;
 
     /**
-     * How this authenticator is shown in "try another way".
+     * How this authenticator is shown: on a page that manages them, and on
+     * the challenge page and in "try another way", which leave out when it
+     * was added and last used (createdAt, lastUsedAt).
      *
      * @return array<string, mixed>
      */

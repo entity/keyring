@@ -17,16 +17,35 @@
 
 Risk signals look for things that make a sign in or session suspicious: a new device, a new country, a session cookie turning up in another browser. Each signal that fires adds a score. The scores add up (capped at 100) to a **level**, and you decide what to do at each level.
 
-Risk is off until you pick signals in your `KeyringServiceProvider`:
+The signals are picked in your `KeyringServiceProvider`. The one `keyring:install` publishes starts with those that make no network call and need nothing your app hasn't got, each one on only when the feature it reads from is:
 
 ```php
-use Keyring\Risk\Signals\NewDevice;
-use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Risk\Signals;
 
-Keyring::risk()->signals([NewDevice::class, SessionFingerprintChanged::class]);
+Keyring::risk()->signals([
+    Signals\SessionFingerprintChanged::class,
+    // These two read the security log: Features::securityLog().
+    Signals\RepeatedFactorFailures::class,
+    Signals\SuccessAfterFailures::class,
+    // These two go by an account's devices: Features::devices().
+    Signals\NewDevice::class,
+    Signals\InactiveAccount::class,
+    // Signals\RecentlyChangedRecovery::class,
+    // Signals\BreachedPassword::class,
+    // Signals\NewCountry::class,
+    // Signals\ImpossibleTravel::class,
+]);
 ```
 
-Once signals are picked, Keyring responds to them as shown below unless you set your own responses. Without a [locator](devices-and-sessions.md#locations), the location signals never fire. The device signals and `InactiveAccount` need [`Features::devices()`](devices-and-sessions.md), and `RepeatedFactorFailures` and `SuccessAfterFailures` need [`Features::securityLog()`](security-log-and-emails.md).
+With the installer's default features that is `SessionFingerprintChanged`, `RepeatedFactorFailures` and `SuccessAfterFailures`; `NewDevice` and `InactiveAccount` are written commented out until you turn on [`Features::devices()`](devices-and-sessions.md). The other four stay off until you turn them on yourself:
+
+- `BreachedPassword` makes a network call at every sign in, and [holds a user whose password it finds](#requiring-a-new-password) until they choose another.
+- `NewCountry` and `ImpossibleTravel` need a [locator](devices-and-sessions.md#locations), and never fire without one.
+- `RecentlyChangedRecovery` needs `Features::emailChanges()`. It's left off because of what the scores add up to, below.
+
+Keyring responds to what the signals find [as shown below](#responding-to-risk) unless you set your own responses. The starting set is chosen so that those responses can't keep out a user who has only a password. A step-up asks for a second factor from a user who has one and does nothing to one who hasn't, and the signals that can fire for such a user (`NewDevice`, `InactiveAccount` and `SuccessAfterFailures`) add up to 75, short of the 90 at which a sign in is refused. `RepeatedFactorFailures` only counts failures that follow a correct password, so it takes someone who knows the password to raise it. Adding `RecentlyChangedRecovery`, or raising a score, can take a password-only user past 90: check the sums when you change the list.
+
+An app that doesn't use the published provider has no signals until it calls `Keyring::risk()->signals([...])`.
 
 ## Built-in Signals
 
@@ -42,7 +61,7 @@ In `Keyring\Risk\Signals`:
 | `InactiveAccount` | The account last signed in 90 days ago or more (the `after` option), and none of its sessions has been used since. | 30 | login |
 | `SuccessAfterFailures` | The first factor was right after five or more failed attempts on the account (the `threshold` option) in the last hour (`within`), counted since it last signed in. | 30 | login |
 | `SessionFingerprintChanged` | A signed-in session now comes from a different browser or platform than the one it was last seen in. IP changes alone don't count. | 60 | every request |
-| `BreachedPassword` | The password just used appears in a public breach list. Not on by default: it makes a network call at sign in. | 40 | login |
+| `BreachedPassword` | The password just used appears in a public breach list. It makes a network call at sign in, so the published provider leaves it off. Whatever it scores, Keyring's own response to it [holds the user until they choose a new password](#requiring-a-new-password). | 40 | login |
 
 `SessionFingerprintChanged` compares with the browser the session was last seen in, and acts on each change once. A cookie used by two browsers at once flips back and forth, so with the default response the owner is asked to verify again, and emailed, on every switch. To end such a session instead, have [your responder](#actions) answer `Action::reauthenticate()` at `Checkpoint::Request`.
 
@@ -54,7 +73,7 @@ In `Keyring\Risk\Signals`:
 
 ### Telling the User
 
-OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, where Keyring asks for a second factor but sends nothing. Together they reach `Level::High`, which notifies. To email the user whenever either is found, without refusing anyone, answer for them in [your responder](#responding-to-risk) and register the `suspicious_activity` [notice](security-log-and-emails.md#email-types):
+OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, where Keyring asks for a second factor but sends nothing. Together they reach `Level::High`, which notifies. To email the user whenever either is found, without refusing anyone, answer for them in [your responder](#responding-to-risk). The `suspicious_activity` [notice](security-log-and-emails.md#email-types) is what's sent, and `keyring:install` registers it:
 
 ```php
 use Keyring\Risk\Action;
@@ -99,7 +118,9 @@ Without your own responder, Keyring does this at every checkpoint:
 | High | `Action::stepUp()->notify()` |
 | Critical | `Action::deny()->revokeAllSessions()->notify()` |
 
-At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's turned on, but the owner stays signed in everywhere else.
+At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's registered, as it is by `keyring:install`, but the owner stays signed in everywhere else.
+
+One finding is answered whatever the level: when `BreachedPassword` finds the password that was just used in a breach, `->requirePasswordChange()` is added to the action above. See [Requiring a New Password](#requiring-a-new-password).
 
 Set your own in `KeyringServiceProvider`:
 
@@ -139,14 +160,30 @@ Build an action with one of the static constructors and chain extras:
 | `Action::deny()` | Refuse the sign in with the usual "these credentials don't match" error. | Sign the session out. |
 | `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::signOutEverywhere()`). |
 | `->lockFor('1h')` | Refuse sign ins for that long. Trusted devices stay trusted, for the same reason sessions aren't revoked. | Refuse sign ins for that long, from now, and stop trusting the user's devices. |
-| `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
+| `->notify()` | Send the `suspicious_activity` security email, if it's registered. | The same. |
 | `->requirePasswordChange()` | Hold the user until they choose a new password. The sign in goes ahead unless the action also denies it, and the hold is there for whoever signs in next. | Hold them from this request on. |
 
 Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. A database or Redis store is the one to use. Octane's `octane` store loses every lock when the server restarts, among [other things](security.md#octanes-cache-store). While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
 
 ### Requiring a New Password
 
-NIST SP 800-63B-4 (Sec. 3.1.1.2) never has passwords changed on a schedule, and always has one changed when there's evidence it was compromised. Stepping up, notifying and locking don't do that: the password someone else knows is still the password. `requirePasswordChange()` holds the user on your change-password page until it isn't, which is the response for a signal about the password itself:
+NIST SP 800-63B-4 (Sec. 3.1.1.2) never has passwords changed on a schedule, and always has one changed when there's evidence it was compromised. Stepping up, notifying and locking don't do that: the password someone else knows is still the password. `requirePasswordChange()` holds the user on your change-password page until it isn't, which is the response for a signal about the password itself.
+
+Keyring's own response does this for `BreachedPassword`. Turn the signal on, tell Keyring where your change-password form is, and a user who signs in with a password found in a breach is held until they choose another:
+
+```php
+// app/Providers/KeyringServiceProvider.php
+use Keyring\Risk\Signals\BreachedPassword;
+
+Keyring::risk()->push(BreachedPassword::class);
+
+// config/keyring.php
+'password_change_url' => '/settings/password',
+```
+
+The sign in itself goes ahead as the level says (a second factor at the signal's own score of 40, when the user has one), and the hold is logged as `risk_password_change`. Without a `password_change_url` a held user gets a `403` on every page, so set it before turning the signal on.
+
+A responder of your own replaces all of Keyring's response, this part included. Keep it by answering for the finding:
 
 ```php
 use Keyring\Risk\Signals\BreachedPassword;
@@ -154,7 +191,7 @@ use Keyring\Risk\Signals\BreachedPassword;
 Keyring::risk()
     ->push(BreachedPassword::class)
     ->respond(fn (Risk $risk) => match (true) {
-        $risk->has('breached_password') => Action::stepUp()->requirePasswordChange()->notify(),
+        $risk->has(BreachedPassword::FINDING) => Action::stepUp()->requirePasswordChange()->notify(),
         $risk->level === Level::Critical => Action::deny()->revokeAllSessions()->notify(),
         $risk->isElevated() => Action::stepUp(),
         default => Action::allow(),
@@ -275,4 +312,4 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->risk?->has('new_
 
 ## Events and Logging
 
-When an action does anything, Keyring dispatches `Keyring\Events\RiskAssessed` with `user`, `risk`, `action` and `checkpoint` (the `Checkpoint` enum, `Checkpoint::Login` or `Checkpoint::Request`), and logs it under the strongest thing it did: `risk_denied`, `risk_reauthenticate`, `risk_locked`, `risk_step_up`, `risk_revoked_sessions` or `risk_notified`, with the checkpoint (`login` or `request`), score and reasons.
+When an action does anything, Keyring dispatches `Keyring\Events\RiskAssessed` with `user`, `risk`, `action` and `checkpoint` (the `Checkpoint` enum, `Checkpoint::Login` or `Checkpoint::Request`), and logs it under the strongest thing it did: `risk_denied`, `risk_reauthenticate`, `risk_locked`, `risk_password_change`, `risk_step_up`, `risk_revoked_sessions` or `risk_notified`, with the checkpoint (`login` or `request`), score and reasons.

@@ -110,14 +110,26 @@ Keyring asks wherever a session starts or carries on:
 - Every way of starting a sign in: the password, a passkey, and any factor of your own.
 - A sign in that's waiting for its second factor.
 - A "remember me" cookie. The session it would have carried on is ended, so the same cookies don't sign the account back in once it's allowed again.
-- Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`.
+- Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`. The first request that's refused also ends every other session the account has, with its "remember me" cookies, trusted devices and any pending email change (a `sessions_revoked` entry), so a session that stayed away doesn't work again once the account is let back.
 - Registration that [signs new users in](#saying-when-an-address-is-taken), which leaves this one signed out.
 
 An account that's turned away gets the same answer as one that doesn't exist. So does one whose address isn't verified yet, when registration [doesn't reveal who has an account](#without-revealing-who-has-an-account). What doesn't sign anyone in still works for it: a password reset, and the emailed links that confirm or undo an email change or report a device.
 
 The callback runs on every signed-in request, so answer from the user it's given rather than with a query.
 
-Use this rather than a global scope on the user model to keep an account out. A scope makes the account look missing to Keyring, which ends nothing: its sessions, "remember me" cookies, trusted devices and any pending email change are all still there when the scope shows the account again, and no event fires to clear them. `allowSignInWhen()` ends each session on its next request.
+Keyring only finds out that an account is kept out when one of its sessions makes a request. Until then the sessions are still in the registry, and they would work again if the account were let back before any of them came. To end them as you set your flag, sign the account out yourself:
+
+```php
+use Keyring\Sessions\Sessions;
+
+$user->forceFill(['banned' => true])->save();
+
+app(Sessions::class)->signOutEverywhere($user);
+```
+
+That is also what OWASP ASVS 5.0.0 (7.4.2) asks for: a disabled account's sessions end when it's disabled, not when they're next used.
+
+Use `allowSignInWhen()` rather than a global scope on the user model to keep an account out. A scope makes the account look missing to Keyring, which ends nothing: its sessions, "remember me" cookies, trusted devices and any pending email change are all still there when the scope shows the account again, and no event fires to clear them.
 
 Failed attempts count against the user your finder returns, however the username was typed, so an account has one limit whether someone guesses at its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep it to a lookup.
 
@@ -184,7 +196,7 @@ The page (`challenge` for logins, `confirm` for step-up) receives:
 |---|---|
 | `purpose` | `login` or `confirm`. |
 | `factor` | The key of the factor to verify now. |
-| `authenticator` | How the factor presents this authenticator. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`, and `replace`: whether a code has been used, so the user should [make a new set](authenticators.md#recovery-codes). |
+| `authenticator` | How the factor presents this authenticator, without the dates a [settings page](authenticators.md#adding-an-authenticator) gets: whoever has only the password isn't told when its owner last signed in. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`, and `replace`: whether a code has been used, so the user should [make a new set](authenticators.md#recovery-codes). |
 | `challenge` | Factor-specific props. See below. |
 | `alternatives` | The user's other authenticators that would help, for "try another way". Same shape as `authenticator`. |
 | `canTrustDevice` | Whether to show "don't ask again on this device". `true` for logins with `Features::devices()` on and `devices.trust_for` not `null`. |
@@ -220,7 +232,7 @@ Post the proof to `POST /login/challenge/{factor}`:
 | `code` | `totp`, `email-code`, `recovery` and most custom factors. |
 | `credential` | `passkey`, `security-key`: the browser's WebAuthn response, as an object or a JSON string. |
 | `authenticator` | Optional. The authenticator ID. Defaults to the one the page showed, or the only one of that factor. |
-| `trust` | Optional boolean. Trust this device for `devices.trust_for`, once this login has verified two categories. |
+| `trust` | Optional boolean. Trust this device for `devices.trust_for`, once this login has reached AAL2. |
 
 For WebAuthn, the browser may answer with any of the user's keys of that factor, not just the one shown, and Keyring accepts it.
 
@@ -260,7 +272,7 @@ Change both to fit your app, but leave out any check that the address is free. K
 
 ### Without Revealing Who Has an Account
 
-By default (`registration.reveal_taken` is `false`), nobody can use the form to find out whether an address has an account. This is what OWASP ASVS 6.3.8 asks of registration.
+By default (`registration.reveal_taken` is `false`), nobody can use the form to find out whether an address has an account. This is what OWASP ASVS 5.0.0 (6.3.8) asks of registration.
 
 - The answer is always the same: a redirect to the login page with the `registration-received` status ("Thanks for registering. We've emailed that address with what to do next."), or that status as JSON. Nobody is signed in.
 - Validation errors from your action are shown as usual. They're the same for every address, because your action never looks at whether it's taken.

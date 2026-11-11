@@ -62,7 +62,7 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 
 `keyring.fresh:15m` lets the request through when the user verified, in the last 15 minutes, the strongest combination their account can give, and at least as much as signing in would ask of them. The window takes any [duration](configuration.md#durations) and defaults to `15m`.
 
-NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new authenticator bound at the highest level the account can authenticate at, so what's asked here follows the account, not the sign-in policy:
+NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new authenticator bound at the highest level the account can authenticate at, or the level the new one will be used at if that is lower. Keyring always asks for the highest, so what's asked here follows the account, not the sign-in policy:
 
 - Users with only a password confirm with their password, so an account can always add its first sign-in method.
 - Users with two factors prove both again, even where the policy would sign them in with one. A stolen session plus one phished factor can't add, remove or change anything.

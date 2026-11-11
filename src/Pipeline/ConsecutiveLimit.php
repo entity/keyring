@@ -10,7 +10,7 @@ use Keyring\Models\FailureCount;
 
 /**
  * Failures in a row on one of an account's authenticators, however slowly
- * they come: 100 by default, NIST SP 800-63B's cap. They're counted in the
+ * they come: 100 by default, NIST SP 800-63B-4's cap. They're counted in the
  * database, so clearing the cache doesn't start the count over, and at the
  * cap the authenticator is refused for the account until that's dealt with.
  * Nothing brings it back by itself.

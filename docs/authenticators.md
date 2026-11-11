@@ -101,15 +101,17 @@ Authenticator apps and email codes take an optional `name` when beginning or con
 
 A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment, or one that was already confirmed, with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
 
-On success, the response contains the new authenticator, presented the same way as on the challenge page:
+On success, the response contains the new authenticator, as its factor's `present()` gives it:
 
 ```json
 {
   "status": "authenticator-added",
-  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
+  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app", "createdAt": "2026-11-08T14:05:00+00:00", "lastUsedAt": null },
   "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp-eh", "..."]
 }
 ```
+
+`createdAt` and `lastUsedAt` are when it was added and last used to sign in or confirm, as ISO 8601 dates, for the list on your settings page: OWASP's Passkey Security Cheat Sheet has a page that manages credentials show both. The [challenge page](sign-in-flow.md#page-props) gets the same shape without them.
 
 `recoveryCodes` is only there when Keyring generated recovery codes along with this authenticator (see below).
 
@@ -163,7 +165,7 @@ It also forgets the failures counted against it. An authenticator that failed to
 
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
-Removing the user's last second factor (the last one beyond recovery codes and email codes) also needs their current password in the request as `password`. Their password may have been as short as `min_with_mfa` while it had a second factor beside it, and on its own NIST SP 800-63B asks for `min_without_mfa`. Keyring only stores a hash, so it checks the length then: a missing or wrong password, or one that's too short, gets an error on `password` asking them to change it first.
+Removing the user's last second factor (the last one beyond recovery codes and email codes) also needs their current password in the request as `password`. Their password may have been as short as `min_with_mfa` while it had a second factor beside it, and on its own NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so it checks the length then: a missing or wrong password, or one that's too short, gets an error on `password` asking them to change it first.
 
 ## Signing Out Other Sessions
 

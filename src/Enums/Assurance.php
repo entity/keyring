@@ -23,15 +23,17 @@ enum Assurance: int
     case AAL1 = 1;
 
     /**
-     * At least two factors from different categories. An emailed code isn't
-     * one, so a password and a code is AAL1.
+     * Two factors from different categories, one of them something the user
+     * has: NIST never takes a biometric without the authenticator it
+     * unlocks. An emailed code isn't a factor, so a password and a code is
+     * AAL1.
      */
     case AAL2 = 2;
 
     /**
-     * Two categories, from a phishing-resistant key that can't leave its
-     * device, was added with a verified attestation, and either verified
-     * the user itself or was used with a password.
+     * Two factors, one of them a phishing-resistant key that can't leave its
+     * device and was added with a verified attestation. The other is that
+     * key verifying the user itself, or a password.
      */
     case AAL3 = 3;
 

@@ -53,14 +53,16 @@ trait ManagesNotifications
     }
 
     /**
-     * The app's notification of a type, or null when it hasn't one.
+     * The app's notification of a type, or null when it hasn't one. Each is
+     * also handed where to reach the app's support ("support_contact"), as
+     * $contact, for the ones that say who to turn to.
      *
      * @param  array<string, mixed>  $arguments
      */
     public function notification(string $type, array $arguments = []): ?Notification
     {
         return $this->hasNotification($type)
-            ? app($this->notifications[$type], $arguments)
+            ? app($this->notifications[$type], ['contact' => config('keyring.support_contact'), ...$arguments])
             : null;
     }
 

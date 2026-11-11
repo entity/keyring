@@ -348,7 +348,9 @@ class KeyringManager
      * one nobody has approved yet. Keyring asks wherever a session starts or
      * carries on: every factor that can start a sign in, a sign in waiting
      * for its second factor, "remember me", and each request of a session
-     * that's already signed in, which is signed out once the answer is no.
+     * that's already signed in. Once the answer is no, that request is signed
+     * out and every other session of the account ends with it. To end them
+     * before any of them makes a request, call Sessions::signOutEverywhere().
      * An account that's turned away is answered like one that doesn't exist.
      * So is one that hasn't verified its address yet, when registration
      * hides who has an account.
@@ -461,7 +463,9 @@ class KeyringManager
      * every page sends them to keyring.password_change_url until the
      * password changes, by them or by a reset. Signing out doesn't shake it
      * off. Returns false for an account with no password, which is left
-     * alone. A risk response does the same with requirePasswordChange().
+     * alone. A risk response does the same with requirePasswordChange(),
+     * as Keyring's own does when the BreachedPassword signal finds the
+     * password just used in a breach.
      */
     public function requirePasswordChange(Authenticatable&Model $user, ?string $reason = null): bool
     {

@@ -340,6 +340,22 @@ describe('when the breach check can\'t be reached', function () {
             && ! str_contains($request->url().$request->body(), substr($this->hash, 5)));
     });
 
+    // OWASP ASVS 5.0.0, 15.3.2: an outbound call doesn't go where a
+    // redirect sends it.
+    it('follows no redirect, and counts one as no answer', function (int $status) {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake([
+            'api.pwnedpasswords.com/*' => Http::response('', $status, ['Location' => 'https://elsewhere.example/range/'.substr($this->hash, 0, 5)]),
+            // Somewhere that would call every password clean.
+            'elsewhere.example/*' => ($this->range)(),
+        ]);
+
+        expect(($this->errors)())->toBe([__('keyring::keyring.password_unchecked')]);
+
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn (Request $request) => ! str_starts_with($request->url(), 'https://api.pwnedpasswords.com/'));
+    })->with([301, 302, 307, 308]);
+
     it('asks nothing about a password too short to be taken, or with the breach check off', function () {
         config(['keyring.passwords.refuse_unchecked' => true]);
         Http::fake(['api.pwnedpasswords.com/*' => Http::response('', 503)]);

@@ -19,11 +19,13 @@ class EmailChangeNotice extends Notification
 {
     /**
      * @param  string  $email  the new address, with most of its name hidden
+     * @param  string|null  $contact  "support_contact" from config/keyring.php: a URL or an address
      */
     public function __construct(
         public string $email,
         #[\SensitiveParameter] public string $revertUrl,
         #[\SensitiveParameter] public ?string $confirmUrl = null,
+        public ?string $contact = null,
     ) {}
 
     /**
@@ -49,8 +51,12 @@ class EmailChangeNotice extends Notification
                 ->action(__('Confirm the change'), $this->confirmUrl);
         }
 
-        return $message
+        $message
             ->line(__('Wasn\'t you? This link cancels the change and signs you out everywhere:'))
             ->line($this->revertUrl);
+
+        return $this->contact === null
+            ? $message
+            : $message->line(MailText::contact(__('If this wasn\'t you and you need help, contact us:'), $this->contact));
     }
 }

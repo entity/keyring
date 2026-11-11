@@ -3,14 +3,22 @@
 declare(strict_types=1);
 
 use App\Notifications\Keyring\VerificationCode;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Route;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
+use Keyring\Factors\Factor;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
+use Keyring\Login\Attempt;
+use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\SmsCode;
 
 class FiveDigitSmsCode extends SmsCode
@@ -23,6 +31,27 @@ class QuarterHourSmsCode extends SmsCode
 {
     #[Override]
     protected int $ttl = 900;
+}
+
+/**
+ * A factor that is only something the user is: nothing they hold comes with it.
+ */
+class VoicePrint extends Factor
+{
+    public function key(): string
+    {
+        return 'voice';
+    }
+
+    public function categories(Authenticator $authenticator): array
+    {
+        return [Category::Inherence];
+    }
+
+    public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
+    {
+        return $request->input('code') === 'my voice is my passport' ? $this->verified($authenticator) : null;
+    }
 }
 
 beforeEach(function () {
@@ -116,6 +145,66 @@ it('refuses one added with extend the same way', function () {
     Keyring::extend('sms', fn () => new FiveDigitSmsCode);
 
     expect(fn () => Keyring::factor('sms'))->toThrow(LogicException::class, 'Keyring refuses codes shorter than 6 digits');
+});
+
+// NIST SP 800-63B-4 (Sec. 2.2.1) takes a biometric only with the
+// authenticator it unlocks, so AAL2 needs something the user has.
+describe('a factor that is nothing the user holds', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, Totp::class, VoicePrint::class]);
+        Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'voice', 'name' => 'Voice']);
+
+        Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
+        Route::middleware(['web', 'auth', 'keyring.enrolled'])->get('/app', fn () => 'app');
+        config(['keyring.enrollment_url' => '/settings/security']);
+    });
+
+    it('is asked for beside the password, and leaves the session at aal1', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+        $this->post(route('keyring.login.verify', 'voice'), ['code' => 'my voice is my passport', 'trust' => true])->assertRedirect('/dashboard');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
+            ->and($this->user->devices()->whereNotNull('trusted_until')->count())->toBe(0);
+
+        // Nothing it proved reaches AAL2, and the account has nothing that would.
+        $this->get('/billing')->assertRedirect('/settings/security')->assertSessionHas('status', 'enroll-first');
+        $this->get('/app')->assertRedirect('/settings/security');
+    });
+
+    it('doesn\'t count as the account\'s second factor', function () {
+        $keyring = $this->user->keyring;
+
+        expect($keyring->hasSecondFactor())->toBeFalse()
+            ->and($keyring->canMeet(Requirement::aal2()))->toBeFalse()
+            ->and($keyring->canMeet(Requirement::factors(2)))->toBeTrue();
+    });
+
+    it('is refused where the policy asks for aal2 outright', function () {
+        Keyring::require(Requirement::aal2());
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+        $this->get(route('keyring.login.challenge'))
+            ->assertRedirect('/login')
+            ->assertSessionHasErrors(['email' => __('keyring::keyring.unavailable')]);
+        $this->assertGuest();
+    });
+
+    it('reaches aal2 once something the user has is proved with it', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+        // The voice print can't finish the sign in now, so it isn't offered.
+        $this->post(route('keyring.login.verify', 'voice'), ['code' => 'my voice is my passport']);
+        $this->assertGuest();
+
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+        $this->get('/billing')->assertOk();
+        $this->get('/app')->assertOk();
+    });
 });
 
 // What holds for email codes holds for any code factor: its codes' state is

@@ -33,10 +33,10 @@ use LogicException;
  */
 abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 {
-    /** The fewest digits a code may have: about 20 bits, the least OWASP ASVS 6.5.4 accepts. */
+    /** The fewest digits a code may have: about 20 bits, the least OWASP ASVS 5.0.0 (6.5.4) accepts. */
     public const int MIN_LENGTH = 6;
 
-    /** The longest a code may last, in seconds: the ten minutes OWASP ASVS 6.5.5 allows. */
+    /** The longest a code may last, in seconds: the ten minutes OWASP ASVS 5.0.0 (6.5.5) allows. */
     public const int MAX_TTL = 600;
 
     /** Digits in each code, MIN_LENGTH or more. */
@@ -69,12 +69,12 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
     public function ensureCodesAreSafe(): void
     {
         throw_if($this->length < self::MIN_LENGTH, LogicException::class, sprintf(
-            'The [%s] factor sends %d digit codes. Keyring refuses codes shorter than %d digits: fewer are too easy to guess (OWASP ASVS 6.5.4).',
+            'The [%s] factor sends %d digit codes. Keyring refuses codes shorter than %d digits: fewer are too easy to guess (OWASP ASVS 5.0.0, 6.5.4).',
             $this->key(), $this->length, self::MIN_LENGTH,
         ));
 
         throw_if($this->ttl < 1 || $this->ttl > self::MAX_TTL, LogicException::class, sprintf(
-            'The [%s] factor keeps its codes for %d seconds. Keyring refuses a code that lasts longer than %d seconds, or no time at all: a sent code has ten minutes at most (OWASP ASVS 6.5.5).',
+            'The [%s] factor keeps its codes for %d seconds. Keyring refuses a code that lasts longer than %d seconds, or no time at all: a sent code has ten minutes at most (OWASP ASVS 5.0.0, 6.5.5).',
             $this->key(), $this->ttl, self::MAX_TTL,
         ));
     }

@@ -58,9 +58,13 @@ class SendSecurityNotifications
         $this->send($event->user, 'password_changed');
     }
 
+    /**
+     * The reset link went to the account's address, so whoever finished the
+     * reset reads that mailbox. It's told even if nobody verified it before.
+     */
     public function passwordReset(Events\PasswordReset $event): void
     {
-        $this->send($event->user, 'password_changed');
+        $this->send($event->user, 'password_changed', addressProven: true);
     }
 
     public function authenticatorAdded(Events\AuthenticatorAdded $event): void
@@ -142,7 +146,7 @@ class SendSecurityNotifications
     /**
      * @param  array<string, string|int>  $with  what this notice has beyond when, device and IP
      */
-    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $with = [], bool $describeRequest = true): void
+    protected function send(Authenticatable|AnonymousNotifiable $user, string $type, array $with = [], bool $describeRequest = true, bool $addressProven = false): void
     {
         // A model without Notifiable (say, staff that sign in through
         // another guard) has nowhere to send it, so it's skipped rather than
@@ -153,7 +157,7 @@ class SendSecurityNotifications
 
         // An address nobody has verified may be anyone's: whoever registered
         // typed it. It hears about the account once it's proved to be theirs.
-        if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
+        if (! $addressProven && $user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
             return;
         }
 

@@ -6,6 +6,7 @@ namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enums\Purpose;
@@ -79,16 +80,29 @@ class ChallengeController
         return $this->keyring->render($purpose === Purpose::Login ? 'challenge' : $purpose->value, [
             'purpose' => $purpose->value,
             'factor' => $authenticator->factor,
-            'authenticator' => $authenticator->factor()->present($authenticator),
+            'authenticator' => $this->option($authenticator),
             'challenge' => $challenge,
             'alternatives' => $options
                 ->reject(fn (Authenticator $option) => $option->id === $authenticator->id)
-                ->map(fn (Authenticator $option) => $option->factor()->present($option))
+                ->map($this->option(...))
                 ->values()
                 ->all(),
             'canTrustDevice' => $this->canTrustDevice($attempt, $authenticator),
             'expiresAt' => date(DATE_ATOM, $attempt->expiresAt),
         ]);
+    }
+
+    /**
+     * An authenticator as the challenge page offers it: what tells it from
+     * the others, without when it was added or last used. At sign in the
+     * page is shown to whoever has the password, who has no call to learn
+     * when its owner was last here.
+     *
+     * @return array<string, mixed>
+     */
+    protected function option(Authenticator $authenticator): array
+    {
+        return Arr::except($authenticator->factor()->present($authenticator), ['createdAt', 'lastUsedAt']);
     }
 
     /**

@@ -61,8 +61,9 @@ use Webauthn\PublicKeyCredentialUserEntity;
 class Ceremonies
 {
     /**
-     * The shortest RSA key an app can settle for, in bits: what RFC 8230
-     * asks of RS256, and the 112 bits of strength NIST SP 800-63B wants.
+     * The shortest RSA key an app can settle for, in bits: what RFC 8812
+     * (Section 2) asks of RS256, and the 112 bits of strength NIST SP
+     * 800-63B-4 wants (Sec. 3.1.6.2).
      */
     public const int SHORTEST_RSA_KEY = 2048;
 

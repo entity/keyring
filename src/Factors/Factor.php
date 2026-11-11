@@ -82,12 +82,18 @@ abstract class Factor implements FactorContract
         return 'code';
     }
 
+    /**
+     * With when it was added and last used, for a page that manages them.
+     * Null for one with no record of its own, like the password.
+     */
     public function present(Authenticator $authenticator): array
     {
         return [
             'factor' => $this->key(),
             'id' => $authenticator->isVirtual() ? null : $authenticator->id,
             'name' => $authenticator->name,
+            'createdAt' => $authenticator->isVirtual() ? null : $authenticator->created_at?->toIso8601String(),
+            'lastUsedAt' => $authenticator->last_used_at?->toIso8601String(),
         ];
     }
 

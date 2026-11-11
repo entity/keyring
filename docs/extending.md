@@ -47,7 +47,7 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | The models | `Keyring::useAuthenticatorModel()` and the other four | [The Keyring Facade](configuration.md#the-keyring-facade) |
 | Which attributes are protected | `protected`, `Keyring::withoutProtection()` | [Protected Changes](protected-changes.md) |
 
-Risk signals, security notices, the security log, devices and every sign-in method but the password are off until you turn them on.
+Devices, email changes and every sign-in method but the password are off until you turn them on. [Risk signals](risk.md) and [security notices](security-log-and-emails.md#security-emails) are whatever your `KeyringServiceProvider` lists: the one `keyring:install` publishes starts with a set of each, and an app without it has none.
 
 ## Replacing a Controller or Service
 

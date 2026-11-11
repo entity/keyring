@@ -16,6 +16,8 @@ use Keyring\Factors\RecoveryCodes;
  * factor: two of the same kind aren't multi-factor. Only authentication
  * factors count. "Steps" counts every category, so an emailed code, which
  * isn't one, can still be asked for without being taken for a factor.
+ * The assurance levels ask for more than a count: from AAL2 up, one of the
+ * factors has to be something the user has.
  */
 final readonly class Requirement
 {
@@ -43,9 +45,16 @@ final readonly class Requirement
         return new self(factors: 1);
     }
 
+    /**
+     * AAL2: two factors, one of them something the user has. NIST SP
+     * 800-63B-4 (Sec. 2.2.1) takes a password or a biometric only beside a
+     * physical authenticator, never the two alone. A passkey that verified
+     * the user is both at once. For two categories of any kind, ask for
+     * factors(2).
+     */
     public static function aal2(): self
     {
-        return new self(factors: 2);
+        return new self(factors: 2, categories: [Category::Possession]);
     }
 
     /**
@@ -57,7 +66,7 @@ final readonly class Requirement
      */
     public static function aal3(): self
     {
-        return self::aal2()->including(Category::Possession)->attestedKey();
+        return self::aal2()->attestedKey();
     }
 
     public static function factors(int $count): self

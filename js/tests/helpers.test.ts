@@ -47,6 +47,44 @@ describe('routes', () => {
     expect(routes.authenticator('abc')).toBe('/user/authenticators/abc')
   })
 
+  // OWASP ASVS 5.0.0, 1.2.2: a value put into a URL is encoded for where
+  // it goes, so it can't aim the request at another path.
+  test('keep a factor or an ID inside its own path segment, whatever it holds', () => {
+    expect(routes.authenticator('../sessions')).toBe('/user/authenticators/..%2Fsessions')
+    expect(routes.authenticator('abc/confirm')).toBe('/user/authenticators/abc%2Fconfirm')
+    expect(routes.authenticator('abc?default=1#x')).toBe('/user/authenticators/abc%3Fdefault%3D1%23x')
+    expect(routes.session('9f2c/../../logout')).toBe('/user/sessions/9f2c%2F..%2F..%2Flogout')
+    expect(routes.session('a b%2Fc')).toBe('/user/sessions/a%20b%252Fc')
+    expect(routes.enroll('totp/../../password')).toBe('/user/authenticators/totp%2F..%2F..%2Fpassword')
+    expect(routes.confirmEnrollment('totp?x')).toBe('/user/authenticators/totp%3Fx/confirm')
+    expect(routes.loginOptions('passkey/../..')).toBe('/login/passkey%2F..%2F../options')
+    expect(routes.loginWith('passkey#')).toBe('/login/passkey%23')
+    expect(routes.challenge('login', 'totp/send')).toBe('/login/challenge/totp%2Fsend')
+    expect(routes.verify('confirm', 'totp?')).toBe('/confirm/totp%3F')
+    expect(routes.send('confirm', 'email-code/x')).toBe('/confirm/email-code%2Fx/send')
+
+    // Where each of those lands is the segment it was given, on this origin.
+    for (const path of [routes.authenticator('../sessions'), routes.session('9f2c/../../logout'), routes.loginOptions('passkey/../..')]) {
+      expect(new URL(path, 'https://app.example').pathname).toBe(path)
+    }
+  })
+
+  test('leave the keys and IDs the server issues as they are', () => {
+    expect(routes.verify('login', 'email-code')).toBe('/login/challenge/email-code')
+    expect(routes.enroll('security-key')).toBe('/user/authenticators/security-key')
+    expect(routes.authenticator('01JCM8Q3ZV7W9X2Y4T6R8S0A1B')).toBe('/user/authenticators/01JCM8Q3ZV7W9X2Y4T6R8S0A1B')
+    expect(routes.challenge('login')).toBe('/login/challenge')
+  })
+
+  test('refuse a segment a browser would resolve away, encoded or not', () => {
+    for (const dots of ['.', '..']) {
+      expect(() => routes.authenticator(dots)).toThrow(TypeError)
+      expect(() => routes.session(dots)).toThrow(TypeError)
+      expect(() => routes.loginWith(dots)).toThrow(TypeError)
+      expect(() => routes.verify('confirm', dots)).toThrow(TypeError)
+    }
+  })
+
   test('use an overridden route as written', () => {
     configureRoutes({ prefix: 'account', login: '/sign-in' })
 

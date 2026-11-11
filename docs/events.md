@@ -48,7 +48,7 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 |---|---|---|
 | `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)` (valid for `devices.report_link_for` unless you pass days) for a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
-| `SessionsRevoked` | Sessions were signed out: "sign out everywhere else", one session ended from the sessions list, or an administrator's `keyring:sign-out` for the user. | `user`, `count` |
+| `SessionsRevoked` | Sessions were signed out: "sign out everywhere else", one session ended from the sessions list, an administrator's `keyring:sign-out` for the user, or the first request refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
 | `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), so two browsers held the same ones, and the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended: its device, IP address and user agent are those of whoever used the cookie first) |
 
@@ -93,12 +93,28 @@ An assessment that ends in `Action::allow()` dispatches nothing. See [Risk](risk
 | Event | When | Properties |
 |---|---|---|
 | `AccessRefused` | A signed-in user asked for an authenticator, device or session that isn't theirs, or that doesn't exist (both get the same 404, so the event doesn't tell them apart), or opened an email verification link made for another account. | `user`, `resource` (`authenticator`, `device`, `session` or `email_verification`), `id` (what was asked for, as it was sent; for a session, its handle) |
+| `RateLimited` | The form limiter refused a request to one of Keyring's routes outside the sign-in limits: registration, a reset, a change, an emailed link, or passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring` or `keyring-login-options`), `route` (its name), `retryAfter` (seconds) |
 | `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account may not add one yet) |
 | `AuthenticatorRemovalRefused` | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `user`, `authenticator` |
 | `LinkRefused` | An emailed link was refused: a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
 | `VerificationRefused` | A sign in or step-up met its requirement and was still refused, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `attempt`, `factor`, `skipped` (the steps' class names) |
 
 None of these changes what the person who was refused sees. Each fires every time, however often it's repeated: only the [security log](security-log-and-emails.md#refusals-that-repeat) limits how many it writes down. A form that fails ordinary validation dispatches nothing.
+
+That makes them the place to count from. Keyring keeps no metrics of its own, so if you watch for credential stuffing, feed your counters from a listener:
+
+```php
+use Illuminate\Support\Facades\Event;
+use Keyring\Events\FactorFailed;
+use Keyring\Events\Lockout;
+use Keyring\Events\RateLimited;
+
+Event::listen(fn (FactorFailed $event) => Metrics::increment('auth.failed', ['factor' => $event->factor]));
+Event::listen(fn (Lockout $event) => Metrics::increment('auth.locked_out', ['factor' => $event->factor]));
+Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited', ['route' => $event->route]));
+```
+
+`Metrics` stands for whatever your app reports to.
 
 ## Laravel's Auth Events
 

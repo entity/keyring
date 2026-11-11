@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
@@ -65,6 +66,27 @@ it('writes to the app\'s log when the table is turned off, so something always r
         ->and($lines[1][2]['meta'])->toBe(['factors' => ['password']]);
 });
 
+// OWASP ASVS 5.0.0, 16.2.2: a time that says which timezone it's in.
+// Laravel's own log lines are stamped without one.
+it('gives each line its time with an offset, whatever timezone the app keeps', function (string $timezone, string $at) {
+    config(['app.timezone' => $timezone]);
+    date_default_timezone_set($timezone);
+    // The same moment everywhere, on the clock the app keeps.
+    $this->travelTo(CarbonImmutable::parse('2026-11-08 14:05:09', 'UTC')->setTimezone($timezone));
+    config(['logging.default' => 'memory']);
+    $log = logTo();
+    withFeatures([]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    expect(written($log)[0][2]['at'])->toBe($at);
+
+    date_default_timezone_set('UTC');
+})->with([
+    'utc' => ['UTC', '2026-11-08T14:05:09+00:00'],
+    'a local timezone' => ['Europe/Paris', '2026-11-08T15:05:09+01:00'],
+]);
+
 it('writes to the channel the app names', function () {
     $default = logTo('default-channel');
     $security = logTo('security');
@@ -96,7 +118,7 @@ it('logs a bypass to the app\'s log with the table off, and refuses it when that
 
     Keyring::withoutProtection(fn () => null, reason: 'support ticket 42');
 
-    expect(written($log))->toBe([['warning', 'protection_bypassed', ['ip' => '127.0.0.1', 'user_agent' => 'Symfony', 'request_id' => Context::getHidden(SecurityLog::REQUEST_ID), 'meta' => ['reason' => 'support ticket 42']]]]);
+    expect(written($log))->toBe([['warning', 'protection_bypassed', ['at' => now()->toIso8601String(), 'ip' => '127.0.0.1', 'user_agent' => 'Symfony', 'request_id' => Context::getHidden(SecurityLog::REQUEST_ID), 'meta' => ['reason' => 'support ticket 42']]]]);
 
     config(['logging.default' => 'broken', 'logging.channels.broken' => ['driver' => 'monolog', 'handler' => BrokenLogHandler::class]]);
     $ran = false;

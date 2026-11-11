@@ -205,11 +205,14 @@ class SecurityLog
 
     /**
      * The entry as a line in the app's log, at its own severity, with what
-     * the table would hold as its context.
+     * the table would hold as its context. The time is given with its
+     * offset: Laravel stamps a log line without one, so a line alone
+     * wouldn't say which timezone it was written in.
      */
     protected function write(SecurityEvent $event): void
     {
         Log::channel(config('keyring.security_log.channel'))->log($event->severity->value, 'Keyring: '.$event->type, array_filter([
+            'at' => $event->created_at->toIso8601String(),
             'user' => $event->authenticatable_id === null ? null : $event->authenticatable_type.':'.$event->authenticatable_id,
             'factor' => $event->factor,
             'device_id' => $event->device_id,

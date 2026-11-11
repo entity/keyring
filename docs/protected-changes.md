@@ -189,7 +189,7 @@ However a change is cancelled, the old address's "this wasn't me" link keeps wor
 
 | Field | |
 |---|---|
-| `current_password` | Required when the user has a password. Keyring checks it itself, with the `Keyring\Rules\CurrentPassword` rule, so a change always takes the current password whatever your action does (OWASP ASVS 6.2.3). A fresh verification can be a passkey or a code, which doesn't show the user knows the password they're replacing. |
+| `current_password` | Required when the user has a password. Keyring checks it itself, with the `Keyring\Rules\CurrentPassword` rule, so a change always takes the current password whatever your action does (OWASP ASVS 5.0.0, 6.2.3). A fresh verification can be a passkey or a code, which doesn't show the user knows the password they're replacing. |
 | `password`, `password_confirmation` | The new password, checked by the published action against the [password rules](#password-rules). |
 | `sign_out_others` | Optional boolean, `true` by default. Read by Keyring. |
 
@@ -209,7 +209,7 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 ## Requiring a Password Change
 
-Keyring never expires passwords. When there's evidence one is known to someone else, it can hold the user until they choose another, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). Place a hold from your own code, or from a [risk response](risk.md#requiring-a-new-password):
+Keyring never expires passwords. When there's evidence one is known to someone else, it can hold the user until they choose another, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). Keyring places a hold itself in one case: with the [`BreachedPassword`](risk.md#requiring-a-new-password) signal on, when the password someone just signed in with is found in a breach. Place one from your own code for anything else you learn, or from a [risk response](risk.md#requiring-a-new-password) of your own:
 
 ```php
 use Keyring\Facades\Keyring;
@@ -249,10 +249,10 @@ The check runs in `Keyring\Http\Middleware\RequirePasswordChange`, which Keyring
 - breached passwords rejected, in production by default. Laravel's check lets a password through when Have I Been Pwned can't be reached; set [`passwords.refuse_unchecked`](configuration.md#passwords) to refuse it instead,
 - the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
 - no passwords made up of [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
-- with bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. That's 72 plain characters but as few as 18 emoji, so 64 characters don't always fit. Set `HASH_DRIVER=argon2id` to accept every password up to `max`, which is what OWASP ASVS 6.2.9 needs (see [Passwords](configuration.md#passwords)),
+- with bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. That's 72 plain characters but as few as 18 emoji, so 64 characters don't always fit. Set `HASH_DRIVER=argon2id` to accept every password up to `max`, which is what OWASP ASVS 5.0.0 (6.2.9) needs (see [Passwords](configuration.md#passwords)),
 - and `confirmed`, so the request needs `password_confirmation`.
 
-Passwords may hold any Unicode characters, and Keyring puts each one in Unicode's NFC form before it's measured, hashed or checked, as NIST SP 800-63B recommends. The same "é" is one code point from some keyboards and two from others, and without this a password set on one device could fail on another. The rules above count what will be hashed: a character is one code point of the NFC form. Keyring's routes do this for the input they hand your actions (`password`, `password_confirmation` and `current_password`) and for every password they check. If your own code sets a password some other way, such as a seeder, an admin tool or a route of your own, pass it through `PasswordRules::normalize()` first:
+Passwords may hold any Unicode characters, and Keyring puts each one in Unicode's NFC form before it's measured, hashed or checked, as NIST SP 800-63B-4 recommends (Sec. 3.1.1.2). The same "é" is one code point from some keyboards and two from others, and without this a password set on one device could fail on another. The rules above count what will be hashed: a character is one code point of the NFC form. Keyring's routes do this for the input they hand your actions (`password`, `password_confirmation` and `current_password`) and for every password they check. If your own code sets a password some other way, such as a seeder, an admin tool or a route of your own, pass it through `PasswordRules::normalize()` first:
 
 ```php
 $user->password = Hash::make(PasswordRules::normalize($password));
@@ -264,7 +264,7 @@ A password hashed without it only matters when it has characters that aren't alr
 
 ### Context-Specific Words
 
-A password that is just the name of your app, your company or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 6.1.2 asks you to keep a list of such words, and 6.2.11 to use it to stop easy-to-guess passwords. The list goes in the `passwords.context` option:
+A password that is just the name of your app, your company or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 5.0.0 (6.1.2) asks you to keep a list of such words, and 6.2.11 to use it to stop easy-to-guess passwords. The list goes in the `passwords.context` option:
 
 ```php
 'passwords' => [
@@ -284,7 +284,7 @@ Put in the names of your organisation, products, systems, projects, departments 
 
 How they're compared:
 
-- The whole password is compared, not the words inside it, as NIST SP 800-63B asks (Sec. 3.1.1.2). A password is refused when, with its digits, spaces and punctuation taken out, it is one of these words or several of them run together: `acme2026!`, `Taylor.Otwell.1990` and `acmeacmeacme` are refused. A passphrase that happens to have one in it is as hard to guess as any other, so `acme sells the best anvils` passes. Refusing it would be a composition rule by another name.
+- The whole password is compared, not the words inside it, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). A password is refused when, with its digits, spaces and punctuation taken out, it is one of these words or several of them run together: `acme2026!`, `Taylor.Otwell.1990` and `acmeacmeacme` are refused. A passphrase that happens to have one in it is as hard to guess as any other, so `acme sells the best anvils` passes. Refusing it would be a composition rule by another name.
 - Case doesn't matter, and each value is also taken word by word, split at anything that isn't a letter or a digit: `Acme Rockets` counts `acme` and `rockets`.
 - Characters that stand in for letters count as those letters: `0` as `o`, `1` and `l` as `i`, `3` as `e`, `4` and `@` as `a`, `5` and `$` as `s`, `7` as `t`. So `k3yr1ng` is `keyring`.
 - Words under four characters don't count, because they turn up by chance. The exception is your app's name or a listed entry as a whole, which counts from three characters, so an app called `IBM` refuses `ibm-ibm-ibm`. Two characters or fewer never count.
@@ -302,7 +302,7 @@ protected function passwordRules((Authenticatable&Model)|null $user = null, arra
 }
 ```
 
-Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 6.2.5, which wants passwords of any composition accepted, and NIST SP 800-63B says the same. People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
+Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 5.0.0 (6.2.5), which wants passwords of any composition accepted, and NIST SP 800-63B says the same. People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
 
 ## Resetting the Password
 
@@ -319,7 +319,22 @@ The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent t
 - dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`,
 - redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.
 
-Resets use Laravel's password broker (`passwords.broker`, or your default), so its token expiry and throttling apply. A reset link stops working as soon as the password changes through Keyring, the account's email address changes, or the user is deleted. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
+Resets use Laravel's password broker (`passwords.broker`, or your default), so two of its settings in `config/auth.php` are part of the flow:
+
+```php
+'passwords' => [
+    'users' => [
+        'provider' => 'users',
+        'table' => 'password_reset_tokens',
+        'expire' => 60,
+        'throttle' => 60,
+    ],
+],
+```
+
+`throttle` is the seconds an account waits between reset links, and it's the only limit on how often one account is mailed. Keyring's own limit on `POST /forgot-password` is the [form limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute per sender, which does nothing about many senders asking for one account. A new Laravel app has 60 seconds; Keyring neither sets it nor checks it when the app runs, so keep it, and the [conformance suite](testing.md#the-conformance-suite) fails when it's missing or zero. A request the broker throttles gets the same `reset-link-sent` answer as any other. `expire` is the minutes a link works for. OWASP's Forgot Password Cheat Sheet asks for both, and NIST SP 800-63B-4 (Sec. 4.2.1.2) for a link that lasts 24 hours at most: Keyring doesn't cap `expire`, so don't raise it past 1440.
+
+A reset link stops working as soon as the password changes through Keyring, the account's email address changes, or the user is deleted. Password reset keeps working while an account is locked, and lifts the lock, so a lock can't keep the owner out for good.
 
 ## Email Verification
 

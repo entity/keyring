@@ -284,10 +284,10 @@ await removeAuthenticator(added.authenticator.id)
 | Function | Does |
 |---|---|
 | `beginEnrollment(factor, data?)` | `POST /user/authenticators/{factor}`. Resolves to `{ factor, enrollment }`. |
-| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first; if the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes? }`. |
+| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first; if the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes? }`, where `authenticator` is typed `Authenticator`: `factor`, `id`, `name`, `createdAt` and `lastUsedAt`, with a factor's own extras. |
 | `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
-| `renameAuthenticator(id, name)` | `PATCH` with `name`. |
-| `makeDefault(id)` | `PATCH` with `default: true`. |
+| `renameAuthenticator(id, name)` | `PATCH` with `name`. Resolves to `{ authenticator }`. |
+| `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. |
 | `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too; when adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
@@ -387,13 +387,15 @@ If you registered the routes yourself, override the ones you moved:
 
 ```ts
 configureRoutes({
-  enroll: factor => `/account/authenticators/${factor}`,
-  confirmEnrollment: factor => `/account/authenticators/${factor}/confirm`,
-  authenticator: id => `/account/authenticators/${id}`,
+  enroll: factor => `/account/authenticators/${encodeURIComponent(factor)}`,
+  confirmEnrollment: factor => `/account/authenticators/${encodeURIComponent(factor)}/confirm`,
+  authenticator: id => `/account/authenticators/${encodeURIComponent(id)}`,
 })
 ```
 
-The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment` and `authenticator`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three. An override is used as written, without the `prefix`:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `sessions` and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three.
+
+Keyring's own paths put a factor's key or an ID in as one encoded path segment, and throw a `TypeError` for `.` and `..`, which a browser resolves away however they're written. So a value that isn't what the server issued, with a `/` or a `?` in it, can't send the request and the user's cookies to another path. An override is used as written, without the `prefix`, so encode what yours is given too:
 
 ```ts
 configureRoutes({

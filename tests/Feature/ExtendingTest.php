@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
@@ -37,6 +38,7 @@ use Keyring\KeyringServiceProvider;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
+use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\Context;
@@ -450,3 +452,102 @@ it('publishes a notification for every type, that builds from what keyring passe
     expect($notification->via($this->user))->toBe(['mail'])
         ->and(renderedMail($notification->toMail($this->user))['text'])->not->toBeEmpty()->not->toContain(':name')->not->toContain(':remaining')->not->toContain(':reasons');
 })->with(KeyringManager::NOTIFICATIONS);
+
+// "Bot Checks" in docs/security.md: a check of the app's own goes before
+// the limits, so a request it turns away is nobody's failed attempt.
+it('lets a step of the app\'s own turn a request away before it counts against anyone', function () {
+    Keyring::pipeline(fn (Steps $steps) => $steps->before(EnsureNotThrottled::class, ChecksForBots::class));
+
+    foreach (range(1, 8) as $attempt) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('captcha');
+    }
+
+    expect(loggedTypes())->toBe([]);
+
+    // Past the check, the account has every guess it had.
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'human' => 'yes'])->assertRedirect('/dashboard');
+
+    // A challenge page comes after a right password, so it isn't asked again there.
+    $this->post('/logout');
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'human' => 'yes'])->assertRedirect(route('keyring.login.challenge'));
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
+});
+
+class ChecksForBots
+{
+    public function handle(Context $context, Closure $next): Context
+    {
+        if ($context->identifying && $context->request->input('human') !== 'yes') {
+            throw ValidationException::withMessages(['captcha' => 'Please confirm you are not a robot.']);
+        }
+
+        return $next($context);
+    }
+}
+
+// NIST SP 800-63B-4, Sec. 4.6: a notice says who to contact when the
+// recipient says the event wasn't theirs.
+describe('a support contact', function () {
+    /**
+     * The published notification of a type, as Keyring would build it.
+     */
+    function publishedNotification(string $type): Illuminate\Notifications\Notification
+    {
+        sendNotifications();
+
+        return Keyring::requiredNotification($type, [
+            'when' => 'Monday', 'code' => '12345678', 'minutes' => 10,
+            'email' => 'n•••@example.com', 'revertUrl' => 'https://example.com/revert',
+        ]);
+    }
+
+    it('is in every notice about the account once the app sets one', function (string $type) {
+        config(['keyring.support_contact' => 'https://example.com/support?from=email']);
+
+        $mail = renderedMail(publishedNotification($type)->toMail($this->user));
+
+        expect($mail['text'])->toContain('contact us')->toContain('https://example.com/support?from=email')
+            ->and($mail['html'])->toContain('href="https://example.com/support?from=email"');
+    })->with([...array_slice(KeyringManager::NOTIFICATIONS, 0, 12), 'verification_code', 'email_change_notice']);
+
+    it('links an email address as one', function () {
+        config(['keyring.support_contact' => 'help@example.com']);
+
+        $mail = renderedMail(publishedNotification('password_changed')->toMail($this->user));
+
+        expect($mail['html'])->toContain('href="mailto:help@example.com"')->toContain('>help@example.com</a>')
+            ->and($mail['text'])->toContain('contact us: [help@example.com](mailto:help@example.com)');
+    });
+
+    it('leaves anything that isn\'t a page or an address as plain text', function () {
+        config(['keyring.support_contact' => 'Call 020 7946 0000 [or](https://evil.example) visit reception']);
+
+        $mail = renderedMail(publishedNotification('password_changed')->toMail($this->user));
+
+        expect($mail['html'])->toContain('contact us: Call 020 7946 0000 [or](https://evil.example) visit reception')->not->toContain('href="https://evil.example"')
+            ->and($mail['text'])->toContain('contact us: Call 020 7946 0000 [or](https://evil.example) visit reception');
+    });
+
+    it('is left out until then', function (string $type) {
+        $notification = publishedNotification($type);
+
+        expect($notification->contact)->toBeNull()
+            ->and(renderedMail($notification->toMail($this->user))['text'])->not->toContain('contact us');
+    })->with(['password_changed', 'verification_code', 'email_change_notice']);
+
+    it('is handed to a notification of the app\'s own that asks for it, and to no other', function () {
+        config(['keyring.support_contact' => 'help@example.com']);
+        Keyring::notifications(['password_changed' => WantsTheContact::class, 'new_device' => WantsNothing::class]);
+
+        expect(Keyring::notification('password_changed', ['when' => 'Monday'])->contact)->toBe('help@example.com')
+            ->and(Keyring::notification('new_device', ['when' => 'Monday']))->toBeInstanceOf(WantsNothing::class);
+    });
+});
+
+class WantsTheContact extends Illuminate\Notifications\Notification
+{
+    public function __construct(public ?string $contact = null) {}
+}
+
+class WantsNothing extends Illuminate\Notifications\Notification {}

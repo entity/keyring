@@ -19,6 +19,7 @@
     - [Secure Cookies](#secure-cookies)
     - [A Content Security Policy](#a-content-security-policy)
     - [Headers on Your Other Responses](#headers-on-your-other-responses)
+    - [Bot Checks](#bot-checks)
 - [Cryptography](#cryptography)
     - [Keys](#keys)
     - [Algorithms](#algorithms)
@@ -28,12 +29,14 @@
 - [What a Request Costs](#what-a-request-costs)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
+    - [Where Keyring Departs From a Standard](#where-keyring-departs-from-a-standard)
+    - [Other Limits](#other-limits)
 
 ## Introduction
 
-Keyring is built on OWASP's authentication, session management and forgot password guidance, and on NIST SP 800-63B-4. Its assurance levels follow NIST SP 800-63B-4 as far as a library can check. This page lists what it promises, so you can check your setup against it, and where it stops.
+Keyring is built on OWASP ASVS 5.0.0, OWASP's cheat sheets on authentication, and NIST SP 800-63B-4. Its assurance levels follow NIST SP 800-63B-4 as far as a library can check. This page lists what it promises, so you can check your setup against it, and where it stops: [Standards](#standards) says where each choice comes from, and [Known Limitations](#known-limitations) where Keyring does something other than a standard says.
 
-The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration. [OWASP ASVS](owasp-asvs.md) says what to turn on for each level of ASVS 5.0's authentication and session management chapters, requirement by requirement.
+The [conformance suite](testing.md#the-conformance-suite) tests several of these guarantees against your own configuration. [OWASP ASVS and NIST SP 800-63B](owasp-asvs.md) goes through ASVS 5.0.0 requirement by requirement, says what to turn on for each of its levels, and what your app has to supply for each of NIST's.
 
 Guarantees about a [feature](quick-start.md#adding-features), such as devices or email changes, apply once that feature is on.
 
@@ -47,22 +50,21 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices or
 - A password longer than its stored hash can check (72 bytes for bcrypt) fails like a wrong one, with the same error, timing and throttling, wherever Keyring checks a password: signing in, step-up, removing the last second factor and the current password on a change. The over-long value never reaches the hasher.
 - Passwords are put in Unicode's NFC form before they're measured, hashed or checked, so one set on a device that composes characters one way still works on a device that composes them another.
 - Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_logins.keep_for`, as soon as the user's password or email address changes, or when `keyring.guard` is no longer the guard they started under. An emailed code could have gone to the address the account no longer has, so an email change and its undo both end a sign in that was waiting for one.
-- The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
+- The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login. On Laravel's `cookie` session driver, where there is nothing on the server to destroy, the old copy is signed out through its registry record instead.
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - Registration doesn't reveal whether an address has an account, unless you set `registration.reveal_taken`. A free address, a taken one, one reserved for its previous owner and one whose account you keep out get the same response, status, cookies and session, after the same validation, in at least `timebox`, with one password hash each and every email sent after the response. Nobody is signed in by registering. Whether an address is taken is decided by Keyring, not by your action, so the guarantee doesn't depend on how the action is written, as long as it doesn't check for itself. See [Registration](sign-in-flow.md#without-revealing-who-has-an-account).
 - With that registration, an account can't be signed in until its address is verified, and a correct password is answered like a wrong one until then. Verifying takes the emailed link and the password together, so neither someone who registered an address they can't read mail for, nor its owner who never chose that password, ends up with a verified account. A finished password reset also verifies the address.
 - Checking a password can rehash it under the app's current settings. The new hash is only saved over the one that was checked, under a row lock, so a sign in that overlaps a reset can't write the old password back, and whatever device trust it was given is withdrawn when it's ended.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
-- Keyring's responses send `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: same-origin` (`no-referrer` on the pages emailed links open), and signing out sends `Clear-Site-Data`.
 
 ### Rate Limiting
 
 Every factor has its own limits, checked in the pipeline before the proof is looked at:
 
-- **Per account**: `limits.per_account` attempts a minute (5). The account is the user: Keyring finds who a typed username belongs to before it counts, so every way of typing it shares one limit, guesses at login and when confirming count together, and two accounts never share a count however alike their usernames look. Browsers the account has signed in from before (they carry one of its device cookies) count in a bucket of their own, so someone guessing from elsewhere can't lock the owner out (OWASP's "device cookies"). They share that one bucket between them: a device cookie is made at every sign in from a new browser, so someone who could once sign in may hold any number, and with a bucket each they'd get the account's allowance of guesses once per cookie. A browser stops counting as known when a password reset or change, or a sign-out everywhere, takes the account back, until it signs in again.
+- **Per account**: `limits.per_account` attempts a minute (5). The account is the user: Keyring finds who a typed username belongs to before it counts, so every way of typing it shares one limit, guesses at login and when confirming count together, and two accounts never share a count however alike their usernames look. Browsers the account has signed in from before (they carry one of its device cookies) count in a bucket of their own, so someone guessing from elsewhere can't lock the owner out, an idea taken from the OWASP Community page on device cookies. They share that one bucket between them: a device cookie is made at every sign in from a new browser, so someone who could once sign in may hold any number, and with a bucket each they'd get the account's allowance of guesses once per cookie. A browser stops counting as known when a password reset or change, or a sign-out everywhere, takes the account back, until it signs in again.
 - **Per typed username**: a sign in that names its account is counted under the name as typed as well, with the same numbers, whether or not anyone has it. Only this count says so when it refuses (the `429`). The account's own limit refuses quietly: the attempt is answered like a wrong password, in the same time, without the password being looked at. So a name is answered from its own history, and locking an account under one name doesn't show which other names belong to it, or which names have an account at all.
 - **Per IP address**: `limits.per_ip` attempts a minute (20), shared by every account on that address. A browser carrying the account's device cookie counts per IP for that account alone, so others on a shared address can't hold it up, and an attacker holding several of the account's device cookies still gets one count. Behind a load balancer, configure Laravel's [trusted proxies](#trusted-proxies), or every user shares the balancer's address.
-- **In a row**: `limits.consecutive` failures (100, the most NIST SP 800-63B allows) on one of an account's authenticators, however slowly they come. Each authenticator app, security key and set of recovery codes has a count of its own, and so does the password. They're counted in the database, so clearing the cache doesn't start them over, and at the cap the authenticator is refused for the account until that's dealt with: nothing brings it back by itself (see [At the Cap](#at-the-cap)). `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop. With `Features::devices()` on, browsers the account hasn't signed in from may only make `limits.consecutive_elsewhere` (80) of those failures. The rest are kept for the owner's own browsers, so someone guessing elsewhere can't use the whole cap up, and the two never add up to more than it.
+- **In a row**: `limits.consecutive` failures (100, the most NIST SP 800-63B-4 allows, Sec. 3.2.2) on one of an account's authenticators, however slowly they come. Each authenticator app, security key and set of recovery codes has a count of its own, and so does the password. They're counted in the database, so clearing the cache doesn't start them over, and at the cap the authenticator is refused for the account until that's dealt with: nothing brings it back by itself (see [At the Cap](#at-the-cap)). `null` turns the cap off. Without it, guessing just under the per-minute limit would never stop. With `Features::devices()` on, browsers the account hasn't signed in from may only make `limits.consecutive_elsewhere` (80) of those failures. The rest are kept for the owner's own browsers, so someone guessing elsewhere can't use the whole cap up, and the two never add up to more than it.
 
 How they count:
 
@@ -78,9 +80,9 @@ The per-minute counts, their locks and each typed name's own failures are kept i
 
 #### At the Cap
 
-An authenticator that has failed `limits.consecutive` times in a row is disabled for that account, as NIST asks, and stays disabled until it's set up again. What that takes depends on the factor:
+An authenticator that has failed `limits.consecutive` times in a row is disabled for that account, as NIST SP 800-63B-4 asks (Sec. 3.2.2), and stays disabled until it's set up again. What that takes depends on the factor:
 
-- **One that can start a sign in** (the password, a passkey): a completed password reset, a new password chosen while signed in, or `Keyring::unlock($user)`. The sign-in form says to reset the password (`keyring::keyring.locked`), and Keyring dispatches `AccountLocked` and logs `account_locked`. Register the [`account_locked` notice](security-log-and-emails.md#email-types) to email the owner, who may not have been the one guessing.
+- **One that can start a sign in** (the password, a passkey): a completed password reset, a new password chosen while signed in, or `Keyring::unlock($user)`. The sign-in form says to reset the password (`keyring::keyring.locked`), and Keyring dispatches `AccountLocked` and logs `account_locked`. The [`account_locked` notice](security-log-and-emails.md#email-types), which `keyring:install` registers, emails the owner, who may not have been the one guessing.
 - **A second factor**: the user signs in another way (another factor, or a recovery code), removes it and adds it again. The challenge page says so (`keyring::keyring.factor_locked`, with a `429`), and each refused attempt dispatches `Lockout` with a `retryAfter` of `null`. A password reset doesn't bring it back, since a reset only proves the mailbox.
 
 From a support tool of your own, `Keyring::unlock($user, 'totp')` clears one factor's failures and locks, whichever kind it is:
@@ -110,7 +112,7 @@ By default every lock lifts by itself, the longest after a day, and it takes the
 ],
 ```
 
-An account locked that many times within a day on a factor that can start a sign in is then refused as it would be at the cap, however few failures that took. Locks double, so with the default one-minute window the fifth comes after about a quarter of an hour of steady guessing and at most eleven fit in a day: a higher number never holds anything. The sign-in form says to reset the password (`keyring::keyring.locked`) in place of counting down, and Keyring dispatches `AccountLocked` and logs `account_locked`. Register the [`account_locked` notice](security-log-and-emails.md#email-types) to email the owner that the account is locked and that resetting the password unlocks it. Like every security notice it isn't sent until you register it.
+An account locked that many times within a day on a factor that can start a sign in is then refused as it would be at the cap, however few failures that took. Locks double, so with the default one-minute window the fifth comes after about a quarter of an hour of steady guessing and at most eleven fit in a day: a higher number never holds anything. The sign-in form says to reset the password (`keyring::keyring.locked`) in place of counting down, and Keyring dispatches `AccountLocked` and logs `account_locked`. The [`account_locked` notice](security-log-and-emails.md#email-types) emails the owner that the account is locked and that resetting the password unlocks it. `keyring:install` registers it; like every security notice, an app that hasn't registered it sends nothing.
 
 The lock ends with a completed password reset, a new password chosen while signed in, or `Keyring::unlock($user)`. It's kept in the database beside the failures in a row, so neither time nor a cleared cache lifts it.
 
@@ -118,9 +120,9 @@ It follows the other limits' rules. Browsers the account has signed in from befo
 
 It's off by default: the cap ends the guessing either way, and this only gets someone who guesses fast there sooner, in a quarter of an hour in place of a day and a half.
 
-Factors can set their own limits by overriding `limits()`. A factor that leaves out what the default `limits()` returns leaves out the cap on failures in a row too, so add to the list rather than replacing it. A reset only clears the keys the default `limits()` builds, so a factor with its own per-account keys should clear them in a `PasswordReset` listener. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, removing an authenticator, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Usernameless passkey options have their own limiter, `keyring-login-options`, at 60 requests a minute per IP address, because the login page fetches them on every load for autofill. Apps can redefine either limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each account can be sent three codes per factor every 10 minutes (`limits.codes` and `limits.codes_per`), however many sign ins, step-ups or enrollments ask for them.
+Factors can set their own limits by overriding `limits()`. A factor that leaves out what the default `limits()` returns leaves out the cap on failures in a row too, so add to the list rather than replacing it. A reset only clears the keys the default `limits()` builds, so a factor with its own per-account keys should clear them in a `PasswordReset` listener. Other routes use Laravel's throttle middleware with the named `keyring` limiter: registration, password reset requests, resets, password changes, email change requests, enrollment confirmations, removing an authenticator, verification emails, the emailed email-change links and the "this wasn't me" link share 6 requests a minute per user, or per IP address for guests. Usernameless passkey options have their own limiter, `keyring-login-options`, at 60 requests a minute per IP address, because the login page fetches them on every load for autofill. A request either one refuses is logged as `rate_limited`, once for each wait. Apps can redefine either limiter (see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits)). Each account can be sent three codes per factor every 10 minutes (`limits.codes` and `limits.codes_per`), however many sign ins, step-ups or enrollments ask for them.
 
-Mail that isn't a guess at anything has a count of its own, since a sign in that succeeds is never counted and the form limiter only counts the sender. An account is sent each kind of [security notice](security-log-and-emails.md#security-emails) five times an hour at most (`limits.notices` and `limits.notices_per`), with every event still in the security log. An account can ask to change its email address that often, and a typed address is mailed about a change that often, whichever accounts ask. An address is mailed by registration that often too (the verification link, another one for an account that never verified, or the notice that someone tried to register with it), however many times the form is sent. No security notice goes to a `MustVerifyEmail` user whose address isn't verified: whoever registered typed it, so it may be anyone's.
+Mail that isn't a guess at anything has a count of its own, since a sign in that succeeds is never counted and the form limiter only counts the sender. An account is sent each kind of [security notice](security-log-and-emails.md#security-emails) five times an hour at most (`limits.notices` and `limits.notices_per`), with every event still in the security log. An account can ask to change its email address that often, and a typed address is mailed about a change that often, whichever accounts ask. An address is mailed by registration that often too (the verification link, another one for an account that never verified, or the notice that someone tried to register with it), however many times the form is sent. No security notice goes to a `MustVerifyEmail` user whose address isn't verified: whoever registered typed it, so it may be anyone's. The notice of a finished password reset is the exception, since the reset link went to that address.
 
 #### Octane's Cache Store
 
@@ -139,7 +141,7 @@ The failures in a row and the locks held until a reset are in your database eith
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
 - A TOTP code is accepted one 30 second step either side of now at most, and only during its own step with a [window of zero](factors.md#authenticator-apps-totp). No wider window can be set.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
-- A set that has had a code used says so until it's replaced (`shouldReplaceRecoveryCodes()`), for your app to send the user to make a new one. NIST SP 800-63B-4 (Sec. 4.2.1.1) asks for a new code after each use. Keyring doesn't issue one on its own, since only the user can save it, so that rule is met once your app sends them and they do.
+- A set that has had a code used says so until it's replaced (`shouldReplaceRecoveryCodes()`), for your app to send the user to make a new one. Keyring doesn't issue one by itself: see [Known Limitations](#where-keyring-departs-from-a-standard).
 - Email codes are random, eight digits (shown as two groups of four, `1234 5678`; spaces are ignored), expire after 10 minutes, allow five wrong guesses per pending attempt, and are replaced by any newer code. A newer code doesn't reset the count, and at the limit the user has to start signing in again. A sent code only verifies the authenticator it was sent to.
 - No factor that sends codes, the built-in email codes or [one of your own](factors.md#writing-a-code-factor), can be registered with codes shorter than six digits or that last longer than ten minutes. Keyring throws a `LogicException` instead.
 - A sent code works once on every session driver. Its state isn't in the session: the code waiting to be typed (as a keyed hash), the wrong guesses at it and the fact that it was used are kept in the cache store the rate limits use (`cache.limiter`), under the pending sign in, step-up or enrollment it was sent for. A right code is used up the moment it's checked, even when a later step refuses the sign in, and of two requests that send it together one is refused. A newer code ends the one before it, and the guesses stay counted, whichever copy of the session the browser sends. That goes for every code factor, at sign in, step-up and enrollment. If that cache store is cleared, pending codes go with it and the user asks for another.
@@ -149,7 +151,7 @@ The failures in a row and the locks held until a reset are in your database eith
 
 ### Second Factors and Step-Up
 
-- Policies count distinct categories, so two factors of the same kind are never treated as multi-factor.
+- Policies count distinct categories, so two factors of the same kind are never treated as multi-factor. AAL2 further needs one of the two to be something the user has (NIST SP 800-63B-4, Sec. 2.2.1): a password beside a factor that is only a biometric is an AAL1 session.
 - Assurance levels follow NIST SP 800-63B-4 as far as a library can check. A passkey that syncs reaches AAL2. AAL3 needs a phishing-resistant key that reports on every sign in that it can't leave its device, that was added with a verified attestation, and that either verified the user itself or was used with a password: another authenticator's user verification is never counted beside it. A key nothing vouches for stays at AAL2, though a policy or route can still ask for one with `deviceBound()`.
 - NIST AAL3 further needs authenticators and verifier cryptography validated to FIPS 140. Keyring can't supply or check either, so a session it calls AAL3 has met NIST's rules for the authentication and nothing more.
 - Email codes are opt-in (`EmailCode::asSecondFactor()`), since NIST doesn't accept email as an authenticator and the inbox can also reset the password. A code is a step at sign in and never a factor: a password and an emailed code is an AAL1 session, doesn't pass `keyring:aal2` or `keyring.enrolled`, doesn't earn a trusted device, and can't stand in for a possession factor the account has.
@@ -172,18 +174,18 @@ The failures in a row and the locks held until a reset are in your database eith
 - "Remember me" can't outlast the session it was ticked for. Laravel's cookie alone signs nobody in: the browser also holds a Keyring cookie naming that session's registry record, and coming back carries the session on with the limits it started with and nothing proved. Once the record has timed out, been revoked or been ended by a risk response, both cookies are refused, even from a client that kept them after being told to delete them.
 - A "remember me" cookie works once. Coming back moves the session to a new record and gives the browser a new cookie, so a copy of the pair brings back nothing the browser it was taken from hasn't already had. If a used cookie is sent again, or a browser is still signed in on the record it named, two browsers held the same pair: the session ends for both, with a `RememberMeReused` event and a `remember_me_reused` log entry. The one exception is the same browser's other requests in the few seconds after (`sessions.remember_grace`), which join the session the first one resumed. They can't start another, and sending the cookie again doesn't make those seconds any longer.
 - A resumed session's device, IP address and browser are those of the request that resumed it, on a record of its own. A browser still on the record from before is never compared with them.
-- Signing in and every step-up give the session a new ID and end the one before: destroyed on the server, and on Laravel's `cookie` session driver, where there is nothing to destroy, signed out through its registry record.
 - A user can always see their sessions and end any one of them or all the others (`/user/sessions`), whatever features are on. Ending needs a fresh verification, looking doesn't. Only their own can be found.
 - A session's registry ID, which its "remember me" cookie carries, is never sent to a page. The sessions list names each one by a keyed hash of it, which can't be turned back into the ID or used as a cookie.
 - A session whose registry record has gone missing is signed out rather than started over.
 - An administrator can end one user's sessions, or everyone's, with `php artisan keyring:sign-out`. "Remember me" brings none of them back. See [For Administrators](devices-and-sessions.md#for-administrators).
+- An account your app stops letting sign in ([`allowSignInWhen()`](sign-in-flow.md#who-may-sign-in)) is refused wherever a session starts or carries on, and the first request that's refused ends every session the account has, with its "remember me" cookies and trusted devices. Until one of its sessions makes a request they're still on record, so call `Sessions::signOutEverywhere()` as you set your flag to end them there and then.
 - Signing a user out everywhere and a session moving to a new record take turns, so a "remember me" cookie coming back at that moment can't carry a session past the sign-out.
 - A revocation can't be undone by a request saving a stale copy of its session.
 - Laravel's session ID is never stored by Keyring or written to the security log.
 - Devices are recognised by a random, httpOnly cookie, stored as a hash. A device is never a factor, only an input to your policy and risk signals.
 - Keyring's two cookies (the device cookie and the "remember me" one) are httpOnly and `SameSite=Lax`. Once the app is served over HTTPS (`APP_URL` is `https`, or `session.secure` is on) they are always `Secure` and carry the `__Host-` prefix, or `__Secure-` when your cookies are shared with subdomains. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies).
 - Signing out everywhere also stops trusting the other devices and cancels pending email changes, so whoever had the account can't skip the second factor on a device they trusted or finish a change they started.
-- A device is only trusted after a login that verified two categories, never after the password alone. A login that verifies two categories, and any grant of trust, gives the browser a new cookie, so neither can rest on a cookie planted in the browser before the user signed in.
+- A device is only trusted after a login that reached AAL2, never after the password alone or with an emailed code. A login that reaches AAL2, and any grant of trust, gives the browser a new cookie, so neither can rest on a cookie planted in the browser before the user signed in.
 - Every device stops being trusted when the password changes, an authenticator is removed, an email change is applied or a signed-in request places a risk lock. A lock placed by a login attempt doesn't, as above.
 
 ### Account Changes
@@ -204,10 +206,11 @@ The failures in a row and the locks held until a reset are in your database eith
 - New passwords are checked against the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, in every environment, and against your app's name, the words you list in `passwords.context` and the user's own name and email address, with look-alike characters read as letters. The whole password is compared, as NIST SP 800-63B-4 Sec. 3.1.1.2 requires: one made up of those words is refused, and a passphrase that only has one in it is not.
 - In production, new passwords are also checked against breach lists (Have I Been Pwned). That check lets a password through when the service can't be reached, unless you set `passwords.refuse_unchecked`.
 - New passwords are refused rather than silently cut short by bcrypt. With bcrypt that limit is 72 bytes, so hash with argon2id to accept every password up to `passwords.max`.
-- Passwords never expire. A user can be held until they choose a new one, by a risk response or by your app, when there's evidence theirs is compromised (NIST SP 800-63B-4, Sec. 3.1.1.2). The hold outlasts signing out and clearing the cache, ends with a password change or reset, and is never placed on an account without a password.
+- Passwords never expire. A user is held until they choose a new one when there's evidence theirs is compromised (NIST SP 800-63B-4, Sec. 3.1.1.2): by your app, by a risk response of yours, or by Keyring's own response when the `BreachedPassword` signal, which is off until you turn it on, finds the password they just signed in with in a breach. The hold outlasts signing out and clearing the cache, ends with a password change or reset, and is never placed on an account without a password.
 
 ### Links and Headers
 
+- Every Keyring response is sent with `Cache-Control: no-store, private` and `X-Content-Type-Options: nosniff`, and signing out sends `Clear-Site-Data`. The referrer policy and the frame header are below.
 - Every emailed link (password reset, email change, email verification, "this wasn't me") is built from `APP_URL`, never from the request that caused the email: not its `Host` header, and not an `X-Forwarded-Prefix` your proxy passed on.
 - Signed links are signed over the path and query only, and checked with `keyring.signed:relative` (Laravel's `signed` middleware, with refused links logged), so a forged `Host` header can't redirect them.
 - Pages opened from emailed links (password resets, email verification, email changes, "this wasn't me") have the link's token or signature in their URL, so they're sent with `Referrer-Policy: no-referrer`: nothing the page loads is told its URL, your own assets and analytics included. A failed form still finds its way back, because Keyring notes the page in the session.
@@ -225,6 +228,21 @@ Keyring::linkRootUsing(fn () => tenant()->url);
 
 Work it out from something the server knows. The request's `Host` header is whatever the sender says, and a link built from it sends a real reset token to their site. The signature covers the path and query, so links keep working under any root.
 
+#### Tokens in Emailed Links
+
+An emailed link has to carry what makes it work, so its token or signature is in the URL of the page it opens. OWASP ASVS 5.0.0 (14.2.1) wants nothing sensitive in a URL, and for these links Keyring can't meet that. What it does is above: the page changes nothing and posts the token in the body of the request that acts, it's sent with `Referrer-Policy: no-referrer` and `Cache-Control: no-store`, and none of the links lasts long. A reset link stops working once it's used, or after `auth.passwords.*.expire` (60 minutes in a new app). An email change's confirming links last 24 hours (`email_changes.confirmable_for`) and its undo link a week (`revertable_for`), and each works once. A verification link lasts `auth.verification.expire` (60 minutes).
+
+The reset link also carries the account's email address, as Laravel's own does, and it stays. Laravel's broker finds a reset by its address: its table is keyed by the address and holds the token as a password hash, which can't be looked up. So the form has to post the address, and a link without it leaves the user to type it into a field that most reset pages, Laravel's starter kits' among them, show filled in and read-only. The address is also less than the token: it's who the email was sent to. To keep it out of the URL all the same, build the link yourself and have your page ask for the address. Keyring leaves a callback of yours alone:
+
+```php
+use Illuminate\Auth\Notifications\ResetPassword;
+use Keyring\Support\Url;
+
+ResetPassword::createUrlUsing(fn (User $user, string $token) => Url::route('password.reset', ['token' => $token]));
+```
+
+`Url::route()` builds from `APP_URL`, as Keyring's own link does. The `reset-password` page then gets an empty `email`.
+
 ### Request Input
 
 A URL ends up in places a request's body doesn't: access logs, proxies, the browser's history. Laravel's `$request->input()` reads the query string as well as the body, so a password sent as `POST /login?password=...` would work, and be logged.
@@ -239,19 +257,19 @@ A URL ends up in places a request's body doesn't: access logs, proxies, the brow
 
 - TOTP secrets are encrypted with `APP_KEY`. [Cryptography](#cryptography) lists every algorithm and key.
 - Recovery codes and email codes are stored as keyed hashes (HMAC-SHA-256). A recovery code is only stored with 112 random bits or more: Keyring's own have 128, those imported from Fortify 119, and no other form is stored or accepted. A sent code is far shorter, so its hash is kept in your cache for ten minutes at most and allowed five guesses.
-- Keyed hashes never use `APP_KEY` itself. Each kind (recovery codes, one-time codes, reserved addresses, WebAuthn user handles) has a key of its own, derived from `APP_KEY` with HKDF, so a hash made for one can't pass as another and none is made with the key Laravel encrypts and signs with.
+- Keyed hashes never use `APP_KEY` itself. Each kind (recovery codes, one-time codes, reserved addresses, WebAuthn user handles, session handles) has a key of its own, derived from `APP_KEY` with HKDF, so a hash made for one can't pass as another and none is made with the key Laravel encrypts and signs with.
 - Email change tokens are stored as SHA-256 hashes, and the addresses in a pending change are encrypted.
 - Device tokens are stored as SHA-256 hashes.
+- A session's registry ID is stored as it is: see [Algorithms](#algorithms) for why one read from the database signs nobody in.
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
 - WebAuthn user handles are an HMAC of the user's model and ID, never the ID or email, so two user models with the same ID don't share one.
-- The security log never holds passwords, codes, tokens or session IDs.
 
 ### Logging
 
 - Sign ins, failed factors, lockouts, session starts and ends, and every change to how an account signs in are recorded as shipped: in the [security log](security-log-and-emails.md) table, which is on by default, or in your app's log when you turn the table off. There is no setting that records nothing.
-- What was refused is recorded too: a request for someone else's authenticator, device or verification link, a sign-in method that wasn't added, a removal that would have left the account unable to sign in, an emailed link with a wrong, ended or expired token or signature, and a verification the pipeline's final gate turned away. None of it changes the answer the requester gets.
+- What was refused is recorded too: a request for someone else's authenticator, device or verification link, a sign-in method that wasn't added, a removal that would have left the account unable to sign in, an emailed link with a wrong, ended or expired token or signature, a request the form rate limiter turned away, and a verification the pipeline's final gate turned away. None of it changes the answer the requester gets.
 - No entry holds a password, code, token, signature, session ID or request body, in the table or in the app's log. Form validation errors aren't logged.
-- Every entry carries a severity and the ID of the request that wrote it.
+- Every entry carries a severity, the ID of the request that wrote it and the time. In the table the time is in your `app.timezone`, which is UTC unless you changed it; in your app's log it's written with its offset. See [Times](security-log-and-emails.md#times).
 - A refused request can't fill the log. A lock is logged once when it starts, not for each request it refuses, and refusals are capped per account or IP address, with one entry to say where the log stopped. See [Refusals That Repeat](security-log-and-emails.md#refusals-that-repeat).
 - A log write that fails never fails the sign in, with one exception: `Keyring::withoutProtection()` doesn't run unless its entry was written.
 - Old entries, devices, ended email changes and ended sessions are deleted every day by a task Keyring schedules itself, and a force deleted user's records are deleted with them.
@@ -291,6 +309,7 @@ Keyring sets the headers and cookies of its own responses. The rest of what a br
 | `SESSION_SECURE_COOKIE=true` | Makes its own two cookies `Secure` and gives them the `__Host-` prefix | Change the flags or name of Laravel's session, CSRF or "remember me" cookies |
 | A `Content-Security-Policy`, with `frame-ancestors` | Sends `X-Frame-Options: DENY` on its own responses, unless yours already say who may frame them | Send a policy: your layout and assets decide what one has to allow. Stop your other pages being framed |
 | `X-Content-Type-Options: nosniff` on your own responses | Sends it, with `Cache-Control: no-store`, `X-Frame-Options: DENY` and a `Referrer-Policy`, on every Keyring response | Add headers to routes that aren't Keyring's |
+| A bot check, if your forms need one | Limits how often anything can be tried, and makes every refusal take as long as the next | Tell a person from a script: no CAPTCHA, no challenge, no minimum time to fill in a form |
 
 ### HTTPS and HSTS
 
@@ -353,6 +372,50 @@ Your other pages get nothing from Keyring, so send the policy on every HTML resp
 Keyring's middleware (`Keyring\Http\Middleware\AddSecurityHeaders`) is on Keyring's routes only. Send `X-Content-Type-Options: nosniff` on the rest of your app too, so a browser never treats a response as a type it doesn't say it is, and decide your own `Referrer-Policy` and `Cache-Control` for pages that show account details. A small middleware on your `web` and `api` groups, or your web server's config, covers all of it.
 
 If you take Keyring's middleware out of `keyring.middleware`, its responses lose `no-store`, `nosniff`, `X-Frame-Options` and their referrer policy unless yours send them. The pages emailed links open have a token in their URL, so they need `Referrer-Policy: no-referrer`.
+
+### Bot Checks
+
+Keyring slows guessing down with [rate limits](#rate-limiting) and doesn't try to tell a person from a script. It has no CAPTCHA, no challenge and no minimum time between showing a form and taking its answer. OWASP ASVS 5.0.0 asks for realistic human timing at Level 3 (2.4.2), and OWASP's Authentication Cheat Sheet suggests a CAPTCHA after failed attempts. Which service to use, when to show it and what to do for the people it gets wrong are your app's decisions, so the check is yours to add.
+
+For signing in, it's a [pipeline step](sign-in-flow.md#writing-a-step) of your own, put before the limits so a request that fails it is never counted as an attempt on anyone's account:
+
+```php
+namespace App\Keyring;
+
+use Closure;
+use Illuminate\Validation\ValidationException;
+use Keyring\Pipeline\Context;
+
+class CheckForBots
+{
+    public function __construct(
+        protected BotCheck $bots,
+    ) {}
+
+    public function handle(Context $context, Closure $next): Context
+    {
+        // Where a sign in starts. A challenge page only comes after a right password.
+        if ($context->identifying && ! $this->bots->passes($context->request)) {
+            throw ValidationException::withMessages(['captcha' => __('Please confirm you are not a robot.')]);
+        }
+
+        return $next($context);
+    }
+}
+```
+
+```php
+// app/Providers/KeyringServiceProvider.php
+use Keyring\Pipeline\Steps;
+use Keyring\Pipeline\Steps\EnsureNotThrottled;
+
+Keyring::pipeline(fn (Steps $steps) => $steps->before(EnsureNotThrottled::class, CheckForBots::class));
+```
+
+`BotCheck` stands for whatever you use: a CAPTCHA's server-side verification, or a signed timestamp from your form that says how long ago it was shown. The step runs inside the timebox, so a refusal takes as long as any other.
+
+Registration, password reset requests and the other forms don't go through the pipeline. For those, add a middleware of your own to [`keyring.middleware`](configuration.md#routes) that checks the routes you name (`register.store`, `password.email`).
+
 ## Cryptography
 
 Everything Keyring does with a key or an algorithm, and where. It adds no cipher or hash of its own: each one below is PHP's, Laravel's or a library's.
@@ -379,10 +442,11 @@ Rotating `APP_KEY` with the old key in `APP_PREVIOUS_KEYS` keeps encrypted value
 | HMAC-SHA-256 under a purpose key | Recovery codes; emailed codes, and those of your own code factors, while they wait in the cache to be typed; the lookup hash of an address an email change holds; the WebAuthn user handle; the handle a page knows a session by | Values that are only ever compared or looked up, never read back. |
 | SHA-256, unkeyed | Device tokens and email change tokens (confirm, current address, revert) | Long random tokens, so a copy of the table can't be used as one. Each has well over 128 bits, which is why a plain hash is enough. |
 | SHA-256, unkeyed | The mark a pending login keeps of the user's password hash and address, inside the encrypted session | Noticing that either changed. Not a secret. |
-| HMAC-SHA-1, or HMAC-SHA-256 or HMAC-SHA-512 where the factor is [set up with one](factors.md#authenticator-apps-totp) | TOTP codes (RFC 6238), six digits every 30 seconds | A legacy algorithm in OWASP ASVS's terms, kept as the default because it's the one every authenticator app makes. |
+| None: stored as it is | A session's registry ID, in `keyring_sessions` or the cache | Nothing, on purpose. The ID isn't a credential by itself. It only does anything from inside a Laravel session, which is kept on the server or, with the `cookie` driver, in a cookie encrypted with `APP_KEY`, or from inside the "remember me" cookie, which is encrypted the same way and only works beside Laravel's own. Someone who can read the table can make none of those without the key. Laravel keeps its own session IDs and `remember_token` the same way. |
+| HMAC-SHA-1, or HMAC-SHA-256 or HMAC-SHA-512 where the factor is [set up with one](factors.md#authenticator-apps-totp) | TOTP codes (RFC 6238), six digits every 30 seconds | A legacy algorithm in OWASP ASVS 5.0.0's Appendix C (requirement 11.4.1), kept as the default because it's the one every authenticator app makes, and several ignore a request for another. |
 | Laravel's hash manager, with your `hashing.driver`: bcrypt by default, or Argon2id | Passwords, the hash an unknown account spends, and the reset tokens Laravel's broker stores | Keyring calls `Hash` and never picks the algorithm or its cost. |
 | ECDSA with P-256 and SHA-256 (ES256), Ed25519 (EdDSA), and RSASSA-PKCS1-v1_5 with SHA-256 (RS256, off by default, 2048 bits at least) | Signatures from passkeys and security keys, limited to [`webauthn.algorithms`](passkeys.md#signature-algorithms) | Proof of holding the key. SHA-256 also hashes the client data and the relying party ID, as WebAuthn defines. |
-| X.509 path validation: ECDSA, Ed25519, Ed448 or RSASSA-PKCS1-v1_5 signatures over SHA-224 or longer, RSA keys of 2048 bits at least, never SHA-1 | Attestation chains, only for a factor with [`requireAttestation()`](passkeys.md#requiring-attestation) | Which maker's key this is. The algorithms are whatever the maker signed its certificates with, so this accepts RSA with PKCS #1 v1.5 padding, which ASVS doesn't approve: several makers' roots use it. Off by default. |
+| X.509 path validation: ECDSA, Ed25519, Ed448 or RSASSA-PKCS1-v1_5 signatures over SHA-224 or longer, RSA keys of 2048 bits at least, never SHA-1 | Attestation chains, only for a factor with [`requireAttestation()`](passkeys.md#requiring-attestation) | Which maker's key this is. The algorithms are whatever the maker signed its certificates with, so this accepts RSA with PKCS #1 v1.5 padding, which ASVS doesn't approve: several makers' roots use it (requirement 11.6.1). Off by default. |
 | HMAC-SHA-256 with `APP_KEY`, by Laravel's URL signing | The email verification link and the "this wasn't me" link | That the link was made by your app, for that route, and hasn't expired. |
 | SHA-1, unkeyed | The address in Laravel's email verification link; shortening the cache keys of the rate limits, sent codes and enrollments; and the breached-password lookup, where Have I Been Pwned's API is asked by the first five characters of a SHA-1 | Nothing rests on it: the link is signed as above, a cache key isn't a secret, and the lookup is the API's own format, whether Laravel makes it or Keyring does (`passwords.refuse_unchecked`). |
 
@@ -413,12 +477,14 @@ All of it comes from the operating system's generator, through PHP's `random_byt
 | The cipher | `app.cipher` | Laravel only reads what the current cipher wrote, so every authenticator secret and pending change has to be decrypted and saved again in a migration of your own before the old cipher goes. Pending logins and enrollments end. |
 | The WebAuthn algorithms | `webauthn.algorithms` and `webauthn.minimum_rsa_bits` | Adding one changes nothing stored. Removing one refuses the keys that sign with it, and their owners add a new key: a key's algorithm can't be changed. |
 | The TOTP digest | The factor's `algorithm` | Only apps added afterwards use it. An authenticator keeps the digest it was set up with, so moving everyone means each user adding their app again. |
-| The keyed hash (HMAC-SHA-256) or how its keys are derived | Fixed in code | A new release would have to re-make them: reserved address hashes can be recomputed from the encrypted address, recovery codes can't be (only the hash is kept) and would be issued again, and a WebAuthn user handle stays for as long as the user has a key that knows it. Stored hashes carry no version tag. |
+| The keyed hash (HMAC-SHA-256) or how its keys are derived | Fixed in code | A new release would have to re-make them: reserved address hashes can be recomputed from the encrypted address, recovery codes can't be (only the hash is kept) and would be issued again, and a WebAuthn user handle stays for as long as the user has a key that knows it. |
 | The token hash (SHA-256) | Fixed in code | Tokens can't be rehashed, since only the hash is kept. Device cookies and pending email change links would be issued again. |
+
+Those last two are where Keyring stops short of OWASP ASVS 5.0.0's requirement 11.2.2, that any algorithm can be swapped. Its stored hashes carry no tag saying which scheme made them, so a release that changed one couldn't take the old and the new side by side: it would have to re-make what can be re-made and issue the rest again, as the table says. A tag is only worth having on the day of such a change, and neither algorithm has a weakness to move away from, so Keyring doesn't carry one yet.
 
 ### Peppering Passwords
 
-NIST SP 800-63B suggests, beyond the salted hash, a keyed hash or encryption of it under a secret kept apart from the database, often called a pepper. Keyring doesn't build one in, for three reasons. The password hash is your `users.password` column and Laravel's hasher, shared with everything else in your app that checks a password, so a pepper only Keyring knew about would break those. A pepper is only worth having when its key lives somewhere the database's attacker can't reach, and where that is (an HSM, a secrets manager, at least a separate environment variable) is your infrastructure's decision. And losing or rotating it locks out every user at once, so it needs a plan that belongs to whoever runs the app.
+NIST SP 800-63B-4 recommends (Sec. 3.1.1.2), beyond the salted hash, a keyed hash or encryption of it under a secret kept apart from the database, often called a pepper. OWASP's Password Storage Cheat Sheet suggests the same. Keyring doesn't build one in, for three reasons. The password hash is your `users.password` column and Laravel's hasher, shared with everything else in your app that checks a password, so a pepper only Keyring knew about would break those. A pepper is only worth having when its key lives somewhere the database's attacker can't reach, and where that is (an HSM, a secrets manager, at least a separate environment variable) is your infrastructure's decision. And losing or rotating it locks out every user at once, so it needs a plan that belongs to whoever runs the app.
 
 Keyring checks and sets passwords through Laravel's `Hash`, so a pepper goes in there and covers every flow: signing in, confirming, password changes, resets and the rehash at sign in. Register a driver that wraps the one you use now:
 
@@ -485,72 +551,115 @@ The operations below are the expensive ones, each with what stops a stranger fro
 | WebAuthn verification: decoding the response and checking one signature | Adding a key, and every sign in or step-up with one | At sign in, the factor's rate limits, checked before the response is read; adding a key is behind the `keyring` limiter and a fresh verification. Usernameless options are limited to 60 a minute per IP address. An RSA key is bounded to 16,384 bits by the library, since the work grows with the key. |
 | Attestation: a certificate chain of at most six, checked against each root you list for the model | Adding a key to a factor with `requireAttestation()` | The `keyring` limiter on enrollment, the cap on chain length, and nothing being fetched: no revocation lookups, no metadata download. |
 | Mail | A reset link, an email change, a verification link, an emailed code, a security notice | Reset and email-change mail is sent after the response. A verification link and an emailed code are sent during the request, unless you queue those notifications: a code is limited to three per factor every 10 minutes per account (`limits.codes`). The published security notices are queued, five of a kind an hour per account (`limits.notices`). The routes that ask for mail are behind the `keyring` limiter. |
+| The risk signals' lookups: a few indexed queries on the security log, the account's devices and its sessions | A sign in that gets its first factor right, for the signals the published provider turns on, and one comparison of browser names on each signed-in request | They run after a correct first factor, which the rate limits bound. Each signal is a line in your provider to take out. |
 | A session lock | Sign in, challenge and enrollment routes | Requests in one session wait for each other, for up to Laravel's 10 seconds, and one that waited that long fails. One session can't hold up another. |
 
 ## Standards
 
-Keyring's code and config say what each thing does. This is where the choices come from:
+Keyring's code and config say what each thing does. This is where the choices come from. A row that says Keyring departs from a requirement has its reason under [Known Limitations](#known-limitations), and [OWASP ASVS and NIST SP 800-63B](owasp-asvs.md) has the standards the other way round: every requirement, and what Keyring does about it.
 
 | What Keyring does | From |
 |---|---|
-| Assurance levels, and what reaches AAL2 and AAL3, as far as a library can check. AAL3 takes an attested key that can't leave its device, with its own user verification or a password. Validated authenticators and verifier cryptography, which NIST AAL3 also needs, are yours to supply | NIST SP 800-63B-4, Sec. 2 and Appendix B |
-| Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours). The session carries on at the level that's left, or ends with `sessions.end_on_lapse` | NIST SP 800-63B-4, Sec. 2.2.3, 2.3.3, 5.1 and 5.2 |
-| A cap of 100 failures in a row on each of an account's authenticators, kept in the database, after which it's refused until it's set up again. A lower number for browsers the account hasn't signed in from is NIST's "additional technique" for keeping an attacker from locking the owner out. `Keyring::unlock()` switches one back on without binding it again, which NIST doesn't provide for | NIST SP 800-63B-4, Sec. 3.2.2 |
-| Proving the strongest combination the account can give before adding a sign-in method, whatever the sign-in policy asks | NIST SP 800-63B-4, Sec. 4.1.2.1 |
-| Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
-| Email codes being opt-in, and counting toward no level: a password and an emailed code is AAL1 | NIST SP 800-63B-4, Sec. 3.1.3.1, which doesn't accept email as an authenticator |
-| The emails `keyring:install` turns on: password changed, sign-in method added or removed, recovery code used, new recovery codes, email address changed, account locked | NIST SP 800-63B, OWASP's Authentication Cheat Sheet and OWASP ASVS 5.0.0, 6.3.7 |
-| Registration that answers the same for every address | OWASP ASVS 5.0.0, 6.3.8 |
-| A notice after each change to how someone signs in, once registered: the password, a sign-in method added or removed, new recovery codes, the email address | OWASP ASVS 5.0.0, 6.3.7 |
-| A notice of a suspicious attempt, once registered: a new device, a failed second factor, a locked account, and what the risk signals find, such as a sign in after a long quiet period or after several failures | OWASP ASVS 5.0.0, 6.3.5 |
-| Password lengths: 8 with a second factor, 15 without, and no setting below 8 | OWASP ASVS 5.0.0, 6.2.1, and NIST SP 800-63B (15 for a password used alone, 8 as part of multi-factor) |
+| **Assurance levels and sessions** | |
+| Assurance levels, and what reaches AAL2 and AAL3, as far as a library can check. AAL2 takes two kinds of factor, one of them something the user has. AAL3 takes an attested key that can't leave its device, with its own user verification or a password. Validated authenticators and verifier cryptography, which NIST AAL3 also needs, are yours to supply | NIST SP 800-63B-4, Sec. 2.2.1, 2.3.1, 2.3.2 and Appendix B |
+| Each level lapsing after idle and overall limits (AAL2: 1 hour, 24 hours; AAL3: 15 minutes, 12 hours). The session carries on at the level that's left, or ends with `sessions.end_on_lapse` | NIST SP 800-63B-4, Sec. 2.2.3, 2.3.3, 5.1 and 5.2. Carrying on departs from Sec. 5.2 |
+| An idle and an absolute timeout on every session, kept on the server, with a longer idle one for "remember me" as a stated decision | OWASP ASVS 5.0.0, 7.3.1 and 7.3.2, and OWASP's Session Management Cheat Sheet. "Remember me" departs from NIST SP 800-63B-4, Sec. 5.1 |
+| A new session ID, and the old session ended, on every sign in and step-up | OWASP ASVS 5.0.0, 7.2.4 |
+| A session that is signed out, revoked or timed out can't be used again | OWASP ASVS 5.0.0, 7.4.1 |
+| A deleted user's sessions end with them, and an account the app keeps out loses all of its sessions at the first request it's refused | OWASP ASVS 5.0.0, 7.4.2 (for ending them sooner, see [Who May Sign In](sign-in-flow.md#who-may-sign-in)) |
+| A stated number of sessions per account, and what happens at it | OWASP ASVS 5.0.0, 7.1.2 |
+| The option to end other sessions after any change to a sign-in method | OWASP ASVS 5.0.0, 7.4.3 |
+| A command for administrators to end one user's sessions or everyone's | OWASP ASVS 5.0.0, 7.4.5 |
+| Users seeing their sessions, and ending any or all of them after verifying again | OWASP ASVS 5.0.0, 7.5.2 |
+| A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
+| **Rate limits** | |
+| A cap of 100 failures in a row on each of an account's authenticators, kept in the database, after which it's refused until it's set up again. A lower number for browsers the account hasn't signed in from is one of the additional, risk-based techniques NIST allows for keeping an attacker from locking the owner out. `Keyring::unlock()` switches an authenticator back on without binding it again, which NIST doesn't provide for | NIST SP 800-63B-4, Sec. 3.2.2 |
+| Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet (exponential lockout) and the OWASP Community page "Slow Down Online Guessing Attacks with Device Cookies", adapted: known browsers share one bucket, and the cookie is a random token stored hashed |
+| Limits per account, per typed username and per IP address on every factor, and a limiter on the other forms | OWASP ASVS 5.0.0, 2.4.1 and 6.3.1, and OWASP's Credential Stuffing Prevention Cheat Sheet |
+| **Passwords** | |
+| Password lengths: 8 with a second factor, 15 without, and no setting below 8 | OWASP ASVS 5.0.0, 6.2.1, and NIST SP 800-63B-4, Sec. 3.1.1.2 (15 for a password used alone, 8 as part of multi-factor) |
 | A password change taking the current password as well as the new one | OWASP ASVS 5.0.0, 6.2.3 |
 | Refusing the most common passwords: the top 10,000 of 8 characters or more and the top 3,000 of 15 or more | OWASP ASVS 5.0.0, 6.2.4 (at least the top 3,000 that fit the policy) |
-| No composition rules, and any characters accepted | OWASP ASVS 5.0.0, 6.2.5, and NIST SP 800-63B |
-| Passwords of at least 64 characters allowed, never silently cut short: up to `passwords.max` with argon2id, 72 bytes with bcrypt | OWASP ASVS 5.0.0, 6.2.9, and NIST SP 800-63B. Met with `HASH_DRIVER=argon2id`, not with bcrypt |
-| Refusing passwords made up of the app's name, the words in `passwords.context`, or the user's name and email address, comparing the whole password | OWASP ASVS 5.0.0, 6.2.11, with 6.1.2 for the list, which is yours to fill in; NIST SP 800-63B-4 Sec. 3.1.1.2 for comparing the whole password |
-| Refusing breached passwords, in production by default | OWASP ASVS 5.0.0, 6.2.12, and NIST SP 800-63B |
-| Passwords of any Unicode characters, normalized to NFC before hashing | NIST SP 800-63B, password verifiers |
-| Passwords never expiring, and a forced change on evidence of compromise when a risk response or your app asks for one | NIST SP 800-63B-4, Sec. 3.1.1.2 |
+| No composition rules, and any characters accepted | OWASP ASVS 5.0.0, 6.2.5, and NIST SP 800-63B-4, Sec. 3.1.1.2 |
+| Passwords of at least 64 characters allowed, never silently cut short: up to `passwords.max` with argon2id, 72 bytes with bcrypt | OWASP ASVS 5.0.0, 6.2.9, and NIST SP 800-63B-4, Sec. 3.1.1.2. Met with `HASH_DRIVER=argon2id`, not with bcrypt |
+| Refusing passwords made up of the app's name, the words in `passwords.context`, or the user's name and email address, comparing the whole password | OWASP ASVS 5.0.0, 6.2.11, with 6.1.2 for the list, which is yours to fill in; NIST SP 800-63B-4, Sec. 3.1.1.2, for comparing the whole password |
+| Refusing breached passwords, in production by default | OWASP ASVS 5.0.0, 6.2.12, and NIST SP 800-63B-4, Sec. 3.1.1.2 |
+| Passwords of any Unicode characters, normalised to NFC before hashing | NIST SP 800-63B-4, Sec. 3.1.1.2. This departs from the letter of OWASP ASVS 5.0.0, 6.2.8 (verified exactly as received): nothing is truncated or has its case changed, but the bytes are normalised |
+| Passwords never expiring, and a user held until they choose a new one on evidence of compromise: when your app says so, and by default when the `BreachedPassword` signal finds the password just used in a breach | NIST SP 800-63B-4, Sec. 3.1.1.2 |
+| **Factors and codes** | |
+| Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B-4, Sec. 2.2.2 and 3.2.5 |
+| Email codes being opt-in, and counting toward no level: a password and an emailed code is AAL1 | NIST SP 800-63B-4, Sec. 3.1.3.1, which doesn't accept email as an authenticator, and OWASP ASVS 5.0.0, 6.3.6 |
 | Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
-| Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
-| Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |
-| Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last | OWASP's Authentication Cheat Sheet |
+| Making everyone add a second factor with `keyring.enrolled`, which the installer sets up once a second factor is picked | OWASP ASVS 5.0.0, 6.3.3 |
+| Proving the strongest combination the account can give before adding a sign-in method, whatever the sign-in policy asks | NIST SP 800-63B-4, Sec. 4.1.2.1 |
+| A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet, and OWASP ASVS 5.0.0, 7.5.1 |
+| Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last, and bound to the sign in they were sent for | OWASP's Multifactor Authentication Cheat Sheet (One-Time Password Handling and Storage), and OWASP ASVS 5.0.0, 6.6.2 and 6.6.3 |
 | TOTP codes, recovery codes and sent codes that work once, whatever the session driver | OWASP ASVS 5.0.0, 6.5.1 |
 | Recovery codes with at least 112 random bits, which is what lets them be kept as keyed hashes rather than salted password hashes | OWASP ASVS 5.0.0, 6.5.2 |
-| Sent codes of at least six digits | OWASP ASVS 5.0.0, 6.5.4 |
-| Sent codes that last ten minutes at most | OWASP ASVS 5.0.0, 6.5.5 |
-| TOTP codes accepted one time step either side of now, and no further | RFC 6238, section 5.2. This default deviates from OWASP ASVS 5.0.0, 6.5.5 (a 30 second maximum), which a window of zero meets: see [Known Limitations](#known-limitations) |
-| Password resets: the same answer for every address, links built from `APP_URL`, no automatic sign in, every session signed out | OWASP's Forgot Password Cheat Sheet |
-| Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
-| A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
+| Sent codes of at least six digits, that last ten minutes at most | OWASP ASVS 5.0.0, 6.5.4 and 6.5.5 |
+| TOTP codes accepted one time step either side of now, and no further | RFC 6238, Section 5.2 (one step back for delay) and Section 6 (a limit on drift either way). This default departs from OWASP ASVS 5.0.0, 6.5.5 (a 30 second maximum), which a window of zero meets |
+| A passkey challenge of 32 random bytes that runs out on the server and is answered once | OWASP's Passkey Security Cheat Sheet, and OWASP ASVS 5.0.0, 6.7.2 |
+| A sign-in method presented with when it was added and last used | OWASP's Passkey Security Cheat Sheet |
+| ES256 and EdDSA signatures by default, and RS256 only when asked for, with keys of 2048 bits at least | OWASP ASVS 5.0.0, 11.2.3 and 11.6.1, and RFC 8812, Section 2 |
+| **Notices and risk** | |
+| The emails `keyring:install` turns on about changes: password changed, sign-in method added or removed, recovery code used, new recovery codes, email address changed, and an email change undone | NIST SP 800-63B-4 (Sec. 4.1.2.1, 4.2.1.1, 4.2.3, 4.5 and 4.6), OWASP's Forgot Password, Multifactor Authentication and Passkey Security Cheat Sheets, and OWASP ASVS 5.0.0, 6.3.7 |
+| The emails it turns on about suspicious attempts: account locked, a new device, a failed second factor, and what the risk signals find | OWASP ASVS 5.0.0, 6.3.5, and OWASP's Multifactor Authentication and Credential Stuffing Prevention Cheat Sheets |
+| A line in every notice saying who to contact, once `support_contact` is set | NIST SP 800-63B-4, Sec. 4.6 |
+| Risk signals in the published provider, at sign in and on every request | OWASP ASVS 5.0.0, 8.2.4, and OWASP's Authentication and Session Management Cheat Sheets |
+| **Account changes and registration** | |
+| Registration that answers the same for every address | OWASP ASVS 5.0.0, 6.3.8 |
+| Password resets: the same answer for every address, links built from `APP_URL`, no automatic sign in, every session signed out, second factors left as they are | OWASP's Forgot Password Cheat Sheet, and OWASP ASVS 5.0.0, 6.4.3 |
+| The conformance suite failing an app whose password broker has no `throttle` | OWASP's Forgot Password Cheat Sheet (rate limiting per account) |
+| Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication Cheat Sheet (changing a registered email address) and Forgot Password Cheat Sheet (recovery after suspected compromise) |
+| **Headers, cookies and links** | |
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
-| `X-Content-Type-Options: nosniff` on every response, and a referrer policy | OWASP ASVS 3.4.4 and 3.4.5 |
-| `X-Frame-Options: DENY` on every response, unless the app's own policy says who may frame it | OWASP's Clickjacking Defense Cheat Sheet. OWASP ASVS 3.4.6 asks for `frame-ancestors` in a content security policy, which is your app's to send |
-| `Secure` cookies with the `__Host-` prefix | OWASP ASVS 3.3.1 and 3.3.3, and OWASP's Session Management Cheat Sheet |
+| `X-Content-Type-Options: nosniff` and a referrer policy on every Keyring response | OWASP ASVS 5.0.0, 3.4.4 and 3.4.5 |
+| `X-Frame-Options: DENY` on every Keyring response, unless the app's own policy says who may frame it | OWASP's Clickjacking Defense Cheat Sheet. OWASP ASVS 5.0.0, 3.4.6, asks for `frame-ancestors` in a content security policy, which is your app's to send |
+| `Secure` cookies with the `__Host-` prefix | OWASP ASVS 5.0.0, 3.3.1 and 3.3.3, and OWASP's Session Management Cheat Sheet |
 | Cookie names that say what the cookie is for and not what set it (`known_device`, `remembered_session`) | OWASP's Session Management Cheat Sheet, on session ID name fingerprinting |
 | No referrer from pages whose URL holds a token | OWASP's Forgot Password Cheat Sheet |
-| Emailed links that only act on a `POST`, with the token or signature in its body | OWASP ASVS 3.5.3 and 14.2.1, and OWASP's Cross-Site Request Forgery Prevention Cheat Sheet |
-| Passwords, codes, credentials and tokens read from the body, never the query string of a `POST` | OWASP ASVS 14.2.1 and 15.3.7 |
-| A passkey challenge that runs out on the server | OWASP's guidance on passkey challenges |
-| A stated number of sessions per account, and what happens at it | OWASP ASVS 7.1.2 |
-| A command for administrators to end one user's sessions or everyone's | OWASP ASVS 7.4.5 |
-| The option to end other sessions after any change to a sign-in method | OWASP ASVS 7.4.3 |
-| Users seeing their sessions, and ending any or all of them after verifying again | OWASP ASVS 7.5.2 |
-| An idle and an absolute timeout on every session, kept on the server, with a longer idle one for "remember me" as a stated decision | OWASP ASVS 7.3.1 and 7.3.2, and OWASP's Session Management Cheat Sheet |
-| Logging sign ins, failures, lockouts and session ends by default, and what was refused: someone else's record, a link's token or signature, a skipped pipeline step | OWASP ASVS 16.3.1 to 16.3.3 |
+| Emailed links that only act on a `POST`, with the token or signature in its body | OWASP ASVS 5.0.0, 3.5.3, and 14.2.1 for the request that acts (the emailed link itself still has to carry its token in the URL once), and OWASP's Cross-Site Request Forgery Prevention Cheat Sheet |
+| Passwords, codes, credentials and tokens read from the body, never the query string of a `POST` | OWASP ASVS 5.0.0, 14.2.1 and 15.3.7 |
+| The browser package encoding what it puts in a URL path | OWASP ASVS 5.0.0, 1.2.2 |
+| Keyring's own breached-password lookup following no redirect | OWASP ASVS 5.0.0, 15.3.2 |
+| **Logging and storage** | |
+| Logging sign ins, failures, lockouts and session ends by default, and what was refused: someone else's record, a link's token or signature, a rate-limited form, a skipped pipeline step | OWASP ASVS 5.0.0, 16.3.1 to 16.3.3 |
 | A severity and a request ID on every entry, no secrets in any, and a cap on entries a refused request can cause | OWASP's Logging Cheat Sheet |
-| A list of what's stored and how it's protected, deleted on a schedule Keyring sets up itself | OWASP ASVS 14.1 and 14.2.7 |
-| A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
+| A list of what's stored and how it's protected, deleted on a schedule Keyring sets up itself | OWASP ASVS 5.0.0, 14.1 and 14.2.7 |
 
 ## Known Limitations
+
+### Where Keyring Departs From a Standard
+
+Each of these is a choice. The reason is given once, here, and the [requirement-by-requirement page](owasp-asvs.md) says what each means for an app that has to meet the requirement.
+
+- **A default install doesn't require a second factor.** With the installer's default answers the password is the only sign-in method, so there's nothing to require, and OWASP ASVS 5.0.0's requirement 6.3.3 (Level 2) isn't met. Which second factor your users get is your choice to make: pick one and the installer requires it of everyone unless you say otherwise.
+- **Passwords are normalised before they're hashed.** OWASP ASVS 5.0.0 requirement 6.2.8 has a password verified exactly as received. Keyring cuts nothing short and changes no case, but it does put every password in Unicode's NFC form first, as NIST SP 800-63B-4 recommends (Sec. 3.1.1.2). The same "é" is one code point from some keyboards and two from others, and without this a password set on one device could fail on another.
+- **Bcrypt stops passwords at 72 bytes.** It's Laravel's default hasher, and it ignores everything after the first 72 bytes, so with it Keyring refuses a longer password: 72 plain characters, but as few as 18 emoji, whatever `passwords.max` says. OWASP ASVS 5.0.0 requirement 6.2.9 asks for at least 64 characters, of any kind, to be allowed, and NIST SP 800-63B-4 recommends the same (Sec. 3.1.1.2). Set `HASH_DRIVER=argon2id` for that. Keyring doesn't pre-hash passwords to fit, which would leave hashes Laravel's own hasher can't check. See [Passwords](configuration.md#passwords).
+- **By default a TOTP code works for longer than OWASP ASVS allows.** ASVS 5.0.0 requirement 6.5.5 gives a time-based one-time password a maximum lifetime of 30 seconds. Keyring accepts a code one time step either side of now unless told otherwise, so one code can work for up to about 90 seconds, and as shipped it does not meet that requirement. The default follows RFC 6238, which recommends accepting one earlier step for the time a code takes to arrive (Section 5.2) and allows a limit on clock drift either way (Section 6): with none, a code typed near the end of its 30 seconds fails, and so does every code from a phone whose clock is half a minute out. A code still works only once. To meet 6.5.5 exactly, register the factor with [a window of zero](factors.md#authenticator-apps-totp). A window wider than one step is refused.
+- **TOTP codes are made with HMAC-SHA-1.** OWASP ASVS 5.0.0 lists it as a legacy algorithm (Appendix C, requirement 11.4.1). It's the default because it's the only digest every authenticator app makes, and several ignore a request for another without saying so, which would leave their users with codes that never work. Where you know your users' apps, [set the factor up with SHA-256 or SHA-512](factors.md#authenticator-apps-totp).
+- **Windows Hello keys that only sign RS256 aren't taken by default.** RS256 isn't an algorithm OWASP ASVS approves, so `webauthn.algorithms` leaves it out, and on a machine whose Windows Hello makes nothing else, a passkey can't be created with it. See [RS256 and Windows Hello](passkeys.md#rs256-and-windows-hello) for who that affects and how to turn it on. Turning it on, or requiring attestation, whose makers sign their certificates the same way, takes Keyring outside ASVS's requirements 11.2.3 and 11.6.1.
+- **Attestation is off unless you ask for it, only covers hardware keys, and checks no revocation list.** By default any WebAuthn authenticator is accepted and AAGUIDs aren't verified, so no session reaches AAL3. A factor set up with `requireAttestation()` checks `packed` and `fido-u2f` attestation against root certificates you list, and can then be limited to certain models. Platform formats (`tpm`, `android-key`, `apple`) aren't read. OWASP's Passkey Security Cheat Sheet has a verifier check a chain's status too: Keyring fetches nothing while a key is being added, so a maker's certificate that has been revoked is still accepted until you take its root out of your list. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
+- **A used recovery code isn't replaced automatically.** NIST SP 800-63B-4 (Sec. 4.2.1.1) has a new code issued after each use. Keyring uses the code up and stops there, because a new one is only worth something once its owner has seen and saved it, and a sign in is no place to show it. The set says a code has been used (`shouldReplaceRecoveryCodes()`), and the rule is met once your app sends the user to [make a new set](authenticators.md#recovery-codes).
+- **"Remember me" signs a browser back in without a factor.** NIST SP 800-63B-4 (Sec. 5.1) doesn't accept a cookie in place of authentication. A browser that ticked "remember me" comes back signed in after its session idled out, for up to 14 days (`sessions.remember_idle`), because that is what the checkbox is for. Keyring ties the cookie to the session it was ticked for, lets it work once and gives the session it resumes no assurance level, so routes behind `keyring:aal1`, `keyring:aal2` or `keyring.fresh` ask again, but a route behind `auth` alone is reached on the cookie. Where you follow that section, leave the checkbox off your login form or set `sessions.end_on_lapse`. See [Inactivity and "Remember Me"](devices-and-sessions.md#inactivity-and-remember-me).
+- **A session outlives its assurance level.** NIST SP 800-63B-4 (Sec. 5.2) ends a session when its inactivity or overall timeout passes. By default Keyring lowers the session's level instead: a session that signed in with two factors stops being AAL2 after an hour idle or 24 hours and carries on as AAL1, under the limits every session has. Sec. 5.1 allows a session to be treated as a lower level, and ending it would sign out the people who set up a second factor after an hour away while leaving everyone else signed in for 30 days. `sessions.end_on_lapse` ends it. See [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level).
+- **An account has one email address.** NIST SP 800-63B-4 asks for at least two addresses to send notices to (Sec. 4.6) and two to recover an account through (Sec. 4.2.1.2). Keyring knows the one in your user model's `email` attribute: it's where reset links, emailed codes and security notices go. A library with one attribute to read can't supply a second. To send every notice to more than one address, return them from `routeNotificationForMail()` ([A Support Contact](security-log-and-emails.md#a-support-contact) shows how). A second address that can recover the account, verified before it's used, is your app's to build.
+- **A notice doesn't say who to contact until you say where.** NIST SP 800-63B-4 (Sec. 4.6) has a notice carry contact information. The published notices have the line and leave it out while [`support_contact`](security-log-and-emails.md#a-support-contact) is `null`, since only you know where your support is.
+- **No pepper.** NIST SP 800-63B-4 (Sec. 3.1.1.2) and OWASP's Password Storage Cheat Sheet recommend one. See [Peppering Passwords](#peppering-passwords) for why it isn't built in and how to add it.
+- **The breach check fails open by default.** Laravel's check lets a new password through when Have I Been Pwned can't be reached, leaving the bundled list of common passwords, so that an outage elsewhere doesn't stop registrations. OWASP ASVS 5.0.0's requirement 16.5.2 would have it refuse. Set `passwords.refuse_unchecked` to refuse the password instead, at the cost of no new passwords while the service is unreachable. Outside production the check doesn't run at all unless `passwords.uncompromised` is `true`.
+- **The per-minute limits are kept in the cache.** Clearing the limiter's cache store starts the per-minute counts over and lifts their locks and risk locks, which OWASP ASVS 5.0.0's requirement 16.5.3 counts as failing open. A count on every attempt belongs somewhere fast, and what ends guessing doesn't depend on it: the failures in a row and the locks held until a reset are in your database. See [Rate Limiting](#rate-limiting).
+- **An emailed link carries its token in its URL.** It has to, and OWASP ASVS 5.0.0's requirement 14.2.1 doesn't allow for it. See [Tokens in Emailed Links](#tokens-in-emailed-links) for what Keyring does about it, and why the reset link carries the address too.
+- **Stored hashes don't say which scheme made them, and session registry IDs aren't hashed.** See [Changing an Algorithm](#changing-an-algorithm) and [Algorithms](#algorithms).
+- **Form validation failures aren't logged.** OWASP ASVS 5.0.0's requirement 16.3.3 and OWASP's Logging Cheat Sheet list them among what to log. A missing field or a malformed address is an ordinary mistake and says nothing about an attempt on an account, and logging each would bury what does. Everything Keyring refuses for a reason is logged.
+- **The log table's times have no offset.** OWASP ASVS 5.0.0's requirement 16.2.2 wants UTC or an explicit offset. `keyring_events.created_at` is a plain timestamp in your `app.timezone`, as every Laravel timestamp is. Leave `app.timezone` at UTC, its default. See [Times](security-log-and-emails.md#times).
+- **A disabled account's sessions end when one of them is next used.** OWASP ASVS 5.0.0's requirement 7.4.2 ends them when the account is disabled. Keyring doesn't know that moment, because the flag is your app's: call `Sessions::signOutEverywhere()` as you set it. See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
+- **No bot check.** See [Bot Checks](#bot-checks).
+
+### Other Limits
 
 - **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked by guessing faster than the per-minute limit, and after 80 wrong passwords in a row (20 minutes at the quickest) the password is refused from every browser the account hasn't signed in from until its owner resets it. See [At the Cap](#at-the-cap). If they guess under one of the account's names and the owner types another, the owner is told the password is wrong rather than to wait, because saying more would tell a stranger the two names are one account. With `Features::devices()` on, browsers the owner has signed in from before keep their own limit and keep working. Without devices, the lock reaches every browser while the guessing goes on, and so does the cap. A password reset clears the password's counts and locks, but not a second factor's.
 - **Which browsers are known is kept in the cache.** A browser stops counting as known when the account is taken back, and that's recorded in the limiter's cache store with the mark a reset replaces. If the store loses its keys, a browser from before the reset counts as known again. It still can't pass the cap: known browsers and everyone else share it.
 - **A run of failures can begin with a few at once.** Once a kind of browser (the account's own, or everyone else) has failures on record, each of its attempts is counted before its proof is looked at. Its first aren't, so that an ordinary sign in writes nothing, and as many as the per-minute limit lets through at once (`limits.per_account`, 5) can be checked together. Each is counted when it fails. With the defaults that can't pass the cap. It could if `limits.consecutive_elsewhere`, or what's left of `limits.consecutive` above it, were set lower than `limits.per_account`.
-- **By default a TOTP code works for longer than OWASP ASVS allows.** ASVS 5.0.0 requirement 6.5.5 gives a time-based one-time password a maximum lifetime of 30 seconds. Keyring accepts a code one time step either side of now unless told otherwise, so one code can work for up to about 90 seconds, and as shipped it does not meet that requirement. The default follows RFC 6238 (section 5.2), which recommends allowing one step for clock drift and delay: with none, a code typed near the end of its 30 seconds fails, and so does every code from a phone whose clock is half a minute out. A code still works only once. To meet 6.5.5 exactly, register the factor with [a window of zero](factors.md#authenticator-apps-totp). A window wider than one step is refused.
-- **Windows Hello keys that only sign RS256 aren't taken by default.** RS256 isn't an algorithm OWASP ASVS approves, so `webauthn.algorithms` leaves it out, and on a machine whose Windows Hello makes nothing else, a passkey can't be created with it. See [RS256 and Windows Hello](passkeys.md#rs256-and-windows-hello) for who that affects and how to turn it on.
-- **Attestation is off unless you ask for it, and only covers hardware keys.** By default any WebAuthn authenticator is accepted and AAGUIDs aren't verified, so no session reaches AAL3. A factor set up with `requireAttestation()` checks `packed` and `fido-u2f` attestation against root certificates you list, and can then be limited to certain models. Platform formats (`tpm`, `android-key`, `apple`) aren't read, and certificates aren't looked up for revocation. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
 - **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and a user's first passkey after the change gets a different user handle (later ones reuse the handle their keys already have). Recovery codes and reserved email addresses keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
@@ -560,8 +669,6 @@ Keyring's code and config say what each thing does. This is where the choices co
 - **Laravel's `cookie` session driver can't destroy an old session.** The session lives in the cookie, so nothing on the server can delete a copy of one. Keyring ends copies through the registry instead: a sign in, a step-up, a password change, signing out everywhere else and an applied email change all move the session to a new registry record and revoke the old one, and signing out revokes it, so a copy made before any of them is signed out on its next request. Three things remain. A copy keeps working until the next of those happens, or the session is revoked or times out, because until then it's the same cookie as the original. It's only turned away where the [session middleware](devices-and-sessions.md#the-session-middleware) runs. And a sign in that isn't finished has no record to swap, so the ID changes between its steps leave an earlier copy holding the pending login as it was, which the next entry covers. A server-side session driver has none of the three.
 - **The `cookie` session driver lets a browser send back what its session held.** With that driver the session lives in the browser, so it can send an earlier copy of its own cookie, and a pending login or enrollment is kept in the session. Nothing that must happen only once depends on it. TOTP steps and recovery codes are used up in your database. A sent code, its wrong guesses, the code that replaced it, each enrollment's one confirmation and each WebAuthn challenge's one answer are kept in your cache, with the limits on attempts per account and per IP address and codes sent, and failures in a row are counted in your database. Two things remain. An earlier copy returns a pending sign in or step-up to an earlier point, which only means proving a factor again: a WebAuthn challenge it still holds was either never answered, and is as good as it was, or was answered, and is refused. And what the cache remembers lasts as long as the cache does. If the rate limiter's store is cleared or drops keys, an answered challenge that hasn't yet expired (5 to 15 minutes from when it was issued) is forgotten, and whoever holds both an earlier copy of the session and the signed answer the key gave could send that answer again. A key that counts its signatures still refuses it, because the count hasn't moved on. A synced passkey, whose count stays at zero, would be accepted. The same goes for a used code and a confirmed enrollment, so keep that store somewhere [your deploys don't clear](#rate-limiting). A server-side session driver has neither: the challenge is gone from the one session there is.
 - **A request overlapping a session ID change can undo or lose it.** Laravel saves the session when each request ends, so a request still running when the ID changes can save the old session again, and a copied cookie would then keep working. A request sent with the old ID just after the change finds no session, and that browser has to sign in again.
-- **The breach check fails open by default.** Laravel's check lets a new password through when Have I Been Pwned can't be reached, leaving the bundled list of common passwords. Set `passwords.refuse_unchecked` to refuse the password instead, at the cost of no new passwords while the service is unreachable. Outside production the check doesn't run at all unless `passwords.uncompromised` is `true`.
-- **Bcrypt stops passwords at 72 bytes.** It's Laravel's default hasher, and it ignores everything after the first 72 bytes, so with it Keyring refuses a longer password: 72 plain characters, but as few as 18 emoji, whatever `passwords.max` says. OWASP ASVS 6.2.9 asks for at least 64 characters, of any kind, to be allowed. Set `HASH_DRIVER=argon2id` for that. Keyring doesn't pre-hash passwords to fit, which would leave hashes Laravel's own hasher can't check. See [Passwords](configuration.md#passwords).
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
 - **Work in progress.** Keyring hasn't been tagged or used in production yet.

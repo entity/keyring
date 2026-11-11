@@ -112,6 +112,64 @@ it('signs out a session that is already signed in, and says why in the log', fun
         ->and(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta['reason'])->toBe('not_allowed');
 });
 
+describe('an account kept out while some of its sessions stay away', function () {
+    beforeEach(function () {
+        // Signed in on a laptop that makes no request while the account is
+        // banned, with "remember me" ticked and the browser trusted.
+        $response = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+        $this->laptop = session()->all();
+        $this->laptopCookies = collect([Auth::guard()->getRecallerName(), 'remembered_session'])
+            ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)->getValue()])
+            ->all();
+        $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'laptop'), 'trusted_until' => now()->addDay()]);
+
+        // And on a phone, which does.
+        $this->flushSession();
+        Auth::forgetGuards();
+        $this->defaultCookies = [];
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        Auth::forgetGuards();
+    });
+
+    it('ends them all with the first request it refuses', function () {
+        ban($this->user);
+
+        $this->get('/home')->assertRedirect('/login');
+
+        expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+            ->and($this->user->devices()->whereNotNull('trusted_until')->count())->toBe(0)
+            ->and(logEntry('sessions_revoked')->meta)->toBe(['count' => 2])
+            ->and(logEntry('session_ended')->meta)->toBe(['reason' => 'not_allowed']);
+
+        // Let back in, the laptop is signed out: its session and its
+        // "remember me" both ended with the phone's.
+        $this->user->forceFill(['name' => 'Taylor'])->save();
+
+        sendBackSession($this->laptop);
+        $this->get('/home')->assertRedirect('/login');
+        $this->assertGuest();
+
+        $this->flushSession();
+        Auth::forgetGuards();
+        $this->withOnlyCookies($this->laptopCookies)->get('/home')->assertRedirect('/login');
+        $this->assertGuest();
+    });
+
+    it('ends them once, not again for each session that then finds out', function () {
+        ban($this->user);
+
+        $this->get('/home')->assertRedirect('/login');
+        $token = $this->user->refresh()->getRememberToken();
+
+        sendBackSession($this->laptop);
+        $this->get('/home')->assertRedirect('/login');
+
+        expect(SecurityEvent::query()->where('type', 'sessions_revoked')->count())->toBe(1)
+            ->and(SecurityEvent::query()->where('type', 'session_ended')->count())->toBe(2)
+            ->and($this->user->refresh()->getRememberToken())->toBe($token);
+    });
+});
+
 it('refuses a "remember me" cookie', function () {
     $response = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
     $cookies = collect([Auth::guard()->getRecallerName(), 'remembered_session'])

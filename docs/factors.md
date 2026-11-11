@@ -42,7 +42,7 @@ Keyring::factors([
 ]);
 ```
 
-Without `Keyring::factors()`, Keyring uses the password alone. `keyring:install` writes the list for the methods you pick. To let users set the others up, turn on [`Features::manageAuthenticators()`](authenticators.md). NIST SP 800-63B asks for at least one phishing-resistant option, which passkeys are.
+Without `Keyring::factors()`, Keyring uses the password alone. `keyring:install` writes the list for the methods you pick. To let users set the others up, turn on [`Features::manageAuthenticators()`](authenticators.md). NIST SP 800-63B-4 asks for at least one phishing-resistant option wherever AAL2 is offered (Sec. 2.2.2), which passkeys are.
 
 The list accepts class names (resolved from the container), instances, and closures that receive the container:
 
@@ -89,7 +89,7 @@ A typed password is put in Unicode's NFC form before it's checked, like every pa
 
 Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code.
 
-By default a code is accepted one 30 second time step either side of now (the `window` constructor argument), so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps it because RFC 6238 (section 5.2) recommends allowing one step for clocks that have drifted and for the time a code takes to arrive, and with none a code typed near the end of its step is refused, which is a large share of honest sign ins.
+By default a code is accepted one 30 second time step either side of now (the `window` constructor argument), so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps it because RFC 6238 recommends accepting one earlier step for the time a code takes to arrive (Section 5.2) and allows a limit on clock drift either way (Section 6), and with none a code typed near the end of its step is refused, which is a large share of honest sign ins.
 
 To meet 6.5.5 to the letter, give the factor a window of zero, so a code only works during its own step:
 
@@ -190,6 +190,8 @@ Every verification proves one or more **categories**, from `Keyring\Enums\Catego
 - `Address`: something sent to an address of theirs, like a code by email. This one isn't an authentication factor: it shows that whoever answers can read the address, and NIST SP 800-63B-4 doesn't accept email as an authenticator. A verification with only this category is a step an app can ask for, and never raises the session's level. `Category::authenticates()` tells the two kinds apart.
 
 Policies count distinct categories, not verifications, so a password and a PIN together are still one factor. See [Policies](policies.md).
+
+AAL2 and AAL3 need `Possession` among what was proved, as NIST SP 800-63B-4 does (Sec. 2.2.1): a biometric is only taken together with the authenticator it unlocks. So if you write a factor that checks something the user is, report `Inherence` only when the check was made by a device they hold, and report `Possession` with it. A factor that reports `Inherence` alone can be asked for as a second step, and the session stays at AAL1.
 
 A factor declares the categories it expects in `categories()`, which Keyring uses to plan what to offer. The categories that count are the ones in the `Verification` returned by `verify()`. That's how a security key only counts as inherence when it actually verified the user that time.
 
@@ -328,7 +330,7 @@ The contract's methods:
 | `rules()` | `code` required, up to 64 characters | Validation for a verification request. Keyring checks them against the request's body, not the query string of a `POST`, so a field you require can't arrive in the URL. |
 | `limits($request, $attempt)` | per account and per IP, from config | Rate limits. See [Rate Limiting](security.md#rate-limiting). |
 | `errorKey()` | `code` | The form field failures are reported on. |
-| `present($authenticator)` | `factor`, `id`, `name` | How the authenticator appears on the challenge page and in "try another way". |
+| `present($authenticator)` | `factor`, `id`, `name`, `createdAt`, `lastUsedAt` | How the authenticator appears on a settings page and in the answers to adding or renaming one. The challenge page and "try another way" get the same without `createdAt` and `lastUsedAt`. |
 
 Helpers on `Keyring\Factors\Factor`:
 

@@ -9,7 +9,9 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Sessions were signed out, e.g. "sign out everywhere else".
+ * Sessions were signed out: "sign out everywhere else", one ended from the
+ * sessions list, an administrator's keyring:sign-out, or an account the app
+ * stopped letting sign in.
  */
 class SessionsRevoked
 {

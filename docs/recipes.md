@@ -176,10 +176,13 @@ public function toMail(object $notifiable): MailMessage
             'details' => array_map(fn (string $label, string $value) => ['label' => $label, 'value' => $value], array_keys($details), $details),
             'actionText' => $this->action(),
             'actionUrl' => $this->action() === null ? null : $this->url,
+            'contact' => $this->contact,
         ],
     );
 }
 ```
+
+`$this->contact` is your [support contact](security-log-and-emails.md#a-support-contact), `null` until you set one. A template of your own has to show it itself: the published one does so in the `toMail()` this replaces.
 
 Two things that catch people out:
 
@@ -543,7 +546,17 @@ use App\Models\User;
 Keyring::allowSignInWhen(fn (User $user) => $user->approved_at !== null);
 ```
 
-Withdrawing an approval signs the account out on its next request. See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
+Withdrawing an approval signs the account out on its next request, and that request ends its other sessions too. To end them all as you withdraw it, without waiting for a request, sign the account out yourself:
+
+```php
+use Keyring\Sessions\Sessions;
+
+$user->forceFill(['approved_at' => null])->save();
+
+app(Sessions::class)->signOutEverywhere($user);
+```
+
+See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
 
 Approval can also be what lets a user add a sign-in method, in place of verifying their email address:
 
