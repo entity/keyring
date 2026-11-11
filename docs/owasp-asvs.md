@@ -311,7 +311,7 @@ ASVS's other chapters are about your whole application. These are the requiremen
 | | | What it means for your app |
 |---|---|---|
 | 1.2.2 URLs are built with untrusted data encoded | Met | Server side, links are built from named routes. The browser package encodes every factor key and ID it puts in a path. A route you override with `configureRoutes()` is used as written, so [encode in yours](frontend.md#changing-routes). |
-| 2.4.1 Anti-automation controls | Met by default | The [rate limits](security.md#rate-limiting), and the `keyring`, `keyring-pages` and `keyring-login-options` limiters on the other forms. All are options, and you can redefine the limiters: only a password minimum under 8, a sent code under six digits or over ten minutes, a TOTP window over one step and an RSA floor under 2048 bits are refused. |
+| 2.4.1 Anti-automation controls | Met by default | The [rate limits](security.md#rate-limiting), and the `keyring`, `keyring-pages` and `keyring-login-options` limiters on the other forms. All are options, and you can redefine the limiters: only a password minimum under 8, a sent code under six digits or over ten minutes and a TOTP window over one step are refused, and an RSA floor under 2048 bits is raised to 2048. |
 | 2.4.2 Flows require realistic human timing (Level 3) | Yours | Keyring has no bot check and no minimum time on a form. Where a CAPTCHA or a challenge goes is in [Bot Checks](security.md#bot-checks). |
 | 3.3.1, 3.3.3 `Secure` cookies with a `__Host-` or `__Secure-` prefix | Met by default | Keyring's two cookies, over HTTPS. A name you set yourself (`devices.cookie`, `sessions.remember_cookie`) is used as written, so the prefix is yours to add. Laravel's session cookie is yours to name and secure: see [Secure Cookies](security.md#secure-cookies). |
 | 3.4.1 `Strict-Transport-Security` on every response | Yours | Keyring sends none: it would only cover its own routes. See [HTTPS and HSTS](security.md#https-and-hsts). |
@@ -342,7 +342,7 @@ ASVS's other chapters are about your whole application. These are the requiremen
 | 16.3.3 Security events and attempts to bypass controls are logged | Deviates | Refused links, signatures, tokens, records and pipeline steps are logged, and so is a refusal by a rate limit. Form validation failures aren't, on purpose: a missing field is an ordinary mistake. Laravel's CSRF refusals are the framework's. |
 | 16.4.2 Logs are protected and shipped elsewhere | Yours | Keyring writes to your database or your log channel. Who can read and change them, and where they're copied, is yours. |
 | 16.5.2 Works securely when an outside service fails | Deviates | When Have I Been Pwned can't be reached, a new password is let through, leaving the bundled list of common passwords, so an outage doesn't stop registrations. `passwords.refuse_unchecked` refuses it instead. |
-| 16.5.3 Fails securely | Deviates | The per-minute limits, their locks and risk locks are in the cache, so clearing it lifts them. The cap on failures in a row, which is what ends guessing, is in the database. See [Rate Limiting](security.md#rate-limiting). |
+| 16.5.3 Fails securely | Deviates | The breach check in 16.5.2 lets a password through on an error, which is this requirement's own example. And the per-minute limits, their locks and risk locks are in the cache, so clearing it lifts them. The cap on failures in a row, which is what ends guessing, is in the database. See [Rate Limiting](security.md#rate-limiting). |
 
 The rest of those chapters either doesn't apply to an authentication package or is your app's and its deployment's: file handling, OAuth, WebRTC, TLS configuration, your own forms' validation and your own pages' output.
 
@@ -364,7 +364,7 @@ A session Keyring calls AAL3 has met NIST's rules for the authentication itself.
 
 ### Section by Section
 
-Where Keyring doesn't meet a section whatever you configure. Sections that aren't listed are met, or are about things Keyring doesn't make: authenticator hardware, biometric sensors, identity proofing, federation.
+Where Keyring doesn't meet a section whatever you configure. Sections that aren't listed are met, or are about things Keyring doesn't make: authenticator hardware, biometric sensors, identity proofing, federation. If you write an SMS code factor, Sec. 3.1.3.3 and 3.2.9 become yours too.
 
 | Section | | What it means for your app |
 |---|---|---|
@@ -382,7 +382,7 @@ Where Keyring doesn't meet a section whatever you configure. Sections that aren'
 | 3.1.1.2 New passwords are compared against a blocklist | Met by default | The common list and the context words can't be turned off. The breach check can (`passwords.uncompromised`), and lets a password through when the service is down unless you set `passwords.refuse_unchecked`. |
 | 3.1.1.2 Guidance on choosing a password, password managers and paste allowed | Yours | Keyring ships no pages, and its validation takes any string. Its refusal messages say what to do instead. |
 | 3.1.1.2 A keyed hash or encryption under a separately stored key (recommended) | Deviates | Not built in: the hash column is shared with the rest of your app, where the key lives is your infrastructure's decision, and rotating it locks everyone out. [Peppering Passwords](security.md#peppering-passwords) shows how to add one. |
-| 3.2.2 No more than 100 failures in a row on one authenticator | Met by default | `limits.consecutive`. A higher number, or `null`, is accepted. `Keyring::unlock()` switches a disabled authenticator back on without binding it again, which NIST doesn't provide for: see [At the Cap](security.md#at-the-cap). |
+| 3.2.2 No more than 100 failures in a row on one authenticator | Met by default | `limits.consecutive`. A higher number, or `null`, is accepted, and a factor of your own that overrides `limits()` without the default list loses the cap. `Keyring::unlock()` switches a disabled authenticator back on without binding it again, which NIST doesn't provide for: see [At the Cap](security.md#at-the-cap). |
 | 4.1.2.1 A new authenticator is bound at the highest level the account can reach | Met by default | `changes_middleware`. Emptying it fails the conformance suite and nothing else. Keyring always asks for the highest the account can reach, where NIST would also take the level the new authenticator will be used at. |
 | 4.1.2.1 The subscriber is told when an authenticator is added | Met by default | `authenticator_added`, from the published provider. A notice that isn't registered isn't sent, and nothing warns. |
 | 4.2.1.1 A used recovery code is replaced with a new one | Deviates | Keyring uses the code up and doesn't issue another by itself, because a new code is only worth something once its owner has seen and saved it. `shouldReplaceRecoveryCodes()` says when a set has had one used: send the user to [make a new set](authenticators.md#recovery-codes). Until your app does, this rule isn't met. |
@@ -391,6 +391,7 @@ Where Keyring doesn't meet a section whatever you configure. Sections that aren'
 | 4.2.1.2 At least two verified recovery addresses | Yours | Keyring has one, the `email` attribute. A second address, verified before it's used, is your app's to build: see [Known Limitations](security.md#known-limitations). |
 | 4.2.3 Account recovery is announced | Met by default | `password_changed` after a reset, and `recovery_code_used`. |
 | 4.6 At least two notification addresses, and every notice sent to all of them | Yours | Keyring mails your user model as Laravel does, at one address. Return more from `routeNotificationForMail()`: see [A Support Contact](security-log-and-emails.md#a-support-contact). |
+| 4.3 A compromised authenticator is suspended or invalidated promptly | Yours | Keyring refuses a sign in whose key counter went backwards and logs `clone_suspected`, but removes nothing by itself. Act on `Keyring\Events\CloneSuspected`, and on a user's report, by removing the authenticator. |
 | 4.6 A notice says who to contact | Needs setup | Set [`support_contact`](security-log-and-emails.md#a-support-contact), and Keyring's notices end with it. It's `null` until you do. |
 | 5.1 A cookie isn't used instead of authentication | Deviates | "Remember me" brings a browser back signed in, with nothing proved, after its session idled out. Keyring binds it to the session it was ticked for, lets it work once, and gives the session it resumes no level, so anything behind `keyring:aal1`, `keyring:aal2` or `keyring.fresh` asks again. Routes behind `auth` alone are reachable on the cookie. Leave the checkbox off your login form, or set `sessions.end_on_lapse`, where you follow this section. |
 | 5.1 Requests that change something carry a CSRF token | Met by default | Laravel's, on the `web` group. |
@@ -413,17 +414,17 @@ Keyring follows OWASP's Authentication, Session Management, Multifactor Authenti
 | Authentication | Throttle logins per account, with growing lockouts | Met by default | The numbers are options. |
 | Authentication | A CAPTCHA after failed attempts | Yours | See [Bot Checks](security.md#bot-checks). |
 | Session Management | Session ID names that aren't descriptive | Met by default | Keyring's cookies are `known_device` and `remembered_session`. Laravel's session cookie is yours to name. |
-| Session Management | Store only a hash of a session token | Deviates | The registry keeps its IDs as they are. See [Storage](security.md#storage) for why one alone signs nobody in. |
+| Session Management | Store only a hash of a session token | Deviates | The registry keeps its IDs as they are. See [Storage](security.md#storage) for why one alone signs nobody in. That holds while Laravel encrypts cookies, as the `web` group does: don't list Keyring's cookies under `encryptCookies(except:)`. |
 | Session Management | Idle and absolute timeouts on the server | Met by default | `sessions.idle => null` removes Keyring's idle limit. |
 | Session Management | `no-store` on sensitive responses, `Clear-Site-Data` at sign out | Met by default | On Keyring's routes, through `keyring.middleware`. |
 | Session Management | Bind the session to client properties and notice changes | Met by default | The `SessionFingerprintChanged` signal in the published provider. |
 | Multifactor Authentication | Offer TOTP, and require MFA where you can | Met by default | A default install registers an authenticator app that everyone must set up. Installing with `--factor=none` gives it up: see [Level 2](#level-2). |
-| Multifactor Authentication | Tell the user when a second factor fails after the right password | Met by default | The "was this you?" alert, and the `second_factor_failed` email once you've picked a second sign-in method. |
-| Multifactor Authentication | Re-authenticate and notify when a factor changes | Met by default | `changes_middleware`, and the notices in the published provider. |
+| Multifactor Authentication | Tell the user when a second factor fails after the right password | Met by default | The "was this you?" alert and the `second_factor_failed` email. An install with `--factor=none` has no second factor to fail. |
+| Multifactor Authentication | Re-authenticate and notify when a factor changes | Met by default | `changes_middleware`, and the `authenticator_added` and `authenticator_removed` emails. Emptying the first or setting the emails to `null` undoes it. |
 | Multifactor Authentication | No fallback from a phishing-resistant factor to a weaker one | Met by default | `noDowngrade()`, in the policy the installer writes. A policy of your own has to say it. Recovery codes stay on offer. |
 | Password Storage | Argon2id, or bcrypt for legacy systems | Yours | Your `hashing.driver`. Laravel's default is bcrypt. |
 | Password Storage | A pepper kept apart from the database | Deviates | Not built in. See [Peppering Passwords](security.md#peppering-passwords). |
-| Forgot Password | Rate limit reset requests per account | Met by default | Laravel's broker `throttle`, which Keyring doesn't set: keep it. The conformance suite fails without one. See [Resetting the Password](protected-changes.md#resetting-the-password). |
+| Forgot Password | Rate limit reset requests per account | Yours | Laravel's broker `throttle`, which is on in a new Laravel app and which Keyring doesn't set: keep it. The conformance suite fails without one. See [Resetting the Password](protected-changes.md#resetting-the-password). |
 | Forgot Password | After a reset: no automatic sign in, sessions ended, the user emailed | Met by default | The email is `password_changed`, from the published provider. |
 | Credential Stuffing Prevention | Per-IP limits that aren't the only defence | Met by default | The numbers are options. |
 | Credential Stuffing Prevention | Metrics from each defence | Partly | Keyring dispatches an event and writes a log entry for each. Counting them is a listener of yours: see [Events](events.md). |
