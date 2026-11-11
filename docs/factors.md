@@ -140,7 +140,9 @@ Enrolling sends a code to the current address, and the user types it to confirm.
 
 ### Recovery Codes
 
-Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx`, shown once. Each carries 120 random bits, above the 112 OWASP ASVS asks for, and they're stored as keyed hashes. Codes from before this format keep working. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
+Eight single-use codes in the form `xxxx-xxxx-xxxx-xxxx-xxxx-xxxx`, shown once. Each carries 120 random bits and is stored as a keyed hash (HMAC-SHA256 with `APP_KEY`). OWASP ASVS 5.0.0 requirement 6.5.2 allows that for a code with 112 random bits or more, and asks for a slow, salted password hash below it, so Keyring stores and accepts nothing shorter: `secretFor()` throws an `InvalidArgumentException` for a code in any other form, and one typed in another form never matches. Typing them is case-insensitive, and spaces and dashes are ignored. Like TOTP, each code is used up under a row lock.
+
+The one other form is Fortify's, for sets [`keyring:import`](upgrading-from-fortify.md#importing-two-factor-data) brings across: 20 letters and digits, 119 random bits. Those have that many only while their case counts, so an imported code has to be typed as it was shown.
 
 A user has at most one set. Generating a new set replaces the old one. Users get a set automatically with their first extra factor. Recovery codes are a fallback, so they can never be the default authenticator. See [Recovery Codes](authenticators.md#recovery-codes).
 

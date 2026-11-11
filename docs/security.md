@@ -151,7 +151,7 @@ Work it out from something the server knows. The request's `Host` header is what
 ### Storage
 
 - TOTP secrets are encrypted with `APP_KEY`.
-- Recovery codes and email codes are stored as keyed hashes.
+- Recovery codes and email codes are stored as keyed hashes (HMAC-SHA256 with `APP_KEY`). A recovery code is only stored with 112 random bits or more: Keyring's own have 120, those imported from Fortify 119, and no other form is stored or accepted. A sent code is far shorter, so its hash is kept in your cache for ten minutes at most and allowed five guesses.
 - Email change tokens are stored as SHA-256 hashes, and the addresses in a pending change are encrypted.
 - Device tokens are stored as SHA-256 hashes.
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
@@ -178,6 +178,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |
 | Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last | OWASP's Authentication Cheat Sheet |
 | TOTP codes, recovery codes and sent codes that work once, whatever the session driver | OWASP ASVS 5.0.0, requirement 6.5.1 |
+| Recovery codes with at least 112 random bits, which is what lets them be kept as keyed hashes rather than salted password hashes | OWASP ASVS 5.0.0, requirement 6.5.2 |
 | Sent codes of at least six digits | OWASP ASVS 5.0.0, requirement 6.5.4 |
 | Sent codes that last ten minutes at most | OWASP ASVS 5.0.0, requirement 6.5.5 |
 | TOTP codes accepted one time step either side of now, and no further | RFC 6238, section 5.2. This default deviates from OWASP ASVS 5.0.0, requirement 6.5.5 (a 30 second maximum), which a window of zero meets: see [Known Limitations](#known-limitations) |

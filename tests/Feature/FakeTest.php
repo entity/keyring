@@ -135,7 +135,7 @@ it('still offers recovery codes under no downgrade, so a lost key is not a locko
     expect(collect($response->json('props.alternatives'))->pluck('factor')->all())->toBe(['recovery']);
     $this->flushHeaders();
 
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertRedirect('/dashboard');
     $this->assertAuthenticatedAs($this->user);
 });
 

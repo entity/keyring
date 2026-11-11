@@ -112,7 +112,8 @@ Things to know:
 - One exception: a failed two factor import's stand-in is replaced by a later run that can read the secret, whatever else the user has by then. A passkey that failed has no stand-in. If the user's two factor came across in the meantime, a later run lists that passkey as skipped, since it can't tell a row that failed from one the user removed, and the user adds the passkey again in the app.
 - It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Drop them once the import is clean: a user who removes every sign-in method in Keyring has none left to tell a later run they were already imported.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
-- Recovery codes become case-insensitive, and spaces and dashes in them are ignored.
+- Imported recovery codes work as they did: typed as Fortify showed them, capitals included. Spaces and dashes are ignored. Keyring stores each as a keyed hash, which OWASP ASVS 5.0.0 requirement 6.5.2 allows for a code with 112 random bits or more, and Fortify's 20 letters and digits have 119 only while their case counts. The codes Keyring makes itself are case-insensitive.
+- A recovery code set holding anything other than Fortify's own codes (an app that swapped in a shorter format, say) is left behind and listed as skipped, since a short code can't safely be stored that way. Those users keep their authenticator app and make new codes.
 - `--dry-run` reports the same outcome and exit code without writing anything.
 
 ## How Fortify Concepts Map

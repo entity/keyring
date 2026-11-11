@@ -293,24 +293,24 @@ it('signs in with a recovery code once', function () {
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'AAAAA 11111'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'AAAA AAAA AAAA AAAA AAAA AAAA'])->assertRedirect('/dashboard');
 
     Event::assertDispatched(RecoveryCodeUsed::class, fn ($event) => $event->remaining === 2);
 
     $this->post('/logout');
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertSessionHasErrors('code');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertSessionHasErrors('code');
 });
 
 it('signs in with the last recovery code', function () {
     $user = taylor();
     totpFor($user);
-    Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->for($user, 'authenticatable')->create();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($user);
 });
@@ -398,7 +398,7 @@ it('signs in with just a password under a stricter policy when there is no real 
 })->with([
     'only a password' => [null],
     'a used-up recovery set' => [[]],
-    'only recovery codes' => [['aaaaa-11111']],
+    'only recovery codes' => [['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa']],
 ]);
 
 it('still accepts a recovery code when the policy is out of reach', function () {
@@ -409,7 +409,7 @@ it('still accepts a recovery code when the policy is out of reach', function () 
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($user);
 });

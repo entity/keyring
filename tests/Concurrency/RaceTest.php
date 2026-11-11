@@ -35,11 +35,11 @@ it('never lets two removals at once take the last way in', function () {
 
 it('spends a recovery code once, however many requests bring it', function () {
     $user = taylor();
-    $codes = Authenticator::factory()->recoveryCodes(['aaaaa-11111', 'bbbbb-22222'])->for($user, 'authenticatable')->create();
+    $codes = Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb'])->for($user, 'authenticatable')->create();
 
     $results = contend($codes, [
-        ['use-recovery-code', $codes->id, 'aaaaa-11111'],
-        ['use-recovery-code', $codes->id, 'aaaaa-11111'],
+        ['use-recovery-code', $codes->id, 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'],
+        ['use-recovery-code', $codes->id, 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'],
     ]);
 
     expect(outcomes($results, true))->toBe(1)
