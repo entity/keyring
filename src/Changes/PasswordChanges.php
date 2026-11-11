@@ -16,6 +16,7 @@ use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
 use Keyring\Support\Throttle;
 use LogicException;
+use RuntimeException;
 
 /**
  * What always happens around a new password, whatever the app's action does
@@ -96,10 +97,11 @@ class PasswordChanges
      *
      * A new hash isn't a new password: the same one hashes differently every
      * time. So the answer is whether the password itself changed, as far as
-     * can be told: from $old, a password known to have been the account's,
-     * checked against the new hash, or from $new, the one that was sent,
-     * checked against the old hash. With $keepHold the rest still happens
-     * for a password that didn't change, and only the hold is kept.
+     * can be told: from $old, a password said to have been the account's,
+     * checked against the old hash and the new, or from $new, the one that
+     * was sent, checked against the old hash. An account that had no
+     * password has nothing to be the same as. With $keepHold the rest still
+     * happens for a password that didn't change, and only the hold is kept.
      *
      * @param  Closure(): void  $save
      */
@@ -115,7 +117,9 @@ class PasswordChanges
             throw new LogicException('The password action returned without saving a new password. Throw a ValidationException to refuse it.');
         }
 
-        $changed = ! $this->matches($old, $after) && ! $this->matches($new, $before);
+        $changed = blank($before) || ! (
+            ($this->matches($old, $before) && $this->matches($old, $after)) || $this->matches($new, $before)
+        );
 
         if (! $changed && ! $keepHold) {
             return false;
@@ -132,8 +136,22 @@ class PasswordChanges
         return $changed;
     }
 
+    /**
+     * Whether the password is the one the hash was made from. A stored
+     * value the hasher won't check (another algorithm's hash, an imported
+     * one, a placeholder) matches nothing: the hasher throws for those, and
+     * by here the new password is already saved.
+     */
     protected function matches(#[\SensitiveParameter] ?string $password, ?string $hash): bool
     {
-        return $password !== null && filled($hash) && Hash::check(PasswordRules::forVerifying($password, $hash), $hash);
+        if ($password === null || blank($hash)) {
+            return false;
+        }
+
+        try {
+            return Hash::check(PasswordRules::forVerifying($password, $hash), $hash);
+        } catch (RuntimeException) {
+            return false;
+        }
     }
 }

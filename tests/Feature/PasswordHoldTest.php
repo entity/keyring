@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Contracts\Validation\UncompromisedVerifier;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
@@ -145,6 +146,47 @@ it('keeps the hold through a reset to the same password, without telling the lin
 
     expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
 });
+
+// Nothing to be the same as: the field is only checked for an account that
+// has a password, so what it holds proves nothing for one that hasn't.
+it('sets a first password for an account that had none, whatever the current password field holds', function () {
+    Event::fake([PasswordChanged::class]);
+    $this->user->forceFill(['password' => null])->saveQuietly();
+    Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)->putJson(route('user-password.update'), [
+        'current_password' => 'a much longer passphrase 1',
+        'password' => 'a much longer passphrase 1',
+        'password_confirmation' => 'a much longer passphrase 1',
+    ])->assertOk();
+
+    expect(Hash::check('a much longer passphrase 1', $this->user->fresh()->password))->toBeTrue();
+    Event::assertDispatchedTimes(PasswordChanged::class, 1);
+});
+
+// The hasher throws for a stored value it won't check, and by then the new
+// password is saved: the reset has to finish, sessions, link and all.
+it('finishes a reset for an account whose stored password is not a hash the app checks', function (string $stored) {
+    config(['hashing.bcrypt.verify' => true]);
+    DB::table('users')->where('id', $this->user->id)->update(['password' => $stored]);
+    Keyring::requirePasswordChange($this->user->fresh());
+    $token = Password::broker()->createToken($this->user);
+
+    $this->post(route('password.update'), [
+        'token' => $token,
+        'email' => 'taylor@example.com',
+        'password' => 'a much longer passphrase',
+        'password_confirmation' => 'a much longer passphrase',
+    ])->assertSessionHasNoErrors()->assertRedirect(route('login'));
+
+    expect(Hash::check('a much longer passphrase', $this->user->fresh()->password))->toBeTrue()
+        ->and(Password::broker()->tokenExists($this->user->fresh(), $token))->toBeFalse()
+        ->and(Keyring::requiresPasswordChange($this->user))->toBeFalse();
+})->with([
+    'an imported md5' => [md5('password')],
+    'another algorithm\'s hash' => [password_hash('password', PASSWORD_ARGON2ID)],
+    'a placeholder' => ['!'],
+]);
 
 it('holds one hold per user however often evidence turns up', function () {
     Event::fake([PasswordChangeRequired::class]);
