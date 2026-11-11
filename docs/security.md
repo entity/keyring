@@ -84,6 +84,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - TOTP codes can't be reused: each authenticator stores the last accepted time step, updated under a database row lock, so two requests with the same code can't both pass.
 - Each recovery code works once, used up under the same kind of row lock. Two different codes used at the same time both stay valid until used.
 - Email codes are random, eight digits (shown as two groups of four, `1234 5678`; spaces are ignored), expire after 10 minutes, allow five wrong guesses per pending attempt, and are replaced by any newer code. A newer code doesn't reset the count, and at the limit the user has to start signing in again. A sent code only verifies the authenticator it was sent to.
+- No factor that sends codes, the built-in email codes or [one of your own](factors.md#writing-a-code-factor), can be registered with codes shorter than six digits or that last longer than ten minutes. Keyring throws a `LogicException` instead.
 - WebAuthn challenges are random 32 byte values, kept on the server and dropped on the first verification, whether it succeeds or not, so a response can't be replayed. If a passkey verifies on the second-factor step and a later check such as a risk lock refuses the login, the challenge stays with that pending login until it expires. A challenge only completes the ceremony it was issued for: one from the usernameless login options can't finish a second factor or a step-up.
 - A passkey's signature counter is checked and saved under the same kind of row lock, so two assertions can't both pass against one stored count, and a slower request can't lower it.
 
@@ -173,6 +174,8 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
 | Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |
 | Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last | OWASP's Authentication Cheat Sheet |
+| Sent codes of at least six digits | OWASP ASVS 5.0.0, requirement 6.5.4 |
+| Sent codes that last ten minutes at most | OWASP ASVS 5.0.0, requirement 6.5.5 |
 | Password resets: the same answer for every address, links built from `APP_URL`, no automatic sign in, every session signed out | OWASP's Forgot Password Cheat Sheet |
 | Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |

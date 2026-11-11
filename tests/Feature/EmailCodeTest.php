@@ -422,3 +422,21 @@ it('only takes email codes as a second factor when the app accepts the risk', fu
 
     expect(fn () => Keyring::registered())->toThrow(InvalidArgumentException::class, 'EmailCode::asSecondFactor()');
 });
+
+it('refuses a code shorter than six digits, the least that resists guessing', function (int $length) {
+    EmailCode::asSecondFactor(length: $length);
+})->with([1, 5])->throws(LogicException::class, 'Keyring refuses codes shorter than 6 digits');
+
+it('refuses a code that lasts longer than ten minutes', function (string $expireAfter) {
+    EmailCode::asSecondFactor(expireAfter: $expireAfter);
+})->with(['601', '11m', '30d'])->throws(LogicException::class, 'Keyring refuses a code that lasts longer than 600 seconds');
+
+it('refuses a code that lasts no time at all', function () {
+    EmailCode::asSecondFactor(expireAfter: '0s');
+})->throws(LogicException::class, 'or no time at all');
+
+it('takes six digits and ten minutes, the edges of what it allows', function () {
+    Keyring::factors([Password::class, EmailCode::asSecondFactor(length: 6, expireAfter: '10m')]);
+
+    expect(Keyring::registered()->keys()->all())->toBe(['password', 'email-code']);
+});

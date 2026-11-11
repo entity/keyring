@@ -105,6 +105,8 @@ Codes are eight digits, last ten minutes and allow five wrong guesses. To change
 EmailCode::asSecondFactor(length: 6, expireAfter: '5m', maxGuesses: 3)
 ```
 
+Six digits is the shortest a code can be and ten minutes the longest it can last, the bounds OWASP ASVS 5.0.0 sets for codes sent out of band (requirements 6.5.4 and 6.5.5). Asking for less or for longer throws a `LogicException` on that line.
+
 The code goes out in your `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs), which `keyring:install` publishes and registers.
 
 A code:
@@ -195,9 +197,11 @@ You can override these properties:
 
 | Property | Default | Means |
 |---|---|---|
-| `$length` | `8` | Digits per code. |
-| `$ttl` | `600` | Seconds a code stays valid. |
+| `$length` | `8` | Digits per code, `6` at least. |
+| `$ttl` | `600` | Seconds a code stays valid, `600` at most. |
 | `$maxGuesses` | `5` | Wrong guesses allowed per sign in or enrollment, however many codes it sends. |
+
+Keyring checks `$length` and `$ttl` when it resolves your factors, and throws a `LogicException` naming the factor when a code would be shorter than six digits or last longer than ten minutes (OWASP ASVS 5.0.0, requirements 6.5.4 and 6.5.5). The bounds are `CodeFactor::MIN_LENGTH` and `CodeFactor::MAX_TTL`.
 
 Code factors count as possession and have priority 30. Override `categories()`, `priority()` or `present()` to change that.
 

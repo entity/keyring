@@ -11,6 +11,16 @@ use Keyring\Factors\Totp;
 use Keyring\Models\Authenticator;
 use Keyring\Tests\Fixtures\SmsCode;
 
+class FiveDigitSmsCode extends SmsCode
+{
+    protected int $length = 5;
+}
+
+class QuarterHourSmsCode extends SmsCode
+{
+    protected int $ttl = 900;
+}
+
 beforeEach(function () {
     SmsCode::$sent = [];
     Keyring::factors([Password::class, Totp::class, EmailCode::asSecondFactor(), SmsCode::class]);
@@ -87,4 +97,19 @@ it('keeps enrollments small in the session', function () {
         ->assertJsonStructure(['enrollment' => ['qr']]);
 
     expect(json_decode(Crypt::decryptString(session('keyring.enrollment.totp')), true))->not->toHaveKey('props');
+});
+
+it('refuses a custom code factor whose codes are too short or last too long, when it is registered', function (string $factor, string $message) {
+    Keyring::factors([Password::class, $factor]);
+
+    expect(fn () => Keyring::registered())->toThrow(LogicException::class, $message);
+})->with([
+    'five digits' => [FiveDigitSmsCode::class, 'The [sms] factor sends 5 digit codes. Keyring refuses codes shorter than 6 digits'],
+    'fifteen minutes' => [QuarterHourSmsCode::class, 'The [sms] factor keeps its codes for 900 seconds. Keyring refuses a code that lasts longer than 600 seconds'],
+]);
+
+it('refuses one added with extend the same way', function () {
+    Keyring::extend('sms', fn () => new FiveDigitSmsCode);
+
+    expect(fn () => Keyring::factor('sms'))->toThrow(LogicException::class, 'Keyring refuses codes shorter than 6 digits');
 });
