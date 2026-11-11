@@ -7,7 +7,8 @@ use Keyring\Support\Duration;
 
 /**
  * An authenticator being set up. Props are shown to the user; state stays on
- * the server until the enrollment is confirmed.
+ * the server until the enrollment is confirmed. Its ID is what the server
+ * remembers it by once it has been confirmed, so it can't be again.
  */
 final class Enrollment
 {

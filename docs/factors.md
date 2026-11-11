@@ -134,7 +134,7 @@ A code:
 
 Sending a new code doesn't reset the wrong guess count. Once the limit is reached the attempt is over, and the user has to start signing in again.
 
-The code, its guess count and the fact that it was used are kept on the server, in the cache store your rate limits use (`cache.limiter`), not in the session. So all of the above holds on any session driver, including Laravel's `cookie` driver, where a browser can send back an earlier copy of its session. Clearing that cache store drops the codes that are waiting to be typed, and the user asks for another.
+The code, its guess count and the fact that it was used are kept on the server, in the cache store your rate limits use (`cache.limiter`), not in the session. So all of the above holds on any session driver, including Laravel's `cookie` driver, where a browser can send back an earlier copy of its session. That store has to keep its keys from one request to the next, as the rate limits already need: with the `array` store a code is forgotten before it can be typed. Clearing it drops the codes that are waiting, and the user asks for another.
 
 Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)) after the first wrong guess. They're counted per user, so another browser doesn't get guesses of its own. Email codes are only as strong as the inbox, so they aren't phishing resistant.
 

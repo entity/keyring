@@ -178,7 +178,7 @@ The security notices, each sent to the user:
 | `second_factor_failed` | Someone got the password right but failed the next factor. | |
 | `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
 | `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. Sent for the set that comes with a user's first extra sign-in method too. | |
-| `account_locked` | Failed attempts locked the account until its password is reset (only with [`limits.lock_after`](security.md#locking-until-a-reset)). | `url`, the password reset form, when `Features::resetPasswords()` is on. `device` and `ip` are those of the attempt that locked it. |
+| `account_locked` | Failed attempts locked the account until its password is reset (only with [`limits.lock_after`](security.md#locking-until-a-reset)). | `url`, the password reset form (the `password.request` route), when the app has one. `device` and `ip` are those of the attempt that locked it. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. | `reasons` |
 | `clone_suspected` | A passkey or security key looked cloned. | `name` |
 | `email_changed` | An email change applied. Sent to both the old and the new address. | |
