@@ -87,7 +87,43 @@ class DeviceManager
 
         $device->save();
 
+        if ($device->wasRecentlyCreated) {
+            $this->forgetOldest($user, $device);
+        }
+
         return $device;
+    }
+
+    /**
+     * Keep an account to "devices.limit" devices: a new one beyond that
+     * takes the place of whichever was seen longest ago, which is signed
+     * out and forgotten. Every sign in from a browser without the cookie
+     * makes a device, so without a limit one account could fill the table,
+     * and its own devices page, just by signing in.
+     */
+    protected function forgetOldest(Authenticatable&Model $user, Device $new): void
+    {
+        if (($limit = config('keyring.devices.limit')) === null) {
+            return;
+        }
+
+        // Every one past the limit, should it have been lowered: skip()
+        // needs a take() on some databases, so the rest are simply named.
+        $oldest = $this->keyring->deviceModel()::query()
+            ->ownedBy($user)
+            ->active()
+            ->whereKeyNot($new->getKey())
+            ->latest('last_seen_at')
+            ->latest('id')
+            ->skip(max(0, (int) $limit - 1))
+            ->take(PHP_INT_MAX)
+            ->pluck('id');
+
+        foreach ($oldest as $id) {
+            $this->sessions->registry()->revokeDevice($user, $id);
+        }
+
+        $this->keyring->deviceModel()::query()->whereKey($oldest->all())->delete();
     }
 
     /**

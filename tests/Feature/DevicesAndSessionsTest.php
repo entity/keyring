@@ -9,6 +9,7 @@ use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
+use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Assurance;
 use Keyring\Events\DeviceRevoked;
 use Keyring\Events\NewDeviceSignedIn;
@@ -70,6 +71,100 @@ it('remembers devices and announces new ones', function () {
 
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
     expect(Device::count())->toBe(1);
+});
+
+describe('an account that keeps signing in from new browsers', function () {
+    /**
+     * Sign in from a browser the account hasn't used, a minute after the
+     * last, and return its device cookie. It stays signed in.
+     */
+    function newBrowser(): string
+    {
+        test()->travel(1)->minutes();
+        test()->flushSession();
+        Auth::forgetGuards();
+
+        return deviceCookie(login(['keyring_device' => 'not a device the account has'])->assertRedirect('/dashboard'));
+    }
+
+    it('keeps as many devices as the limit, forgetting whichever was seen longest ago', function () {
+        config(['keyring.devices.limit' => 3]);
+
+        $first = newBrowser();
+        $kept = [newBrowser(), newBrowser(), newBrowser()];
+
+        expect(Device::query()->oldest('last_seen_at')->pluck('token_hash')->all())
+            ->toBe(array_map(fn (string $token) => hash('sha256', $token), $kept));
+
+        // The forgotten browser is new to the account again.
+        Event::fake([NewDeviceSignedIn::class]);
+        $this->post('/logout');
+        login(['keyring_device' => $first]);
+
+        Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
+        expect(Device::count())->toBe(3);
+    });
+
+    it('signs the forgotten device out', function (string $driver) {
+        config(['keyring.devices.limit' => 2, 'keyring.sessions.driver' => $driver]);
+
+        newBrowser();
+        $record = session(Sessions::KEY);
+
+        newBrowser();
+        newBrowser();
+
+        expect(app(SessionRegistry::class)->find($record)?->revokedAt)->not->toBeNull()
+            ->and(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(2);
+    })->with('registries');
+
+    it('goes by when a device was last seen, not when it was first', function () {
+        config(['keyring.devices.limit' => 2]);
+
+        $first = newBrowser();
+        $second = newBrowser();
+
+        // The first one comes back, so the second is now the stalest.
+        $this->travel(1)->minutes();
+        $this->flushSession();
+        Auth::forgetGuards();
+        login(['keyring_device' => $first])->assertRedirect('/dashboard');
+
+        newBrowser();
+
+        expect(Device::query()->where('token_hash', hash('sha256', $first))->exists())->toBeTrue()
+            ->and(Device::query()->where('token_hash', hash('sha256', $second))->exists())->toBeFalse();
+    });
+
+    it('does not count devices that were signed out, or another account\'s', function () {
+        config(['keyring.devices.limit' => 2]);
+        $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+        foreach (range(1, 3) as $n) {
+            Device::make(['token_hash' => Device::hashToken("another account's {$n}"), 'first_seen_at' => now(), 'last_seen_at' => now()])
+                ->authenticatable()->associate($other)->save();
+        }
+
+        newBrowser();
+        app(DeviceManager::class)->revoke(Device::query()->ownedBy($this->user)->sole());
+
+        newBrowser();
+        newBrowser();
+
+        expect(Device::query()->ownedBy($this->user)->active()->count())->toBe(2)
+            ->and(Device::query()->ownedBy($this->user)->count())->toBe(3)
+            ->and(Device::query()->ownedBy($other)->count())->toBe(3);
+    });
+
+    it('keeps every device when there is no limit', function () {
+        config(['keyring.devices.limit' => null]);
+
+        foreach (range(1, 6) as $browser) {
+            newBrowser();
+        }
+
+        expect(Device::count())->toBe(6);
+    });
 });
 
 it('gives new device events a working "this wasn\'t me" link', function () {

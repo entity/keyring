@@ -48,6 +48,8 @@ With devices on, Keyring sets its cookie on sign in, offers "don't ask again on 
 
 With `Features::devices()` on, on every sign in Keyring looks for its device cookie (`keyring_device` by default). If it's missing or unknown, Keyring creates a device with a new random token and sets the cookie. The cookie is httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts 400 days. Only a SHA-256 hash of the token is stored.
 
+An account keeps its 50 most recently seen devices (`devices.limit`). A sign in from another new browser forgets the one seen longest ago and signs it out, so it's a new device if it comes back. Without a limit, one account could fill the table and its own devices page just by signing in from browsers that send no cookie.
+
 Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The user agent is never a factor. It's only a weak risk signal: `SessionFingerprintChanged` notices when a session's browser or platform changes.
 
 A browser shared by several accounts has one cookie and a device for each account that signed in on it. Keyring only reuses a cookie that another account already has a device for. Anything else the browser sends is ignored and replaced with a new random token. Keyring can't tell which browser holds a cookie, so a value planted from another account's device is reused too, and the device counts as recognised, until a login on it proves a second factor. Every login that verifies two categories gives the browser a new cookie, so the previous one stops working.
