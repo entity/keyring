@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\Encrypter;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -36,6 +37,7 @@ use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\SoftDeletingUser;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
+use Symfony\Component\Console\Output\BufferedOutput;
 
 describe('keyring:install', function () {
     beforeEach(function () {
@@ -170,13 +172,57 @@ describe('keyring:install', function () {
         'email codes' => [['--factor' => ['email-codes']]],
     ]);
 
-    it('refuses to require a second factor nobody could set up, before writing anything', function (array $factors) {
+    it('refuses to require a second factor nobody could set up, before writing anything', function (array $factors, string $why) {
         $this->artisan('keyring:install', ['--factor' => $factors, '--require-second-factor' => true, '--no-interaction' => true])
-            ->expectsOutputToContain('Requiring a second factor needs one users can set up')
+            ->expectsOutputToContain($why)
             ->assertFailed();
 
         expect(file_exists(config_path('keyring.php')))->toBeFalse();
-    })->with(['the password alone' => [[]], 'email codes' => [['email-codes']]]);
+    })->with([
+        'the password alone' => [[], 'Requiring a second factor needs one users can set up. Add --factor=totp, --factor=passkeys, --factor=security-keys.'],
+        'email codes' => [['email-codes'], 'Requiring a second factor needs one users can set up, and an emailed code isn\'t one. Add --factor=totp'],
+    ]);
+
+    it('calls email codes a step at sign in and not a second factor, wherever it names them', function () {
+        $this->artisan('keyring:install', ['--factor' => ['email-codes'], '--no-interaction' => true])
+            ->expectsOutputToContain('Email codes are an extra step at sign in, not a second factor: a password and an emailed code is still AAL1.')
+            ->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->toContain("            // A step at sign in, not a second factor: a password and an emailed code is AAL1.\n            EmailCode::asSecondFactor(),\n        ]);");
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+    });
+
+    it('says nothing of email codes to an app that did not pick them', function (array $factors) {
+        $this->artisan('keyring:install', ['--factor' => $factors, '--no-interaction' => true])
+            ->doesntExpectOutputToContain('Email codes')
+            ->assertSuccessful();
+
+        expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
+            ->not->toContain('emailed code')->not->toContain('EmailCode');
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+    })->with(['the password alone' => [[]], 'an authenticator app and security keys' => [['totp', 'security-keys']]]);
+
+    it('ends by pointing at what whoever runs the app will need', function () {
+        // Read whole: the list is one write, which the test client can only
+        // find one expected line in.
+        $output = new BufferedOutput;
+
+        expect(Artisan::call('keyring:install', ['--no-interaction' => true], $output))->toBe(0)
+            ->and($output->fetch())
+            ->toContain('Once it\'s running, see "After Installing" in the "Installation" docs.')
+            ->toContain('Sessions end after two hours unused. Set sessions.idle in config/keyring.php to change that')
+            ->toContain('Run the Laravel scheduler (schedule:run): it prunes the security log and other old records every day')
+            ->toContain('Signed-in routes outside the web group need the keyring.session middleware')
+            ->toContain('php artisan keyring:sign-out signs one user out everywhere, or everyone with --all');
+
+        // What it says is so.
+        expect((require __DIR__.'/../../config/keyring.php')['sessions']['idle'])->toBe('2h')
+            ->and((require __DIR__.'/../../config/keyring.php')['prune_at'])->not->toBeNull()
+            ->and(app('router')->getMiddleware())->toHaveKey('keyring.session');
+    });
 
     it('turns on email verification with registration, which leaves new users signed out until they verify', function (array $factors) {
         $this->artisan('keyring:install', ['--factor' => $factors, '--feature' => [Features::registration()], '--no-interaction' => true])
@@ -211,7 +257,7 @@ describe('keyring:install', function () {
 
     it('asks which sign-in methods and features to set up, with the safe answers as the defaults', function () {
         $this->artisan('keyring:install')
-            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (the weakest option)'])
+            ->expectsChoice('Which sign-in methods besides the password?', ['passkeys'], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as an extra step at sign in (not a second factor)'])
             ->expectsConfirmation('Require a second factor for everyone?', 'yes')
             ->expectsQuestion('Which features?', [Features::resetPasswords(), Features::manageAuthenticators()])
             ->expectsConfirmation('Email users when their password, sign-in methods or email address change?', 'yes')
@@ -223,7 +269,7 @@ describe('keyring:install', function () {
 
     it('does not ask about a second factor when the password is the only sign-in method', function () {
         $this->artisan('keyring:install')
-            ->expectsChoice('Which sign-in methods besides the password?', [], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as a second factor (the weakest option)'])
+            ->expectsChoice('Which sign-in methods besides the password?', [], ['totp' => 'Authenticator app', 'passkeys' => 'Passkeys', 'security-keys' => 'Security keys, as a second factor', 'email-codes' => 'Email codes, as an extra step at sign in (not a second factor)'])
             ->expectsQuestion('Which features?', [Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords()])
             ->expectsConfirmation('Email users when their password, sign-in methods or email address change?', 'no')
             ->assertSuccessful();

@@ -37,7 +37,7 @@ php artisan migrate
 
 The command asks four things:
 
-1. **Which sign-in methods besides the password?** None by default. Recovery codes come with any of them.
+1. **Which sign-in methods besides the password?** None by default. Recovery codes come with any of them. Email codes are listed as what they are, an extra step at sign in and not a second factor: a password and an emailed code is still AAL1 (see [Email Codes](factors.md#what-turning-email-codes-on-means)), and the provider says so above their line.
 2. **Require a second factor for everyone?** Asked when you picked an authenticator app, passkeys or security keys, and yes by default. Users still sign in with what they have, then every page sends them to `/settings/security` until they've set one up (see [Requiring a Second Factor](policies.md#requiring-a-second-factor)). It isn't asked with the password alone or with only email codes, where nobody could meet it: then nothing requires a second factor.
 3. **Which features?** Registration, password resets, email verification, changing the password and the security log by default, plus managing sign-in methods when you picked one. Registration always brings email verification, because by default [new users sign in once they've verified their address](sign-in-flow.md#without-revealing-who-has-an-account).
 4. **Email users when their password, sign-in methods or email address change?** Yes by default: password changed, sign-in method added or removed, recovery code used, new recovery codes made, email address changed and account locked.
@@ -132,3 +132,8 @@ To change the prefix, domain or middleware, or to turn routes off, see [Configur
 - Run a queue worker if your queue isn't `sync`. [Security emails](security-log-and-emails.md#security-emails) are queued, so they wait for one, while sign-in codes go out straight away.
 - Add [features](quick-start.md#adding-features) and [sign-in methods](quick-start.md#adding-sign-in-methods) as you need them.
 - Run Laravel's scheduler (`* * * * * php artisan schedule:run`) if you don't already. Keyring adds `keyring:prune` to it, daily, which clears out old devices, finished email changes, old security log entries and ended sessions. See [Pruning](devices-and-sessions.md#pruning).
+- Sessions end after two hours unused, whatever `session.lifetime` says, unless the browser ticked "remember me". Set `sessions.idle` to change that. See [Timeouts](devices-and-sessions.md#timeouts).
+- Signed-in routes outside the `web` group need the `keyring.session` middleware, or a revoked or timed-out session keeps working there. See [The Session Middleware](devices-and-sessions.md#the-session-middleware).
+- `php artisan keyring:sign-out` signs one user out everywhere, or everyone with `--all`, for a stolen laptop or an account someone got into. See [For Administrators](devices-and-sessions.md#for-administrators).
+
+`keyring:install` ends by listing the last four.
