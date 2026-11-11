@@ -83,6 +83,8 @@ The password stays in your `users` table, so password resets and Laravel's own h
 
 When a login starts with an unknown address, Keyring still runs a password hash, so the response takes the same time either way. A correct password is rehashed if your hashing settings changed.
 
+A typed password is put in Unicode's NFC form before it's checked, like every password Keyring's routes set, so it matches whichever way the device composed its characters. See [Password Rules](protected-changes.md#password-rules).
+
 ### Authenticator Apps (TOTP)
 
 Time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL and an SVG QR code. Codes are accepted one time step either side of now by default (the `window` constructor argument), so a code works for up to 90 seconds and a phone whose clock is a little off still works. OWASP ASVS prefers a single 30 second step: register `fn ($app) => $app->make(Totp::class, ['window' => 0])` for that.

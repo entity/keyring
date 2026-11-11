@@ -29,6 +29,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 - A sign-in only succeeds for a user Keyring's guard would load back through its provider. A passkey that belongs to another model (say, staff when the guard signs in users) fails like an unknown one, even when the IDs match.
 - Every refused verification takes at least `timebox` (250ms by default), and unknown accounts still run a password hash, so timing doesn't reveal which accounts exist. The timebox is around the whole pipeline: the rate limits, the proof, the risk checks and whatever listens for a failure, so a `429` waits it out too. That includes a right password turned down by a risk lock or a risk response, which answers like a wrong one.
 - A password longer than its stored hash can check (72 bytes for bcrypt) fails like a wrong one, with the same error, timing and throttling, wherever Keyring checks a password: signing in, step-up, removing the last second factor and the current password on a change. The over-long value never reaches the hasher.
+- Passwords are put in Unicode's NFC form before they're measured, hashed or checked, so one set on a device that composes characters one way still works on a device that composes them another.
 - Pending logins are encrypted JSON in the session, never `serialize()`d, and expire after `pending_logins.keep_for`, as soon as the user's password or email address changes, or when `keyring.guard` is no longer the guard they started under. An emailed code could have gone to the address the account no longer has, so an email change and its undo both end a sign in that was waiting for one.
 - The session ID is regenerated and the old one destroyed when a user proves a factor (signing in or stepping up), changes their password or signs out everywhere else, so a copied session cookie stops working, and someone who planted a session ID before the password step doesn't share the pending login.
 - A password reset never signs anyone in, so the policy still applies at the next login.
@@ -170,6 +171,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
 | Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |
 | Refusing the most common passwords, and ones containing the app's or user's name | OWASP ASVS |
+| Passwords of any Unicode characters, normalized to NFC before hashing | NIST SP 800-63B, password verifiers |
 | Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
 | Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
 | Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |

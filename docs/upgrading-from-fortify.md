@@ -18,7 +18,7 @@
 
 Keyring covers what Fortify does (login, registration, password reset, email verification, password confirmation, two factor authentication) and replaces it. Fortify keeps two factor state in three columns on `users`, which gives one authenticator app per user. Keyring keeps every sign-in method in its own table, so users can have several.
 
-Your users keep their passwords, authenticator apps, recovery codes and `laravel/passkeys` passkeys. The exception is a password over 72 bytes on a bcrypt hash: bcrypt only ever stored its first 72 bytes, and Keyring refuses longer input rather than comparing a truncated value, so those users need to reset their password.
+Your users keep their passwords, authenticator apps, recovery codes and `laravel/passkeys` passkeys. The exception is a password over 72 bytes on a bcrypt hash: bcrypt only ever stored its first 72 bytes, and Keyring refuses longer input rather than comparing a truncated value, so those users need to reset their password. The same goes for a password with characters that weren't typed in Unicode's NFC form (an accented letter sent as a letter and a separate accent, which few keyboards do): Fortify hashed it as typed and Keyring [checks the NFC form](protected-changes.md#password-rules), so it no longer matches.
 
 ## Steps
 

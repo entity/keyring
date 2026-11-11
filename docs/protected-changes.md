@@ -207,6 +207,14 @@ Keyring runs your action as one of its own flows, so it may change the protected
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.
 
+Passwords may hold any Unicode characters, and Keyring puts each one in Unicode's NFC form before it's measured, hashed or checked, as NIST SP 800-63B recommends. The same "é" is one code point from some keyboards and two from others, and without this a password set on one device could fail on another. The rules above count what will be hashed: a character is one code point of the NFC form. Keyring's routes do this for the input they hand your actions (`password`, `password_confirmation` and `current_password`) and for every password they check. If your own code sets a password some other way, such as a seeder, an admin tool or a route of your own, pass it through `PasswordRules::normalize()` first:
+
+```php
+$user->password = Hash::make(PasswordRules::normalize($password));
+```
+
+A password hashed without it only matters when it has characters that aren't already in NFC: that hash then never matches, because Keyring only ever checks the NFC form. There's no second try with the password as typed. Keyring has had this from its first release, so no hash it made needs one.
+
 `PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Facades\Keyring;
+use Normalizer;
 
 /**
  * Password rules: length over complexity, no composition rules, breached
@@ -91,6 +92,35 @@ final class PasswordRules
     }
 
     /**
+     * A password as Keyring hashes and checks it: in Unicode's NFC form, as
+     * NIST SP 800-63B asks. The same "é" is one code point from one keyboard
+     * and two from another, and without this the two wouldn't match. Bytes
+     * that aren't UTF-8 have no form to put them in and stay as they are.
+     */
+    public static function normalize(#[\SensitiveParameter] string $password): string
+    {
+        return Normalizer::normalize($password, Normalizer::FORM_C) ?: $password;
+    }
+
+    /**
+     * Request input with the passwords in it normalized, for an action that
+     * validates and saves one: the rules then measure what will be hashed.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    public static function normalizeInput(#[\SensitiveParameter] array $input): array
+    {
+        foreach (['password', 'password_confirmation', 'current_password'] as $key) {
+            if (is_string($input[$key] ?? null)) {
+                $input[$key] = self::normalize($input[$key]);
+            }
+        }
+
+        return $input;
+    }
+
+    /**
      * What to check against a stored hash. Bcrypt only uses the first 72
      * bytes and stops at a NUL byte, so an input like that would pass on the
      * start of it alone. No bcrypt password can hold either. It's swapped for a
@@ -102,6 +132,8 @@ final class PasswordRules
      */
     public static function forVerifying(#[\SensitiveParameter] string $password, ?string $hash): string
     {
+        $password = self::normalize($password);
+
         return str_starts_with((string) $hash, '$2') && (strlen($password) > 72 || str_contains($password, "\0")) ? Str::random(32) : $password;
     }
 

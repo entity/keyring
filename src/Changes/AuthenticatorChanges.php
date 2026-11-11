@@ -160,7 +160,7 @@ class AuthenticatorChanges
 
         $min = config('keyring.passwords.min_without_mfa');
 
-        if (mb_strlen($password) < $min) {
+        if (mb_strlen(PasswordRules::normalize($password)) < $min) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_too_short_alone', ['min' => $min])]);
         }
     }

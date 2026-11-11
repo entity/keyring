@@ -14,6 +14,7 @@ use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Support\Input;
+use Keyring\Support\PasswordRules;
 
 use function Illuminate\Support\defer;
 
@@ -73,7 +74,7 @@ class PasswordResetController
             ...$request->only('token', 'password'),
         ], fn (Authenticatable&Model $user) => $this->passwords->reset(
             $user,
-            fn () => $resetter->reset($user, $request->all()),
+            fn () => $resetter->reset($user, PasswordRules::normalizeInput($request->all())),
         ));
 
         // Laravel says "no user with that address" for unknown accounts. Answer
