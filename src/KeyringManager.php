@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Keyring\Activity\SecurityLog;
+use Keyring\Changes\PasswordHolds;
 use Keyring\Changes\ProtectedAttributes;
 use Keyring\Concerns\BuildsResponses;
 use Keyring\Concerns\HasKeyring;
@@ -409,6 +410,38 @@ class KeyringManager
     {
         app(RiskLocks::class)->unlock($user);
         app(Throttle::class)->clearAccount($user);
+    }
+
+    /**
+     * Hold a user until they choose a new password, when you have reason to
+     * think theirs is known to someone else: a breach of your own, a report
+     * from the user, a credential-stuffing run. They can still sign in, and
+     * every page sends them to keyring.password_change_url until the
+     * password changes, by them or by a reset. Signing out doesn't shake it
+     * off. Returns false for an account with no password, which is left
+     * alone. A risk response does the same with requirePasswordChange().
+     */
+    public function requirePasswordChange(Authenticatable&Model $user, ?string $reason = null): bool
+    {
+        return app(PasswordHolds::class)->place($user, $reason);
+    }
+
+    /**
+     * Whether the user is held until they choose a new password.
+     */
+    public function requiresPasswordChange(Authenticatable&Model $user): bool
+    {
+        return app(PasswordHolds::class)->holds($user);
+    }
+
+    /**
+     * Stop holding a user for a new password without one being set, when
+     * the evidence turned out to be wrong. An app that saves passwords
+     * outside Keyring's flows calls this once it has saved a new one.
+     */
+    public function cancelPasswordChange(Authenticatable&Model $user): void
+    {
+        app(PasswordHolds::class)->lift($user);
     }
 
     /**

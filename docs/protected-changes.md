@@ -12,6 +12,7 @@
     - [The Old Address Is Reserved](#the-old-address-is-reserved)
     - [Checking and Cancelling](#checking-and-cancelling)
 - [Changing the Password](#changing-the-password)
+- [Requiring a Password Change](#requiring-a-password-change)
 - [Password Rules](#password-rules)
 - [Resetting the Password](#resetting-the-password)
 - [Email Verification](#email-verification)
@@ -193,6 +194,38 @@ For an action that still uses Laravel's rule, Keyring replaces an over-long `cur
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
 Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, cancels any pending email change, ends any reset links still outstanding and stops trusting the user's devices, including this one. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+
+## Requiring a Password Change
+
+Keyring never expires passwords. When there's evidence one is known to someone else, it can hold the user until they choose another, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). Place a hold from your own code, or from a [risk response](risk.md#requiring-a-new-password):
+
+```php
+use Keyring\Facades\Keyring;
+
+Keyring::requirePasswordChange($user, 'Reported phished on 12 November.');
+
+Keyring::requiresPasswordChange($user);   // true until the password changes
+Keyring::cancelPasswordChange($user);     // the evidence was wrong
+```
+
+Tell Keyring where your change-password form is:
+
+```php
+// config/keyring.php
+'password_change_url' => '/settings/password',
+```
+
+While a user is held:
+
+- They can still sign in. Every signed-in request in the `web` group sends them to `password_change_url` with the `change-password` status. JSON requests get a `403` with that status and the URL as `redirect`. Without a `password_change_url`, they get a plain `403`.
+- That page is let through, for any method, and so are `PUT /user/password`, the [confirm page](step-up.md#the-confirm-flow) it may send them to, signing out and email verification. Nothing else is, including Keyring's other routes.
+- The hold ends when the password changes: through `PUT /user/password`, or a [password reset](#resetting-the-password). If your app saves passwords itself, without `Features::updatePasswords()`, call `Keyring::cancelPasswordChange($user)` once it has saved a new one.
+- Signing out and in again changes nothing. The hold is a row in `keyring_password_holds`, not something in the session or the cache.
+- A hold placed by a request reaches that request's session at once. Other sessions that are already signed in hear of it within a minute.
+
+`requirePasswordChange()` returns `false` and does nothing for a user without a password: someone who only signs in with a passkey has nothing to change, and holding them would lock them out. A user whose password is removed after they were held is let go too. The optional reason is kept on the row for your support tools (`Keyring\Changes\PasswordHolds::reason($user)`), and a risk response fills it with the signals it acted on. `Keyring\Events\PasswordChangeRequired` is dispatched when a hold is placed, with `user` and `reason`: listen for it to email the user, since Keyring doesn't.
+
+The check runs in `Keyring\Http\Middleware\RequirePasswordChange`, which Keyring adds to the `web` group after its [session middleware](devices-and-sessions.md#the-session-middleware). With `sessions.middleware` off, add `keyring.password` wherever you add `keyring.session`.
 
 ## Password Rules
 

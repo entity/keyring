@@ -9,6 +9,7 @@ use Keyring\Support\Duration;
  *
  *     Action::stepUp()->notify()
  *     Action::deny()->revokeAllSessions()->lockFor('1h')->notify()
+ *     Action::stepUp()->requirePasswordChange()
  */
 final readonly class Action
 {
@@ -19,6 +20,7 @@ final readonly class Action
         public bool $revokeSessions = false,
         public ?int $lockSeconds = null,
         public bool $notify = false,
+        public bool $changePassword = false,
     ) {}
 
     public static function allow(): self
@@ -75,9 +77,21 @@ final readonly class Action
         return clone ($this, ['notify' => true]);
     }
 
+    /**
+     * Hold the user until they choose a new password: for a signal that
+     * says theirs is known to someone else, like BreachedPassword. They
+     * can still sign in, and are sent to keyring.password_change_url from
+     * every page until it's done.
+     */
+    #[\NoDiscard]
+    public function requirePasswordChange(): self
+    {
+        return clone ($this, ['changePassword' => true]);
+    }
+
     public function doesSomething(): bool
     {
-        return $this->stepUp || $this->reauthenticate || $this->deny || $this->revokeSessions || $this->lockSeconds !== null || $this->notify;
+        return $this->stepUp || $this->reauthenticate || $this->deny || $this->revokeSessions || $this->lockSeconds !== null || $this->notify || $this->changePassword;
     }
 
     /**
@@ -89,6 +103,7 @@ final readonly class Action
             $this->deny => 'denied',
             $this->reauthenticate => 'reauthenticate',
             $this->lockSeconds !== null => 'locked',
+            $this->changePassword => 'password_change',
             $this->stepUp => 'step_up',
             $this->revokeSessions => 'revoked_sessions',
             $this->notify => 'notified',

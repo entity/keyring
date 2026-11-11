@@ -133,6 +133,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Password Change Page
+    |--------------------------------------------------------------------------
+    |
+    | Where a user who has to choose a new password is sent from every other
+    | page until they have: after Keyring::requirePasswordChange($user), or a
+    | risk response with requirePasswordChange(). Null answers 403.
+    |
+    */
+
+    'password_change_url' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Devices
     |--------------------------------------------------------------------------
     |

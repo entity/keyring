@@ -5,6 +5,8 @@ namespace Keyring\Risk;
 use Closure;
 use Illuminate\Container\Attributes\Singleton;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
+use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Signal;
 use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\ImpossibleTravel;
@@ -95,8 +97,9 @@ class RiskEngine
 
     /**
      * Decide what to do about the risk and carry out the parts that don't
-     * depend on where we are: announce it, sign out everywhere, lock. The
-     * caller handles deny, step-up and re-authentication.
+     * depend on where we are: announce it, sign out everywhere, lock, hold
+     * for a new password. The caller handles deny, step-up and
+     * re-authentication.
      */
     public function enforce(Authenticatable $user, Risk $risk, Checkpoint $checkpoint): Action
     {
@@ -118,6 +121,12 @@ class RiskEngine
             }
 
             app(RiskLocks::class)->lock($user, $action->lockSeconds);
+        }
+
+        // Evidence about the password holds whoever has it, the owner
+        // included, so this is safe to act on from a login attempt too.
+        if ($action->changePassword && $user instanceof Model) {
+            app(PasswordHolds::class)->place($user, implode(', ', array_map(fn (Finding $finding) => $finding->signal, $risk->findings)) ?: null);
         }
 
         return $action;

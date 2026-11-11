@@ -384,6 +384,7 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, coming back afterwards. JSON: `401`. Both send `Clear-Site-Data`. |
 | `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, coming back afterwards. JSON: `423` with `redirect`. |
 | `EnrollmentRequiredResponse` | A route needs a sign-in method the user hasn't set up. | Redirect to `enrollment_url` with the `enroll-first` status, or `403` without one. JSON: `403`. |
+| `PasswordChangeRequiredResponse` | The user has to [choose a new password](protected-changes.md#requiring-a-password-change) before going on. | Redirect to `password_change_url` with the `change-password` status, or `403` without one. JSON: `403`. |
 | `VerifiedResponse` | The user's email address is verified. Built with `justNow`, true when the link they followed did it. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. |
 
 "JSON" here means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits.
@@ -451,7 +452,7 @@ Other requests are redirected (back, or to `redirect`) with the slug flashed as 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `reset-link-sent`, `sessions-revoked`, `signed-out` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `reset-link-sent`, `sessions-revoked`, `signed-out` and `verification-link-sent`.
 
 Swap it like the others. Your class receives the same named arguments:
 

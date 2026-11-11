@@ -107,8 +107,28 @@ Build an action with one of the static constructors and chain extras:
 | `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::signOutEverywhere()`). |
 | `->lockFor('1h')` | Refuse sign ins for that long. Trusted devices stay trusted, for the same reason sessions aren't revoked. | Refuse sign ins for that long, from now, and stop trusting the user's devices. |
 | `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
+| `->requirePasswordChange()` | Hold the user until they choose a new password. The sign in goes ahead unless the action also denies it, and the hold is there for whoever signs in next. | Hold them from this request on. |
 
 Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
+
+### Requiring a New Password
+
+NIST SP 800-63B-4 (Sec. 3.1.1.2) never has passwords changed on a schedule, and always has one changed when there's evidence it was compromised. Stepping up, notifying and locking don't do that: the password someone else knows is still the password. `requirePasswordChange()` holds the user on your change-password page until it isn't, which is the response for a signal about the password itself:
+
+```php
+use Keyring\Risk\Signals\BreachedPassword;
+
+Keyring::risk()
+    ->push(BreachedPassword::class)
+    ->respond(fn (Risk $risk) => match (true) {
+        $risk->has('breached_password') => Action::stepUp()->requirePasswordChange()->notify(),
+        $risk->level === Level::Critical => Action::deny()->revokeAllSessions()->notify(),
+        $risk->isElevated() => Action::stepUp(),
+        default => Action::allow(),
+    });
+```
+
+A user with no password is never held, so a responder can ask for this without checking. See [Requiring a Password Change](protected-changes.md#requiring-a-password-change) for what a held user can reach and how the hold ends.
 
 ## Checkpoints
 

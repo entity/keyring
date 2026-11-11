@@ -130,6 +130,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
 - New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
+- Passwords never expire. A user can be held until they choose a new one, by a risk response or by your app, when there's evidence theirs is compromised (NIST SP 800-63B-4, Sec. 3.1.1.2). The hold outlasts signing out and clearing the cache, ends with a password change or reset, and is never placed on an account without a password.
 
 ### Links and Headers
 
@@ -170,7 +171,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
 | Email codes being opt-in, and counting toward no level: a password and an emailed code is AAL1 | NIST SP 800-63B-4, Sec. 3.1.3.1, which doesn't accept email as an authenticator |
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
-| Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |
+| Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short, no expiry, and a forced change on evidence of compromise when a risk response or your app asks for one | NIST SP 800-63B-4, Sec. 3.1.1.2, and OWASP's Authentication Cheat Sheet |
 | Refusing the most common passwords, and ones containing the app's or user's name | OWASP ASVS |
 | Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
 | Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
