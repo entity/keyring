@@ -97,7 +97,9 @@ class DatabaseSessionRegistry implements SessionRegistry
      * rest, which is what keeps the rounds coming. Rows are locked one by
      * one this way, never a range, so a sign in or a move isn't held up or
      * deadlocked. A session that started after this did is left alone, so
-     * new sign ins can't keep it going.
+     * new sign ins can't keep it going. Each round reads from the database
+     * it writes to: a replica that lags would keep handing back what the
+     * last round revoked.
      */
     public function revokeEveryone(): void
     {
@@ -105,6 +107,7 @@ class DatabaseSessionRegistry implements SessionRegistry
 
         do {
             $ids = $this->query()
+                ->useWritePdo()
                 ->whereNull('revoked_at')
                 ->where('authenticated_at', '<=', $now)
                 ->where('expires_at', '>', $now)

@@ -210,10 +210,11 @@ class CacheSessionRegistry implements SessionRegistry
     }
 
     /**
-     * When everyone was last signed out (revokeEveryone).
+     * When everyone was last signed out (revokeEveryone). No session's ID
+     * has a colon in it, so this is never mistaken for a record.
      */
     protected function everyoneKey(): string
     {
-        return $this->prefix.'everyone';
+        return $this->prefix.'everyone:revoked';
     }
 }
