@@ -177,8 +177,8 @@ class RecoveryCodes extends Factor implements Enrollable
      */
     public function generate(): array
     {
-        // 128 random bits each, as OWASP ASVS asks of anything that mustn't
-        // be guessed: 26 lowercase base32 characters, in groups of four with
+        // 128 random bits each, as OWASP ASVS 5.0.0 (11.5.1) asks of anything
+        // that mustn't be guessed: 26 lowercase base32 characters, in groups of four with
         // the last two on their own, xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx.
         $codes = array_map(
             fn () => implode('-', str_split(Str::lower(Base32::encodeUnpadded(random_bytes(16))), 4)),

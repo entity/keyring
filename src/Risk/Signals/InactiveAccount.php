@@ -24,6 +24,9 @@ use Keyring\Support\Duration;
  */
 class InactiveAccount extends Signal
 {
+    /** What its finding is called, in Risk::has(). */
+    public const string FINDING = 'inactive_account';
+
     public function __construct(
         protected SessionRegistry $sessions,
         protected int $score = 30,
@@ -49,7 +52,7 @@ class InactiveAccount extends Signal
             return null;
         }
 
-        return new Finding('inactive_account', $this->score, sprintf('The first sign in for %d days.', $last->diffInDays(now())));
+        return new Finding(self::FINDING, $this->score, sprintf('The first sign in for %d days.', $last->diffInDays(now())));
     }
 
     /**

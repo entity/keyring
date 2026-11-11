@@ -200,6 +200,13 @@ it('signs a remembered browser back in under a new record, with the limits its s
         ->and($replaced->isActive(now()->getTimestamp()))->toBeFalse()
         ->and(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
 
+    // Logged as what it is: a browser signed in again, with nothing proved.
+    $entry = SecurityEvent::query()->where('type', 'session_resumed')->sole();
+
+    expect($entry->ip)->toBe('203.0.113.9')
+        ->and($entry->device_id)->toBe($record->deviceId)
+        ->and(SecurityEvent::query()->where('type', 'signed_in')->count())->toBe(1);
+
     // It's the same session: when it started and when it ends haven't moved.
     expect($record->authenticatedAt)->toBe($old->authenticatedAt)
         ->and($record->expiresAt)->toBe($old->expiresAt)

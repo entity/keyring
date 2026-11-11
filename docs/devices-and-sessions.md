@@ -382,6 +382,8 @@ So a remembered sign in also sets a Keyring cookie holding that session's regist
 
 It's also refused while the account is [risk locked](risk.md#actions).
 
+A session carried on this way dispatches `Keyring\Events\SessionResumed` and is logged as `session_resumed`, so the [security log](security-log-and-emails.md#entry-types) shows every time a browser was signed in, with a proof or without.
+
 Your own `Auth::login($user, remember: true)` gets the Keyring cookie too, on the response that signs in, as long as that route has the middleware. A session given a new registry record (a mid-session [step-up](risk.md#actions), or `rotate()` on the `cookie` session driver) gets a new cookie for it.
 
 If Laravel's cookie first reaches a route without the middleware, Laravel signs it in there and Keyring notes that in the session. The next request the middleware sees is checked the same way.
@@ -560,5 +562,6 @@ In `Keyring\Events`:
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
 | `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the app keeps out |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
+| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as) |
 | `AccessRefused` | `user`, `resource` (`device`), `id`: a request to sign out a device that isn't the user's, answered with a 404 |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`): a "this wasn't me" link that was refused |

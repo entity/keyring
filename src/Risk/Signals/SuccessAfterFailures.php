@@ -21,6 +21,9 @@ use Keyring\Support\Duration;
  */
 class SuccessAfterFailures extends Signal
 {
+    /** What its finding is called, in Risk::has(). */
+    public const string FINDING = 'success_after_failures';
+
     public function __construct(
         protected SecurityLog $log,
         protected int $threshold = 5,
@@ -33,7 +36,7 @@ class SuccessAfterFailures extends Signal
         $failures = $this->log->count($assessment->user, 'factor_failed', Duration::seconds($this->within), since: 'signed_in');
 
         return $failures >= $this->threshold
-            ? new Finding('success_after_failures', $this->score, "Signed in after {$failures} failed attempts in the last {$this->within}.")
+            ? new Finding(self::FINDING, $this->score, "Signed in after {$failures} failed attempts in the last {$this->within}.")
             : null;
     }
 }

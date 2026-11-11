@@ -14,7 +14,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 - **Protected account changes:** once Keyring handles them, `email` and `password` can only change through its flows. Email changes are confirmed from both addresses and can be reverted.
 - **Risk signals:** new device, new country, impossible travel, a session cookie showing up in another browser, repeated failures, a password found in a breach. Each level maps to an action, and a new app starts with the signals its features can feed.
 - **A security log and security emails.** The emails are sent from the start, and each can be swapped for your own notification, restyled or turned off.
-- **Built on OWASP ASVS 5.0.0 and NIST SP 800-63B-4:** [one page](docs/owasp-asvs.md) goes through both, requirement by requirement. Each is met, or stated as a deliberate deviation or as your app's job, with the reason.
+- **Built on OWASP ASVS 5.0.0 and NIST SP 800-63B-4:** [one page](docs/owasp-asvs.md) goes through both, requirement by requirement. Each is met, partly met, waiting on something you turn on, a deliberate deviation or your app's job, and the page says which and why.
 - **Headless:** like Fortify, Keyring renders your pages with props and answers JSON, with swappable responses and published actions. A browser package handles WebAuthn and the challenge page for Vue and React.
 
 Every feature and sign-in method beyond the password is opt-in. See [Adding Features](docs/quick-start.md#adding-features).

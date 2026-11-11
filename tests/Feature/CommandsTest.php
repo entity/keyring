@@ -71,8 +71,29 @@ describe('keyring:install', function () {
         $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
     });
 
-    it('installs the password, registration, resets, verification, password changes and the security log without asking', function () {
+    // OWASP ASVS 5.0.0, 6.3.3: with nothing asked, everyone signs in with
+    // more than a password.
+    it('installs an authenticator app everyone must set up, with recovery codes, without asking', function () {
         $this->artisan('keyring:install', ['--no-interaction' => true])
+            ->expectsOutputToContain('Turned on managing sign-in methods')
+            ->expectsOutputToContain('Build your page for adding a sign-in method at /settings/security')
+            ->assertSuccessful();
+
+        $config = require config_path('keyring.php');
+        $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+
+        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::emailVerification(), Features::updatePasswords(), Features::manageAuthenticators(), Features::securityLog()])
+            ->and($config['enrollment_url'])->toBe('/settings/security')
+            ->and($provider)->toContain('Password::class,')->toContain('Totp::class,')->toContain('RecoveryCodes::class,')
+            ->toContain('Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());')
+            ->toContain("appendMiddlewareToGroup('web', 'keyring.enrolled');")
+            ->not->toContain('WebAuthn')->not->toContain('EmailCode');
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+    });
+
+    it('installs the password alone when asked to, with registration, resets, verification, password changes and the security log', function () {
+        $this->artisan('keyring:install', ['--factor' => ['none'], '--no-interaction' => true])
             ->expectsOutputToContain('Nothing makes users set up a second factor')
             ->assertSuccessful();
 
@@ -176,7 +197,7 @@ describe('keyring:install', function () {
 
         expect(file_exists(config_path('keyring.php')))->toBeFalse();
     })->with([
-        'the password alone' => [[], 'Requiring a second factor needs one users can set up. Add --factor=totp, --factor=passkeys, --factor=security-keys.'],
+        'the password alone' => [['none'], 'Requiring a second factor needs one users can set up. Add --factor=totp, --factor=passkeys, --factor=security-keys.'],
         'email codes' => [['email-codes'], 'Requiring a second factor needs one users can set up, and an emailed code isn\'t one. Add --factor=totp'],
     ]);
 
@@ -213,7 +234,16 @@ describe('keyring:install', function () {
             ->toContain('Sessions end after two hours unused. Set sessions.idle in config/keyring.php to change that')
             ->toContain('Run the Laravel scheduler (schedule:run): it prunes the security log and other old records every day')
             ->toContain('Signed-in routes outside the web group need the keyring.session middleware')
-            ->toContain('php artisan keyring:sign-out signs one user out everywhere, or everyone with --all');
+            ->toContain('php artisan keyring:sign-out signs one user out everywhere, or everyone with --all')
+            // The suite hashes with bcrypt, as a new Laravel app does.
+            ->toContain('Passwords are hashed with bcrypt, which reads 72 bytes')
+            ->toContain('Set HASH_DRIVER=argon2id to take any up to passwords.max');
+
+        config(['hashing.driver' => 'argon2id']);
+        (new Filesystem)->delete(config_path('keyring.php'));
+
+        expect(Artisan::call('keyring:install', ['--no-interaction' => true, '--force' => true], $output))->toBe(0)
+            ->and($output->fetch())->not->toContain('bcrypt');
 
         // What it says is so.
         expect((require __DIR__.'/../../config/keyring.php')['sessions']['idle'])->toBe('2h')

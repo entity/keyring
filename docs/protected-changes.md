@@ -302,7 +302,7 @@ protected function passwordRules((Authenticatable&Model)|null $user = null, arra
 }
 ```
 
-Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 5.0.0 (6.2.5), which wants passwords of any composition accepted, and NIST SP 800-63B says the same. People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
+Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 5.0.0 (6.2.5), which wants passwords of any composition accepted, and NIST SP 800-63B-4 says the same (Sec. 3.1.1.2). People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
 
 ## Resetting the Password
 
