@@ -10,6 +10,7 @@
     - [Device Names](#device-names)
     - [Your Own Device Model](#your-own-device-model)
 - [Listing and Revoking Devices](#listing-and-revoking-devices)
+- [Listing and Ending Sessions](#listing-and-ending-sessions)
 - [The Session Registry](#the-session-registry)
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
@@ -36,18 +37,24 @@ Keyring tracks two things:
 ],
 ```
 
+Because sessions are always kept, the routes that [list and end them](#listing-and-ending-sessions) are always registered. No feature turns them on or off.
+
 With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry` and `ImpossibleTravel` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
 
 ## Routes
 
 | Method | URI | Name | Middleware | Does |
 |---|---|---|---|---|
+| `GET` | `/user/sessions` | `keyring.sessions.index` | `auth:{guard}` | Lists the user's sessions as JSON. |
+| `DELETE` | `/user/sessions/{id}` | `keyring.sessions.destroy` | `auth:{guard}`, `changes_middleware` | Ends one session. |
+| `DELETE` | `/user/sessions` | `keyring.sessions.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
 | `GET` | `/user/devices` | `keyring.devices.index` | `auth:{guard}` | Lists the user's devices as JSON. |
 | `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
 | `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
-| `DELETE` | `/user/sessions` | `keyring.sessions.destroy-others` | `auth:{guard}`, `changes_middleware` | The same, and there whether or not devices are on. |
 | `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
 | `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, `keyring` limiter | Signs the device out. |
+
+The three session routes are always registered. The device routes need `Features::devices()`. Looking needs only a signed-in user. Ending anything also needs `changes_middleware`, a [fresh verification](step-up.md#fresh-verification) by default.
 
 ## Devices
 
@@ -169,7 +176,7 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 ## Listing and Revoking Devices
 
-`GET /user/devices` returns the user's devices that haven't been revoked, most recently seen first:
+With `Features::devices()` on, `GET /user/devices` returns the user's devices that haven't been revoked, most recently seen first. A device is a browser, with however many sessions it has (`sessions`); for the sessions themselves, see [Listing and Ending Sessions](#listing-and-ending-sessions).
 
 ```json
 {
@@ -191,7 +198,7 @@ Keyring::deviceModel()::query()->ownedBy($user)->active()->get();
 
 `DELETE /user/devices/{id}` revokes one device: its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page (JSON clients get it as `redirect`).
 
-`DELETE /user/devices` and `DELETE /user/sessions` are the same thing under two names. The second is registered whether or not `Features::devices()` is on, so "sign out everywhere else" is always there to offer. Either one signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::signOutOthers()`, which returns how many sessions it revoked and dispatches `SessionsRevoked`. It's `signOutEverywhere()` with the current session left out, then `rotate()`, which gives the current session its new ID:
+`DELETE /user/devices` and [`DELETE /user/sessions`](#listing-and-ending-sessions) are the same thing under two names. The second is registered whether or not `Features::devices()` is on, so "sign out everywhere else" is always there to offer. Either one signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID, so someone who copied its cookie is signed out too. It responds with `sessions-revoked`. Do the same from your own code with `Keyring\Sessions\Sessions::signOutOthers()`, which returns how many sessions it revoked and dispatches `SessionsRevoked`. It's `signOutEverywhere()` with the current session left out, then `rotate()`, which gives the current session its new ID:
 
 ```php
 use Keyring\Sessions\Sessions;
@@ -209,6 +216,52 @@ A user can also ask for this [along with adding or removing a sign-in method](au
 `rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one. Keyring calls it after every step-up too, and a browser that signs in while it's already signed in has the session it was on revoked, so on any driver a copy of the session from before is signed out on its next request.
 
 Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (an idle or absolute timeout, a risk response, or a revoked record) leaves the token alone, so other remembered browsers stay signed in. That browser's cookies stop working because its record has ended: see ["Remember Me"](#remember-me).
+
+## Listing and Ending Sessions
+
+`GET /user/sessions` returns every session the user could still carry on, most recently active first. It reads the registry, so it's the whole list: a session with no device, such as one your own `Auth::login()` started in a browser Keyring hadn't seen, and each of two sessions on the same device.
+
+```json
+{
+  "sessions": [
+    {
+      "id": "9f2c41d0...",
+      "name": "<browser> on <platform>",
+      "ip": "203.0.113.7",
+      "device": "01JC6...",
+      "remembered": false,
+      "signedInAt": "2026-11-08T09:12:00+00:00",
+      "lastActiveAt": "2026-11-08T13:55:00+00:00",
+      "expiresAt": "2026-12-08T09:12:00+00:00",
+      "current": true
+    }
+  ]
+}
+```
+
+`device` is the ID of the session's [device](#listing-and-revoking-devices), or `null` when it has none or devices are off, so a page can show sessions under their devices. `lastActiveAt` is kept to the minute. A session that has been revoked, has expired, has [idled out](#timeouts) or has moved to another record isn't listed.
+
+`id` is a handle, not the session's registry ID. The registry ID is what the ["remember me" cookie](#remember-me) carries, so it never leaves the server any other way: a page that could read it could hand someone the session. The handle is an HMAC-SHA256 of that ID under your `APP_KEY`. It can't be turned back into the ID, it's the wrong length to be taken for one, and the only thing that accepts it is the route below, which looks for it among the signed-in user's own sessions. A session that moves to a new record gets a new handle, so fetch the list again before acting on an old one.
+
+`DELETE /user/sessions/{id}` ends the session with that handle. Its record is revoked, so that browser is signed out on its next request and its "remember me" cookie brings nothing back. The response is a [status response](sign-in-flow.md#status-responses) with `session-revoked`, and `SessionsRevoked` is dispatched with a count of one. The user's "remember me" token is left alone, so their other remembered browsers stay signed in. A handle that isn't one of the user's own sessions, someone else's included, gets a `404`.
+
+Ending the current session is signing out: Keyring does everything `POST /logout` does, including changing the "remember me" token and dispatching `LoggedOut`, and answers with the same [`LogoutResponse`](sign-in-flow.md#signing-out). A JSON client gets a `204`, so send the user to your login page when `current` was `true`.
+
+`DELETE /user/sessions` signs out every session but this one. See [below](#listing-and-revoking-devices) for everything it ends.
+
+From your own code:
+
+```php
+use Keyring\Sessions\Sessions;
+
+$sessions = app(Sessions::class);
+
+$sessions->list($request, $user);            // what the route returns
+$sessions->active($user);                    // the same sessions as RegisteredSession objects
+
+$session = $sessions->find($user, $handle);  // null unless it's one of the user's own
+$sessions->revoke($user, $session);
+```
 
 ## The Session Registry
 
@@ -438,5 +491,5 @@ In `Keyring\Events`:
 |---|---|
 | `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = null)` |
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
-| `SessionsRevoked` | `user`, `count` |
+| `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, or an administrator's `keyring:sign-out` for one user |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |

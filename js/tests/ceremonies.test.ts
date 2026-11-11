@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { enroll, removeAuthenticator } from '../src/enroll'
 import { KeyringRequestError } from '../src/http'
+import { endOtherSessions, endSession, listSessions } from '../src/sessions'
 import { createCredential, fromBase64Url, getCredential, toBase64Url } from '../src/webauthn'
 
 // A browser without the JSON helpers (parse*FromJSON, toJSON), so the
@@ -175,6 +176,41 @@ describe('enrolling', () => {
     await enroll('recovery', { sign_out_others: true })
 
     expect(requests[1]).toMatchObject({ method: 'POST', url: '/user/authenticators/recovery/confirm', body: { sign_out_others: true } })
+  })
+})
+
+describe('sessions', () => {
+  test('lists the sessions the server returns', async () => {
+    const session = { id: '9f2c', name: 'Firefox on Windows', ip: '203.0.113.7', device: null, remembered: false, signedInAt: 'a', lastActiveAt: 'b', expiresAt: 'c', current: true }
+    answers.push({ status: 200, body: { sessions: [session] } })
+
+    expect(await listSessions()).toEqual([session])
+    expect(requests[0]).toMatchObject({ method: 'GET', url: '/user/sessions', body: undefined })
+  })
+
+  test('ends one session by its handle, or all the others', async () => {
+    answers.push({ status: 200, body: { status: 'session-revoked' } }, { status: 200, body: { status: 'sessions-revoked' } })
+
+    expect(await endSession('9f2c')).toEqual({ status: 'session-revoked' })
+    expect(await endOtherSessions()).toEqual({ status: 'sessions-revoked' })
+
+    expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
+      { method: 'DELETE', url: '/user/sessions/9f2c' },
+      { method: 'DELETE', url: '/user/sessions' },
+    ])
+  })
+
+  test('answers with nothing when the session ended was this one', async () => {
+    answers.push({ status: 204, body: null })
+
+    expect(await endSession('9f2c')).toEqual({})
+  })
+
+  test('throws on a session that is not the user\'s, or a stale verification', async () => {
+    answers.push({ status: 404, body: { message: 'Not found' } }, { status: 423, body: { message: 'Confirm first', redirect: '/confirm' } })
+
+    expect((await endSession('nope').catch(error => error)).status).toBe(404)
+    expect((await endOtherSessions().catch(error => error)).data.redirect).toBe('/confirm')
   })
 })
 

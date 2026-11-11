@@ -72,6 +72,7 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
 
         // Sessions are kept whatever the features, so ending them is always there.
         Route::delete('/user/sessions', [SessionController::class, 'destroyOthers'])->name('keyring.sessions.destroy-others');
+        Route::delete('/user/sessions/{session}', [SessionController::class, 'destroy'])->name('keyring.sessions.destroy');
 
         if (Features::enabled(Features::devices())) {
             Route::delete('/user/devices', [DeviceController::class, 'destroyOthers'])->name('keyring.devices.destroy-others');
@@ -86,6 +87,8 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
             Route::post('/user/email', [EmailChangeController::class, 'store'])->middleware('throttle:keyring')->name('keyring.email.store');
         }
     });
+
+    Route::get('/user/sessions', [SessionController::class, 'index'])->name('keyring.sessions.index');
 
     if (Features::enabled(Features::devices())) {
         Route::get('/user/devices', [DeviceController::class, 'index'])->name('keyring.devices.index');

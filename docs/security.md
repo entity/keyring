@@ -111,6 +111,8 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - A "remember me" cookie works once. Coming back moves the session to a new record and gives the browser a new cookie, so a copy of the pair brings back nothing the browser it was taken from hasn't already had. If a used cookie is sent again, or a browser is still signed in on the record it named, two browsers held the same pair: the session ends for both, with a `RememberMeReused` event and a `remember_me_reused` log entry. The one exception is the same browser's other requests in the few seconds after (`sessions.remember_grace`), which join the session the first one resumed. They can't start another, and sending the cookie again doesn't make those seconds any longer.
 - A resumed session's device, IP address and browser are those of the request that resumed it, on a record of its own. A browser still on the record from before is never compared with them.
 - Signing in and every step-up give the session a new ID and end the one before: destroyed on the server, and on Laravel's `cookie` session driver, where there is nothing to destroy, signed out through its registry record.
+- A user can always see their sessions and end any one of them or all the others (`/user/sessions`), whatever features are on. Ending needs a fresh verification, looking doesn't. Only their own can be found.
+- A session's registry ID, which its "remember me" cookie carries, is never sent to a page. The sessions list names each one by a keyed hash of it, which can't be turned back into the ID or used as a cookie.
 - A session whose registry record has gone missing is signed out rather than started over.
 - An administrator can end one user's sessions, or everyone's, with `php artisan keyring:sign-out`. "Remember me" brings none of them back. See [For Administrators](devices-and-sessions.md#for-administrators).
 - Signing a user out everywhere and a session moving to a new record take turns, so a "remember me" cookie coming back at that moment can't carry a session past the sign-out.
@@ -188,6 +190,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | A stated number of sessions per account, and what happens at it | OWASP ASVS 7.1.2 |
 | A command for administrators to end one user's sessions or everyone's | OWASP ASVS 7.4.5 |
 | The option to end other sessions after any change to a sign-in method | OWASP ASVS 7.4.3 |
+| Users seeing their sessions, and ending any or all of them after verifying again | OWASP ASVS 7.5.2 |
 | An idle and an absolute timeout on every session, kept on the server, with a longer idle one for "remember me" as a stated decision | OWASP ASVS 7.3.1 and 7.3.2, and OWASP's Session Management Cheat Sheet |
 | A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 

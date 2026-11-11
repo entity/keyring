@@ -9,6 +9,7 @@
 - [Signing In With a Passkey](#signing-in-with-a-passkey)
 - [Challenge Helpers Without Vue or React](#challenge-helpers-without-vue-or-react)
 - [Managing Authenticators](#managing-authenticators)
+- [Sessions](#sessions)
 - [Handling Step-Up in JavaScript](#handling-step-up-in-javascript)
 - [JSON Requests](#json-requests)
 - [WebAuthn Helpers](#webauthn-helpers)
@@ -35,7 +36,7 @@ It's plain ES modules, so it works with any bundler. The main entry point has no
 
 | Import | Contains |
 |---|---|
-| `@entity/keyring` | WebAuthn helpers, enrollment helpers, `json()`, routes and types. No framework code. |
+| `@entity/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes and types. No framework code. |
 | `@entity/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
 | `@entity/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@entity/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
@@ -47,7 +48,7 @@ Keyring renders the components `auth/login`, `auth/challenge` and so on. [Pages]
 - **The challenge page** (and `confirm`, for step-up) shows whichever factor comes next. [`useChallenge()`](#the-challenge-page) does the work.
 - **The login page** can offer passkeys, with [`usePasskeyLogin()`](#signing-in-with-a-passkey).
 
-Settings pages for authenticators, devices and the email address are yours too, built on the [helpers below](#managing-authenticators) and the JSON routes. The [example app](https://github.com/entity/keyring-example) has every page, in React with the Laravel starter kit's components, if you'd like a reference.
+Settings pages for authenticators, sessions, devices and the email address are yours too, built on the [helpers below](#managing-authenticators) and the JSON routes. The [example app](https://github.com/entity/keyring-example) has every page, in React with the Laravel starter kit's components, if you'd like a reference.
 
 ## The Challenge Page
 
@@ -261,6 +262,27 @@ await removeAuthenticator(added.authenticator.id)
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them.
 
+## Sessions
+
+Three helpers call the [session routes](devices-and-sessions.md#listing-and-ending-sessions), which every app has:
+
+```ts
+import { endOtherSessions, endSession, listSessions } from '@entity/keyring'
+
+const sessions = await listSessions()
+
+await endSession(sessions[1].id)   // one session, by its handle
+await endOtherSessions()           // every session but this one
+```
+
+| Function | Does |
+|---|---|
+| `listSessions()` | `GET /user/sessions`. Resolves to the sessions, most recently active first, each a `Session`: `id`, `name`, `ip`, `device`, `remembered`, `signedInAt`, `lastActiveAt`, `expiresAt` and `current`. |
+| `endSession(id)` | `DELETE /user/sessions/{id}`. Ending the one marked `current` signs the user out and resolves to `{}`, so send them to the login page. |
+| `endOtherSessions()` | `DELETE /user/sessions`. |
+
+`id` is a handle that only these routes accept, and it changes when a session moves to a new record, so list again before ending one from a list that's been open a while. An old handle gets a `404`. The two that end sessions need a fresh verification, like the authenticator helpers: see below.
+
 ## Handling Step-Up in JavaScript
 
 The authenticator routes need a [fresh verification](step-up.md#fresh-verification). When the user doesn't have one, a JSON request fails with `423` and a `redirect` to the confirm page. The helpers throw a `KeyringRequestError` with that status:
@@ -300,7 +322,6 @@ The same applies to any of your own routes behind `keyring:aal2` or `keyring.fre
 import { json } from '@entity/keyring'
 
 const { devices } = await json('GET', '/user/devices')
-await json('DELETE', '/user/sessions')       // sign out everywhere else
 const { pending } = await json('GET', '/user/email')
 await json('PUT', '/user/password', { current_password, password, password_confirmation })
 ```

@@ -12,6 +12,7 @@ use Keyring\Contracts\Signal;
 use Keyring\Devices\DeviceManager;
 use Keyring\Enums\Assurance;
 use Keyring\Events\DeviceRevoked;
+use Keyring\Events\LoggedOut;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Facades\Keyring;
@@ -1096,6 +1097,265 @@ describe('signing out other sessions without the devices feature', function () {
 
     it('is not there for a guest', function () {
         $this->deleteJson(route('keyring.sessions.destroy-others'))->assertUnauthorized();
+    });
+});
+
+describe('the sessions a user can see and end', function () {
+    beforeEach(function () {
+        /** A session of the user's on another browser, last used a while ago. */
+        $this->session = function (string $id, array $with = [], ?User $user = null): RegisteredSession {
+            $now = now()->getTimestamp();
+
+            return tap(
+                new RegisteredSession($id, (string) ($user ?? $this->user)->id, 'web', null, Assurance::AAL1, '203.0.113.7', CHROME, $now - 600, $now - 300, $now + 3600)->with($with),
+                fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
+            );
+        };
+
+        $this->handle = fn (string $id) => app(Sessions::class)->handle(app(SessionRegistry::class)->find($id));
+    });
+
+    it('lists every one of them, this one marked, whether or not devices are on', function (string $driver, array $features) {
+        withFeatures($features);
+        Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+        config(['keyring.sessions.driver' => $driver]);
+
+        $this->freezeSecond();
+        login();
+        $here = app(SessionRegistry::class)->find(session(Sessions::KEY));
+        $other = ($this->session)('elsewhere', ['remembered' => true]);
+
+        $this->getJson(route('keyring.sessions.index'))
+            ->assertOk()
+            ->assertJsonCount(2, 'sessions')
+            ->assertJsonPath('sessions.0', [
+                'id' => app(Sessions::class)->handle($here),
+                'name' => 'Firefox on Windows',
+                'ip' => '127.0.0.1',
+                'device' => $here->deviceId,
+                'remembered' => false,
+                'signedInAt' => now()->toIso8601String(),
+                'lastActiveAt' => now()->toIso8601String(),
+                'expiresAt' => now()->addDays(30)->toIso8601String(),
+                'current' => true,
+            ])
+            ->assertJsonPath('sessions.1', [
+                'id' => app(Sessions::class)->handle($other),
+                'name' => 'Chrome on macOS',
+                'ip' => '203.0.113.7',
+                'device' => null,
+                'remembered' => true,
+                'signedInAt' => now()->subMinutes(10)->toIso8601String(),
+                'lastActiveAt' => now()->subMinutes(5)->toIso8601String(),
+                'expiresAt' => now()->addHour()->toIso8601String(),
+                'current' => false,
+            ]);
+    })->with('registries')->with([
+        'with devices' => [Features::all()],
+        'without devices' => [array_values(array_diff(Features::all(), [Features::devices()]))],
+        'with no features at all' => [[]],
+    ]);
+
+    it('shows a session that has no device, and two on one device apart', function () {
+        $token = deviceCookie(login());
+        $device = Device::sole()->id;
+        $first = session(Sessions::KEY);
+
+        $this->travel(1)->minutes();
+        $this->flushSession();
+        Auth::forgetGuards();
+        login(['keyring_device' => $token]);
+
+        ($this->session)('no-device');
+
+        // The devices list has one row for all of it.
+        $this->getJson(route('keyring.devices.index'))->assertJsonCount(1, 'devices')->assertJsonPath('devices.0.sessions', 2);
+
+        $this->getJson(route('keyring.sessions.index'))
+            ->assertJsonCount(3, 'sessions')
+            ->assertJsonPath('sessions.0.device', $device)
+            ->assertJsonPath('sessions.1.device', $device)
+            ->assertJsonPath('sessions.1.id', ($this->handle)($first))
+            ->assertJsonPath('sessions.2.device', null);
+
+        // And one of the two on that device can be ended without the other.
+        $this->deleteJson(route('keyring.sessions.destroy', ($this->handle)($first)))->assertOk();
+
+        expect(app(SessionRegistry::class)->find($first)->revokedAt)->not->toBeNull();
+        $this->get('/home')->assertOk();
+    });
+
+    it('leaves out sessions that have ended, idled out or moved to another record', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        login();
+
+        ($this->session)('revoked');
+        $registry->revoke('revoked');
+        ($this->session)('expired', ['expiresAt' => now()->subMinute()->getTimestamp()]);
+        ($this->session)('idle', ['lastActivityAt' => now()->subHours(3)->getTimestamp()]);
+        $registry->replace('moved', ($this->session)('moved')->with(['id' => 'moved-on']));
+
+        $this->getJson(route('keyring.sessions.index'))
+            ->assertJsonCount(2, 'sessions')
+            ->assertJsonPath('sessions.0.current', true)
+            ->assertJsonPath('sessions.1.id', ($this->handle)('moved-on'));
+    })->with('registries');
+
+    it('never shows a registry ID, and the handle it shows is no use as one', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+        $here = session(Sessions::KEY);
+        ($this->session)(str_repeat('e', 40), ['remembered' => true]);
+
+        $response = $this->getJson(route('keyring.sessions.index'))->assertOk();
+        $handles = $response->json('sessions.*.id');
+
+        expect($response->getContent())->not->toContain($here)->not->toContain(str_repeat('e', 40));
+
+        foreach ($handles as $handle) {
+            expect($handle)->toMatch('/^[0-9a-f]{64}$/')
+                ->and(app(SessionRegistry::class)->find($handle))->toBeNull();
+        }
+
+        // The route that ends a session doesn't take the ID in the handle's place.
+        $this->deleteJson(route('keyring.sessions.destroy', str_repeat('e', 40)))->assertNotFound();
+
+        expect(app(SessionRegistry::class)->find(str_repeat('e', 40))->revokedAt)->toBeNull();
+
+        // And sent as the cookie that brings a remembered session back, a handle brings nothing.
+        $user = $this->user->fresh();
+        $recaller = [Auth::guard()->getRecallerName() => $user->id.'|'.$user->remember_token.'|'.$user->password];
+
+        foreach ($handles as $handle) {
+            $this->flushSession();
+            Auth::forgetGuards();
+            $this->withCookies([...$recaller, 'keyring_remember' => $handle])->get('/home')->assertRedirect('/login');
+            $this->assertGuest();
+        }
+
+        expect(app(SessionRegistry::class)->forUser($this->user)->map->id->all())->toEqualCanonicalizing([$here, str_repeat('e', 40)]);
+    })->with('registries');
+
+    it('ends one session and leaves the rest alone', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Event::fake([SessionsRevoked::class]);
+        $registry = app(SessionRegistry::class);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+        $here = session(Sessions::KEY);
+        $token = $this->user->fresh()->remember_token;
+        ($this->session)('phone');
+        ($this->session)('tablet');
+
+        $this->deleteJson(route('keyring.sessions.destroy', ($this->handle)('phone')))
+            ->assertOk()
+            ->assertJsonPath('status', 'session-revoked')
+            ->assertJsonPath('message', 'That session has been signed out.');
+
+        // Other remembered browsers keep their way back in.
+        expect($registry->find('phone')->revokedAt)->not->toBeNull()
+            ->and($registry->forUser($this->user)->map->id->all())->toEqualCanonicalizing([$here, 'tablet'])
+            ->and($this->user->fresh()->remember_token)->toBe($token);
+
+        Event::assertDispatched(SessionsRevoked::class, fn (SessionsRevoked $event) => $event->count === 1 && $event->user->is($this->user));
+        $this->get('/home')->assertOk();
+
+        // It's gone from the list, so its handle finds nothing now.
+        $this->deleteJson(route('keyring.sessions.destroy', app(Sessions::class)->handle($registry->find('phone'))))->assertNotFound();
+    })->with('registries');
+
+    it('only ends the signed-in user\'s own', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        ($this->session)('theirs', user: $other);
+        login();
+
+        $this->getJson(route('keyring.sessions.index'))->assertJsonCount(1, 'sessions');
+
+        $this->deleteJson(route('keyring.sessions.destroy', ($this->handle)('theirs')))->assertNotFound();
+        $this->deleteJson(route('keyring.sessions.destroy', 'theirs'))->assertNotFound();
+
+        expect(app(SessionRegistry::class)->find('theirs')->revokedAt)->toBeNull();
+    })->with('registries');
+
+    it('signs out when the session it ends is this one', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Event::fake([LoggedOut::class, SessionsRevoked::class]);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
+        $here = session(Sessions::KEY);
+        $token = $this->user->fresh()->remember_token;
+        ($this->session)('phone');
+
+        // Exactly what POST /logout answers.
+        $this->withCredentials()->withCookie('keyring_remember', $here)
+            ->deleteJson(route('keyring.sessions.destroy', ($this->handle)($here)))
+            ->assertNoContent()
+            ->assertHeader('Clear-Site-Data', '"cache", "storage"')
+            ->assertCookieExpired('keyring_remember');
+
+        $this->assertGuest();
+        expect(app(SessionRegistry::class)->find($here)->revokedAt)->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find('phone')->revokedAt)->toBeNull()
+            ->and($this->user->fresh()->remember_token)->not->toBe($token)
+            ->and(session()->has(Sessions::KEY))->toBeFalse();
+
+        Event::assertDispatched(LoggedOut::class, fn (LoggedOut $event) => $event->user->is($this->user));
+        Event::assertNotDispatched(SessionsRevoked::class);
+    })->with('registries');
+
+    it('sends a page visit that ended its own session where signing out does', function () {
+        login();
+
+        $this->delete(route('keyring.sessions.destroy', ($this->handle)(session(Sessions::KEY))))->assertRedirect('/');
+
+        $this->assertGuest();
+    });
+
+    it('needs a fresh verification to end one, and none to look', function () {
+        ($this->session)('phone');
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
+
+        $this->getJson(route('keyring.sessions.index'))->assertOk()->assertJsonCount(2, 'sessions');
+        $this->deleteJson(route('keyring.sessions.destroy', ($this->handle)('phone')))->assertStatus(423);
+
+        expect(app(SessionRegistry::class)->find('phone')->revokedAt)->toBeNull();
+    });
+
+    it('is not there for a guest', function () {
+        ($this->session)('phone');
+
+        $this->getJson(route('keyring.sessions.index'))->assertUnauthorized();
+        $this->deleteJson(route('keyring.sessions.destroy', ($this->handle)('phone')))->assertUnauthorized();
+    });
+
+    it('ends a session on the record "remember me" has carried it on to since', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+
+        $listed = ($this->session)('listed');
+        $registry->replace('listed', $listed->with(['id' => 'carried-on']));
+
+        app(Sessions::class)->revoke($this->user, $listed);
+
+        expect($registry->find('carried-on')->revokedAt)->not->toBeNull()
+            ->and($registry->forUser($this->user))->toBeEmpty();
+    })->with('registries');
+
+    it('gives each session a handle of its own, that changes with the app key', function () {
+        $sessions = app(Sessions::class);
+        $phone = ($this->session)('phone');
+        $handle = $sessions->handle($phone);
+
+        expect($sessions->handle(($this->session)('tablet')))->not->toBe($handle)
+            ->and($sessions->handle($phone))->toBe($handle)
+            ->and($sessions->find($this->user, $handle)->id)->toBe('phone');
+
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+
+        expect($sessions->handle($phone))->not->toBe($handle);
     });
 });
 

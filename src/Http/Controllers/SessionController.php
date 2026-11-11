@@ -2,15 +2,21 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Contracts\Support\Responsable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Events\LoggedOut;
+use Keyring\Events\SessionsRevoked;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Login\SignIn;
 use Keyring\Sessions\Sessions;
 
 /**
- * The user's own sessions, straight from the registry, so they're there
- * whether or not the app keeps devices.
+ * The user's own sessions, straight from the registry: every one of them,
+ * one at a time, whether or not the app keeps devices.
  */
 class SessionController
 {
@@ -20,6 +26,34 @@ class SessionController
         protected KeyringManager $keyring,
         protected Sessions $sessions,
     ) {}
+
+    public function index(Request $request): JsonResponse
+    {
+        return new JsonResponse(['sessions' => $this->sessions->list($request, $this->keyring->user())]);
+    }
+
+    /**
+     * End one session, named by its handle. Ending this one is signing out.
+     */
+    public function destroy(Request $request, SignIn $signIn, string $session): Responsable
+    {
+        $user = $this->keyring->user();
+        $session = $this->sessions->find($user, $session) ?? abort(404);
+
+        if ($session->id === $this->sessions->current($request)?->id) {
+            $signIn->out($request);
+
+            LoggedOut::dispatch($user);
+
+            return $this->keyring->response(LogoutResponse::class);
+        }
+
+        $this->sessions->revoke($user, $session);
+
+        SessionsRevoked::dispatch($user, 1);
+
+        return $this->status('session-revoked');
+    }
 
     /**
      * Sign out everywhere except here.

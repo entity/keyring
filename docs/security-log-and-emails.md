@@ -52,7 +52,7 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `new_device` | A sign in from a new device. | `device` |
 | `device_revoked` | A device was signed out. | `device` |
 | `device_reported` | A device was signed out from the "this wasn't me" link. | `device` |
-| `sessions_revoked` | "Sign out everywhere else". | `count` |
+| `sessions_revoked` | "Sign out everywhere else", one session ended from the sessions list, or an administrator's `keyring:sign-out` for the user. | `count` |
 | `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `remember_me_reused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent are the request that brought the used one; `device_id` is the device the ended session was on. | `device` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |

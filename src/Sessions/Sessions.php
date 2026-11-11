@@ -22,6 +22,7 @@ use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
+use Keyring\Support\KeyedHash;
 use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
 
@@ -193,7 +194,7 @@ class Sessions
      * The session a replaced record became, however many times it has moved
      * since. Null when that record is gone.
      */
-    public function latest(RegisteredSession $session): ?RegisteredSession
+    public function latest(?RegisteredSession $session): ?RegisteredSession
     {
         while ($session?->replacedBy !== null) {
             $session = $this->registry->find($session->replacedBy);
@@ -234,6 +235,65 @@ class Sessions
         return $this->registry->forUser($user)
             ->reject(fn (RegisteredSession $session) => $this->idledOut($session, $now))
             ->values();
+    }
+
+    /**
+     * The user's sessions for a "where you're signed in" page, most recently
+     * active first, each under its handle.
+     *
+     * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool}>
+     */
+    public function list(Request $request, Authenticatable $user): Collection
+    {
+        $current = $request->session()->get(self::KEY);
+        $time = fn (int $timestamp) => now()->setTimestamp($timestamp)->toIso8601String();
+
+        return $this->active($user)->map(fn (RegisteredSession $session) => [
+            'id' => $this->handle($session),
+            'name' => $this->keyring->describeDevice($session->userAgent),
+            'ip' => $session->ip,
+            'device' => $session->deviceId,
+            'remembered' => $session->remembered,
+            'signedInAt' => $time($session->authenticatedAt),
+            'lastActiveAt' => $time($session->lastActivityAt),
+            'expiresAt' => $time($session->expiresAt),
+            'current' => $session->id === $current,
+        ]);
+    }
+
+    /**
+     * What a session goes by outside the server. Its registry ID is what the
+     * "remember me" cookie carries, so that never reaches a page: whoever
+     * could read it there could come back as the session. The handle is a
+     * keyed hash of the ID. It picks the session out from its user's others
+     * and leads nowhere else: not back to the ID, and to nothing at all in a
+     * cookie.
+     */
+    public function handle(RegisteredSession $session): string
+    {
+        return KeyedHash::make('keyring.session.'.$session->id);
+    }
+
+    /**
+     * The user's session with this handle, if it's one that can still be
+     * carried on. Only ever looked for among the user's own.
+     */
+    public function find(Authenticatable $user, string $handle): ?RegisteredSession
+    {
+        return $this->active($user)->first(fn (RegisteredSession $session) => hash_equals($this->handle($session), $handle));
+    }
+
+    /**
+     * End one of the user's sessions, wherever it is by now: "remember me"
+     * may have carried it on to another record since it was listed.
+     */
+    public function revoke(Authenticatable $user, RegisteredSession $session): void
+    {
+        $this->holding($user, function () use ($session) {
+            if ($current = $this->latest($this->registry->find($session->id))) {
+                $this->registry->revoke($current->id);
+            }
+        });
     }
 
     public function current(Request $request): ?RegisteredSession
