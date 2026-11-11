@@ -10,6 +10,11 @@
     - [Account Changes](#account-changes)
     - [Links and Headers](#links-and-headers)
     - [Storage](#storage)
+- [Cryptography](#cryptography)
+    - [Keys](#keys)
+    - [Algorithms](#algorithms)
+    - [Random Values](#random-values)
+    - [Changing an Algorithm](#changing-an-algorithm)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
@@ -147,7 +152,7 @@ Work it out from something the server knows. The request's `Host` header is what
 
 ### Storage
 
-- TOTP secrets are encrypted with `APP_KEY`.
+- TOTP secrets are encrypted with `APP_KEY`. [Cryptography](#cryptography) lists every algorithm and key.
 - Recovery codes and email codes are stored as keyed hashes (HMAC-SHA-256).
 - Keyed hashes never use `APP_KEY` itself. Each kind (recovery codes, one-time codes, reserved addresses, WebAuthn user handles) has a key of its own, derived from `APP_KEY` with HKDF, so a hash made for one can't pass as another and none is made with the key Laravel encrypts and signs with.
 - Email change tokens are stored as SHA-256 hashes, and the addresses in a pending change are encrypted.
@@ -155,6 +160,69 @@ Work it out from something the server knows. The request's `Host` header is what
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
 - WebAuthn user handles are an HMAC of the user ID, never the ID or email.
 - The security log never holds passwords, codes, tokens or session IDs.
+
+## Cryptography
+
+Everything Keyring does with a key or an algorithm, and where. It adds no cipher or hash of its own: each one below is PHP's, Laravel's or a library's.
+
+### Keys
+
+| Key | Where it lives | Used for |
+|---|---|---|
+| `APP_KEY`, and `APP_PREVIOUS_KEYS` for what was made before a rotation | Your environment | Laravel's encrypter and signed URLs, directly. Keyring never uses it as a key of its own. |
+| Four purpose keys, one each for recovery codes, one-time codes, reserved addresses and WebAuthn user handles | Nowhere: derived on each use from `APP_KEY` (and each previous key) with HKDF-SHA-256, the purpose's name as the label | Keyring's keyed hashes. A hash made for one purpose can't pass as another, and none is made with the key that encrypts. |
+| Each authenticator app's TOTP secret, 160 random bits | `keyring_authenticators.secret`, encrypted | Making and checking that app's codes. |
+| Each passkey's or security key's public key | `keyring_authenticators.public_key`, as the key sent it | Checking that key's signatures. The private key never leaves the authenticator. |
+| Attestation root certificates | Your `webauthn.attestation_roots`, or your `TrustsAuthenticators` | Deciding which makers' keys a factor with `requireAttestation()` takes. |
+| The password hash | Your `users` table | Laravel's hasher: see below. |
+
+Rotating `APP_KEY` with the old key in `APP_PREVIOUS_KEYS` keeps encrypted values, signed links, recovery codes and reserved addresses working. See [Known Limitations](#known-limitations) for the short-lived values it ends.
+
+### Algorithms
+
+| Algorithm | Where | What it protects |
+|---|---|---|
+| Laravel's encrypter, with your `app.cipher`: AES-256-CBC with an HMAC-SHA-256 tag by default, or AES-256-GCM | The `secret` of an authenticator (TOTP secrets, the set of recovery code hashes, whatever a code factor of yours keeps there); `value` and `previous_value` of a pending change (both addresses); pending logins and enrollments in the session, whatever the session driver | Secrets and addresses at rest. |
+| Laravel's cookie encryption, the same cipher | The device cookie and the "remember me" pairing cookie, when your `web` group encrypts cookies, as it does by default | Tokens in the browser. |
+| HMAC-SHA-256 under a purpose key | Recovery codes; emailed codes, and those of your own code factors, while they wait in the session; the lookup hash of an address an email change holds; the WebAuthn user handle | Values that are only ever compared or looked up, never read back. |
+| SHA-256, unkeyed | Device tokens and email change tokens (confirm, current address, revert) | Long random tokens, so a copy of the table can't be used as one. Each has well over 128 bits, which is why a plain hash is enough. |
+| SHA-256, unkeyed | The mark a pending login keeps of the user's password hash and address, inside the encrypted session | Noticing that either changed. Not a secret. |
+| HMAC-SHA-1, or HMAC-SHA-256 or HMAC-SHA-512 where the factor is [set up with one](factors.md#authenticator-apps-totp) | TOTP codes (RFC 6238), six digits every 30 seconds | A legacy algorithm in OWASP ASVS's terms, kept as the default because it's the one every authenticator app makes. |
+| Laravel's hash manager, with your `hashing.driver`: bcrypt by default, or Argon2id | Passwords, the hash an unknown account spends, and the reset tokens Laravel's broker stores | Keyring calls `Hash` and never picks the algorithm or its cost. |
+| ECDSA with P-256 and SHA-256 (ES256), Ed25519 (EdDSA), and RSASSA-PKCS1-v1_5 with SHA-256 (RS256, off by default, 2048 bits at least) | Signatures from passkeys and security keys, limited to [`webauthn.algorithms`](passkeys.md#signature-algorithms) | Proof of holding the key. SHA-256 also hashes the client data and the relying party ID, as WebAuthn defines. |
+| X.509 path validation: ECDSA, Ed25519, Ed448 or RSASSA-PKCS1-v1_5 signatures over SHA-224 or longer, RSA keys of 2048 bits at least, never SHA-1 | Attestation chains, only for a factor with [`requireAttestation()`](passkeys.md#requiring-attestation) | Which maker's key this is. The algorithms are whatever the maker signed its certificates with, so this accepts RSA with PKCS #1 v1.5 padding, which ASVS doesn't approve: several makers' roots use it. Off by default. |
+| HMAC-SHA-256 with `APP_KEY`, by Laravel's URL signing | The email verification link and the "this wasn't me" link | That the link was made by your app, for that route, and hasn't expired. |
+| SHA-1, unkeyed | The address in Laravel's email verification link; shortening cache keys for the rate limits; and the breached-password lookup, where Have I Been Pwned's API is asked by the first five characters of a SHA-1 | Nothing rests on it: the link is signed as above, a cache key isn't a secret, and the lookup is the API's own format, made by Laravel. |
+
+### Random Values
+
+All of it comes from the operating system's generator, through PHP's `random_bytes()` and `random_int()`. `Str::random()` is built on `random_bytes()`. Nothing uses `rand()`, `mt_rand()` or `uniqid()`.
+
+| Value | Made with | Size |
+|---|---|---|
+| Recovery codes | `random_bytes(16)` | 128 bits each |
+| WebAuthn challenges | `random_bytes(32)` | 256 bits |
+| TOTP secrets | `random_int()`, 32 base32 characters | 160 bits |
+| Device tokens | `Str::random(40)` | About 238 bits |
+| Session registry IDs, one of which is the "remember me" pairing | `Str::random(40)` | About 238 bits |
+| Pending login IDs | `Str::random(40)` | About 238 bits |
+| Email change tokens | `Str::random(48)` | About 285 bits |
+| Laravel's "remember me" token, when Keyring replaces it | `Str::random(60)` | About 357 bits |
+| WebAuthn user handles | HMAC-SHA-256 of the user's ID under a purpose key, not random | 256 bits, and not guessable without `APP_KEY` |
+| Emailed codes | `random_int()` | Eight digits, about 27 bits. Short on purpose: they last 10 minutes and five guesses. |
+| The password an unknown account's hash is spent on | `Str::random(32)` | Thrown away. |
+
+### Changing an Algorithm
+
+| To change | How | What happens to stored values |
+|---|---|---|
+| The password hash or its cost | `hashing.driver` and its options | Nothing to re-make: each password is rehashed the next time its owner signs in. |
+| `APP_KEY` | Set the new key, with the old one in `APP_PREVIOUS_KEYS` | Encrypted values are read with the old key and written with the new one as they're next saved. Recovery codes and reserved addresses are found under either. Codes waiting in a session and pending logins end. |
+| The cipher | `app.cipher` | Laravel only reads what the current cipher wrote, so every authenticator secret and pending change has to be decrypted and saved again in a migration of your own before the old cipher goes. Pending logins and enrollments end. |
+| The WebAuthn algorithms | `webauthn.algorithms` and `webauthn.minimum_rsa_bits` | Adding one changes nothing stored. Removing one refuses the keys that sign with it, and their owners add a new key: a key's algorithm can't be changed. |
+| The TOTP digest | The factor's `algorithm` | Only apps added afterwards use it. An authenticator keeps the digest it was set up with, so moving everyone means each user adding their app again. |
+| The keyed hash (HMAC-SHA-256) or how its keys are derived | Fixed in code | A new release would have to re-make them: reserved address hashes can be recomputed from the encrypted address, recovery codes can't be (only the hash is kept) and would be issued again, and a WebAuthn user handle stays for as long as the user has a key that knows it. Stored hashes carry no version tag. |
+| The token hash (SHA-256) | Fixed in code | Tokens can't be rehashed, since only the hash is kept. Device cookies and pending email change links would be issued again. |
 
 ## Standards
 
