@@ -15,6 +15,7 @@
     - [Algorithms](#algorithms)
     - [Random Values](#random-values)
     - [Changing an Algorithm](#changing-an-algorithm)
+    - [Peppering Passwords](#peppering-passwords)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
@@ -223,6 +224,63 @@ All of it comes from the operating system's generator, through PHP's `random_byt
 | The TOTP digest | The factor's `algorithm` | Only apps added afterwards use it. An authenticator keeps the digest it was set up with, so moving everyone means each user adding their app again. |
 | The keyed hash (HMAC-SHA-256) or how its keys are derived | Fixed in code | A new release would have to re-make them: reserved address hashes can be recomputed from the encrypted address, recovery codes can't be (only the hash is kept) and would be issued again, and a WebAuthn user handle stays for as long as the user has a key that knows it. Stored hashes carry no version tag. |
 | The token hash (SHA-256) | Fixed in code | Tokens can't be rehashed, since only the hash is kept. Device cookies and pending email change links would be issued again. |
+
+### Peppering Passwords
+
+NIST SP 800-63B suggests, beyond the salted hash, a keyed hash or encryption of it under a secret kept apart from the database, often called a pepper. Keyring doesn't build one in, for three reasons. The password hash is your `users.password` column and Laravel's hasher, shared with everything else in your app that checks a password, so a pepper only Keyring knew about would break those. A pepper is only worth having when its key lives somewhere the database's attacker can't reach, and where that is (an HSM, a secrets manager, at least a separate environment variable) is your infrastructure's decision. And losing or rotating it locks out every user at once, so it needs a plan that belongs to whoever runs the app.
+
+Keyring checks and sets passwords through Laravel's `Hash`, so a pepper goes in there and covers every flow: signing in, confirming, password changes, resets and the rehash at sign in. Register a driver that wraps the one you use now:
+
+```php
+use Illuminate\Contracts\Hashing\Hasher;
+use Illuminate\Support\Facades\Hash;
+
+class PepperedHasher implements Hasher
+{
+    public function __construct(
+        protected Hasher $hasher,
+        #[\SensitiveParameter] protected string $pepper,
+    ) {}
+
+    public function make(#[\SensitiveParameter] $value, array $options = []): string
+    {
+        return $this->hasher->make($this->pepper($value), $options);
+    }
+
+    public function check(#[\SensitiveParameter] $value, $hashedValue, array $options = []): bool
+    {
+        return $this->hasher->check($this->pepper($value), $hashedValue, $options);
+    }
+
+    public function info($hashedValue): array
+    {
+        return $this->hasher->info($hashedValue);
+    }
+
+    public function needsRehash($hashedValue, array $options = []): bool
+    {
+        return $this->hasher->needsRehash($hashedValue, $options);
+    }
+
+    // Base64, because a raw HMAC can hold a NUL byte, where bcrypt stops reading.
+    protected function pepper(#[\SensitiveParameter] string $value): string
+    {
+        return base64_encode(hash_hmac('sha256', $value, $this->pepper, true));
+    }
+}
+
+// In a service provider's boot().
+Hash::extend('peppered', fn () => new PepperedHasher(
+    Hash::driver('argon2id'),
+    config('services.password_pepper'),
+));
+```
+
+Then set `hashing.driver` to `peppered`. Three things to settle first:
+
+- **Existing passwords.** A hash made without the pepper won't match with it. Either have `check()` fall back to the bare hasher and report `needsRehash()` for those, so each moves over at its owner's next sign in, or add the pepper before there are users.
+- **Rotation.** Changing the pepper is changing every hash. Keep the old one to check against, and rehash on sign in, as above.
+- **Length.** The HMAC is 44 characters whatever was typed, so bcrypt's 72 byte limit no longer cuts a long password short. Keyring's [password rules](protected-changes.md#password-rules) go by `hashing.driver`, so with a driver that isn't `bcrypt` they stop refusing passwords over 72 bytes. A password over 72 bytes is still refused at sign in while its stored hash is a bcrypt one, since Keyring can't tell a peppered bcrypt hash from a plain one: wrap Argon2id rather than bcrypt, or keep new passwords to 72 bytes with a rule of your own.
 
 ## Standards
 
