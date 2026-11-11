@@ -168,7 +168,7 @@ Where a user who has to choose a new password is sent from every other page unti
 'support_contact' => null,
 ```
 
-Where users can reach you about their account: a page's URL (`'https://example.com/support'`) or an email address (`'support@example.com'`). Every notification is handed it as `$contact`, and the published security notices, the emailed code and the email change notice end with "If this wasn't you and you need help, contact us" and a link to it. `null` leaves the line out. See [Security Emails](security-log-and-emails.md#a-support-contact).
+Where users can reach you about their account: a page's URL (`'https://example.com/support'`) or an email address (`'support@example.com'`). Every notification is handed it as `$contact`, and Keyring's security notices, the emailed code and the email change notice end with "If this wasn't you and you need help, contact us" and a link to it. `null` leaves the line out. See [Security Emails](security-log-and-emails.md#a-support-contact).
 
 ```php
 'enrollments' => [
@@ -410,7 +410,7 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::respondWith($contract, $implementation)` | Swaps a response. See [Responses](sign-in-flow.md#responses). |
 | `Keyring::page($name, $component)` | Changes the component a page renders. See [Pages](sign-in-flow.md#pages). |
 | `Keyring::risk()->signals([...])->respond(...)` | Configures risk signals and actions. `Keyring::risk()->push(...)` adds to the signals already on. See [Risk](risk.md). |
-| `Keyring::notifications([...])` | Registers your notification class for each email Keyring sends. A security notice with none isn't sent, and unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
+| `Keyring::notifications([...])` | Swaps the notification Keyring sends for a type with your own class, or `null` to send none. Types left out keep Keyring's own, and unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
 | `Keyring::createUsersUsing($action)` | Sets the registration action. See [Registration](sign-in-flow.md#registration). |
 | `Keyring::resetUserPasswordsUsing($action)` | Sets the password reset action. See [Resetting the Password](protected-changes.md#resetting-the-password). |
 | `Keyring::updateUserPasswordsUsing($action)` | Sets the password change action. See [Changing the Password](protected-changes.md#changing-the-password). |
@@ -452,7 +452,7 @@ It also answers questions about your setup, for your own controllers, factors an
 | `Keyring::requirementFor($user, $attempt)` | What this user must prove to finish the attempt. See [Checking Requirements in Code](policies.md#checking-requirements-in-code). |
 | `Keyring::statusMessage($status)` | The translated message for a status slug, or `null`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
 | `Keyring::render($name, $props)` | Renders one of Keyring's [pages](sign-in-flow.md#pages), as Inertia or Blade, for a route of your own. |
-| `Keyring::hasNotification($type)` | Whether a notification is registered for a [type](security-log-and-emails.md#email-types). |
+| `Keyring::hasNotification($type)` | Whether a notification is sent for a [type](security-log-and-emails.md#email-types). |
 | `Keyring::protectedAttributes($user = null)` | The attributes that only change through Keyring's flows. Pass a user whose model keeps its password under another name to get that name. See [Protected Attributes](protected-changes.md#protected-attributes). |
 | `Keyring::response($contract, ...$with)` | Builds one of Keyring's [responses](sign-in-flow.md#responses), yours when you swapped it, for a route of your own. |
 | `Keyring::describeDevice($userAgent)` | A user agent as a name people recognise, or `null`. |
@@ -460,7 +460,7 @@ It also answers questions about your setup, for your own controllers, factors an
 | `Keyring::email()` | The attribute holding the user's address, `email` by default. |
 | `Keyring::policy($user, $attempt)` | What the policy asks of this user, before considering what they've enrolled. |
 | `Keyring::steps()` | The pipeline's steps, in order. `Keyring::dangerouslyChangedSteps()` lists the mandatory ones an app took out. |
-| `Keyring::notification($type, $arguments)` | The app's notification for a type, or `null`. `Keyring::requiredNotification()` throws when there isn't one. |
+| `Keyring::notification($type, $arguments)` | The notification for a type, Keyring's own or yours, or `null` when it's turned off. `Keyring::requiredNotification()` throws when it is. |
 | `Keyring::belongsToGuard($user)` | Whether Keyring's guard would load this user back, so they can be signed in. |
 | `Keyring::recordedIp($request)` | The request's IP address as Keyring stores it. |
 | `Keyring::allowsSignIn($user)` | Whether the app lets this user be signed in. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |

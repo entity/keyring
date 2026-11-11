@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace App\Notifications\Keyring;
+namespace Keyring\Notifications;
 
 class EmailChangeReverted extends SecurityNotice
 {
-    protected function subject(): string
+    public function subject(): string
     {
         return __('Your email address change was undone');
     }
 
-    protected function intro(): string
+    public function intro(): string
     {
         return __('A change to the email address on your account was just undone, and you were signed out everywhere.');
     }

@@ -2,19 +2,21 @@
 
 declare(strict_types=1);
 
-namespace App\Notifications\Keyring;
+namespace Keyring\Notifications;
 
+use Closure;
 use DateTimeInterface;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Mail\Mailable;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use Keyring\Support\MailText;
 
 /**
- * What every security notice shares. Change via() to send them somewhere
- * else, or toMail() to use your own views: here for all of them, or in one
- * notice for just that one.
+ * What every security notice shares. To send one somewhere else or from
+ * your own views, extend it and give Keyring::notifications() your class.
+ * To write the email of every notice yourself, use toMailUsing().
  *
  * Queued once any open transaction commits, so a change that's rolled back
  * is never announced.
@@ -22,6 +24,13 @@ use Keyring\Support\MailText;
 abstract class SecurityNotice extends Notification implements ShouldQueueAfterCommit
 {
     use Queueable;
+
+    /**
+     * The app's own email for every notice, when it has one.
+     *
+     * @var (Closure(self, object): (MailMessage|Mailable))|null
+     */
+    protected static ?Closure $toMailCallback = null;
 
     /**
      * Keyring fills in whichever of these the notice has. Some hold what
@@ -42,14 +51,26 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
         public ?string $contact = null,
     ) {}
 
-    abstract protected function subject(): string;
+    /**
+     * Write the email of every notice yourself, from your own views say.
+     * The callback is given the notice and who it's for, and returns the
+     * mail. Null goes back to Keyring's own.
+     *
+     * @param  (Closure(self, object): (MailMessage|Mailable))|null  $callback
+     */
+    public static function toMailUsing(?Closure $callback): void
+    {
+        self::$toMailCallback = $callback;
+    }
 
-    abstract protected function intro(): string;
+    abstract public function subject(): string;
+
+    abstract public function intro(): string;
 
     /**
      * The label of the button to $url, for notices that have one.
      */
-    protected function action(): ?string
+    public function action(): ?string
     {
         return null;
     }
@@ -69,8 +90,12 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
      * Mail lines are read as Markdown, so anything that could hold a user's
      * text goes through MailText::plain() to stay plain text.
      */
-    public function toMail(object $notifiable): MailMessage
+    public function toMail(object $notifiable): MailMessage|Mailable
     {
+        if (self::$toMailCallback !== null) {
+            return (self::$toMailCallback)($this, $notifiable);
+        }
+
         $message = new MailMessage()->subject($this->subject())->line(MailText::plain($this->intro()));
 
         $details = array_filter([__('When') => $this->when, __('Device') => $this->device, __('IP address') => $this->ip]);

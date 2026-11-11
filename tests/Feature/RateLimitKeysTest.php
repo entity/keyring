@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\NewDevice;
-use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\RateLimiter as Limiter;
 use Illuminate\Support\Facades\Cache;
@@ -16,6 +14,8 @@ use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
 use Keyring\Factors\WebAuthn;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\NewDevice;
+use Keyring\Notifications\VerificationCode;
 use Keyring\Support\Throttle;
 use Keyring\Testing\VirtualAuthenticator;
 

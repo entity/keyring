@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\NewDevice;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Notification;
 use Keyring\Models\Device;
+use Keyring\Notifications\NewDevice;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {

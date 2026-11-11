@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
-use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Http\Request;
@@ -29,6 +27,8 @@ use Keyring\Factors\WebAuthn;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
+use Keyring\Notifications\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\PasswordRules;
 use Keyring\Testing\VirtualAuthenticator;
@@ -298,10 +298,11 @@ it('tells the user when a sign-in method is added', function () {
     Notification::assertSentTo($this->user, AuthenticatorAddedNotice::class);
 });
 
-it('tells the user when their recovery codes are replaced, once the app registers the notice', function () {
+it('tells the user when their recovery codes are replaced, unless the app turned the notice off', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $this->verifiedWith($totp);
     Notification::fake();
+    Keyring::notifications(['recovery_codes_generated' => null]);
 
     $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
     $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();

@@ -87,8 +87,8 @@ function totpCode(string $secret, int $step = 0): string
 }
 
 /**
- * Register the published notification for each type, or for every one, as
- * an app's KeyringServiceProvider would.
+ * Turn on Keyring's own notification for each type, or for every one: the
+ * suspected clone, which starts off, and any a test turned off.
  *
  * @param  list<string>|null  $types
  */
@@ -97,7 +97,7 @@ function sendNotifications(?array $types = null): void
     $types ??= KeyringManager::NOTIFICATIONS;
 
     Keyring\Facades\Keyring::notifications(array_combine($types, array_map(
-        fn (string $type) => 'App\\Notifications\\Keyring\\'.Str::studly($type),
+        fn (string $type) => 'Keyring\\Notifications\\'.Str::studly($type),
         $types,
     )));
 }

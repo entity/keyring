@@ -25,7 +25,7 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | How a user is found, and how usernames are normalised | `Keyring::findUsersUsing()`, `Keyring::normalizeUsernamesUsing()` | [Finding the User](sign-in-flow.md#finding-the-user) |
 | The attribute users sign in with, and the one holding their address | `username` and `email` | [Guard and Users](configuration.md#guard-and-users) |
 | Creating users, resetting and changing passwords, validating a new address | The published actions in `app/Actions/Keyring` | [Protected Changes](protected-changes.md) |
-| Every email: wording, template, channel, or whether it's sent | The published notifications in `app/Notifications/Keyring` and `Keyring::notifications()` | [Security Emails](security-log-and-emails.md#security-emails) |
+| Every email: wording, template, channel, or whether it's sent | `Keyring::notifications()`, with your own class for a type or `null`, and `SecurityNotice::toMailUsing()` | [Security Emails](security-log-and-emails.md#security-emails) |
 | What a page renders | `Keyring::page()` | [Pages](sign-in-flow.md#pages) |
 | What Keyring answers with | `Keyring::respondWith()` and the contracts in `Keyring\Contracts\Responses` | [Responses](sign-in-flow.md#responses) |
 | Validation and status messages | The `keyring-lang` translation files | [Messages and Translations](configuration.md#messages-and-translations) |

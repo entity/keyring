@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Actions\Keyring\CreateNewUser;
-use App\Notifications\Keyring\AlreadyRegistered;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -31,6 +30,7 @@ use Keyring\KeyringServiceProvider;
 use Keyring\Login\Registration;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
+use Keyring\Notifications\AlreadyRegistered;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\PlainUser;
 use Keyring\Tests\Fixtures\RacedRegistration;

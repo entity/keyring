@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
@@ -18,6 +17,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\VerificationCode;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Tests\Fixtures\SmsCode;
 

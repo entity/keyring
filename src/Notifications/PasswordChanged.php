@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace App\Notifications\Keyring;
+namespace Keyring\Notifications;
 
 class PasswordChanged extends SecurityNotice
 {
-    protected function subject(): string
+    public function subject(): string
     {
         return __('Your password was changed');
     }
 
-    protected function intro(): string
+    public function intro(): string
     {
         return __('The password for your account was just changed.');
     }

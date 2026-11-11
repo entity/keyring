@@ -2,21 +2,21 @@
 
 declare(strict_types=1);
 
-namespace App\Notifications\Keyring;
+namespace Keyring\Notifications;
 
 class AccountLocked extends SecurityNotice
 {
-    protected function subject(): string
+    public function subject(): string
     {
         return __('Your account is locked');
     }
 
-    protected function intro(): string
+    public function intro(): string
     {
         return __('Too many failed attempts to sign in have locked your account. Reset your password to unlock it.');
     }
 
-    protected function action(): ?string
+    public function action(): ?string
     {
         return __('Reset your password');
     }

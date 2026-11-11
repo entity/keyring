@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -21,6 +20,7 @@ use Keyring\Http\Controllers\AuthenticatedSessionController;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\VerificationCode;
 use Keyring\Pipeline\NameLimit;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;

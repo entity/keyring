@@ -187,8 +187,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Where users can reach you about their account: a page's URL or an email
-    | address. Every notification is handed it as $contact, and the published
-    | ones end with "if this wasn't you and you need help, contact us" when
+    | address. Every notification is handed it as $contact, and Keyring's
+    | own end with "if this wasn't you and you need help, contact us" when
     | it's set. Null leaves the line out.
     |
     */

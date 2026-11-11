@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Notifications\Keyring;
+namespace Keyring\Notifications;
 
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;

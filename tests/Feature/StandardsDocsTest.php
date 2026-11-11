@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Console\InstallCommand;
+use Keyring\Factors\FactorRegistry;
+use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 
 // docs/owasp-asvs.md says what a default install gives an app and where
@@ -15,7 +18,7 @@ beforeEach(function () {
     $this->defaults = require __DIR__.'/../../config/keyring.php';
 
     // What keyring:install writes with its default answers.
-    $this->provider = (fn () => $this->provider(new Filesystem, [], true, false))->call(new InstallCommand);
+    $this->provider = (fn () => $this->provider(new Filesystem, [], false))->call(new InstallCommand);
 });
 
 it('lists the features a default install turns on', function () {
@@ -27,18 +30,21 @@ it('lists the features a default install turns on', function () {
         ->and($line[1])->toBe('five');
 });
 
-it('counts the security emails and risk signals a default install registers', function () {
-    $notices = Str::matchAll("/^ +'([a-z_]+)' => Notifications/m", $this->provider)
+it('counts the security emails Keyring sends and the risk signals a default install registers', function () {
+    // What Keyring sends before an app changes anything.
+    $keyring = new KeyringManager(new FactorRegistry, app(ProtectedAttributes::class));
+    $notices = collect(KeyringManager::NOTIFICATIONS)
         ->reject(fn (string $type) => in_array($type, ['verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use', 'already_registered'], true))
+        ->filter(fn (string $type) => $keyring->hasNotification($type))
         ->values();
     $signals = Str::matchAll('/^ +Signals\\\\(\w+)::class,$/m', $this->provider);
 
     preg_match('/^- (\w+) \[security emails\]\([^)]+\): (.+),$/m', $this->page, $emails);
     preg_match('/^- (\w+) \[risk signals\]\([^)]+\): (.+),$/m', $this->page, $risk);
 
-    expect($notices->all())->toBe(['password_changed', 'authenticator_added', 'authenticator_removed', 'recovery_code_used', 'recovery_codes_generated', 'email_changed', 'account_locked', 'suspicious_activity'])
-        ->and($emails[1])->toBe('eight')
-        // One phrase for each, in the order the provider lists them.
+    expect($notices->all())->toBe(['new_device', 'password_changed', 'authenticator_added', 'authenticator_removed', 'second_factor_failed', 'recovery_code_used', 'recovery_codes_generated', 'suspicious_activity', 'account_locked', 'email_changed', 'email_change_reverted'])
+        ->and($emails[1])->toBe('eleven')
+        // One phrase for each, in the order Keyring lists them.
         ->and(preg_split('/, (?:and )?/', $emails[2]))->toHaveCount($notices->count())
         ->and($signals->all())->toBe(['SessionFingerprintChanged', 'RepeatedFactorFailures', 'SuccessAfterFailures'])
         ->and($risk[1])->toBe('three')

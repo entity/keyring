@@ -8,7 +8,6 @@ use App\Actions\Keyring\CreateNewUser;
 use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
-use App\Notifications\Keyring as Notifications;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\ServiceProvider;
 use Keyring\Facades\Keyring;
@@ -74,29 +73,5 @@ class KeyringServiceProvider extends ServiceProvider
         Keyring::resetUserPasswordsUsing(ResetUserPassword::class);
         Keyring::updateUserPasswordsUsing(UpdateUserPassword::class);
         Keyring::validateEmailChangesUsing(ValidateEmailChange::class);
-
-        // The emails Keyring sends, in app/Notifications/Keyring. They're
-        // yours to restyle or send another way, and a security notice that
-        // isn't listed here isn't sent. One that's commented out has nothing
-        // to announce until its feature is on. See "Security Log & Emails".
-        Keyring::notifications([
-            'verification_code' => Notifications\VerificationCode::class,
-            'confirm_email_change' => Notifications\ConfirmEmailChange::class,
-            'email_change_notice' => Notifications\EmailChangeNotice::class,
-            'email_address_in_use' => Notifications\EmailAddressInUse::class,
-            'already_registered' => Notifications\AlreadyRegistered::class,
-            'password_changed' => Notifications\PasswordChanged::class,
-            'authenticator_added' => Notifications\AuthenticatorAdded::class,
-            'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
-            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
-            'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
-            'email_changed' => Notifications\EmailChanged::class,
-            'account_locked' => Notifications\AccountLocked::class,
-            'new_device' => Notifications\NewDevice::class,
-            'second_factor_failed' => Notifications\SecondFactorFailed::class,
-            'suspicious_activity' => Notifications\SuspiciousActivity::class,
-            'email_change_reverted' => Notifications\EmailChangeReverted::class,
-            // 'clone_suspected' => Notifications\CloneSuspected::class,
-        ]);
     }
 }
