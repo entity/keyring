@@ -7,6 +7,7 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Foundation\Application;
@@ -113,6 +114,7 @@ class KeyringServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->registerPublishing();
             $this->registerAboutSection();
+            $this->schedulePruning();
         }
     }
 
@@ -258,6 +260,21 @@ class KeyringServiceProvider extends ServiceProvider
             'Features' => implode(', ', config('keyring.features')) ?: 'none',
             'Session registry' => config('keyring.sessions.driver'),
         ]);
+    }
+
+    /**
+     * Run keyring:prune every day, so what Keyring keeps is deleted when its
+     * time is up without the app having to remember to schedule it. Added
+     * once the schedule is asked for, which only scheduler commands do. Set
+     * "prune_at" to null to schedule it yourself.
+     */
+    protected function schedulePruning(): void
+    {
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+            if (($at = config('keyring.prune_at')) !== null) {
+                $schedule->command(Console\PruneCommand::class)->dailyAt($at);
+            }
+        });
     }
 
     protected function registerPublishing(): void

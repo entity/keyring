@@ -294,6 +294,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Pruning
+    |--------------------------------------------------------------------------
+    |
+    | `php artisan keyring:prune` deletes what's past its time: old log
+    | entries, devices, ended email changes and ended sessions. Keyring adds
+    | it to Laravel's scheduler to run every day at this time, so it happens
+    | wherever `schedule:run` does. Null leaves scheduling it to you.
+    |
+    */
+
+    'prune_at' => '03:00',
+
+    /*
+    |--------------------------------------------------------------------------
     | Pending Logins
     |--------------------------------------------------------------------------
     |
