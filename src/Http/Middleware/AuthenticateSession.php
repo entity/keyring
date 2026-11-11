@@ -120,14 +120,12 @@ class AuthenticateSession
      */
     protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
-        $idle = $this->sessions->idle();
-
         return match (true) {
             $session->revokedAt !== null => 'revoked',
             $session->expiresAt <= $now => 'expired',
             $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
             $session->replacedBy !== null => 'replaced',
-            $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
+            $this->sessions->idledOut($session, $now) => 'idle',
             default => null,
         };
     }
@@ -212,7 +210,7 @@ class AuthenticateSession
             return null;
         }
 
-        $current = $this->sessions->resume($request, $session);
+        $current = $this->sessions->resume($request, $user, $session);
 
         // A request sent alongside this one used the cookie first, or the
         // session was revoked a moment ago. Looking again says which.
