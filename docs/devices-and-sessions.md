@@ -65,7 +65,7 @@ An account keeps its 50 most recently seen devices (`devices.limit`). A sign in 
 
 Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The user agent is never a factor. It's only a weak risk signal: `SessionFingerprintChanged` notices when a session's browser or platform changes.
 
-A browser shared by several accounts has one cookie and a device for each account that signed in on it. Keyring only reuses a cookie that another account already has a device for. Anything else the browser sends is ignored and replaced with a new random token. Keyring can't tell which browser holds a cookie, so a value planted from another account's device is reused too, and the device counts as recognised, until a login on it proves a second factor. Every login that reaches AAL2 gives the browser a new cookie, so the previous one stops working.
+A browser shared by several accounts has one cookie and a device for each account that signed in on it. An account's device never takes a value the browser sent: Keyring can't tell a cookie two accounts share from one that was placed in the browser holding a value someone else's device has, and taking it would get that someone's own browser recognised as this account's. So an account signing in on a browser for the first time gives it a new cookie, and the accounts already on that browser move to the new one with it. Every login that reaches AAL2 gives the browser a new cookie too, so the previous one stops working.
 
 ### Trusted Devices
 

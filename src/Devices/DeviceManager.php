@@ -80,7 +80,8 @@ class DeviceManager
             'last_seen_at' => now(),
         ]);
 
-        if ($provedSecondFactor) {
+        // A new device has just been given a token nobody else has seen.
+        if ($provedSecondFactor && $device->exists) {
             $this->rotateToken($request, $device);
         } elseif ($device->exists && ($earlier = $this->earlierToken($request)) !== null) {
             // Found by the cookie from before the app was served over HTTPS:
@@ -148,16 +149,19 @@ class DeviceManager
      */
     protected function newDevice(Request $request, Authenticatable&Model $user): Device
     {
-        $token = $this->tokenForNewDevice($request, $user);
+        $device = new ($this->keyring->deviceModel())(['first_seen_at' => now()]);
+        $device->authenticatable()->associate($user);
 
-        $device = new ($this->keyring->deviceModel())([
-            'token_hash' => $this->keyring->deviceModel()::hashToken($token),
-            'first_seen_at' => now(),
-        ]);
+        // Always a token of its own making. The browser may hold one
+        // already, another account's that has signed in on it, and it may
+        // hold one that was put there: the server can't tell which. Taking
+        // it would let whoever placed it be recognised as this account's
+        // browser from their own. So the account never takes a value the
+        // browser sent, and the accounts already on the browser move to the
+        // new one with it.
+        $this->rotateToken($request, $device);
 
-        $this->queueCookie($request, $token);
-
-        return $device->authenticatable()->associate($user);
+        return $device;
     }
 
     /**
@@ -235,28 +239,11 @@ class DeviceManager
     }
 
     /**
-     * A new random token, unless another account already has a device with
-     * the one this browser sent: the cookie is shared by everyone signing in
-     * on the browser, so that one is kept. A value no account has is never
-     * stored. The server can't tell a shared cookie from one planted in this
-     * browser with a value another account holds, so a kept token only gets
-     * the device recognised until a login proves a second factor (rotateToken).
-     */
-    protected function tokenForNewDevice(Request $request, Authenticatable&Model $user): string
-    {
-        $token = $this->token($request);
-
-        // A revoked device starts over with a new token.
-        return $token !== null && $this->forBrowser($request)->isNotEmpty() && ! $this->query($user)->withToken($token)->exists()
-            ? $token
-            : Str::random(40);
-    }
-
-    /**
-     * Neither trust nor a proven second factor may rest on a token the browser
-     * could have been handed, so both issue a new one. Everyone signed in on
-     * this browser moves to it together, or the cookie would stop matching
-     * their devices.
+     * Neither a new device, nor trust, nor a proven second factor may rest on
+     * a token the browser could have been handed, so each issues a new one.
+     * Everyone signed in on this browser moves to it together, or the cookie
+     * would stop matching their devices. A value no account has moves
+     * nobody.
      */
     protected function rotateToken(Request $request, Device $device): void
     {

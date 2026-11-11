@@ -752,16 +752,56 @@ it('keeps recognising two accounts that share a browser', function () {
     $abigail = fn (string $token) => test()->withHeader('User-Agent', FIREFOX)->withCookies(['known_device' => $token])
         ->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
 
-    $token = deviceCookie(login());
+    $first = deviceCookie(login());
     $this->post('/logout');
-    $abigail($token);
+
+    // A second account on the browser gives it a new cookie, and the first
+    // account's device moves to it too.
+    $shared = deviceCookie($abigail($first));
     $this->post('/logout');
-    $abigail($token);
+
+    expect($shared)->not->toBe($first);
+
+    $abigail($shared);
     $this->post('/logout');
-    login(['known_device' => $token]);
+    login(['known_device' => $shared]);
 
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 2);
-    expect(Device::count())->toBe(2);
+    expect(Device::count())->toBe(2)
+        ->and(Device::query()->withToken($shared)->count())->toBe(2);
+});
+
+// The server can't tell a cookie two accounts share from one that was put in
+// the browser, holding a value someone else's device has. So an account never
+// takes a value the browser sent: whoever placed it would be recognised as
+// that account's browser from their own, with no "new device" notice and
+// with whatever a policy allows a browser it knows.
+it('never recognises a browser by a device cookie that was planted in the account owner\'s', function () {
+    Keyring::require(fn (User $user, Attempt $attempt) => $attempt->isNewDevice() ? Requirement::aal2()->ifEnrolled() : Requirement::aal1());
+    User::create(['name' => 'Mallory', 'email' => 'mallory@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    // A real cookie, issued to someone else's own browser, then placed in
+    // the owner's.
+    $planted = deviceCookie($this->withHeader('User-Agent', CHROME)->post('/login', ['email' => 'mallory@example.com', 'password' => 'password']));
+    $this->post('/logout');
+
+    // The owner signs in with a password alone, before they have a second factor.
+    $owners = deviceCookie(login(['known_device' => $planted])->assertRedirect('/dashboard'));
+    $this->post('/logout');
+
+    expect($owners)->not->toBe($planted)
+        ->and($this->user->devices()->sole()->token_hash)->toBe(hash('sha256', $owners));
+
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    Event::fake([NewDeviceSignedIn::class]);
+
+    // The other browser still holds the planted value, and now the password.
+    login(['known_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
+    $this->assertGuest();
+
+    // The owner's own browser is the one that's known.
+    login(['known_device' => $owners])->assertRedirect('/dashboard');
+    Event::assertNotDispatched(NewDeviceSignedIn::class);
 });
 
 it('signs this session out when its own device is revoked', function () {

@@ -238,13 +238,18 @@ describe('a browser holding the cookies from before the app was served over HTTP
 
     it('never gives a new device the token of the old cookie', function () {
         // Anything on the domain could set a cookie without the prefix, so
-        // one holding another account's token is planted, not shared.
+        // one holding another account's token may be planted, not shared. A
+        // new device never takes a token the browser sent, under either
+        // name: it gets one of its own, and whoever was on the old one
+        // moves to it.
         User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 
         $response = signInHolding(['known_device' => $this->device], email: 'abigail@example.com');
+        $new = $response->getCookie('__Host-known_device')->getValue();
 
-        expect($response->getCookie('__Host-known_device')->getValue())->not->toBe($this->device)
-            ->and(Device::query()->withToken($this->device)->count())->toBe(1);
+        expect($new)->not->toBe($this->device)
+            ->and(Device::query()->withToken($this->device)->count())->toBe(0)
+            ->and(Device::query()->withToken($new)->count())->toBe(2);
 
         $response->assertCookieExpired('known_device');
     });
