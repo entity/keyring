@@ -416,11 +416,19 @@ it('never lets auth pages be cached', function () {
     $this->get('/login')->assertHeader('Cache-Control', 'no-store, private');
 });
 
+it('tells the browser not to guess the type of a page, a redirect or JSON', function () {
+    $this->inertia()->get('/login')->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->flushHeaders()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->getJson('/user/devices')->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->postJson('/logout')->assertNoContent()->assertHeader('X-Content-Type-Options', 'nosniff');
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertUnprocessable()->assertHeader('X-Content-Type-Options', 'nosniff');
+});
+
 it('leaves caching to an app that takes the middleware out of the config', function () {
     config(['keyring.middleware' => ['web']]);
     withFeatures(Features::all());
 
-    $this->get('/login')->assertHeaderMissing('Referrer-Policy');
+    $this->get('/login')->assertHeaderMissing('Referrer-Policy')->assertHeaderMissing('X-Content-Type-Options');
 });
 
 it('cycles the remember token when a device is revoked', function () {

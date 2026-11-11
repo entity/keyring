@@ -34,7 +34,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices, e
 - A password reset never signs anyone in, so the policy still applies at the next login.
 - Checking a password can rehash it under the app's current settings. The new hash is only saved over the one that was checked, under a row lock, so a sign in that overlaps a reset can't write the old password back, and whatever device trust it was given is withdrawn when it's ended.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
-- Keyring's responses send `Cache-Control: no-store, private` and `Referrer-Policy: same-origin`, and signing out sends `Clear-Site-Data`.
+- Keyring's responses send `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`, and signing out sends `Clear-Site-Data`.
 
 ### Rate Limiting
 

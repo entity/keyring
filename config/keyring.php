@@ -2,7 +2,7 @@
 
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
-use Keyring\Http\Middleware\PreventCaching;
+use Keyring\Http\Middleware\AddSecurityHeaders;
 
 return [
 
@@ -63,8 +63,9 @@ return [
     |--------------------------------------------------------------------------
     |
     | Keyring registers its routes under these middleware. Set "routes" to
-    | false to register them yourself with Keyring::routes(). PreventCaching
-    | keeps auth pages out of caches and their URLs out of Referer headers.
+    | false to register them yourself with Keyring::routes(). AddSecurityHeaders
+    | keeps auth pages out of caches, their URLs out of Referer headers and
+    | their responses from being read as another content type.
     |
     */
 
@@ -74,7 +75,7 @@ return [
 
     'domain' => null,
 
-    'middleware' => ['web', PreventCaching::class],
+    'middleware' => ['web', AddSecurityHeaders::class],
 
     /*
     |--------------------------------------------------------------------------
