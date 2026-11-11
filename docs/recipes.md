@@ -555,7 +555,7 @@ That replaces Keyring's own rule, so only use it when approving an account means
 
 ## An App Whose Every Page Needs AAL2
 
-Some apps can't show anything to a session that hasn't proved two factors: NIST SP 800-63B-4 (Sec. 2) asks for AAL2 wherever personal information is shown, for one. By default Keyring signs users in with what they have and lets a level lapse without ending the session, so three settings make AAL2 the floor.
+Some apps can't show anything to a session that hasn't proved two factors: NIST SP 800-63B-4 (Sec. 2) has federal agencies choose at least AAL2 wherever personal information is made available online, for one. By default Keyring signs users in with what they have and lets a level lapse without ending the session, so three settings make AAL2 the floor.
 
 First, the policy and the factors. Don't register email codes, which [aren't a factor](factors.md#what-turning-email-codes-on-means):
 
@@ -605,4 +605,4 @@ With that:
 - "Remember me" brings no session back, so leave it off your login form.
 - Laravel's own `session.lifetime` still ends an idle session sooner if it's shorter than an hour. Set it to 60 or more.
 
-Each of those was checked against a test of this setup. What Keyring can't do for you is the rest of what NIST asks at AAL2: phishing-resistant sign in has to be on offer (register passkeys, as above), and a federal agency's server cryptography has to be validated.
+What Keyring can't do for you is the rest of what NIST asks at AAL2: phishing-resistant sign in has to be on offer (register passkeys, as above), and a federal agency's server cryptography has to be validated.
