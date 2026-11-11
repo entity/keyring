@@ -107,7 +107,7 @@ Everything in Level 1, and:
     ```
 
 5. **Turn on `Features::devices()`**, so users can see where they're signed in and sign out elsewhere ([7.4.3, 7.5.2](#v75-defenses-against-session-abuse)), and offer "sign out everywhere else" after a sign-in method is added or removed.
-6. **Write down** your list of words passwords must not contain and put it in `passwords.context` ([6.1.2, 6.2.11](#v62-password-security)), your session timeouts and why you chose them ([7.1.1](#v71-session-management-documentation)), and that an account may have any number of sessions ([7.1.2](#v71-session-management-documentation)).
+6. **Write down** your list of words a password must not be made up of and put it in `passwords.context` ([6.1.2, 6.2.11](#v62-password-security)), your session timeouts and why you chose them ([7.1.1](#v71-session-management-documentation)), and that an account may have any number of sessions ([7.1.2](#v71-session-management-documentation)).
 7. **Give administrators a way to end a user's sessions** ([7.4.5](#v74-session-termination)), and a process for someone who has lost their second factor and their recovery codes ([6.4.4](#v64-authentication-factor-lifecycle-and-recovery)).
 
 Email codes meet Keyring's `aal2` at sign in but not NIST's, and Level 3 rules them out. Leave `EmailCode::asSecondFactor()` out unless you need it.
@@ -183,7 +183,7 @@ Everything in Level 2, and:
 | 6.2.8 The password is verified exactly as typed | 1 | Met | |
 | 6.2.9 Passwords of at least 64 characters are permitted | 2 | Needs setup | Set `HASH_DRIVER=argon2id`. With bcrypt, Laravel's default, Keyring refuses anything over 72 bytes rather than cut it short, which turns away 64 characters of accented or non-Latin text. The conformance suite flags bcrypt. |
 | 6.2.10 No periodic rotation | 2 | Met | Keyring has no password expiry. Don't add one. |
-| 6.2.11 The context word list is enforced | 2 | Needs setup | Put your list (6.1.2) in `passwords.context`. Keyring refuses a password containing a listed word, the app's name, the user's name, the name part of their email address or their organisation's part of its domain, look-alike spellings such as `k3yr1ng` included. |
+| 6.2.11 The context word list is enforced | 2 | Needs setup | Put your list (6.1.2) in `passwords.context`. Keyring refuses a password made up of nothing but listed words, the app's name, the user's name, the name part of their email address and their organisation's part of its domain, with digits and punctuation taken out and look-alike spellings such as `k3yr1ng` read as letters. A longer passphrase that only has one of them in it passes. |
 | 6.2.12 Checked against breached passwords | 2 | Met by default | In production, through Have I Been Pwned. `passwords.uncompromised => false` turns it off, and `true` runs it everywhere. Laravel's check lets a password through when the service can't be reached: set `passwords.refuse_unchecked` to refuse it instead. |
 
 #### V6.3 General Authentication Security
