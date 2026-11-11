@@ -7,6 +7,7 @@ use Illuminate\Support\Str;
 use Keyring\Changes\ProtectedAttributes;
 use Keyring\Console\InstallCommand;
 use Keyring\Factors\FactorRegistry;
+use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Support\Duration;
 
@@ -17,8 +18,10 @@ beforeEach(function () {
     $this->page = file_get_contents(__DIR__.'/../../docs/owasp-asvs.md');
     $this->defaults = require __DIR__.'/../../config/keyring.php';
 
-    // What keyring:install writes with its default answers.
-    $this->provider = (fn () => $this->provider(new Filesystem, [], false))->call(new InstallCommand);
+    // What keyring:install sets up with its default answers: an authenticator
+    // app everyone must set up, which brings managing sign-in methods.
+    $this->features = array_values(array_intersect(Features::all(), [...$this->defaults['features'], Features::manageAuthenticators()]));
+    $this->provider = (fn () => $this->provider(new Filesystem, self::DEFAULT_FACTORS, true, test()->features))->call(new InstallCommand);
 });
 
 it('lists the features a default install turns on', function () {
@@ -26,8 +29,15 @@ it('lists the features a default install turns on', function () {
 
     $listed = Str::matchAll('/`([a-z-]+)`/', $line[2])->all();
 
-    expect($listed)->toBe($this->defaults['features'])->toHaveCount(5)
-        ->and($line[1])->toBe('five');
+    expect($listed)->toBe($this->features)->toHaveCount(6)
+        ->and($line[1])->toBe('six');
+});
+
+it('says a default install has an authenticator app everyone must set up, which is what the installer writes', function () {
+    expect($this->page)->toContain('an authenticator app as a second factor that every user must set up before going further, with recovery codes')
+        ->and($this->provider)->toContain('Totp::class,')->toContain('RecoveryCodes::class,')
+        ->toContain("appendMiddlewareToGroup('web', 'keyring.enrolled');")
+        ->not->toContain('WebAuthn');
 });
 
 it('counts the security emails Keyring sends and the risk signals a default install registers', function () {

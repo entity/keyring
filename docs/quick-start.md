@@ -25,7 +25,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), which features to turn on, and whether to email users when their password, sign-in methods or email address change. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes, the security log and those emails. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
+`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), and which features to turn on. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, an authenticator app that everyone must set up, registration, password resets, email verification, password changes, managing sign-in methods and the security log. Pass `--factor=none` for the password alone. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
 
 Add the trait to your user model, and keep Laravel's `hashed` cast on the password. Registration leaves a new user signed out until they've verified their address, so nobody can use the form to find out who has an account. That needs `MustVerifyEmail` (the installer turns on email verification for you):
 

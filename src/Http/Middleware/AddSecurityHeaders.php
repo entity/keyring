@@ -28,6 +28,10 @@ use Symfony\Component\HttpFoundation\Response;
  * reporting a device, verifying an address), which is what a page on
  * another site lines its own button up over. An app that has said how its
  * pages may be framed keeps its say.
+ *
+ * A page on another site that opens one of them in a new window keeps no
+ * handle on it. A window the page opens itself, for a social login say,
+ * still talks back to it. An app with an opener policy of its own keeps it.
  */
 class AddSecurityHeaders
 {
@@ -56,6 +60,10 @@ class AddSecurityHeaders
 
         if (! $this->saysWhoMayFrameIt($response)) {
             $response->headers->set('X-Frame-Options', 'DENY');
+        }
+
+        if (! $response->headers->has('Cross-Origin-Opener-Policy')) {
+            $response->headers->set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
         }
 
         return $response;

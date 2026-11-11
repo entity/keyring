@@ -44,6 +44,7 @@ class RecordSecurityEvents
             Events\SessionsRevoked::class => 'sessionsRevoked',
             Events\SessionEnded::class => 'sessionEnded',
             Events\RememberMeReused::class => 'rememberMeReused',
+            Events\SessionResumed::class => 'sessionResumed',
             Events\EmailChangeRequested::class => 'emailChangeRequested',
             Events\EmailChanged::class => 'emailChanged',
             Events\EmailChangeReverted::class => 'emailChangeReverted',
@@ -184,6 +185,15 @@ class RecordSecurityEvents
         $this->log->record('remember_me_reused', $event->user, device: $event->session->deviceId, meta: [
             'device' => $this->keyring->describeDevice($event->session->userAgent),
         ]);
+    }
+
+    /**
+     * "Remember me" signed a browser in again. It proved nothing, so the
+     * entry says so by being its own type and not a sign in.
+     */
+    public function sessionResumed(Events\SessionResumed $event): void
+    {
+        $this->log->record('session_resumed', $event->user, device: $event->session->deviceId);
     }
 
     public function emailChangeRequested(Events\EmailChangeRequested $event): void

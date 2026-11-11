@@ -13,7 +13,9 @@ use Keyring\Contracts\Signal;
 use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\BreachedPassword;
 use Keyring\Risk\Signals\ImpossibleTravel;
+use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\NewDevice;
+use Keyring\Risk\Signals\SuccessAfterFailures;
 use Keyring\Sessions\Sessions;
 
 /**
@@ -95,10 +97,16 @@ class RiskEngine
 
     /**
      * Keyring's own answer, until the app gives one with respond(): by
-     * level, and a hold for a new password whenever the one just used was
-     * found in a breach, whatever that scored. A step-up or a notice leaves
-     * a password someone else knows as the password, and NIST SP 800-63B-4
-     * (Sec. 3.1.1.2) has one changed when there's evidence it's compromised.
+     * level, with two findings answered whatever they scored.
+     *
+     * A sign in that follows several failures, or a long quiet period, is
+     * told to the owner: OWASP ASVS 5.0.0 (6.3.5) names both, and on its own
+     * each only reaches the level that asks for a second factor.
+     *
+     * A password found in a breach is held for a new one. A step-up or a
+     * notice leaves a password someone else knows as the password, and NIST
+     * SP 800-63B-4 (Sec. 3.1.1.2) has one changed when there's evidence it's
+     * compromised.
      */
     protected function defaultResponse(Risk $risk): Action
     {
@@ -108,6 +116,10 @@ class RiskEngine
             Level::High => Action::stepUp()->notify(),
             Level::Critical => Action::deny()->revokeAllSessions()->notify(),
         };
+
+        if ($risk->has(SuccessAfterFailures::FINDING) || $risk->has(InactiveAccount::FINDING)) {
+            $action = $action->notify();
+        }
 
         return $risk->has(BreachedPassword::FINDING) ? $action->requirePasswordChange() : $action;
     }

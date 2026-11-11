@@ -50,7 +50,7 @@ The first release. Nothing is tagged yet.
 
 ### Logging and Emails
 
-- A security log with a severity and a request ID on every entry, of sign ins, failures, lockouts, changes and what was refused, capped so a refused request can't fill it. Without the table it goes to your app's log.
+- A security log with a severity and a request ID on every entry, of sign ins, sessions "remember me" carried on, failures, lockouts, changes and what was refused, capped so a refused request can't fill it. Without the table it goes to your app's log.
 - "Was this you?" alerts at the next sign in.
 - Security emails about changes to how an account signs in and about suspicious attempts, sent from the start as far as your features go. Each is a notification you can swap for your own or turn off, and `SecurityNotice::toMailUsing()` writes them all from your own template.
 - `support_contact`, so every notice can say who to contact.
@@ -58,8 +58,8 @@ The first release. Nothing is tagged yet.
 
 ### Tooling
 
-- `keyring:install`, which asks which sign-in methods and features you want and publishes a config, a provider and your actions; `keyring:import fortify`; and `keyring:prune`, scheduled daily.
-- Security headers on Keyring's responses: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and a referrer policy.
+- `keyring:install`, which asks which sign-in methods and features you want and publishes a config, a provider and your actions. Its defaults give an authenticator app that every user must set up, and `--factor=none` the password alone. Also `keyring:import fortify`, and `keyring:prune`, scheduled daily.
+- Security headers on Keyring's responses: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin-allow-popups` and a referrer policy.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite that checks your setup still keeps Keyring's guarantees.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment, sessions and the challenge page, with Vue and React bindings.
 - Documentation of where Keyring stands on every requirement of OWASP ASVS 5.0.0 and NIST SP 800-63B-4 that bears on it, and of each place it deliberately does something else.

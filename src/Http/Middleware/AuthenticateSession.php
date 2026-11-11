@@ -14,6 +14,7 @@ use Keyring\Devices\UserAgent;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionEnded;
+use Keyring\Events\SessionResumed;
 use Keyring\Events\SessionsRevoked;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -260,6 +261,8 @@ class AuthenticateSession
         }
 
         $this->assurance->touch();
+
+        SessionResumed::dispatch($user, $current->with(['deviceId' => $device->id ?? $current->deviceId]));
 
         if ($device?->wasRecentlyCreated) {
             NewDeviceSignedIn::dispatch($user, $device);

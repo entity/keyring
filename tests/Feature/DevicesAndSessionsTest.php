@@ -672,11 +672,24 @@ it('still refuses to be framed when the app\'s headers do not say who may', func
     'a policy that only reports' => [['Content-Security-Policy-Report-Only' => "frame-ancestors 'self'"]],
 ]);
 
+// OWASP ASVS 5.0.0, 3.4.8: a page another site opened keeps no window in
+// common with it. A popup the page opens itself still answers to it.
+it('keeps its windows apart from the site that opened them, and keeps the popups it opens', function () {
+    $this->inertia()->get('/login')->assertOk()->assertHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    $this->flushHeaders()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect()->assertHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+});
+
+it('leaves the opener policy to an app that sends its own', function () {
+    withAppHeaders(['Cross-Origin-Opener-Policy' => 'same-origin']);
+
+    $this->inertia()->get('/login')->assertOk()->assertHeader('Cross-Origin-Opener-Policy', 'same-origin');
+});
+
 it('leaves caching to an app that takes the middleware out of the config', function () {
     config(['keyring.middleware' => ['web']]);
     withFeatures(Features::all());
 
-    $this->get('/login')->assertHeaderMissing('Referrer-Policy')->assertHeaderMissing('X-Content-Type-Options')->assertHeaderMissing('X-Frame-Options');
+    $this->get('/login')->assertHeaderMissing('Referrer-Policy')->assertHeaderMissing('X-Content-Type-Options')->assertHeaderMissing('X-Frame-Options')->assertHeaderMissing('Cross-Origin-Opener-Policy');
 });
 
 it('cycles the remember token when a device is revoked', function () {

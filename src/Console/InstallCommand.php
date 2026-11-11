@@ -9,6 +9,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
@@ -23,7 +24,7 @@ use function Laravel\Prompts\multiselect;
 #[AsCommand(name: 'keyring:install')]
 #[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
-        {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
+        {--factor=* : A sign-in method to add besides the password: totp (the default), passkeys, security-keys or email-codes, or none for the password alone}
         {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords, email-verification, update-passwords and security-log): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
         {--require-second-factor : Make every user set up a second factor (the default with an authenticator app, passkeys or security keys)}
         {--optional-second-factor : Leave setting up a second factor to each user}
@@ -51,6 +52,16 @@ class InstallCommand extends Command
         'security-keys' => ['Security keys, as a second factor', 'WebAuthn::securityKeys(),'],
         'email-codes' => ['Email codes, as an extra step at sign in (not a second factor)', 'EmailCode::asExtraStep(),', 'a password and an emailed code is AAL1.'],
     ];
+
+    /**
+     * The sign-in method picked unless another is: a second factor anyone
+     * can set up, with an app they may already have. OWASP ASVS 5.0.0
+     * (6.3.3) has every user sign in with more than a password from Level 2.
+     */
+    protected const array DEFAULT_FACTORS = ['totp'];
+
+    /** What --factor takes to mean the password alone. */
+    protected const string NO_FACTORS = 'none';
 
     /**
      * The sign-in methods that count as a second factor everyone can be made
@@ -87,7 +98,7 @@ class InstallCommand extends Command
     public function handle(Filesystem $files): int
     {
         $unknown = array_filter([
-            '--factor' => [array_diff((array) $this->option('factor'), array_keys(self::FACTORS)), array_keys(self::FACTORS)],
+            '--factor' => [array_diff((array) $this->option('factor'), array_keys(self::FACTORS), [self::NO_FACTORS]), [...array_keys(self::FACTORS), self::NO_FACTORS]],
             '--feature' => [array_diff((array) $this->option('feature'), Features::all()), Features::all()],
         ], fn (array $option) => $option[0] !== []);
 
@@ -162,6 +173,7 @@ class InstallCommand extends Command
         $this->components->info('Once it\'s running, see "After Installing" in the "Installation" docs.');
         $this->components->bulletList([
             'Sessions end after two hours unused. Set <comment>sessions.idle</comment> in <comment>config/keyring.php</comment> to change that',
+            ...Hash::getDefaultDriver() === 'bcrypt' ? ['Passwords are hashed with bcrypt, which reads 72 bytes: longer ones are refused, and that can be under 64 characters of non-Latin text. Set <comment>HASH_DRIVER=argon2id</comment> to take any up to <comment>passwords.max</comment>'] : [],
             'Run the Laravel scheduler (<comment>schedule:run</comment>): it prunes the security log and other old records every day',
             'Signed-in routes outside the <comment>web</comment> group need the <comment>keyring.session</comment> middleware',
             '<comment>php artisan keyring:sign-out</comment> signs one user out everywhere, or everyone with <comment>--all</comment>',
@@ -210,14 +222,16 @@ class InstallCommand extends Command
     {
         $chosen = (array) $this->option('factor');
 
-        if ($chosen === [] && $this->input->isInteractive()) {
-            $chosen = multiselect(
+        if ($chosen === []) {
+            $chosen = $this->input->isInteractive() ? multiselect(
                 label: 'Which sign-in methods besides the password?',
                 options: array_map(fn (array $factor) => $factor[0], self::FACTORS),
+                default: self::DEFAULT_FACTORS,
                 hint: 'You can add more later in app/Providers/KeyringServiceProvider.php.',
-            );
+            ) : self::DEFAULT_FACTORS;
         }
 
+        // "none" is in no list, so it leaves the password alone.
         return array_values(array_intersect(array_keys(self::FACTORS), $chosen));
     }
 

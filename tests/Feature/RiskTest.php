@@ -634,6 +634,19 @@ describe('a sign in after a long quiet period', function () {
             ->and($assessed->risk->reasons())->toBe(['The first sign in for 91 days.']);
     });
 
+    // OWASP ASVS 5.0.0, 6.3.5: the owner hears of it without the app
+    // writing a response of its own.
+    it('is told to the owner, who may have nothing more to prove', function () {
+        Keyring::risk()->signals([InactiveAccount::class]);
+        $cookie = lastSignedIn(daysAgo: 91);
+
+        signInAs(cookies: ['known_device' => $cookie])->assertRedirect('/dashboard');
+
+        $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
+
+        expect($notice->reasons)->toBe('The first sign in for 91 days.');
+    });
+
     it('is not found before then', function () {
         Keyring::risk()->signals([InactiveAccount::class])->respond(fn (Risk $risk) => $risk->has('inactive_account') ? Action::deny() : Action::allow());
         $cookie = lastSignedIn(daysAgo: 89);
@@ -719,6 +732,38 @@ describe('a sign in that follows several failed attempts', function () {
         expect($assessed->risk->has('success_after_failures'))->toBeTrue()
             ->and($assessed->risk->score)->toBe(30)
             ->and($assessed->risk->reasons())->toBe(['Signed in after 5 failed attempts in the last 1h.']);
+    });
+
+    // OWASP ASVS 5.0.0, 6.3.5: the owner hears of it without the app
+    // writing a response of its own.
+    it('is told to the owner, who may have nothing more to prove', function () {
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([SuccessAfterFailures::class]);
+
+        foreach (range(1, 5) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        Notification::assertNothingSent();
+
+        signInAs()->assertRedirect('/dashboard');
+
+        $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
+
+        expect($notice->reasons)->toBe('Signed in after 5 failed attempts in the last 1h.');
+    });
+
+    it('is not told when the app answers for itself and says nothing', function () {
+        config(['keyring.limits.per_account' => 100]);
+        Keyring::risk()->signals([SuccessAfterFailures::class])->respond(fn (Risk $risk) => Action::allow());
+
+        foreach (range(1, 5) as $guess) {
+            signInAs(password: 'nope');
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+
+        Notification::assertNotSentTo($this->user, SuspiciousActivity::class);
     });
 
     it('is not found after fewer', function () {

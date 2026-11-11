@@ -73,7 +73,9 @@ In `Keyring\Risk\Signals`:
 
 ### Telling the User
 
-OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, where Keyring asks for a second factor but sends nothing. Together they reach `Level::High`, which notifies. To email the user whenever either is found, without refusing anyone, answer for them in [your responder](#responding-to-risk). The `suspicious_activity` [notice](security-log-and-emails.md#email-types) is what's sent, and `keyring:install` registers it:
+OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, which asks for a second factor and sends nothing, so Keyring's own response emails the user whenever either is found, whatever the level. The `suspicious_activity` [notice](security-log-and-emails.md#email-types) is what's sent.
+
+A responder of your own replaces Keyring's, this included. To keep it, notify for the two findings yourself:
 
 ```php
 use Keyring\Risk\Action;
@@ -83,16 +85,18 @@ use Keyring\Risk\Risk;
 use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\SuccessAfterFailures;
 
-Keyring::risk()
-    ->push(InactiveAccount::class, SuccessAfterFailures::class)
-    ->respond(fn (Risk $risk, Checkpoint $at) => match ($risk->level) {
+Keyring::risk()->respond(function (Risk $risk, Checkpoint $at) {
+    $action = match ($risk->level) {
         Level::Low => Action::allow(),
-        Level::Medium => $risk->has('inactive_account') || $risk->has('success_after_failures')
-            ? Action::stepUp()->notify()
-            : Action::stepUp(),
+        Level::Medium => Action::stepUp(),
         Level::High => Action::stepUp()->notify(),
         Level::Critical => Action::deny()->revokeAllSessions()->notify(),
-    });
+    };
+
+    return $risk->has(InactiveAccount::FINDING) || $risk->has(SuccessAfterFailures::FINDING)
+        ? $action->notify()
+        : $action;
+});
 ```
 
 The email lists what was found, such as "The first sign in for 120 days."
@@ -118,9 +122,12 @@ Without your own responder, Keyring does this at every checkpoint:
 | High | `Action::stepUp()->notify()` |
 | Critical | `Action::deny()->revokeAllSessions()->notify()` |
 
-At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's registered, as it is by `keyring:install`, but the owner stays signed in everywhere else.
+At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out, but the owner stays signed in everywhere else.
 
-One finding is answered whatever the level: when `BreachedPassword` finds the password that was just used in a breach, `->requirePasswordChange()` is added to the action above. See [Requiring a New Password](#requiring-a-new-password).
+Three findings are answered whatever the level:
+
+- A sign in that follows several failures (`SuccessAfterFailures`) or a long quiet period (`InactiveAccount`) adds `->notify()` to the action above. See [Telling the User](#telling-the-user).
+- When `BreachedPassword` finds the password that was just used in a breach, `->requirePasswordChange()` is added. See [Requiring a New Password](#requiring-a-new-password).
 
 Set your own in `KeyringServiceProvider`:
 

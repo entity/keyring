@@ -5,13 +5,16 @@ declare(strict_types=1);
 use Illuminate\Hashing\BcryptHasher;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Events\FactorVerified;
+use Keyring\Events\PasswordChanged as PasswordChangedEvent;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\PasswordChanged;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -80,6 +83,23 @@ it('ends outstanding reset links when the password is changed', function (bool $
         ->assertRedirect(route('login'));
     expect(Hash::check('another brand new passphrase', $this->plain->fresh()->password))->toBeTrue();
 })->with(['signing others out' => true, 'staying signed in elsewhere' => false]);
+
+// OWASP ASVS 5.0.0, 6.3.7. Other notices wait for a verified address: this
+// one doesn't, because the reset link went to it.
+it('tells an account whose address was never verified that its password was reset', function () {
+    Notification::fake();
+    $this->plain->forceFill(['email_verified_at' => null])->save();
+
+    // Any other change says nothing to an address nobody has proved.
+    PasswordChangedEvent::dispatch($this->plain);
+    Notification::assertNothingSent();
+
+    $token = Password::broker()->createToken($this->plain);
+    $this->post(route('password.update'), ['token' => $token, 'email' => 'plain@example.com', 'password' => 'a brand new passphrase', 'password_confirmation' => 'a brand new passphrase'])
+        ->assertRedirect(route('login'));
+
+    Notification::assertSentToTimes($this->plain, PasswordChanged::class, 1);
+});
 
 it('keeps a reset link working after a refused new password', function () {
     $token = Password::broker()->createToken($this->plain);
