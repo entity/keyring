@@ -199,7 +199,7 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 - at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)). Neither option can be set below 8: Keyring throws a `LogicException` rather than accept a shorter minimum,
 - at most `max` characters (128),
-- no composition rules by default (no "one uppercase, one symbol"),
+- no composition rules (no "one uppercase, one symbol"): any characters are accepted, with spaces, punctuation and emoji among them,
 - breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),
 - the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
 - no passwords containing [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
@@ -243,9 +243,12 @@ use Illuminate\Validation\Rules\Password;
 
 protected function passwordRules((Authenticatable&Model)|null $user = null, array $context = []): array
 {
-    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule, $context);
+    // Administrators need 20 characters, second factor or not.
+    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->rules(['min:20']) : $rule, $context);
 }
 ```
+
+Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 6.2.5, which wants passwords of any composition accepted, and NIST SP 800-63B says the same. People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
 
 ## Resetting the Password
 

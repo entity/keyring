@@ -216,6 +216,21 @@ it('still takes a password that only looks a little like a name', function () {
         ->and(passes('4 l0ng p455phr453 f0r m3', $user))->toBeTrue();
 });
 
+it('takes passwords of any composition, and lets an app ask for more length instead', function () {
+    expect(passes('  . , ; : ! ? - _  '))->toBeTrue()
+        ->and(passes('!?.,;:-_()[]{}<>'))->toBeTrue()
+        ->and(passes('alllowercaselettersonly'))->toBeTrue()
+        ->and(passes('1357924680135792468'))->toBeTrue()
+        ->and(passes('пароль из многих слов'))->toBeTrue()
+        ->and(passes('🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑'))->toBeTrue();
+
+    // The example in the docs: a longer minimum for some users.
+    $longer = fn (Password $rule) => $rule->rules(['min:20']);
+
+    expect(passes('a long passphrase', adjust: $longer))->toBeFalse()
+        ->and(passes('a long passphrase for me', adjust: $longer))->toBeTrue();
+});
+
 it('checks the breach list in production only, unless told otherwise', function () {
     $breachCheck = fn () => collect(PasswordRules::for())->contains(fn (mixed $rule) => $rule instanceof Password && (fn () => $this->uncompromised)->call($rule));
 

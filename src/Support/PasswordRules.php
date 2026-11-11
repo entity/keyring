@@ -49,7 +49,7 @@ final class PasswordRules
 
     /**
      * The rules for a new password. Pass a callback to adjust the Password
-     * rule Keyring builds, e.g. fn (Password $rule) => $rule->mixedCase(),
+     * rule Keyring builds, e.g. fn (Password $rule) => $rule->rules(['min:20']),
      * and $context for words a password mustn't contain at registration,
      * when there's no user yet (their name and email). Words to do with the
      * app itself go in the passwords.context option.
