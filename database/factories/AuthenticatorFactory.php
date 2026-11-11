@@ -82,7 +82,7 @@ class AuthenticatorFactory extends Factory
             'credential_id' => rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
             'public_key' => '{}',
             'transports' => ['usb'],
-            'meta' => ['user_verified' => $userVerified, 'backup_eligible' => $synced],
+            'meta' => ['user_verified' => $userVerified, 'backup_eligible' => $synced, 'backed_up' => $synced],
         ]);
     }
 

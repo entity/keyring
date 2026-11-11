@@ -362,6 +362,7 @@ Each key is a row in `keyring_authenticators` with:
 | `transports` | How the browser can reach the key (`usb`, `nfc`, `internal`...). |
 | `meta.user_verified` | Whether the key verified the user when registered. |
 | `meta.backup_eligible` | Whether the key said it can be synced. |
+| `meta.backed_up` | Whether the key said it has been backed up, which a key that can sync may not have been yet. Read again on every sign in, like `backup_eligible`. Keyring only records it: assurance goes by whether the key can sync at all. |
 
 The user handle given to authenticators is an HMAC of the user's ID, under a key derived from `APP_KEY` for that purpose alone, never their real ID or email. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` doesn't make password managers list the account twice.
 

@@ -209,8 +209,9 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
                     return false;
                 }
 
-                // Whether the key may sync is reported again on every sign in.
-                $locked->withMeta('backup_eligible', $result['backupEligible'])->forceFill([
+                // Whether the key may sync, and whether it has been backed up
+                // yet, are reported again on every sign in.
+                $locked->withMeta('backup_eligible', $result['backupEligible'])->withMeta('backed_up', $result['backedUp'])->forceFill([
                     'public_key' => $this->ceremonies()->toJson($result['record']),
                     'sign_count' => $result['record']->counter,
                 ]);
@@ -286,6 +287,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             'meta' => [
                 'user_verified' => (bool) $record->uvInitialized,
                 'backup_eligible' => (bool) $record->backupEligible,
+                'backed_up' => (bool) $record->backupStatus,
             ],
         ]);
     }

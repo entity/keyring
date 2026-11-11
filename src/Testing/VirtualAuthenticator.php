@@ -56,6 +56,8 @@ class VirtualAuthenticator
         public bool $synced = false,
         // How long an RS256 key is.
         public int $bits = 2048,
+        // Whether a passkey that syncs has been backed up yet. Null: it has.
+        public ?bool $backedUp = null,
     ) {
         $this->credentialId = random_bytes(32);
         $this->key = match ($algorithm) {
@@ -193,7 +195,7 @@ class VirtualAuthenticator
 
     protected function authenticatorData(string $rpId, bool $attested): string
     {
-        $flags = 0x01 | ($this->userVerification ? 0x04 : 0) | ($this->synced ? 0x08 | 0x10 : 0) | ($attested ? 0x40 : 0);
+        $flags = 0x01 | ($this->userVerification ? 0x04 : 0) | ($this->synced ? 0x08 : 0) | ($this->synced && ($this->backedUp ?? true) ? 0x10 : 0) | ($attested ? 0x40 : 0);
 
         $data = hash('sha256', $rpId, true).chr($flags).pack('N', ++$this->counter);
 

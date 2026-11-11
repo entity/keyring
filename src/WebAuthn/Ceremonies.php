@@ -174,10 +174,10 @@ class Ceremonies
 
     /**
      * Check a login response against a stored credential. Returns the updated
-     * record, whether the user was verified and whether the key may sync, or
-     * null when it isn't valid.
+     * record, whether the user was verified, whether the key may sync and
+     * whether it has been backed up, or null when it isn't valid.
      *
-     * @return array{record: CredentialRecord, userVerified: bool, backupEligible: bool}|null
+     * @return array{record: CredentialRecord, userVerified: bool, backupEligible: bool, backedUp: bool}|null
      *
      * @throws CounterException when the counter went backwards (a cloned key)
      */
@@ -198,6 +198,7 @@ class Ceremonies
                 'record' => $record,
                 'userVerified' => $credential->response->authenticatorData->isUserVerified(),
                 'backupEligible' => $credential->response->authenticatorData->isBackupEligible(),
+                'backedUp' => $credential->response->authenticatorData->isBackedUp(),
             ];
         } catch (CounterException $e) {
             throw $e;
