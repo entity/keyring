@@ -127,8 +127,12 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - Reverting an email change signs out every session, ends any sign in still waiting for its second factor, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
+- A password change takes the current password as well as a fresh verification, checked by Keyring itself rather than by your action. A user with no password yet sets one with the fresh verification alone.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
-- New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
+- New passwords need at least 8 characters with a second factor and 15 without, and neither minimum can be configured below 8. Any characters are accepted, with no composition rules.
+- New passwords are checked against the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, in every environment, and against your app's name, the words you list in `passwords.context` and the user's own name and email address, with look-alike characters read as letters.
+- In production, new passwords are also checked against breach lists (Have I Been Pwned). That check lets a password through when the service can't be reached, unless you set `passwords.refuse_unchecked`.
+- New passwords are refused rather than silently cut short by bcrypt. With bcrypt that limit is 72 bytes, so hash with argon2id to accept every password up to `passwords.max`.
 
 ### Links and Headers
 
@@ -169,8 +173,13 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
 | Email codes being opt-in, and below AAL2 | NIST SP 800-63B, which rules out email for authentication codes |
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
-| Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |
-| Refusing the most common passwords, and ones containing the app's or user's name | OWASP ASVS |
+| Password lengths: 8 with a second factor, 15 without, and no setting below 8 | OWASP ASVS 5.0.0, 6.2.1, and NIST SP 800-63B (15 for a password used alone, 8 as part of multi-factor) |
+| A password change taking the current password as well as the new one | OWASP ASVS 5.0.0, 6.2.3 |
+| Refusing the most common passwords: the top 10,000 of 8 characters or more and the top 3,000 of 15 or more | OWASP ASVS 5.0.0, 6.2.4 (at least the top 3,000 that fit the policy) |
+| No composition rules, and any characters accepted | OWASP ASVS 5.0.0, 6.2.5, and NIST SP 800-63B |
+| Passwords of at least 64 characters allowed, never silently cut short: up to `passwords.max` with argon2id, 72 bytes with bcrypt | OWASP ASVS 5.0.0, 6.2.9, and NIST SP 800-63B. Met with `HASH_DRIVER=argon2id`, not with bcrypt |
+| Refusing passwords containing the app's name, the words in `passwords.context`, or the user's name and email address | OWASP ASVS 5.0.0, 6.2.11, with 6.1.2 for the list, which is yours to fill in |
+| Refusing breached passwords, in production by default | OWASP ASVS 5.0.0, 6.2.12, and NIST SP 800-63B |
 | Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
 | Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
 | Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |
@@ -194,6 +203,8 @@ Keyring's code and config say what each thing does. This is where the choices co
 - **Laravel's `cookie` session driver can't destroy an old session.** The session lives in the cookie, so a copied one keeps working after the ID changes, until the session is revoked or expires. Signing out everywhere else, a password change and an applied email change revoke the session's registry record and carry on under a new one, so a copy is signed out then. After a step-up it keeps working, without what the step-up proved. Use a server-side session driver if that matters.
 - **The `cookie` session driver can replay what a session held.** A pending login or enrollment is kept in the session, so a browser can send back an earlier copy of its own cookie: one from before a code's guesses were counted, say. The limits that stop guessing don't live there. Attempts per account and per IP address, failures in a row, and codes sent are counted in your cache, so a replayed cookie doesn't get more guesses than the limits allow. A server-side session driver closes the gap entirely.
 - **A request overlapping a session ID change can undo or lose it.** Laravel saves the session when each request ends, so a request still running when the ID changes can save the old session again, and a copied cookie would then keep working. A request sent with the old ID just after the change finds no session, and that browser has to sign in again.
+- **The breach check fails open by default.** Laravel's check lets a new password through when Have I Been Pwned can't be reached, leaving the bundled list of common passwords. Set `passwords.refuse_unchecked` to refuse the password instead, at the cost of no new passwords while the service is unreachable. Outside production the check doesn't run at all unless `passwords.uncompromised` is `true`.
+- **Bcrypt stops passwords at 72 bytes.** It's Laravel's default hasher, and it ignores everything after the first 72 bytes, so with it Keyring refuses a longer password: 72 plain characters, but as few as 18 emoji, whatever `passwords.max` says. OWASP ASVS 6.2.9 asks for at least 64 characters, of any kind, to be allowed. Set `HASH_DRIVER=argon2id` for that. Keyring doesn't pre-hash passwords to fit, which would leave hashes Laravel's own hasher can't check. See [Passwords](configuration.md#passwords).
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
 - **Work in progress.** Keyring hasn't been tagged or used in production yet.
