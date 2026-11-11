@@ -143,7 +143,7 @@ it('refuses a password bcrypt would cut short once it is in nfc', function () {
         ->and(strlen(PasswordRules::normalize($grows)))->toBe(120);
 
     $this->post('/register', ['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => $grows, 'password_confirmation' => $grows])
-        ->assertSessionHasErrors(['password' => 'The password must not be longer than 72 bytes.']);
+        ->assertSessionHasErrors(['password' => __('keyring::keyring.password_too_long', ['attribute' => 'password'])]);
 
     // And one already stored that way never matches on its first 72 bytes.
     expect(PasswordRules::forVerifying($grows, Hash::make('anything')))->not->toBe($grows)

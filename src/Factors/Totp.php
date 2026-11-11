@@ -17,6 +17,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use LogicException;
 use PragmaRX\Google2FA\Google2FA;
 
 /**
@@ -33,17 +34,34 @@ class Totp extends Factor implements Enrollable
 {
     public const string KEY = 'totp';
 
+    /** The most 30 second steps either side of now a code may be from. */
+    public const int MAX_WINDOW = 1;
+
     /**
      * The digests RFC 6238 lets a code be made with.
      */
     protected const array ALGORITHMS = ['sha1', 'sha256', 'sha512'];
 
+    /**
+     * A window of 1 takes the step before and the step after now as well,
+     * as RFC 6238 recommends for a clock that's a little off, so a code
+     * works for up to 90 seconds. OWASP ASVS 6.5.5 caps a code's life at 30
+     * seconds, which is a window of 0. Nothing wider than 1 is accepted.
+     *
+     * @throws LogicException
+     * @throws InvalidArgumentException
+     */
     public function __construct(
         protected Google2FA $engine,
         protected int $window = 1,
         protected ?string $issuer = null,
         protected string $algorithm = 'sha1',
     ) {
+        throw_if($window < 0 || $window > self::MAX_WINDOW, LogicException::class, sprintf(
+            'The [%s] factor was given a window of %d. Keyring accepts 0 (a code works for its own 30 seconds, as OWASP ASVS 6.5.5 asks) or 1 (one step either side, for clocks that are a little off): a wider one keeps every code working for minutes.',
+            self::KEY, $window,
+        ));
+
         if (! in_array($algorithm, static::ALGORITHMS, true)) {
             throw new InvalidArgumentException("TOTP codes are made with sha1, sha256 or sha512, not [{$algorithm}].");
         }

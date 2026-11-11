@@ -113,7 +113,8 @@ Things to know:
 - It never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Drop them once the import is clean: a user who removes every sign-in method in Keyring has none left to tell a later run they were already imported.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
 - `laravel/passkeys` takes RS256 keys and Keyring doesn't by default, so a passkey made by Windows Hello may be imported and then refused at sign in. Add `RS256` to [`webauthn.algorithms`](passkeys.md#rs256-and-windows-hello) to keep those working.
-- Recovery codes become case-insensitive, and spaces and dashes in them are ignored.
+- Imported recovery codes work as they did: typed as Fortify showed them, capitals included. Spaces and dashes are ignored. Keyring stores each as a keyed hash, which OWASP ASVS 5.0.0 requirement 6.5.2 allows for a code with 112 random bits or more, and Fortify's 20 letters and digits have 119 only while their case counts. The codes Keyring makes itself are case-insensitive.
+- A recovery code set holding anything other than Fortify's own codes (an app that swapped in a shorter format, say) is left behind and listed as skipped, since a short code can't safely be stored that way. Those users keep their authenticator app and make new codes.
 - `--dry-run` reports the same outcome and exit code without writing anything.
 
 ## How Fortify Concepts Map
@@ -143,7 +144,7 @@ Things to know:
 |---|---|
 | `Fortify::createUsersUsing(CreateNewUser::class)` | `Keyring::createUsersUsing(CreateNewUser::class)`, with an action implementing `Keyring\Contracts\CreatesNewUsers`. Your existing action's `create()` body mostly carries over. |
 | `Fortify::resetUserPasswordsUsing()` | `Keyring::resetUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\ResetsUserPasswords`. Your existing `reset()` body carries over; type the user as `Authenticatable&Model $user` (with a `@param User $user` docblock) to match the contract. |
-| `Fortify::updateUserPasswordsUsing()` | `Keyring::updateUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\UpdatesUserPasswords`. Same as above: keep the body, change the signature. |
+| `Fortify::updateUserPasswordsUsing()` | `Keyring::updateUserPasswordsUsing()`, with an action implementing `Keyring\Contracts\UpdatesUserPasswords`. Same as above: keep the body, change the signature. Keyring checks `current_password` before your action runs, so the action's own check is no longer needed. |
 | `PasswordValidationRules` trait | The published `PasswordValidationRules` trait, built on [Keyring's rules](protected-changes.md#password-rules). |
 | `Fortify::updateUserProfileInformationUsing()` | Your own code. Email changes go through [Keyring's flow](protected-changes.md#changing-the-email-address), because `email` is protected; your `ValidateEmailChange` action holds their validation. |
 | `Fortify::authenticateUsing()` | `Keyring::findUsersUsing()` finds the user; Keyring checks the password itself. See [Finding the User](sign-in-flow.md#finding-the-user). |

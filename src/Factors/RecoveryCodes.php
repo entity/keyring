@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Category;
@@ -21,6 +22,18 @@ use ParagonIE\ConstantTime\Base32;
 /**
  * Single-use codes the user saved when setting up their first second factor.
  * Stored as keyed hashes, never in plain text.
+ *
+ * A keyed hash is quick to work out, so it's only enough for a code too long
+ * to guess: OWASP ASVS 6.5.2 asks for 112 random bits, and a slow, salted
+ * password hash for anything with fewer. So a code is only stored, and only
+ * accepted, in one of two forms that have them:
+ *
+ * - Keyring's own: 26 base32 characters (128 bits), typed in either case.
+ * - Fortify's, as keyring:import brings them in: 20 letters and digits (119
+ *   bits), which only carry that much while their case counts.
+ *
+ * Anything else is refused when a set is stored and never matches when one
+ * is typed.
  */
 class RecoveryCodes extends Factor implements Enrollable
 {
@@ -54,7 +67,8 @@ class RecoveryCodes extends Factor implements Enrollable
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $candidates = KeyedHash::candidates(KeyedHash::RECOVERY_CODES, $this->normalizeCode((string) $request->input('code')));
+        $code = $this->canonical((string) $request->input('code'));
+        $candidates = $code === null ? [] : KeyedHash::candidates(KeyedHash::RECOVERY_CODES, $code);
 
         $used = $this->consume($authenticator, function (Authenticator $locked) use ($candidates) {
             $hashes = $this->hashes($locked);
@@ -160,10 +174,20 @@ class RecoveryCodes extends Factor implements Enrollable
      * The value to store for a set of plain codes.
      *
      * @param  list<string>  $codes
+     *
+     * @throws InvalidArgumentException when a code isn't in a form that may be kept as a keyed hash
      */
     public function secretFor(#[\SensitiveParameter] array $codes): string
     {
         return json_encode(array_map($this->hash(...), $codes), JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Whether a code is in a form Keyring stores and accepts.
+     */
+    public function accepts(#[\SensitiveParameter] string $code): bool
+    {
+        return $this->canonical($code) !== null;
     }
 
     /**
@@ -176,14 +200,26 @@ class RecoveryCodes extends Factor implements Enrollable
 
     protected function hash(#[\SensitiveParameter] string $code): string
     {
-        return KeyedHash::make(KeyedHash::RECOVERY_CODES, $this->normalizeCode($code));
+        return KeyedHash::make(KeyedHash::RECOVERY_CODES, $this->canonical($code) ?? throw new InvalidArgumentException(
+            'Keyring only stores recovery codes with 112 random bits or more: its own (26 base32 characters) or Fortify\'s (20 letters and digits). '
+            .'A shorter code is too easy to guess to be kept as a keyed hash (OWASP ASVS 6.5.2).',
+        ));
     }
 
     /**
-     * Codes are case-insensitive.
+     * The code as it's hashed, without the spaces and dashes it's shown or
+     * typed with, or null when it's in neither form Keyring keeps. Its own
+     * codes read the same in either case. An imported one is left as typed:
+     * told apart by case it has 119 bits, lowercased about 102.
      */
-    protected function normalizeCode(#[\SensitiveParameter] string $code): string
+    protected function canonical(#[\SensitiveParameter] string $code): ?string
     {
-        return Str::lower(parent::normalizeCode($code));
+        $code = $this->normalizeCode($code);
+
+        return match (true) {
+            preg_match('/^[a-z2-7]{26}$/i', $code) === 1 => Str::lower($code),
+            preg_match('/^[a-z0-9]{20}$/i', $code) === 1 => $code,
+            default => null,
+        };
     }
 }

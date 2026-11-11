@@ -35,9 +35,12 @@ class AuthenticatorFactory extends Factory
     }
 
     /**
+     * A set that accepts the given codes. Each has to be in the form Keyring
+     * makes them, 26 base32 characters (a-z and 2-7) with any dashes.
+     *
      * @param  list<string>  $codes
      */
-    public function recoveryCodes(array $codes = ['aaaaa-11111', 'bbbbb-22222', 'ccccc-33333']): static
+    public function recoveryCodes(array $codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc']): static
     {
         return $this->state(fn () => [
             'factor' => 'recovery',

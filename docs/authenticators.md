@@ -98,7 +98,7 @@ Authenticator apps and email codes take an optional `name` when beginning or con
 | `recovery` | none: confirming means "I've saved these" |
 | `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 
-A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
+A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment, or one that was already confirmed, with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
 
 On success, the response contains the new authenticator, presented the same way as on the challenge page:
 
@@ -106,7 +106,7 @@ On success, the response contains the new authenticator, presented the same way 
 {
   "status": "authenticator-added",
   "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
-  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp", "..."]
+  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp-eh", "..."]
 }
 ```
 

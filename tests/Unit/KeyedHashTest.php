@@ -69,12 +69,12 @@ it('has nothing to hash with when the app has no key', function () {
 it('hashes each kind of stored value under its own purpose', function () {
     $user = taylor();
 
-    $recovery = Keyring::factor('recovery')->secretFor(['abcd-efgh']);
+    $recovery = Keyring::factor('recovery')->secretFor(['abcd-efgh-ijkl-mnop-qrst-uvwx-yz']);
 
     $factor = EmailCode::asSecondFactor();
     $code = (fn () => $this->hash('12345678'))->call($factor);
 
-    expect(json_decode($recovery))->toBe([KeyedHash::make(KeyedHash::RECOVERY_CODES, 'abcdefgh')])
+    expect(json_decode($recovery))->toBe([KeyedHash::make(KeyedHash::RECOVERY_CODES, 'abcdefghijklmnopqrstuvwxyz')])
         ->and($code)->toBe(KeyedHash::make(KeyedHash::ONE_TIME_CODES, $factor->key().'|12345678'))
         ->and(PendingChange::lookupHash('Taylor@Example.com'))->toBe(KeyedHash::make(KeyedHash::RESERVED_ADDRESSES, 'taylor@example.com'))
         ->and(app(Ceremonies::class)->userHandle($user))->toBe(KeyedHash::make(KeyedHash::USER_HANDLES, (string) $user->id));
@@ -86,8 +86,8 @@ it('will not take one kind of stored hash for another', function () {
     // A recovery set whose stored hash is the right code hashed as something else.
     $forged = Authenticator::factory()->for($user, 'authenticatable')->create([
         'factor' => 'recovery',
-        'secret' => json_encode([KeyedHash::make(KeyedHash::ONE_TIME_CODES, 'abcdefgh'), KeyedHash::make(KeyedHash::USER_HANDLES, 'abcdefgh')]),
+        'secret' => json_encode([KeyedHash::make(KeyedHash::ONE_TIME_CODES, 'abcdefghijklmnopqrstuvwxyz'), KeyedHash::make(KeyedHash::USER_HANDLES, 'abcdefghijklmnopqrstuvwxyz')]),
     ]);
 
-    expect(Keyring::factor('recovery')->verify(Attempt::start(Purpose::Login, $user), $forged, Request::create('/', 'POST', ['code' => 'abcd-efgh'])))->toBeNull();
+    expect(Keyring::factor('recovery')->verify(Attempt::start(Purpose::Login, $user), $forged, Request::create('/', 'POST', ['code' => 'abcd-efgh-ijkl-mnop-qrst-uvwx-yz'])))->toBeNull();
 });

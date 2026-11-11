@@ -18,10 +18,11 @@ class DatabaseSessionRegistry implements SessionRegistry
     public function save(RegisteredSession $session): void
     {
         // Never clear revoked_at from a stale copy: a revocation that lands
-        // between reading and saving a record must stick.
+        // between reading and saving a record must stick. So must the
+        // record that replaced it.
         $row = $session->toArray();
 
-        $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at'])));
+        $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at'])));
     }
 
     public function find(string $id): ?RegisteredSession
@@ -50,6 +51,30 @@ class DatabaseSessionRegistry implements SessionRegistry
         $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => now()->getTimestamp()]);
     }
 
+    /**
+     * The update only matches a record still in use, and holds its row until
+     * the new record is stored. Of two requests at the same moment the
+     * second waits, then matches nothing.
+     */
+    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    {
+        return $this->connection->transaction(function () use ($id, $successor, $revoke) {
+            $now = now()->getTimestamp();
+
+            $replaced = $this->query()->where('id', $id)->whereNull('revoked_at')->whereNull('replaced_by')->update([
+                'replaced_by' => $successor->id,
+                'replaced_at' => $now,
+                ...$revoke ? ['revoked_at' => $now] : [],
+            ]) === 1;
+
+            if ($replaced) {
+                $this->save($successor);
+            }
+
+            return $replaced;
+        });
+    }
+
     public function revokeAll(Authenticatable $user, ?string $except = null): int
     {
         return $this->activeFor($user)
@@ -68,16 +93,16 @@ class DatabaseSessionRegistry implements SessionRegistry
     {
         return $this->query()
             ->where('expires_at', '<=', now()->getTimestamp())
-            ->orWhereNotNull('revoked_at')
+            ->orWhere(fn (Builder $query) => $query->whereNotNull('revoked_at')->whereNull('replaced_by'))
             ->delete();
     }
 
     /**
-     * The user's sessions that haven't been revoked.
+     * The user's sessions that haven't been revoked or replaced.
      */
     protected function activeFor(Authenticatable $user): Builder
     {
-        return $this->query()->where('user_id', (string) $user->getAuthIdentifier())->whereNull('revoked_at');
+        return $this->query()->where('user_id', (string) $user->getAuthIdentifier())->whereNull('revoked_at')->whereNull('replaced_by');
     }
 
     protected function query(): Builder
