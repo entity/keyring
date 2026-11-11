@@ -60,7 +60,7 @@ describe('keyring:install', function () {
             ->and($provider)->toContain("            'verification_code' => Notifications\VerificationCode::class,")
             ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
-            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(15)
+            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(17)
             ->and($provider)->toContain('Password::class,')
             ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
             // Every action, so turning a feature on later works.

@@ -1,6 +1,7 @@
 <?php
 
 use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
+use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Http\Request;
@@ -284,6 +285,49 @@ it('tells the user when a sign-in method is added', function () {
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     Notification::assertSentTo($this->user, AuthenticatorAddedNotice::class);
+});
+
+it('tells the user when their recovery codes are replaced, once the app registers the notice', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->verifiedWith($totp);
+    Notification::fake();
+
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+    Notification::assertNothingSent();
+
+    sendNotifications(['recovery_codes_generated']);
+
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+    $notice = Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole();
+
+    expect($notice->ip)->toBe('127.0.0.1')
+        ->and(renderedMail($notice->toMail($this->user))['text'])->toContain('Any codes you saved before no longer work.');
+});
+
+it('tells them about the recovery codes that come with a first sign-in method too', function () {
+    Notification::fake();
+    sendNotifications(['recovery_codes_generated']);
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+    Notification::assertSentToTimes($this->user, RecoveryCodesGeneratedNotice::class, 1);
+    Notification::assertSentToTimes($this->user, AuthenticatorAddedNotice::class, 1);
+});
+
+it('sends nothing for a new name or a new default, which change nothing about how anyone signs in', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->verifiedWith($totp);
+    Notification::fake();
+    sendNotifications();
+
+    $this->patchJson(route('keyring.authenticators.update', $totp), ['name' => 'Phone', 'default' => true])->assertOk();
+
+    Notification::assertNothingSent();
 });
 
 it('shows a name someone typed as plain text in the email, never as a link', function (string $name, string $html, string $text) {
