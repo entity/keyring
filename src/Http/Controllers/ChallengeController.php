@@ -114,6 +114,12 @@ class ChallengeController
 
         $factor->send($attempt, $authenticator);
 
+        // Sending found the attempt out of guesses, where this copy of the
+        // session didn't know it.
+        if ($attempt->exhausted) {
+            return $this->startOver($request, $purpose);
+        }
+
         $this->attempts->save($attempt);
 
         return $this->status('code-sent');

@@ -34,19 +34,20 @@ return [
     |
     | Signing in and out, challenges and step-up are always on. Add the rest
     | as your app needs them. Each one brings its routes, and anything else
-    | it needs, only once it's here.
+    | it needs, only once it's here. Take the security log out and its
+    | events are written to your app's log instead.
     |
     */
 
     'features' => [
         Features::registration(),
         Features::resetPasswords(),
+        Features::securityLog(),
         // Features::emailVerification(),
         // Features::updatePasswords(),
         // Features::manageAuthenticators(),
         // Features::devices(),
         // Features::emailChanges(),
-        // Features::securityLog(),
     ],
 
     /*
@@ -235,13 +236,27 @@ return [
     |--------------------------------------------------------------------------
     |
     | At least 8 characters with a second factor and 15 without, any
-    | characters, and no composition rules. Bcrypt silently ignores anything
-    | past 72 bytes, so with bcrypt longer passwords are rejected rather than
-    | truncated.
+    | characters, and no composition rules. Neither minimum can go below 8:
+    | Keyring throws on a lower one rather than raise it quietly.
+    |
+    | "max" is in characters, and is only reached with a hasher that reads a
+    | whole password. Bcrypt, Laravel's default, silently ignores anything
+    | past 72 bytes, so with bcrypt Keyring refuses a longer password rather
+    | than truncate it: the real limit is then 72 bytes, which is 72 plain
+    | characters but only 36 accented or Cyrillic ones, 24 Chinese, Japanese
+    | or Korean ones, or 18 emoji. Set HASH_DRIVER=argon2id to take every
+    | password up to "max", as OWASP ASVS 6.2.9 asks (at least 64 characters).
     |
     | "uncompromised" checks new passwords against Have I Been Pwned over the
     | network. Null runs it in production only, so local and test runs make
-    | no network calls.
+    | no network calls. Laravel's check lets a password through when the
+    | service can't be reached, which leaves only the list of common
+    | passwords that ships with Keyring. Set "refuse_unchecked" to refuse
+    | the password instead, and ask the user to try again.
+    |
+    | "context" is your list of words a password mustn't be made up of: names
+    | of your organisation, products, systems, projects and teams. Your app's
+    | name, and each user's name and address, are checked without listing.
     |
     */
 
@@ -250,6 +265,8 @@ return [
         'min_without_mfa' => 15,
         'max' => 128,
         'uncompromised' => null,
+        'refuse_unchecked' => false,
+        'context' => [],
         'broker' => null,
     ],
 
@@ -276,18 +293,43 @@ return [
     | Security Log
     |--------------------------------------------------------------------------
     |
-    | With Features::securityLog(), sign ins, failures, lockouts, changes and
-    | automatic actions are logged to keyring_events. Prune with
-    | `php artisan keyring:prune`.
+    | With Features::securityLog(), sign ins, failures, lockouts, refusals,
+    | changes and automatic actions are logged to keyring_events and kept for
+    | "keep_for". Without it they're written to the log "channel" instead
+    | (null for your default one), so they're always recorded somewhere.
+    |
+    | "context_key" is where your app keeps a request's ID in Laravel's
+    | Context, if it does. Entries carry it, or an ID Keyring makes itself.
+    | What's refused can be asked for again without end, so only "refusals"
+    | entries of one type are written every "refusals_per" about an account,
+    | or from an IP address when nobody is known (null for no limit).
     |
     */
 
     'security_log' => [
         'keep_for' => '180d',
+        'channel' => env('KEYRING_LOG_CHANNEL'),
+        'context_key' => 'trace_id',
+        'refusals' => 20,
+        'refusals_per' => '1h',
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
         'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pruning
+    |--------------------------------------------------------------------------
+    |
+    | `php artisan keyring:prune` deletes what's past its time: old log
+    | entries, devices, ended email changes and ended sessions. Keyring adds
+    | it to Laravel's scheduler to run every day at this time, so it happens
+    | wherever `schedule:run` does. Null leaves scheduling it to you.
+    |
+    */
+
+    'prune_at' => '03:00',
 
     /*
     |--------------------------------------------------------------------------

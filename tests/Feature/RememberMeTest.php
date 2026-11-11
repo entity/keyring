@@ -30,6 +30,10 @@ use Keyring\Tests\TestCase;
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
 
+    // These compare what was stored with now(), so the clock only moves
+    // when a test moves it.
+    $this->freezeSecond();
+
     $this->user = taylor();
 });
 

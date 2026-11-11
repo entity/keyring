@@ -4,14 +4,18 @@ use Illuminate\Mail\Markdown;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Keyring\Factors\Totp;
 use Keyring\KeyringManager;
+use Keyring\Models\SecurityEvent;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
+use Monolog\Handler\TestHandler;
+use Monolog\LogRecord;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -96,6 +100,20 @@ function sendNotifications(?array $types = null): void
 }
 
 /**
+ * Send back an earlier copy of the session (from session()->all()), as a
+ * browser can when the session is kept in its cookie: Laravel's "cookie"
+ * session driver has nothing on the server to say the copy is out of date.
+ *
+ * @param  array<string, mixed>  $earlier
+ */
+function sendBackSession(array $earlier): void
+{
+    test()->flushSession();
+    app('auth')->forgetGuards();
+    test()->withSession($earlier);
+}
+
+/**
  * Turn on only these features and register Keyring's routes again, since
  * they're read once at boot.
  *
@@ -128,4 +146,43 @@ function expectValidPhp(string $path): void
     exec(escapeshellarg(PHP_BINARY).' -l '.escapeshellarg($path).' 2>&1', $output, $status);
 
     expect($status)->toBe(0, implode("\n", $output));
+}
+
+/**
+ * The types logged so far, oldest first.
+ *
+ * @return list<string>
+ */
+function loggedTypes(): array
+{
+    return SecurityEvent::query()->oldest('id')->pluck('type')->all();
+}
+
+function logEntry(string $type): SecurityEvent
+{
+    return SecurityEvent::query()->where('type', $type)->sole();
+}
+
+/**
+ * Send the app's log to a channel that keeps its lines in memory.
+ */
+function logTo(string $channel = 'memory'): TestHandler
+{
+    config(["logging.channels.{$channel}" => ['driver' => 'monolog', 'handler' => TestHandler::class]]);
+
+    return Log::channel($channel)->getLogger()->getHandlers()[0];
+}
+
+/**
+ * What Keyring wrote to a log channel, as [level, type, context].
+ *
+ * @return list<array{string, string, array<string, mixed>}>
+ */
+function written(TestHandler $handler): array
+{
+    return collect($handler->getRecords())
+        ->filter(fn (LogRecord $record) => str_starts_with($record->message, 'Keyring: '))
+        ->map(fn (LogRecord $record) => [strtolower($record->level->name), substr($record->message, 9), $record->context])
+        ->values()
+        ->all();
 }

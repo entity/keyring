@@ -6,13 +6,33 @@ type Prompt = { options: object, autofill: boolean, signal?: AbortSignal, resolv
 
 let prompts: Prompt[] = []
 let autofillSupported = true
+
+// A browser has one WebAuthn request open at a time, and takes a moment to
+// let go of one that was aborted. With this set, the stand-in does too, and
+// refuses a request made before then the way Chrome does.
+let letsGoAfter: number | null = null
+let open = 0
+let refused = 0
 let posted: Array<{ url: string, callbacks: { onError: (errors: Record<string, string>) => void, onFinish: () => void } }> = []
 
 mock.module('../src/webauthn', () => ({
   supportsAutofill: async () => autofillSupported,
   getCredential: (options: object, { autofill = false, signal }: { autofill?: boolean, signal?: AbortSignal } = {}) => new Promise((resolve, reject) => {
-    prompts.push({ options, autofill, signal, resolve, reject })
-    signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    if (letsGoAfter !== null && open > 0) {
+      refused++
+
+      return reject(new DOMException('A request is already pending.', 'OperationError'))
+    }
+
+    open++
+    const close = <T>(settle: (value: T) => void) => (value: T) => {
+      open--
+      settle(value)
+    }
+    const aborted = close(() => reject(new DOMException('Aborted', 'AbortError')))
+
+    prompts.push({ options, autofill, signal, resolve: close(resolve), reject: close(reject) })
+    signal?.addEventListener('abort', () => letsGoAfter === null ? aborted(undefined) : setTimeout(aborted, letsGoAfter))
   }),
 }))
 
@@ -25,6 +45,7 @@ mock.module('@inertiajs/core', () => ({
 const { isAbort, keyPrompt, passkeyLogin } = await import('../src/inertia')
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const cancelled = () => new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError')
 const challenge = { challenge: { options: {} } } as any
 
@@ -32,6 +53,9 @@ beforeEach(() => {
   prompts = []
   posted = []
   autofillSupported = true
+  letsGoAfter = null
+  open = 0
+  refused = 0
 })
 
 describe('isAbort', () => {
@@ -49,11 +73,50 @@ describe('keyPrompt', () => {
 
     const first = prompt(challenge)
     const second = prompt(challenge)
+    expect(prompts[0].signal?.aborted).toBe(true)
+
+    // The new prompt opens once the browser has let go of the old one.
+    await tick()
     prompts[1].resolve({ id: 'key' })
 
     expect(await first).toBeNull()
     expect(await second).toEqual({ id: 'key' })
-    expect(prompts[0].signal?.aborted).toBe(true)
+  })
+
+  test('waits for the browser to let go of the prompt it replaces', async () => {
+    letsGoAfter = 10
+    const prompt = keyPrompt()
+
+    const first = prompt(challenge)
+    const second = prompt(challenge)
+    await wait(30)
+
+    expect(refused).toBe(0)
+    expect(prompts).toHaveLength(2)
+
+    prompts[1].resolve({ id: 'key' })
+
+    expect(await first).toBeNull()
+    expect(await second).toEqual({ id: 'key' })
+  })
+
+  test('only prompts for the newest of several calls made while it waits', async () => {
+    letsGoAfter = 10
+    const prompt = keyPrompt()
+
+    const first = prompt(challenge)
+    const second = prompt(challenge)
+    const third = prompt(challenge)
+    await wait(30)
+
+    expect(refused).toBe(0)
+    expect(prompts).toHaveLength(2)
+
+    prompts[1].resolve({ id: 'key' })
+
+    expect(await first).toBeNull()
+    expect(await second).toBeNull()
+    expect(await third).toEqual({ id: 'key' })
   })
 
   test('resolves to null when the user closes the prompt, and throws real failures', async () => {
@@ -107,6 +170,28 @@ describe('passkeyLogin', () => {
 
     expect(prompts.map(prompt => prompt.autofill)).toEqual([true, false, true])
     expect(states.at(-1)).toEqual({ processing: false, error: null })
+  })
+
+  test('waits for the browser to let go of autofill before the button asks', async () => {
+    letsGoAfter = 10
+    const states: Array<{ processing: boolean, error: string | null }> = []
+    const login = passkeyLogin({ autofill: true }, state => states.push(state))
+
+    await login.start()
+    await tick()
+
+    login.signIn()
+    await wait(30)
+
+    expect(refused).toBe(0)
+    expect(prompts.map(prompt => prompt.autofill)).toEqual([true, false])
+    expect(states.at(-1)).toEqual({ processing: true, error: null })
+
+    prompts[1].resolve({ id: 'passkey' })
+    await tick()
+
+    expect(posted).toHaveLength(1)
+    login.stop()
   })
 
   test('shows the server error and offers autofill again when a passkey is refused', async () => {

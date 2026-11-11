@@ -10,10 +10,13 @@ use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SendsCodes;
+use Keyring\Enrollment\Enrollment;
 use Keyring\Enrollment\EnrollmentStore;
+use Keyring\Events\EnrollmentRefused;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Models\Authenticator;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
 
@@ -64,8 +67,13 @@ class AuthenticatorController
 
         $request->validate([...$factor->enrollmentRules(), 'sign_out_others' => ['sometimes', 'boolean']]);
 
-        $authenticator = $factor->confirmEnrollment($this->keyring->user(), $enrollment, $request)
-            ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.invalid')]);
+        $authenticator = $this->confirmed($factor, $enrollment, $request);
+
+        // Each enrollment adds its authenticator once, whichever copy of the
+        // session it comes back in.
+        if (! $this->enrollments->claim($enrollment)) {
+            throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
+        }
 
         $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
 
@@ -122,13 +130,36 @@ class AuthenticatorController
     }
 
     /**
+     * The authenticator the user just proved works. A proof the factor
+     * turns down is answered as before and goes on record, whether the
+     * factor says no or throws its own message.
+     *
+     * @throws ValidationException
+     */
+    protected function confirmed(Enrollable $factor, Enrollment $enrollment, Request $request): Authenticator
+    {
+        try {
+            return $factor->confirmEnrollment($this->keyring->user(), $enrollment, $request)
+                ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.invalid')]);
+        } catch (ValidationException $e) {
+            EnrollmentRefused::dispatch($this->keyring->user(), $factor->key(), 'invalid');
+
+            throw $e;
+        }
+    }
+
+    /**
      * The factor to enroll. Until the email address is proven, the account
      * may belong to someone who registered it first, and factors they added
      * would survive the real owner's password reset.
      */
     protected function enrollable(Request $request, string $key): Enrollable
     {
-        abort_unless($this->keyring->allowsEnrollment($this->keyring->user()), 403, __('keyring::keyring.verify_email_first'));
+        if (! $this->keyring->allowsEnrollment($this->keyring->user())) {
+            EnrollmentRefused::dispatch($this->keyring->user(), $key, 'not_allowed');
+
+            abort(403, __('keyring::keyring.verify_email_first'));
+        }
 
         $factor = $this->keyring->factor($key);
 

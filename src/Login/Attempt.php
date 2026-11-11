@@ -152,7 +152,9 @@ final class Attempt
     }
 
     /**
-     * Factor specific state, like WebAuthn options or a sent code.
+     * Factor specific state, like WebAuthn options. Nothing that has to be
+     * used once or counted belongs here on its own: where the browser holds
+     * the session, an earlier copy of it brings the state back.
      */
     public function state(string $factor, ?string $key = null, mixed $default = null): mixed
     {

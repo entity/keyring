@@ -98,7 +98,7 @@ Authenticator apps and email codes take an optional `name` when beginning or con
 | `recovery` | none: confirming means "I've saved these" |
 | `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 
-A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
+A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment, or one that was already confirmed, with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
 
 On success, the response contains the new authenticator, presented the same way as on the challenge page:
 
@@ -221,5 +221,10 @@ In `Keyring\Events`:
 | `AuthenticatorRemoved` | `user`, `authenticator` |
 | `RecoveryCodesGenerated` | `user`, `authenticator` |
 | `RecoveryCodeUsed` | `authenticator`, `remaining` |
+| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid` or `not_allowed`) |
+| `AuthenticatorRemovalRefused` | `user`, `authenticator` |
+| `AccessRefused` | `user`, `resource`, `id` |
 
 Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.
+
+The last three are what was turned away: a confirmation whose code or key was wrong (or an account that may not enroll yet), a removal that would have left the user unable to sign in, and a request for an authenticator that isn't the user's. Each is answered as before, a 422, 403 or 404, and written to the [security log](security-log-and-emails.md#entry-types).

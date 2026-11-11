@@ -39,7 +39,7 @@ Keyring tracks two things:
 
 Because sessions are always kept, the routes that [list and end them](#listing-and-ending-sessions) are always registered. No feature turns them on or off.
 
-With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry` and `ImpossibleTravel` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
+With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry`, `ImpossibleTravel` and `InactiveAccount` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
 
 ## Routes
 
@@ -474,14 +474,23 @@ A level lapses on its own clock without ending the session: after its `idle` wit
 - security log entries older than `security_log.keep_for`,
 - registered sessions that have expired or been revoked, through the registry's `prune()`. A record "remember me" replaced stays until it would have expired, so its cookie is still recognised as used. The cache driver's records expire on their own.
 
-Schedule it daily:
+Keyring adds it to Laravel's scheduler itself, every day at 03:00, so it runs wherever your app's `schedule:run` does and nothing is kept past its time because a line was left out of `routes/console.php`. `php artisan schedule:list` shows it. To run it at another time, change `prune_at`:
+
+```php
+// config/keyring.php
+'prune_at' => '01:30',
+```
+
+Set it to `null` and Keyring schedules nothing, which leaves it to you: on one server only, say, or from a job of your own.
 
 ```php
 // routes/console.php
 use Illuminate\Support\Facades\Schedule;
 
-Schedule::command('keyring:prune')->daily();
+Schedule::command('keyring:prune')->daily()->onOneServer();
 ```
+
+Either way it only runs if your server runs Laravel's scheduler (`* * * * * php artisan schedule:run`), as any scheduled task does.
 
 It runs Laravel's `model:prune` for Keyring's models, including your own [device model](#your-own-device-model). Laravel's plain `model:prune` only looks in `app/Models`, so it won't find them on its own.
 
@@ -495,3 +504,5 @@ In `Keyring\Events`:
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
 | `SessionsRevoked` | `user`, `count`: after signing out everywhere else, ending one session, or an administrator's `keyring:sign-out` for one user |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
+| `AccessRefused` | `user`, `resource` (`device`), `id`: a request to sign out a device that isn't the user's, answered with a 404 |
+| `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`): a "this wasn't me" link that was refused |

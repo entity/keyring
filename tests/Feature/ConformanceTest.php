@@ -35,6 +35,9 @@ class ConformanceTest extends TestCase
     /** @var list<string> */
     private array $unchecked = [];
 
+    /** Keyring's own tests run on Laravel's default hasher. */
+    private bool $acknowledgesBcrypt = true;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -145,6 +148,39 @@ class ConformanceTest extends TestCase
         $this->expectExceptionMessage('user/sessions');
 
         $this->test_keyring_checks_the_session_on_every_signed_in_route();
+    }
+
+    protected function keyringAcknowledgesBcryptLimit(): bool
+    {
+        return $this->acknowledgesBcrypt;
+    }
+
+    public function test_the_suite_fails_while_bcrypt_limits_passwords_to_72_bytes(): void
+    {
+        $this->acknowledgesBcrypt = false;
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('Set HASH_DRIVER=argon2id');
+
+        $this->test_keyring_takes_passwords_of_64_characters();
+    }
+
+    public function test_the_suite_passes_with_a_hasher_that_reads_a_whole_password(): void
+    {
+        $this->acknowledgesBcrypt = false;
+        config(['hashing.driver' => 'argon2id']);
+
+        $this->test_keyring_takes_passwords_of_64_characters();
+    }
+
+    public function test_the_suite_fails_when_the_longest_password_allowed_is_under_64_characters(): void
+    {
+        config(['keyring.passwords.max' => 63]);
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('keyring.passwords.max');
+
+        $this->test_keyring_takes_passwords_of_64_characters();
     }
 
     public function test_the_suite_fails_when_a_mandatory_step_was_taken_out(): void
