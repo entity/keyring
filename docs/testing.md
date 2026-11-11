@@ -270,12 +270,13 @@ The suite checks that:
 
 - a correct password either signs in or leads to the challenge page,
 - a wrong password and an unknown account give the same error,
+- registering with an address that has an account is answered like one that hasn't, and signs nobody in (skipped with `registration.reveal_taken`),
 - protected attributes can't change outside Keyring's flows,
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
-If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
+If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password` and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.
 
 `KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

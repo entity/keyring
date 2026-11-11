@@ -57,6 +57,22 @@ trait KeyringConformance
         return [];
     }
 
+    /**
+     * What your registration form posts for an address. Override it when
+     * your CreatesNewUsers action validates other fields.
+     *
+     * @return array<string, mixed>
+     */
+    protected function keyringRegistration(string $email): array
+    {
+        return [
+            'name' => 'Avery Quinn',
+            Keyring::email() => $email,
+            'password' => 'Xk4-mR9vTq2-Lw7bZp5-Hd3n',
+            'password_confirmation' => 'Xk4-mR9vTq2-Lw7bZp5-Hd3n',
+        ];
+    }
+
     public function test_keyring_signs_in_with_a_password_or_asks_for_more(): void
     {
         $user = $this->keyringUser();
@@ -97,6 +113,32 @@ trait KeyringConformance
         $this->assertNotSame('', $wrong);
         $this->assertSame($wrong, $unknown, 'Login errors must not reveal which accounts exist.');
         $this->assertGuest();
+    }
+
+    public function test_keyring_registers_a_taken_address_like_a_free_one(): void
+    {
+        if (! Keyring::hidesRegisteredAddresses()) {
+            $this->markTestSkipped('Registration is off, or the registration.reveal_taken option lets it say when an address is taken.');
+        }
+
+        $field = Keyring::email();
+        $answers = [];
+
+        foreach (['taken' => (string) $this->keyringUser()->getAttribute($field), 'free' => 'nobody-'.uniqid().'@example.com'] as $case => $address) {
+            $response = $this->post(route('register.store'), $this->keyringRegistration($address));
+
+            $answers[$case] = [
+                'status' => $response->getStatusCode(),
+                'location' => $response->headers->get('Location'),
+                'flashed' => session('status'),
+                'errors' => $this->sessionErrors()->toArray(),
+                'signed in' => Keyring::guard()->check(),
+            ];
+        }
+
+        $this->assertSame([], $answers['free']['errors'], 'Your CreatesNewUsers action refused the form. Return one it accepts from keyringRegistration().');
+        $this->assertSame($answers['free'], $answers['taken'], 'Registration must answer the same for an address that has an account. Don\'t check in your CreatesNewUsers action whether it\'s taken: Keyring does.');
+        $this->assertFalse($answers['free']['signed in'], 'Registering must not sign a new user in, or a taken address would show.');
     }
 
     public function test_keyring_protects_email_and_password(): void

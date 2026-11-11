@@ -49,7 +49,7 @@ Once Keyring handles changing the password (`updatePasswords()`) or the email (`
 | `GET` | `/reset-password/{token}` | `password.reset` | guest |
 | `POST` | `/reset-password` | `password.update` | guest, limited |
 | `GET` | `/email/verify` | `verification.notice` | `auth` |
-| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | `auth`, signed, limited |
+| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | signed, limited |
 | `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
 `auth` here is `auth:{guard}`, Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute by default. The email routes exist only with `Features::emailChanges()`, the password route with `Features::updatePasswords()`, the reset routes with `Features::resetPasswords()`, and the verification routes with `Features::emailVerification()`.
@@ -140,7 +140,7 @@ The user is then redirected to the forgot password page (or the login page, when
 
 ### The Old Address Is Reserved
 
-While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. That goes for lookalikes too: an address that differs only in case, accents, letter width or characters that don't show is held back with it, because MySQL's and MariaDB's default collations take those for the same address and their unique index would refuse to give it back. Another account asking to move to it gets the same "address in use" email as for any taken address. `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()` wherever users are created. The published `CreateNewUser` action does:
+While a change can still be reverted, nobody else can take the address it replaced. Otherwise someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. That goes for lookalikes too: an address that differs only in case, accents, letter width or characters that don't show is held back with it, because MySQL's and MariaDB's default collations take those for the same address and their unique index would refuse to give it back. Another account asking to move to it gets the same "address in use" email as for any taken address. [Registration](sign-in-flow.md#registration) counts it as taken too, so it's answered like any address that has an account. Where your own code creates users or gives them a new address (an admin screen, an import), `Keyring\Rules\UnreservedAddress` refuses it with Laravel's "has already been taken" message, so use it next to `Rule::unique()`:
 
 ```php
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
@@ -207,7 +207,7 @@ Keyring runs your action as one of its own flows, so it may change the protected
 - with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
 - and `confirmed`, so the request needs `password_confirmation`.
 
-`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does in `validate()`: `PasswordRules::for(context: [$input['name'], $input['email']])`.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:
 
@@ -240,6 +240,8 @@ Resets use Laravel's password broker (`passwords.broker`, or your default), so i
 ## Email Verification
 
 With `Features::emailVerification()` on, Keyring provides Laravel's usual verification routes and the `verify-email` page. Verification links are built from `APP_URL` and signed over the path only (`signed:relative`), so a forged `Host` header can't redirect them. After verifying, users go to `home` with `?verified=1`.
+
+A link followed by a browser that isn't signed in sends it to the login page, and back to the link after signing in, as Laravel's `auth` middleware would. Opening the link never verifies anything without the account's password as well. With [registration that doesn't reveal who has an account](sign-in-flow.md#without-revealing-who-has-an-account), which is the default, that's how every new user verifies: they can't sign in before they've followed the link, signing in from the browser that followed it is what verifies the address, and a finished password reset verifies it too.
 
 If you've already set `VerifyEmail::createUrlUsing()` yourself, Keyring leaves it alone.
 

@@ -41,7 +41,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model. Users who register themselves must verify their address before adding a sign-in method, so implement `MustVerifyEmail` too:
+`keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model. Users who register themselves verify their address before they can sign in, so implement `MustVerifyEmail` too:
 
 ```php
 use Illuminate\Contracts\Auth\MustVerifyEmail;

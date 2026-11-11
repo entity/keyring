@@ -22,7 +22,7 @@ use function Laravel\Prompts\multiselect;
 #[Description('Install Keyring: pick sign-in methods and features, then publish the config, migrations, a provider and your actions')]
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
-        {--feature=* : A feature to turn on, replacing the defaults (registration and reset-passwords): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
+        {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords and email-verification): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
         {--emails : Register the emails that tell users their password or sign-in methods changed (the default with a second sign-in method)}
         {--no-emails : Register no security emails, only the ones a flow needs}
         {--force : Overwrite files that already exist}')]
@@ -172,10 +172,10 @@ class InstallCommand extends Command
                     Features::emailChanges() => 'Email changes, confirmed and undoable',
                     Features::securityLog() => 'Security log and "was this you?" alerts',
                 ],
-                default: [Features::registration(), Features::resetPasswords(), ...$factors === [] ? [] : [Features::manageAuthenticators()]],
+                default: [Features::registration(), Features::resetPasswords(), Features::emailVerification(), ...$factors === [] ? [] : [Features::manageAuthenticators()]],
                 scroll: 8,
                 hint: 'Signing in and out, challenges and step-up are always on.',
-            ) : [Features::registration(), Features::resetPasswords()];
+            ) : [Features::registration(), Features::resetPasswords(), Features::emailVerification()];
         }
 
         // Users can't set up the sign-in methods without it.
@@ -184,12 +184,12 @@ class InstallCommand extends Command
             $this->components->info('Turned on managing sign-in methods, so users can set up the ones you picked.');
         }
 
-        // Anyone can register someone else's address, so they must prove it
-        // before adding a sign-in method that would outlive a password reset.
-        if (array_all([Features::registration(), Features::manageAuthenticators()], fn (string $feature) => in_array($feature, $chosen, true))
-            && ! in_array(Features::emailVerification(), $chosen, true)) {
+        // Registering answers the same whether or not an address has an
+        // account, so a new user signs in once they've proved theirs. Anyone
+        // can register someone else's address, too.
+        if (in_array(Features::registration(), $chosen, true) && ! in_array(Features::emailVerification(), $chosen, true)) {
             $chosen[] = Features::emailVerification();
-            $this->components->info('Turned on email verification, so users prove their address before adding a sign-in method.');
+            $this->components->info('Turned on email verification, so users prove their address before they sign in. Registration needs it unless you set registration.reveal_taken in config/keyring.php.');
         }
 
         return array_values(array_intersect(Features::all(), $chosen));

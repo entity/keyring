@@ -143,6 +143,7 @@ Keyring::notifications([
     'confirm_email_change' => Notifications\ConfirmEmailChange::class,
     'email_change_notice' => Notifications\EmailChangeNotice::class,
     'email_address_in_use' => Notifications\EmailAddressInUse::class,
+    'already_registered' => Notifications\AlreadyRegistered::class,
     'password_changed' => Notifications\PasswordChanged::class,
     'authenticator_added' => Notifications\AuthenticatorAdded::class,
     'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
@@ -184,7 +185,7 @@ The published notices share an abstract `SecurityNotice` in the same folder, whi
 
 ### Emails a Flow Needs
 
-Four emails are part of a flow rather than a notice. The flow can't work without one, so it throws `Keyring\Exceptions\MissingNotification`, naming the type, when none is registered:
+Five emails are part of a flow rather than a notice. The flow can't work without one, so it throws `Keyring\Exceptions\MissingNotification`, naming the type, when none is registered:
 
 | Type | Sent to | Passes |
 |---|---|---|
@@ -192,12 +193,13 @@ Four emails are part of a flow rather than a notice. The flow can't work without
 | `confirm_email_change` | The new address, during an email change. | `url` and `expiresAt` |
 | `email_change_notice` | The current address, during an email change. | `email` (the new address, with most of its name hidden), `revertUrl`, and `confirmUrl` when this address must confirm too |
 | `email_address_in_use` | An address someone tried to change their email to, when it already has an account. | |
+| `already_registered` | An address someone tried to [register](sign-in-flow.md#without-revealing-who-has-an-account) with, when it already has an account. | `loginUrl`, and `resetUrl` when password resets are on |
 
-`verification_code` sends straight away; the three email change emails are sent after the response, so timing doesn't reveal whether an address has an account. An email change is refused before anything is saved when one of its three is missing.
+`verification_code` sends straight away; the three email change emails and `already_registered` are sent after the response, so timing doesn't reveal whether an address has an account. An email change is refused before anything is saved when one of its three is missing, and so is a registration without `already_registered`, unless `registration.reveal_taken` is on.
 
-The email change emails, and the copies of `email_changed` and `email_change_reverted` that go to an address the account no longer has, are sent to a bare address: the `$notifiable` is an `AnonymousNotifiable` routed to mail, not your user. Keep `via()` and `toMail()` from reading user attributes in those classes.
+The email change emails, `already_registered`, and the copies of `email_changed` and `email_change_reverted` that go to an address the account no longer has, are sent to a bare address: the `$notifiable` is an `AnonymousNotifiable` routed to mail, not your user. Keep `via()` and `toMail()` from reading user attributes in those classes.
 
-Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. You change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response.
+Password resets and email verification use Laravel's own `ResetPassword` and `VerifyEmail` notifications, with links Keyring builds from `APP_URL`. You change them the usual Laravel way, for example by overriding `sendPasswordResetNotification()` on your user model. The reset email is also sent after the response, and so is a new user's verification email, unless `registration.reveal_taken` is on.
 
 ### Your Own Templates
 

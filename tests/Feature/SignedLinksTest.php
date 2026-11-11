@@ -35,6 +35,8 @@ it('builds the "this wasn\'t me" link from APP_URL, not the Host header', functi
 });
 
 it('builds email verification links from APP_URL, not the Host header', function () {
+    // A signed-in user asks for the link, which takes registration that signs new users in.
+    revealTakenAddresses();
     $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
 
     $this->actingAs($user)
@@ -67,6 +69,7 @@ describe('with a forwarded prefix the app trusts', function () {
     });
 
     it('leaves it out of what a verification link signs', function () {
+        revealTakenAddresses();
         $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);
         $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
 

@@ -48,19 +48,21 @@ describe('keyring:install', function () {
         $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
     });
 
-    it('installs the password, registration and password resets without asking', function () {
+    it('installs the password, registration, password resets and email verification without asking', function () {
         $this->artisan('keyring:install', ['--no-interaction' => true])->assertSuccessful();
 
         $config = require config_path('keyring.php');
         $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
 
-        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords()])
+        expect($config['features'])->toBe([Features::registration(), Features::resetPasswords(), Features::emailVerification()])
+            ->and($config['registration'])->toBe(['reveal_taken' => false])
             ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
             // The emails a flow needs are registered, the security notices left for later.
             ->and($provider)->toContain("            'verification_code' => Notifications\VerificationCode::class,")
+            ->toContain("            'already_registered' => Notifications\AlreadyRegistered::class,")
             ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
-            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(15)
+            ->and(glob($this->sandbox.'/app/Notifications/Keyring/*.php'))->toHaveCount(16)
             ->and($provider)->toContain('Password::class,')
             ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
             // Every action, so turning a feature on later works.
@@ -100,14 +102,14 @@ describe('keyring:install', function () {
         expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toContain('RecoveryCodes::class,');
     })->with(['passkeys', 'security-keys', 'email-codes']);
 
-    it('turns on email verification when registered users can add sign-in methods', function () {
-        $this->artisan('keyring:install', ['--factor' => ['passkeys'], '--feature' => [Features::registration()], '--no-interaction' => true])
+    it('turns on email verification with registration, which leaves new users signed out until they verify', function (array $factors) {
+        $this->artisan('keyring:install', ['--factor' => $factors, '--feature' => [Features::registration()], '--no-interaction' => true])
             ->expectsOutputToContain('Turned on email verification')
             ->expectsOutputToContain('MustVerifyEmail')
             ->assertSuccessful();
 
         expect((require config_path('keyring.php'))['features'])->toContain(Features::emailVerification());
-    });
+    })->with(['the password alone' => [[]], 'a passkey' => [['passkeys']]]);
 
     it('refuses sign-in methods and features it doesn\'t know, before writing anything', function () {
         $this->artisan('keyring:install', ['--factor' => ['totpp'], '--feature' => ['devicez'], '--no-interaction' => true])

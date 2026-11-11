@@ -94,12 +94,18 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
 
     if (Features::enabled(Features::emailVerification())) {
         Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
-        Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['signed:relative', 'throttle:keyring'])->name('verification.verify');
         Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware('throttle:keyring')->name('verification.send');
     }
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });
+
+// The link in a verification email. It's often opened signed out, in which
+// case the controller sends the browser to sign in first: opening it alone
+// verifies nothing, so a mail scanner changes nothing either.
+if (Features::enabled(Features::emailVerification())) {
+    Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['signed:relative', 'throttle:keyring'])->name('verification.verify');
+}
 
 // Emailed links. GET only shows a page with a button and the POST acts, so a
 // mail scanner that opens a link changes nothing.

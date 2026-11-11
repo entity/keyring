@@ -52,6 +52,7 @@ use Keyring\KeyringManager;
  * @method static string|null recordedIp(\Illuminate\Http\Request $request)
  * @method static void unlock(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static bool allowsSignIn(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
+ * @method static bool hidesRegisteredAddresses()
  * @method static bool allowsEnrollment(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static string normalizeUsername(string $username)
  * @method static \Keyring\KeyringManager normalizeUsernamesUsing(\Closure $callback)

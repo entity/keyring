@@ -35,13 +35,13 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-The command asks which sign-in methods you want besides the password, which [features](quick-start.md#adding-features) to turn on, and whether to email users when their password or sign-in methods change. Recovery codes come with any second sign-in method. Picking registration with a sign-in method also turns on email verification, since users who register themselves must prove their address before adding one. Without prompts (`--no-interaction`, or in CI) you get the password, registration and password resets, and the security emails whenever you pick a second sign-in method. You can also answer with options:
+The command asks which sign-in methods you want besides the password, which [features](quick-start.md#adding-features) to turn on, and whether to email users when their password or sign-in methods change. Recovery codes come with any second sign-in method. Picking registration also turns on email verification, since by default [new users sign in once they've verified their address](sign-in-flow.md#without-revealing-who-has-an-account). Without prompts (`--no-interaction`, or in CI) you get the password, registration, password resets and email verification, and the security emails whenever you pick a second sign-in method. You can also answer with options:
 
 ```bash
 php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --emails
 ```
 
-`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration` and `reset-passwords`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--emails` and `--no-emails` say whether the provider registers the four security notices about password and sign-in method changes; the classes are published either way.
+`--factor` takes `totp`, `passkeys`, `security-keys` or `email-codes`. `--feature` takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`, and replaces the defaults (`registration`, `reset-passwords` and `email-verification`), so list those too if you want them. An unknown value stops the command before it writes anything, and an unknown feature in `config/keyring.php` stops the app booting, rather than leaving that feature off. `--emails` and `--no-emails` say whether the provider registers the four security notices about password and sign-in method changes; the classes are published either way.
 
 Pass `--force` to overwrite files that already exist; without it, existing files are skipped, and with `config/keyring.php` already there it doesn't ask which features to turn on. It's safe to run again: the migrations are only published once, so they're never added twice under new timestamps. Running it again on an older install adds any new actions, but leaves your provider alone, so register them there yourself. Until you do, the routes that need them fail with an exception that says which `Keyring::*Using()` call is missing.
 
@@ -53,7 +53,7 @@ If you're moving from Fortify, read [Upgrading From Fortify](upgrading-from-fort
 
 | File | What it is |
 |---|---|
-| `config/keyring.php` | A short config: the guard, username, home, your features and enrollment page. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
+| `config/keyring.php` | A short config: the guard, username, home, your features, how registration answers and your enrollment page. Every other option keeps Keyring's default; copy any from [Configuration](configuration.md) to change it. |
 | `database/migrations/*_create_keyring_*_table.php` | Five tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes` and `keyring_events`. They're all created, so turning a feature on later needs no new migration. Tables for features you don't use stay empty. |
 | `app/Providers/KeyringServiceProvider.php` | Where you register sign-in methods, the policy, your actions and your emails. It lists the sign-in methods you picked, and it's added to `bootstrap/providers.php` for you. |
 | `app/Actions/Keyring/*.php` | Your code for the features that need it, all published and registered so a feature works as soon as you turn it on: registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
@@ -98,7 +98,7 @@ The trait does three things:
 
 The published actions hash the password themselves, so they work with or without the `hashed` cast shown above. With it, a password that's already hashed isn't hashed again.
 
-Implement `MustVerifyEmail` together with `Features::emailVerification()`; one doesn't work without the other. With the interface but not the feature, registering throws an exception saying so, before anything is saved. Users who implement it must verify their address before they can add a sign-in method. With registration and sign-in methods both on, that's required: see [Managing Authenticators](authenticators.md#email-verification).
+Implement `MustVerifyEmail` together with `Features::emailVerification()`; one doesn't work without the other. With the interface but not the feature, registering throws an exception saying so, before anything is saved. With registration on you need both, unless you set [`registration.reveal_taken`](sign-in-flow.md#saying-when-an-address-is-taken): a new user is signed out until they've verified their address, so the app doesn't boot without the feature and registering throws without the interface. Users who implement it must also verify their address before they can add a sign-in method: see [Managing Authenticators](authenticators.md#email-verification).
 
 Keyring looks users up by the `email` attribute by default (see `username` in [Configuration](configuration.md#guard-and-users)). Lookups trim and lowercase the input, so store addresses the same way. `Keyring::normalizeUsername()` does exactly that, and the published `CreateNewUser` action uses it. To normalise differently, see [Finding the User](sign-in-flow.md#finding-the-user).
 

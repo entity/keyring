@@ -14,6 +14,8 @@
     - [Sending Codes](#sending-codes)
 - [Finishing the Login](#finishing-the-login)
 - [Registration](#registration)
+    - [Without Revealing Who Has an Account](#without-revealing-who-has-an-account)
+    - [Saying When an Address Is Taken](#saying-when-an-address-is-taken)
 - [Signing Out](#signing-out)
 - [The Verification Pipeline](#the-verification-pipeline)
     - [Customising the Steps](#customising-the-steps)
@@ -48,7 +50,7 @@ The pending attempt is encrypted JSON in the session. It lasts `pending_logins.k
 | `POST` | `/login/challenge/{factor}` | `keyring.login.verify` | Verify the next factor. |
 | `POST` | `/login/challenge/{factor}/send` | `keyring.login.send` | Send a code (email codes). |
 | `GET` | `/register` | `register` | The registration page. |
-| `POST` | `/register` | `register.store` | Create an account and sign in. Uses the `keyring` rate limiter. |
+| `POST` | `/register` | `register.store` | Create an account. Uses the `keyring` rate limiter. See [Registration](#registration). |
 | `POST` | `/logout` | `logout` | Sign out. |
 
 The login and registration routes are for guests only, and `/logout` needs `auth:{guard}`. The registration routes exist only when the `registration` feature is on. The `keyring` rate limiter allows 6 a minute by default; see [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits).
@@ -107,9 +109,9 @@ Keyring asks wherever a session starts or carries on:
 - A sign in that's waiting for its second factor.
 - A "remember me" cookie. The session it would have carried on is ended, so the same cookies don't sign the account back in once it's allowed again.
 - Each request of a session that's already signed in. It's signed out, with a `session_ended` entry whose reason is `not_allowed`.
-- Registration, which doesn't sign the new user in.
+- Registration that [signs new users in](#saying-when-an-address-is-taken), which leaves this one signed out.
 
-An account that's turned away gets the same answer as one that doesn't exist. What doesn't sign anyone in still works for it: a password reset, and the emailed links that confirm or undo an email change or report a device.
+An account that's turned away gets the same answer as one that doesn't exist. So does one whose address isn't verified yet, when registration [doesn't reveal who has an account](#without-revealing-who-has-an-account). What doesn't sign anyone in still works for it: a password reset, and the emailed links that confirm or undo an email change or report a device.
 
 The callback runs on every signed-in request, so answer from the user it's given rather than with a query.
 
@@ -247,18 +249,66 @@ When the requirement is met, Keyring:
 
 ## Registration
 
-`POST /register` passes the whole request to your `CreatesNewUsers` action (published to `app/Actions/Keyring/CreateNewUser.php` and registered with `Keyring::createUsersUsing()`). The action validates and returns the new user. Keyring then dispatches Laravel's `Registered` event and signs the user in, counting the password they just chose as proved. It doesn't consult the policy, since the user has no other factors yet.
+`POST /register` passes the whole request to your `CreatesNewUsers` action (published to `app/Actions/Keyring/CreateNewUser.php` and registered with `Keyring::createUsersUsing()`). The action has two methods:
 
-To leave new users signed out, for example until they verify their email or an admin approves them, pass `false` or a callback to `signInAfterRegistering()`. They're sent to the login page with the `registered` status:
+- `validate(array $input): array` checks the form and returns what `create()` needs. The published one validates `name`, `email`, `password` and `password_confirmation` (with `PasswordRules::for()`, see [Password Rules](protected-changes.md#password-rules)).
+- `create(array $input)` saves the user from what `validate()` returned.
+
+Change both to fit your app, but leave out any check that the address is free. Keyring makes it, after `validate()` has passed and before `create()` is called: an address is taken when an account has it (a soft deleted one, or one a global scope of yours hides, included) or when it's [held for its previous owner](protected-changes.md#the-old-address-is-reserved) while their email change can be undone. What Keyring does with a taken address is the `registration.reveal_taken` option.
+
+### Without Revealing Who Has an Account
+
+By default (`registration.reveal_taken` is `false`), nobody can use the form to find out whether an address has an account. This is what OWASP ASVS 6.3.8 asks of registration.
+
+- The answer is always the same: a redirect to the login page with the `registration-received` status ("Thanks for registering. We've emailed that address with what to do next."), or that status as JSON. Nobody is signed in.
+- Validation errors from your action are shown as usual. They're the same for every address, because your action never looks at whether it's taken.
+- **A free address** gets its account, and Laravel's `Registered` event is dispatched once the response has been sent, which emails the verification link.
+- **A taken address** gets nothing created or changed. Once the response has been sent, Keyring emails it your `already_registered` [notification](security-log-and-emails.md#emails-a-flow-needs), which says someone tried to register and links to the login page and, with `Features::resetPasswords()`, the forgot password page. If the account there was never verified, it's sent another verification link instead, since the first may be lost or expired.
+- An address is mailed five times an hour at most by registration (`limits.notices` every `limits.notices_per`), verification links included, so the form can't be used to fill someone's inbox. Past that the answer stays the same and nothing is sent.
+- The whole request takes at least `timebox` (250ms), whether the form was refused, an account was created or the address was taken, and both of the last two hash one password. No email is sent before the response.
+- Registration keeps the `keyring` rate limiter: six a minute per IP address.
+
+A new user can't sign in until their address is verified. If they could, anyone could register an address with a password of their own and try to sign in with it: success would mean the address was free. So until then a correct password is answered like a wrong one, in the same time.
+
+Verifying takes the emailed link and the password together:
+
+1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session and sends them to the login page with the `sign-in-to-verify` status. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
+2. They sign in. From the browser that followed the link, their account may sign in, and doing so verifies the address (Laravel's `Verified` event fires). They land where the link would have taken them: `home` with `?verified=1`.
+
+From then on they sign in anywhere, like anyone else. A link works until it expires (`auth.verification.expire`, 60 minutes), and registering again with the same address sends a new one. A finished [password reset](protected-changes.md#resetting-the-password) verifies the address too, since its link went to the same inbox. That's the way in for the owner of an address someone else registered first: they can't verify an account whose password they don't know, and whoever registered it never sees the link.
+
+This needs email verification, and Keyring says so rather than leaking quietly:
+
+- With registration on and `Features::emailVerification()` off, the app doesn't boot: it throws `Keyring\Exceptions\EmailVerificationRequired`.
+- With a user model that doesn't implement `MustVerifyEmail`, or no `already_registered` notification, `POST /register` throws before anything is saved.
+
+It also means an account that isn't verified can't be signed in at all, however it got that way: a session whose user loses `email_verified_at` is signed out on its next request. Mark accounts you create yourself (an import, a seeder, a social login) as verified.
+
+Three things are still yours to keep quiet. A username of your own that has to be unique (a handle, say) will say when it's taken, because your action checks it. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other, but anything your action's `create()` does that takes noticeably longer than the timebox will show. And your mail provider's bounce or delivery reports are outside the request altogether.
+
+### Saying When an Address Is Taken
+
+Many apps would rather tell someone straight away that they already have an account. Set the option, and registration works as it does in Fortify and Laravel's starter kits:
+
+```php
+// config/keyring.php
+'registration' => [
+    'reveal_taken' => true,
+],
+```
+
+- A taken address gets Laravel's "has already been taken" error on the email field, next to any other validation errors. Nothing is emailed.
+- A new user is signed in straight away, counting the password they just chose as proved, and `Registered` is dispatched during the request. The policy isn't consulted, since they have no other factors yet. The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
+- Users can sign in before verifying their address, and email verification is optional.
+
+This tells anyone who asks whether an address has an account: the error says so, and so does being signed in. It's the trade most consumer apps make, and it doesn't meet ASVS 6.3.8.
+
+To leave new users signed out in this mode, for example until an admin approves them, pass `false` or a callback to `signInAfterRegistering()`. They're sent to the login page with the `registered` status:
 
 ```php
 Keyring::signInAfterRegistering(false);
 Keyring::signInAfterRegistering(fn (User $user, Request $request) => ! $user->needs_approval);
 ```
-
-The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
-
-The published action validates `name`, `email`, `password` and `password_confirmation` (with `PasswordRules::for()`, see [Password Rules](protected-changes.md#password-rules)). Change it to fit your app.
 
 ## Signing Out
 
@@ -379,7 +429,7 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login, otherwise `keyring::keyring.invalid` on the factor's field. |
 | `LockoutResponse` | Too many attempts. An account's own limit refusing a typed username answers with `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message, or `keyring::keyring.locked` when a password reset is the way back in. |
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
-| `RegisterResponse` | A new user registered and was signed in. | The same as `AuthenticatedResponse`. |
+| `RegisterResponse` | A new user registered and was signed in, with [`registration.reveal_taken`](#saying-when-an-address-is-taken). | The same as `AuthenticatedResponse`. |
 | `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
 | `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, coming back afterwards. JSON: `401`. Both send `Clear-Site-Data`. |
 | `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, coming back afterwards. JSON: `423` with `redirect`. |
@@ -451,7 +501,7 @@ Other requests are redirected (back, or to `redirect`) with the slug flashed as 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `reset-link-sent`, `sessions-revoked`, `signed-out` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
 
 Swap it like the others. Your class receives the same named arguments:
 
@@ -470,7 +520,7 @@ Keyring renders these pages:
 | `login` | `canResetPassword`, `canRegister`, `status` (a translated message) |
 | `challenge` | See [Page Props](#page-props). Used for logins. |
 | `confirm` | The same props, with `purpose: "confirm"`. Used for step-up. |
-| `register` | none. The published action expects `name`, `email`, `password` and `password_confirmation`. |
+| `register` | none. The published action expects `name`, `email`, `password` and `password_confirmation`. Afterwards the user is on the login page with the `registration-received` status, unless [registration signs them in](#saying-when-an-address-is-taken). |
 | `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` (a translated message) |

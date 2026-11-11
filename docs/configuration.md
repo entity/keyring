@@ -4,6 +4,7 @@
 - [Durations](#durations)
 - [Guard and Users](#guard-and-users)
 - [Features](#features)
+- [Registration](#registration)
 - [Redirects](#redirects)
 - [Routes](#routes)
 - [WebAuthn](#webauthn)
@@ -25,7 +26,7 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `registration` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
@@ -55,7 +56,7 @@ use Keyring\Features;
 'features' => [
     Features::registration(),
     Features::resetPasswords(),
-    // Features::emailVerification(),
+    Features::emailVerification(),
     // Features::updatePasswords(),
     // Features::manageAuthenticators(),
     // Features::devices(),
@@ -64,9 +65,21 @@ use Keyring\Features;
 ],
 ```
 
-Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration and password resets. What each feature adds is in [Adding Features](quick-start.md#adding-features).
+Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration, password resets and email verification. What each feature adds is in [Adding Features](quick-start.md#adding-features).
 
 Check for a feature in your own code with `Features::enabled(Features::devices())`. `Features::all()` lists them all, which is handy in tests.
+
+## Registration
+
+```php
+'registration' => [
+    'reveal_taken' => false,
+],
+```
+
+By default registering answers the same whether or not the address has an account: new users sign in once they've followed the link emailed to them, and an address that already has an account is emailed that someone tried to register with it. That needs `Features::emailVerification()` and a `MustVerifyEmail` user model, and the app doesn't boot with registration on and email verification off.
+
+Set `reveal_taken` to `true` to answer "has already been taken" on the form and sign new users in straight away, which lets anyone check whether an address has an account. [Registration](sign-in-flow.md#registration) says exactly what each choice reveals.
 
 ## Redirects
 
@@ -282,7 +295,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `timebox` is the minimum time a refused verification takes, so timing doesn't reveal whether an account exists or whether a password refused for another reason was right. It covers every pipeline step, so a request refused by a rate limit or by validation waits too. Verifications that go through return straight away.
 
-`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until the count is forgotten, `remember_failures_for` after the first failure of the run. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. Set `lock_after` to keep an account locked out of signing in once it has been locked that many times in a day, until its password is reset (see [Locking Until a Reset](security.md#locking-until-a-reset)). An account can be sent `codes` codes for one factor every `codes_per`, and `notices` security notices of one kind, or email change requests, every `notices_per`. See [Rate Limiting](security.md#rate-limiting).
+`limits` are the default attempts per minute for each factor, per account and per IP address, and the failures in a row an account's factor allows before it's refused (`null` for no cap), until the count is forgotten, `remember_failures_for` after the first failure of the run. Each lockout lasts twice as long as the one before, up to `longest_lock`, or `longest_ip_lock` for a whole IP address. Set `lock_after` to keep an account locked out of signing in once it has been locked that many times in a day, until its password is reset (see [Locking Until a Reset](security.md#locking-until-a-reset)). An account can be sent `codes` codes for one factor every `codes_per`, and `notices` security notices of one kind, or email change requests, every `notices_per`; an address is mailed that often by registration too. See [Rate Limiting](security.md#rate-limiting).
 
 Keyring's form routes (registration, password reset, enrollment confirmation, email changes, verification emails and the emailed links) use a named rate limiter, `keyring`, which allows 6 requests a minute per user, or per IP address for guests. Define your own `keyring` limiter in a service provider's `boot()` method to change it:
 
@@ -325,7 +338,7 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::page($name, $component)` | Changes the component a page renders. See [Pages](sign-in-flow.md#pages). |
 | `Keyring::risk()->signals([...])->respond(...)` | Configures risk signals and actions. `Keyring::risk()->push(...)` adds to the signals already on. See [Risk](risk.md). |
 | `Keyring::notifications([...])` | Registers your notification class for each email Keyring sends. A security notice with none isn't sent, and unknown types throw an `InvalidArgumentException`. See [Security Emails](security-log-and-emails.md#security-emails). |
-| `Keyring::createUsersUsing($action)` | Sets the registration action. |
+| `Keyring::createUsersUsing($action)` | Sets the registration action. See [Registration](sign-in-flow.md#registration). |
 | `Keyring::resetUserPasswordsUsing($action)` | Sets the password reset action. See [Resetting the Password](protected-changes.md#resetting-the-password). |
 | `Keyring::updateUserPasswordsUsing($action)` | Sets the password change action. See [Changing the Password](protected-changes.md#changing-the-password). |
 | `Keyring::validateEmailChangesUsing($action)` | Sets the email change validation action. See [Requesting a Change](protected-changes.md#requesting-a-change). |
@@ -343,9 +356,10 @@ php artisan vendor:publish --tag=keyring-lang
 | `Keyring::describeDevicesUsing($callback)` | Names devices your own way, in place of "Firefox on Windows". See [Device Names](devices-and-sessions.md#device-names). |
 | `Keyring::findUsersUsing($callback)` | Finds the user a typed username belongs to your own way, for a password sign in. See [Finding the User](sign-in-flow.md#finding-the-user). |
 | `Keyring::normalizeUsernamesUsing($callback)` | Normalises usernames your own way. See [Finding the User](sign-in-flow.md#finding-the-user). |
-| `Keyring::signInAfterRegistering($when)` | Whether registering signs the user in. See [Registration](sign-in-flow.md#registration). |
+| `Keyring::signInAfterRegistering($when)` | Whether registering signs the user in, where `registration.reveal_taken` lets it. See [Saying When an Address Is Taken](sign-in-flow.md#saying-when-an-address-is-taken). |
 | `Keyring::findUser($request)` | The user a password sign in is for, for a primary factor of your own. |
 | `Keyring::signsInAfterRegistering($user, $request)` | Whether registering signs this user in, for a registration flow of your own. |
+| `Keyring::hidesRegisteredAddresses()` | Whether registration answers the same for a taken address, which it does unless `registration.reveal_taken` is on. |
 | `Keyring::withoutProtection($callback, reason: ...)` | Changes protected attributes outside Keyring's flows. See [Protected Changes](protected-changes.md#bypassing-protection). |
 | `Keyring::activity($user, $limit = 25)` | Recent security log entries. |
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |

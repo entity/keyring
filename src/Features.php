@@ -9,6 +9,7 @@ namespace Keyring;
  *     'features' => [
  *         Features::registration(),
  *         Features::resetPasswords(),
+ *         Features::emailVerification(),
  *     ],
  */
 final class Features
@@ -38,7 +39,8 @@ final class Features
     }
 
     /**
-     * Sign up at /register, through your CreatesNewUsers action.
+     * Sign up at /register, through your CreatesNewUsers action. Needs
+     * emailVerification() too, unless "registration.reveal_taken" is on.
      */
     public static function registration(): string
     {

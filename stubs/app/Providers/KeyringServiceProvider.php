@@ -49,6 +49,7 @@ class KeyringServiceProvider extends ServiceProvider
             'confirm_email_change' => Notifications\ConfirmEmailChange::class,
             'email_change_notice' => Notifications\EmailChangeNotice::class,
             'email_address_in_use' => Notifications\EmailAddressInUse::class,
+            'already_registered' => Notifications\AlreadyRegistered::class,
             'password_changed' => Notifications\PasswordChanged::class,
             'authenticator_added' => Notifications\AuthenticatorAdded::class,
             'authenticator_removed' => Notifications\AuthenticatorRemoved::class,

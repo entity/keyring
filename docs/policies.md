@@ -151,7 +151,7 @@ The closure must cope with `null` devices and risk, and give its strictest answe
 - The policy is asked again after every factor the user verifies during a login. A risk assessment can raise it partway through.
 - When the [risk response](risk.md#responding-to-risk) asks for a step-up and the user has enough authenticators, the requirement becomes at least `aal2()`.
 - The policy applies to logins, and to [fresh verification](step-up.md#fresh-verification), which asks for as much as a login would. [Step-up](step-up.md) to a level sets its own requirement.
-- [Registration](sign-in-flow.md#registration) signs the new user in with their password without asking the policy, since they can't have other factors yet.
+- [Registration](sign-in-flow.md#registration) doesn't sign anyone in by default. Where `registration.reveal_taken` has it sign the new user in, it does so with their password without asking the policy, since they can't have other factors yet.
 - Users can't remove an authenticator if what's left can't sign in, or can't meet the policy (unless it uses `ifEnrolled()`). See [Removing Authenticators](authenticators.md#removing-authenticators).
 
 ## Checking Requirements in Code

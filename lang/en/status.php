@@ -21,8 +21,10 @@ return [
     'password-reset' => 'Your password has been reset. Please sign in.',
     'password-updated' => 'Your password has been changed.',
     'registered' => 'Your account has been created. You can sign in once it\'s ready.',
+    'registration-received' => 'Thanks for registering. We\'ve emailed that address with what to do next.',
     'reset-link-sent' => 'If that address has an account, we\'ve emailed a link to reset the password.',
     'sessions-revoked' => 'You\'ve been signed out everywhere else.',
+    'sign-in-to-verify' => 'Sign in to finish verifying your email address.',
     'signed-out' => 'You\'ve been signed out. Please sign in again.',
     'verification-link-sent' => 'We\'ve emailed you a new verification link.',
 ];

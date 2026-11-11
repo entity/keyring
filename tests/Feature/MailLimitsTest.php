@@ -69,6 +69,8 @@ describe('security notices', function () {
     });
 
     it('sends none to an address nobody has verified, which may be anyone\'s', function () {
+        // Only signed in at all where registration signs new users in.
+        revealTakenAddresses();
         $this->user->forceFill(['email_verified_at' => null])->save();
 
         signInFromNewBrowser();
@@ -117,6 +119,8 @@ describe('email change requests', function () {
     });
 
     it('refuses an account whose own address is unverified, which could never confirm the change', function () {
+        // Only signed in at all where registration signs new users in.
+        revealTakenAddresses();
         $this->user->forceFill(['email_verified_at' => null])->save();
 
         askToMoveTo($this->user->fresh(), 'someone@example.com')

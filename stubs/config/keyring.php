@@ -44,6 +44,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Registration
+    |--------------------------------------------------------------------------
+    |
+    | Registering answers the same whether or not the address has an account,
+    | and new users sign in once they've followed the link emailed to them.
+    | Set "reveal_taken" to true to say when an address is taken and sign new
+    | users in straight away, which lets anyone check who has an account.
+    |
+    */
+
+    'registration' => [
+        'reveal_taken' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Enrollment Page
     |--------------------------------------------------------------------------
     |

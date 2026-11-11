@@ -111,6 +111,16 @@ function withFeatures(array $features): void
 }
 
 /**
+ * Registration as it was before it hid who has an account: the form says
+ * when an address is taken, new users are signed in straight away, and an
+ * account can be signed in before its address is verified.
+ */
+function revealTakenAddresses(): void
+{
+    config(['keyring.registration.reveal_taken' => true]);
+}
+
+/**
  * A mail message's HTML and plain-text parts, as the mail channel renders them.
  *
  * @return array{html: string, text: string}
