@@ -343,6 +343,8 @@ It only checks routes it runs on, and it needs Laravel's session to have started
 })
 ```
 
+The [conformance suite](testing.md#the-conformance-suite) checks this for you: it fails for any route that uses `auth` for Keyring's guard without `keyring.session`, and names it.
+
 On each signed-in request it:
 
 - signs the user out if their registry record was revoked, has expired, belongs to someone else, has been idle too long, or was [carried on by "remember me" somewhere else](#a-cookie-used-twice),
