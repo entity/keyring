@@ -326,7 +326,7 @@ it('removes a passkey planted before the session that asked, so it can not sign 
     $this->post('/logout');
 
     $this->travel(2)->minutes();
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
     $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com'])->assertOk();
 

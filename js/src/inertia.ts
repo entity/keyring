@@ -53,7 +53,9 @@ export function keyPrompt(): (props: ChallengeProps) => Promise<Record<string, a
 
 /** Fetch usernameless options and run the browser prompt (or autofill). */
 export async function passkeyCredential(factor: string, options: { autofill?: boolean, signal?: AbortSignal } = {}): Promise<Record<string, any>> {
-  return getCredential(await json('GET', routes.loginOptions(factor)), options)
+  const login = await json<{ options: Record<string, any> }>('GET', routes.loginOptions(factor))
+
+  return getCredential(login.options, options)
 }
 
 /** Sign in with a credential from passkeyCredential(). */

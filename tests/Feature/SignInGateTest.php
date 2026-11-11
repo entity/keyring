@@ -67,7 +67,7 @@ it('refuses a passkey', function () {
 
     ban($this->user);
 
-    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($this->getJson(route('keyring.login.options', 'passkey'))->json())])
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($this->getJson(route('keyring.login.options', 'passkey'))->json('options'))])
         ->assertSessionHasErrors();
 
     $this->assertGuest();
