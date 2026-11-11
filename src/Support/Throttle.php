@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Support;
 
 use Illuminate\Cache\RateLimiter;
@@ -331,13 +333,15 @@ class Throttle
      */
     protected function accountLimits(Factor $factor, string $account, bool $known): array
     {
+        // Numbers set from the environment arrive as strings.
         $consecutive = config('keyring.limits.consecutive');
+        $lockAfter = $this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null;
 
         return [
             AccountLimit::perMinute(config('keyring.limits.per_account'))
                 ->by($this->bucket($factor->key(), $account, $known))
-                ->holdAfter($this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null),
-            ...($consecutive === null ? [] : [ConsecutiveLimit::of($consecutive, $factor->key(), $account, $known)]),
+                ->holdAfter($lockAfter === null ? null : (int) $lockAfter),
+            ...($consecutive === null ? [] : [ConsecutiveLimit::of((int) $consecutive, $factor->key(), $account, $known)]),
         ];
     }
 

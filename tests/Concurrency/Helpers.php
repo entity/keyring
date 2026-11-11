@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\WithoutIncrementing;
 use Illuminate\Database\Eloquent\Attributes\WithoutTimestamps;
@@ -94,6 +96,6 @@ function contend(Model $locked, array $operations, ?Closure $meanwhile = null): 
 
         expect($result->successful())->toBeTrue($result->output().$result->errorOutput());
 
-        return json_decode(trim(str($result->output())->afterLast('ready')), true)['result'];
+        return json_decode(str($result->output())->afterLast('ready')->trim()->value(), true)['result'];
     }, $workers);
 }

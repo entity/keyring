@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\ConfirmEmailChange;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;

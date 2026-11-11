@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use CBOR\ByteStringObject;
 use CBOR\Decoder;
 use CBOR\MapObject;

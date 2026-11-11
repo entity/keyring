@@ -146,7 +146,7 @@ While a change can still be reverted, nobody else can take the address it replac
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
 ```
 
-With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`, even inside `Keyring::withoutProtection()`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. To check an address yourself, use `app(Keyring\Changes\ReservedAddresses::class)->has($address)`. The address is looked up by a keyed hash (`APP_KEY` and `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
+With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`, even inside `Keyring::withoutProtection()`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. To check an address yourself, use `app(Keyring\Changes\ReservedAddresses::class)->has($address)`. The address is looked up by a keyed hash (under a key derived from `APP_KEY`, and from each of `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
 
 ### Checking and Cancelling
 
@@ -205,6 +205,14 @@ Keyring runs your action as one of its own flows, so it may change the protected
 - no passwords made up of [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
 - with bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. That's 72 plain characters but as few as 18 emoji, so 64 characters don't always fit. Set `HASH_DRIVER=argon2id` to accept every password up to `max`, which is what OWASP ASVS 6.2.9 needs (see [Passwords](configuration.md#passwords)),
 - and `confirmed`, so the request needs `password_confirmation`.
+
+Passwords may hold any Unicode characters, and Keyring puts each one in Unicode's NFC form before it's measured, hashed or checked, as NIST SP 800-63B recommends. The same "é" is one code point from some keyboards and two from others, and without this a password set on one device could fail on another. The rules above count what will be hashed: a character is one code point of the NFC form. Keyring's routes do this for the input they hand your actions (`password`, `password_confirmation` and `current_password`) and for every password they check. If your own code sets a password some other way, such as a seeder, an admin tool or a route of your own, pass it through `PasswordRules::normalize()` first:
+
+```php
+$user->password = Hash::make(PasswordRules::normalize($password));
+```
+
+A password hashed without it only matters when it has characters that aren't already in NFC: that hash then never matches, because Keyring only ever checks the NFC form. There's no second try with the password as typed. Keyring has had this from its first release, so no hash it made needs one.
 
 `PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass theirs yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
 

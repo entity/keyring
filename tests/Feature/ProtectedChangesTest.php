@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\ConfirmEmailChange;
 use App\Notifications\Keyring\EmailAddressInUse;
 use App\Notifications\Keyring\EmailChangeNotice;
@@ -78,7 +80,7 @@ function linkIn(object $notification, string $text): string
         return $mail->actionUrl;
     }
 
-    return collect([...$mail->introLines, ...$mail->outroLines])->first(fn ($line) => str_starts_with($line, 'http'));
+    return collect([...$mail->introLines, ...$mail->outroLines])->first(fn (mixed $line) => is_string($line) && str_starts_with($line, 'http'));
 }
 
 describe('protected attributes', function () {

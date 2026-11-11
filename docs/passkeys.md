@@ -5,6 +5,7 @@
 - [What a Key Proves](#what-a-key-proves)
 - [Relying Party and Origins](#relying-party-and-origins)
 - [Signature Algorithms](#signature-algorithms)
+    - [RS256 and Windows Hello](#rs256-and-windows-hello)
 - [Attestation and AAGUIDs](#attestation-and-aaguids)
     - [Requiring Attestation](#requiring-attestation)
     - [Allowing Only Certain Models](#allowing-only-certain-models)
@@ -75,16 +76,46 @@ When planning what to offer, Keyring assumes a security key will verify the user
 - **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL: if none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If you set a relying party ID that covers several subdomains, list each origin here.
 - **`timeout`** is how long the browser waits, as a [duration](configuration.md#durations).
 - **`attestation_roots`** are the certificates a key's attestation has to chain to, for a factor that [requires attestation](#requiring-attestation).
+- **`algorithms`** and **`minimum_rsa_bits`** decide which [signatures](#signature-algorithms) keys may use.
 
 For local development, `APP_URL` must match the address in your browser, for example `http://localhost:8000`. Browsers only allow WebAuthn on `https` origins and on `localhost`.
 
 ## Signature Algorithms
 
-Keyring offers the browser these algorithms, in order of preference, and accepts only these:
+`webauthn.algorithms` lists the signature algorithms keys may use, in order of preference:
 
-- ES256 (ECDSA with P-256), which nearly every authenticator supports,
-- Ed25519 (EdDSA), only when PHP's `sodium` extension is loaded,
-- RS256, for older platform authenticators.
+```php
+'webauthn' => [
+    'algorithms' => ['ES256', 'EdDSA'],
+    'minimum_rsa_bits' => 2048,
+],
+```
+
+| Name | Algorithm | |
+|---|---|---|
+| `ES256` | ECDSA with P-256 and SHA-256 | Nearly every authenticator supports it. |
+| `EdDSA` | Ed25519 | Only offered when PHP's `sodium` extension is loaded. |
+| `RS256` | RSASSA-PKCS1-v1_5 with SHA-256 | Off by default. See below. |
+
+Only these are offered to the browser, and only these are accepted: a new key that signs with anything else is refused, and so is a sign in with a stored key whose algorithm has since been taken off the list. Its owner then needs another way in, so check what your users have before removing one. An empty list, or a name that isn't one of the three, throws rather than falling back to anything.
+
+The list covers the signature on an [attestation statement](#requiring-attestation) too.
+
+### RS256 and Windows Hello
+
+RS256 is left out because OWASP ASVS 5.0 doesn't approve it: its padding (PKCS #1 v1.5) is on the disallowed list of Appendix C, and the 2048 bit keys that use it give 112 bits of strength where ASVS 11.2.3 asks for 128. ES256 and Ed25519 are approved and give 128. NIST SP 800-63B asks for 112, so RS256 with a 2048 bit key meets NIST but not ASVS.
+
+The cost of leaving it out falls on Windows. Windows Hello signed with RS256 alone for years, and still does on some machines: older builds, and ones where it has no TPM that makes ES256 keys. There the browser can't create a passkey with Windows Hello while RS256 isn't offered, and the user is shown a phone or a security key to use, or an error. They can still add a passkey from a phone or a hardware key, or sign in with their password and another second factor.
+
+If those users matter more to you than ASVS conformance here, add it, last so every other authenticator keeps choosing a stronger one:
+
+```php
+'algorithms' => ['ES256', 'EdDSA', 'RS256'],
+```
+
+Record that as a deviation from ASVS 11.6.1 and 11.2.3 if you assess against it.
+
+With RS256 on, Keyring refuses an RSA key shorter than `minimum_rsa_bits`, both when it's added and at every sign in, and never takes one under 2048 bits however low that's set (RFC 8230 requires 2048 for RS256). Raising it to 3072 would give RSA the 128 bits ASVS asks for, but Windows Hello's RSA keys are 2048 bits, so in practice it refuses the keys RS256 was turned on for, after the browser has already made them. If you want 128 bits throughout, leave RS256 off.
 
 ## Attestation and AAGUIDs
 
@@ -331,7 +362,8 @@ Each key is a row in `keyring_authenticators` with:
 | `transports` | How the browser can reach the key (`usb`, `nfc`, `internal`...). |
 | `meta.user_verified` | Whether the key verified the user when registered. |
 | `meta.backup_eligible` | Whether the key said it can be synced. |
+| `meta.backed_up` | Whether the key said it has been backed up, which a key that can sync may not have been yet. Read again on every sign in, like `backup_eligible`. Keyring only records it: assurance goes by whether the key can sync at all. |
 
-The user handle given to authenticators is an HMAC of the user's ID keyed with `APP_KEY`, never their real ID or email. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` doesn't make password managers list the account twice.
+The user handle given to authenticators is an HMAC of the user's ID, under a key derived from `APP_KEY` for that purpose alone, never their real ID or email. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` doesn't make password managers list the account twice.
 
 To test passkeys without a browser, see [VirtualAuthenticator](testing.md#virtual-authenticators).

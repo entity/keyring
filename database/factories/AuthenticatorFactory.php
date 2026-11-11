@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Attributes\UseModel;
@@ -36,11 +38,11 @@ class AuthenticatorFactory extends Factory
 
     /**
      * A set that accepts the given codes. Each has to be in the form Keyring
-     * makes them, 24 base32 characters (a-z and 2-7) with any dashes.
+     * makes them, 26 base32 characters (a-z and 2-7) with any dashes.
      *
      * @param  list<string>  $codes
      */
-    public function recoveryCodes(array $codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb', 'cccc-cccc-cccc-cccc-cccc-cccc']): static
+    public function recoveryCodes(array $codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc']): static
     {
         return $this->state(fn () => [
             'factor' => 'recovery',
@@ -85,7 +87,7 @@ class AuthenticatorFactory extends Factory
             'credential_id' => rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
             'public_key' => '{}',
             'transports' => ['usb'],
-            'meta' => ['user_verified' => $userVerified, 'backup_eligible' => $synced],
+            'meta' => ['user_verified' => $userVerified, 'backup_eligible' => $synced, 'backed_up' => $synced],
         ]);
     }
 

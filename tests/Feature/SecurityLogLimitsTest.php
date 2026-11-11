@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Auth\Events\Lockout as LaravelLockout;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;

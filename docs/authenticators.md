@@ -68,7 +68,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
 
 | Factor | Request fields | `enrollment` |
 |---|---|---|
-| `totp` | `name` (optional) | `secret`, `url` (`otpauth://`), `qr` (an SVG string) |
+| `totp` | `name` (optional) | `secret`, `algorithm` (`SHA1` unless the factor is [set up with another](factors.md#authenticator-apps-totp)), `url` (`otpauth://`), `qr` (an SVG string) |
 | `email-code` | `name` (optional) | `length`, `sent: true`. A code is sent to the current address. |
 | `recovery` | none | `codes`: the new plain codes, shown once |
 | `passkey`, `security-key` | none | `options`: WebAuthn creation options for the browser |
@@ -79,6 +79,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
   "factor": "totp",
   "enrollment": {
     "secret": "JBSWY3DPEHPK3PXP...",
+    "algorithm": "SHA1",
     "url": "otpauth://totp/Example:taylor%40example.com?secret=...",
     "qr": "<svg ...>...</svg>"
   }
@@ -105,7 +106,7 @@ On success, the response contains the new authenticator, presented the same way 
 {
   "status": "authenticator-added",
   "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
-  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp", "..."]
+  "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp-eh", "..."]
 }
 ```
 

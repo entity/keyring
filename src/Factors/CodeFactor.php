@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -298,6 +300,6 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     protected function hash(#[\SensitiveParameter] string $code): string
     {
-        return KeyedHash::make($this->key().'|'.$code);
+        return KeyedHash::make(KeyedHash::ONE_TIME_CODES, $this->key().'|'.$code);
     }
 }

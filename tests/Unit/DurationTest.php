@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Keyring\Support\Duration;
 
 it('reads seconds, minutes, hours and days as seconds', function () {
