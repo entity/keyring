@@ -154,6 +154,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 'devices' => [
     'cookie' => 'keyring_device',
     'cookie_lifetime' => '400d',
+    'limit' => 50,
     'trust_for' => '30d',
     'report_link_for' => '7d',
     'keep_revoked_for' => '30d',
@@ -162,7 +163,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 ],
 ```
 
-`cookie` is the name of the device cookie and `cookie_lifetime` how long the browser keeps it (400 days is the most browsers allow). `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
+`cookie` is the name of the device cookie and `cookie_lifetime` how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
 
 ## Sessions
 

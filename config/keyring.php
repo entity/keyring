@@ -139,12 +139,15 @@ return [
     | Devices are recognised by a long-lived cookie. "trust_for" enables the
     | "don't ask again on this device" option (set to null to turn it off).
     | A trusted device is only an input to your policy, never a factor.
+    | An account keeps its "limit" most recently seen devices (null for no
+    | limit): a new one beyond that takes the place of the oldest.
     |
     */
 
     'devices' => [
         'cookie' => 'keyring_device',
         'cookie_lifetime' => '400d',
+        'limit' => 50,
         'trust_for' => '30d',
         'report_link_for' => '7d',
         'keep_revoked_for' => '30d',
