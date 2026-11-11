@@ -169,6 +169,8 @@ it('asserts which factors were checked and how they went', function () {
 });
 
 it('acts as a session verified with real authenticators', function () {
+    $this->freezeSecond();
+
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
     $this->actingAs($this->user)->verifiedWith($totp)->freshAt(now()->subMinutes(5))->get('/');
