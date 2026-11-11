@@ -121,7 +121,9 @@ class SignIn
 
     public function confirm(Request $request, Attempt $attempt): void
     {
-        $request->session()->regenerate(true);
+        // A copy of the session from before must not carry on signed in
+        // beside the one that just proved more.
+        $this->sessions->rotate($request);
         $this->assurance->confirm($attempt->verifications);
         $this->sessions->elevate($request, $this->assurance->level());
 

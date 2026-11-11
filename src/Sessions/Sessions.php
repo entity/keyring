@@ -62,8 +62,18 @@ class Sessions
             remembered: $remembered,
         );
 
+        $previous = $request->session()->get(self::KEY);
+
         $this->register($user, $session);
         $this->bind($request, $session, $remembered);
+
+        // A browser that signs in while it's signed in leaves the session it
+        // was on. Ending it is all that stops a copy of the old cookie
+        // carrying on with it on the cookie session driver, and on any
+        // driver it would be listed and counted with nobody left on it.
+        if (is_string($previous)) {
+            $this->registry->revoke($previous);
+        }
 
         return $session;
     }
@@ -259,9 +269,11 @@ class Sessions
 
     /**
      * Give the current session a new ID, so a copy of it made before now
-     * stops working. Regenerating destroys the old session on the server. A
-     * cookie session lives in the browser, where nothing can destroy a copy,
-     * so its registry record is swapped for a new one and the old one revoked.
+     * stops working: after a step-up, a password change, signing out
+     * everywhere else. Regenerating destroys the old session on the server.
+     * A cookie session lives in the browser, where nothing can destroy a
+     * copy, so its registry record is swapped for a new one and the old one
+     * revoked.
      */
     public function rotate(Request $request): void
     {

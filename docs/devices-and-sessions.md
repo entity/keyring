@@ -200,7 +200,7 @@ app(Sessions::class)->signOutEverywhere($user, except: app(Sessions::class)->cur
 app(Sessions::class)->rotate($request);
 ```
 
-`rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one.
+`rotate()` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy, so there `rotate()` also moves the session to a new registry record and revokes the old one. Keyring calls it after every step-up too, and a browser that signs in while it's already signed in has the session it was on revoked, so on any driver a copy of the session from before is signed out on its next request.
 
 Laravel keeps one "remember me" token per user, so changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (an idle or absolute timeout, a risk response, or a revoked record) leaves the token alone, so other remembered browsers stay signed in. That browser's cookies stop working because its record has ended: see ["Remember Me"](#remember-me).
 
@@ -208,7 +208,7 @@ Laravel keeps one "remember me" token per user, so changing it signs out every r
 
 Every signed-in session gets a record in Keyring's registry, with its own random ID, the user, the device, the assurance level, the IP address, the user agent, whether "remember me" was ticked, and its timestamps. Laravel's session ID is never stored. The registry ID lives inside the session.
 
-A session can move to a new record: when ["remember me"](#remember-me) carries it on, after a mid-session [step-up](risk.md#actions), and with `rotate()` on the `cookie` session driver. The old record then names the new one (`replacedBy`, `replacedAt`) and stops being a session: it isn't listed, counted or revoked with the user's sessions.
+A session can move to a new record: when ["remember me"](#remember-me) carries it on, when a [risk response](risk.md#actions) asks it to verify again, and with `rotate()` on the `cookie` session driver, which includes every step-up. The old record then names the new one (`replacedBy`, `replacedAt`) and stops being a session: it isn't listed, counted or revoked with the user's sessions.
 
 Because Keyring checks the registry on every request, revoking a session takes effect on its next request, whichever session driver you use.
 

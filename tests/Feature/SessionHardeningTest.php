@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -7,6 +8,8 @@ use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\Signal;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\Password;
+use Keyring\Factors\Totp;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Risk\Action;
@@ -17,6 +20,7 @@ use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\SingleSignOn;
 
 class RevokesDuringAssessment implements Signal
 {
@@ -152,6 +156,83 @@ it('signs out a copy of a cookie session after :dataset, and keeps the user sign
     'a password change that keeps other sessions' => ['putJson', '/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1', 'sign_out_others' => false]],
     'signing out everywhere else' => ['deleteJson', '/user/devices', []],
 ]);
+
+it('signs out a copy of a cookie session from before a step-up, and keeps the user signed in', function (string $driver) {
+    config(['keyring.sessions.driver' => $driver, 'session.driver' => 'cookie']);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+
+    $signedIn = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
+    $registered = session(Sessions::KEY);
+
+    // Long enough that the sign in no longer counts as fresh. The step-up needs one in progress.
+    $this->travel(16)->minutes();
+    $copied = sessionCookies($this->inertia()->withCredentials()->withCookies($signedIn)->get(route('keyring.confirm.challenge'))->assertOk());
+    $this->withoutHeader('X-Inertia');
+
+    $current = sessionCookies($this->withCredentials()->withCookies($copied)->postJson('/confirm/password', ['password' => 'password'])->assertOk());
+
+    expect(session(Sessions::KEY))->not->toBe($registered)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull()
+        ->and(app(SessionRegistry::class)->find(session(Sessions::KEY))->authenticatedAt)->toBe(app(SessionRegistry::class)->find($registered)->authenticatedAt);
+
+    // Neither copy from before is a signed-in session any more.
+    foreach ([$signedIn, $copied] as $old) {
+        session()->flush();
+        app('auth')->forgetGuards();
+        $this->withCredentials()->withCookies($old)->postJson(route('keyring.authenticators.store', 'totp'))->assertUnauthorized();
+    }
+
+    // The browser that stepped up carries on, with what it proved.
+    session()->flush();
+    app('auth')->forgetGuards();
+    $this->withCredentials()->withCookies($current)->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+
+    expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
+})->with('drivers');
+
+describe('a browser that signs in while it is signed in', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, Totp::class, SingleSignOn::class]);
+        SingleSignOn::$vouchedFor = 'taylor@example.com';
+
+        Route::middleware('web')->post('/sso/callback', fn (Request $request) => Keyring::attempt($request, 'sso'));
+    });
+
+    it('signs out a copy of the cookie session it was on', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'session.driver' => 'cookie']);
+        app('session')->forgetDrivers();
+        app()->forgetInstance('session.store');
+
+        $copied = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
+        $registered = session(Sessions::KEY);
+
+        $current = sessionCookies($this->withCredentials()->withCookies($copied)->post('/sso/callback')->assertRedirect('/dashboard'));
+
+        expect(session(Sessions::KEY))->not->toBe($registered)
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
+
+        session()->flush();
+        app('auth')->forgetGuards();
+        $this->withCredentials()->withCookies($copied)->getJson(route('keyring.devices.index'))->assertUnauthorized();
+
+        session()->flush();
+        app('auth')->forgetGuards();
+        $this->withCredentials()->withCookies($current)->getJson(route('keyring.devices.index'))->assertOk();
+    })->with('drivers');
+
+    it('does not leave the session it was on listed with nobody on it', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        signInWith();
+        $registered = session(Sessions::KEY);
+
+        $this->post('/sso/callback')->assertRedirect('/dashboard');
+
+        expect(app(SessionRegistry::class)->forUser($this->user)->map->id->all())->toBe([session(Sessions::KEY)])
+            ->and(session(Sessions::KEY))->not->toBe($registered);
+    })->with('drivers');
+});
 
 it('replaces a planted session id when the password step leaves a pending login', function () {
     useFileSessions();
