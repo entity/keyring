@@ -2,6 +2,7 @@
 
 namespace Keyring\Enrollment;
 
+use Illuminate\Support\Str;
 use Keyring\Support\Duration;
 
 /**
@@ -23,6 +24,7 @@ final class Enrollment
         public readonly array $props,
         public readonly array $state,
         public readonly int $expiresAt,
+        public readonly string $id,
     ) {}
 
     /**
@@ -31,7 +33,7 @@ final class Enrollment
      */
     public static function make(string $factor, array $props = [], array $state = []): self
     {
-        return new self($factor, $props, $state, Duration::fromNow(config('keyring.enrollments.keep_for'))->getTimestamp());
+        return new self($factor, $props, $state, Duration::fromNow(config('keyring.enrollments.keep_for'))->getTimestamp(), Str::random(40));
     }
 
     #[\NoDiscard]
@@ -49,11 +51,11 @@ final class Enrollment
      * What's kept in the session until the enrollment is confirmed. Props
      * were for the browser and can be large (a QR code), so they're left out.
      *
-     * @return array{factor: string, state: array<string, mixed>, expires_at: int}
+     * @return array{id: string, factor: string, state: array<string, mixed>, expires_at: int}
      */
     public function toArray(): array
     {
-        return ['factor' => $this->factor, 'state' => $this->state, 'expires_at' => $this->expiresAt];
+        return ['id' => $this->id, 'factor' => $this->factor, 'state' => $this->state, 'expires_at' => $this->expiresAt];
     }
 
     /**
@@ -61,6 +63,6 @@ final class Enrollment
      */
     public static function fromArray(array $data): self
     {
-        return new self($data['factor'], [], $data['state'], $data['expires_at']);
+        return new self($data['factor'], [], $data['state'], $data['expires_at'], $data['id']);
     }
 }

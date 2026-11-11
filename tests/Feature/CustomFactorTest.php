@@ -13,11 +13,13 @@ use Keyring\Tests\Fixtures\SmsCode;
 
 class FiveDigitSmsCode extends SmsCode
 {
+    #[Override]
     protected int $length = 5;
 }
 
 class QuarterHourSmsCode extends SmsCode
 {
+    #[Override]
     protected int $ttl = 900;
 }
 
@@ -112,4 +114,41 @@ it('refuses one added with extend the same way', function () {
     Keyring::extend('sms', fn () => new FiveDigitSmsCode);
 
     expect(fn () => Keyring::factor('sms'))->toThrow(LogicException::class, 'Keyring refuses codes shorter than 6 digits');
+});
+
+// What holds for email codes holds for any code factor: its codes' state is
+// on the server, whatever copy of the session the browser sends.
+describe('a browser that sends back an earlier copy of its session', function () {
+    it('cannot sign in with a custom factor\'s code a second time', function () {
+        Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'sms', 'name' => 'Phone', 'secret' => '+447700900001']);
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.send', 'sms'));
+        $code = SmsCode::$sent['+447700900001'];
+        $unspent = session()->all();
+
+        $this->post(route('keyring.login.verify', 'sms'), ['code' => $code])->assertRedirect('/dashboard');
+        $this->post('/logout');
+
+        sendBackSession($unspent);
+
+        $this->post(route('keyring.login.verify', 'sms'), ['code' => $code])->assertSessionHasErrors('code');
+        $this->assertGuest();
+    });
+
+    it('cannot enroll one phone with the code sent to another', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+        $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900001'])->assertOk();
+        $firstPhone = session()->all();
+
+        $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900002'])->assertOk();
+
+        sendBackSession($firstPhone);
+
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+            ->postJson(route('keyring.authenticators.confirm', 'sms'), ['code' => SmsCode::$sent['+447700900002']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.invalid')]);
+
+        expect($this->user->keyring->refresh()->of('sms'))->toBeEmpty();
+    });
 });

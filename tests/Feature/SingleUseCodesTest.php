@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\SentCodes;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 
@@ -31,6 +32,31 @@ it('accepts a recovery code once even when two requests race', function () {
     expect(Keyring::factor('recovery')->verify($this->attempt, $first, $request))->not->toBeNull()
         ->and(Keyring::factor('recovery')->verify($this->attempt, $second, $request))->toBeNull()
         ->and(Keyring::factor('recovery')->present(Authenticator::find($id))['remaining'])->toBe(2);
+});
+
+it('lets one of two requests use up a sent code when both found it unused', function () {
+    $codes = app(SentCodes::class);
+    $sent = ['hash' => 'the-hash', 'expires_at' => now()->addMinutes(10)->getTimestamp(), 'for' => null];
+    $codes->replace('an-attempt', $sent);
+
+    expect($codes->spend('an-attempt', $sent))->toBeTrue()
+        ->and($codes->spend('an-attempt', $sent))->toBeFalse()
+        ->and($codes->current('an-attempt'))->toBeNull();
+});
+
+it('keeps one sent code for each owner, and forgets it once it expires', function () {
+    $codes = app(SentCodes::class);
+    $codes->replace('an-attempt', ['hash' => 'first', 'expires_at' => now()->addMinutes(10)->getTimestamp(), 'for' => 'a']);
+    $codes->replace('an-attempt', ['hash' => 'second', 'expires_at' => now()->addMinutes(10)->getTimestamp(), 'for' => 'b']);
+
+    expect($codes->current('an-attempt'))->toMatchArray(['hash' => 'second', 'for' => 'b'])
+        ->and($codes->current('another-attempt'))->toBeNull();
+
+    $this->travel(10)->minutes();
+    expect($codes->current('an-attempt'))->not->toBeNull();
+
+    $this->travel(1)->seconds();
+    expect($codes->current('an-attempt'))->toBeNull();
 });
 
 it('keeps other recovery codes usable when two different codes are used at once', function () {

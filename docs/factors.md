@@ -129,11 +129,14 @@ A code:
 - expires after 10 minutes,
 - allows five wrong guesses per sign in, across every code sent for it,
 - is replaced by any newer code,
+- works once,
 - is stored as a keyed hash, never in plain text.
 
 Sending a new code doesn't reset the wrong guess count. Once the limit is reached the attempt is over, and the user has to start signing in again.
 
-Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until the enrollment's 15 minutes run out. Email codes are only as strong as the inbox, so they aren't phishing resistant.
+The code, its guess count and the fact that it was used are kept on the server, in the cache store your rate limits use (`cache.limiter`), not in the session. So all of the above holds on any session driver, including Laravel's `cookie` driver, where a browser can send back an earlier copy of its session. Clearing that cache store drops the codes that are waiting to be typed, and the user asks for another.
+
+Enrolling sends a code to the current address, and the user types it to confirm. Every copy would go to the same address, so a user has at most one: enrolling again replaces it. Wrong guesses are limited the same way across an enrollment, including when it's started again, and at the limit no code is sent until 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)) after the first wrong guess. They're counted per user, so another browser doesn't get guesses of its own. Email codes are only as strong as the inbox, so they aren't phishing resistant.
 
 ### Recovery Codes
 
@@ -167,7 +170,7 @@ A factor declares the categories it expects in `categories()`, which Keyring use
 
 [Recipes](recipes.md#sms-codes) has a complete SMS factor, and [a social login](recipes.md#social-login-with-socialite) written as a factor that starts a sign in.
 
-Factors that send a one-time code extend `Keyring\Factors\CodeFactor`. It implements sending, checking, expiry, guess limits, resending and enrollment. A code only verifies the authenticator it was sent to, so a user with two phones can't send to one and type the code against the other. You provide a key, a default name and the delivery:
+Factors that send a one-time code extend `Keyring\Factors\CodeFactor`. It implements sending, checking, expiry, single use, guess limits, resending and enrollment, and keeps each code's state on the server (`Keyring\Factors\SentCodes`) as it does for [email codes](#email-codes). A code only verifies the authenticator it was sent to, so a user with two phones can't send to one and type the code against the other. You provide a key, a default name and the delivery:
 
 ```php
 namespace App\Keyring;
@@ -318,7 +321,7 @@ Implement these as well when they apply:
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment()`, `enrollmentRules()`, `confirmEnrollment()` and `multiple()`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |
 
-An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
+An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it, once: an enrollment that has added its authenticator can't be confirmed again, even from an earlier copy of the session. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
 
 `enrollmentRules()` validates the confirm request. On `Keyring\Factors\Factor` it defaults to the factor's `rules()` plus an optional `name`, so a name can be given when confirming as well as when beginning.
 

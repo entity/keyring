@@ -3,17 +3,20 @@
 use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
 use Keyring\Concerns\HasKeyring;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
+use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Support\PasswordRules;
@@ -327,3 +330,48 @@ class UnnotifiableAccount extends Authenticatable
 {
     use HasKeyring;
 }
+
+// Laravel's "cookie" session driver keeps the session in the browser, which
+// can send back an earlier copy: one that still holds an enrollment that has
+// since been confirmed.
+describe('a browser that sends back an earlier copy of its session', function () {
+    it('cannot bring back recovery codes that were replaced', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->verifiedWith($totp);
+
+        $first = $this->postJson(route('keyring.authenticators.store', 'recovery'))->json('enrollment.codes');
+        $unconfirmed = session()->all();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        $second = $this->postJson(route('keyring.authenticators.store', 'recovery'))->json('enrollment.codes');
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        sendBackSession($unconfirmed);
+
+        $this->actingAs($this->user)->verifiedWith($totp)
+            ->postJson(route('keyring.authenticators.confirm', 'recovery'))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
+
+        $set = $this->user->keyring->refresh()->of('recovery')->sole();
+        $attempt = Attempt::start(Purpose::Login, $this->user);
+
+        expect(Keyring::factor('recovery')->verify($attempt, $set, Request::create('/', 'POST', ['code' => $first[0]])))->toBeNull()
+            ->and(Keyring::factor('recovery')->verify($attempt, $set, Request::create('/', 'POST', ['code' => $second[0]])))->not->toBeNull();
+    });
+
+    it('cannot add the same authenticator app twice from one enrollment', function () {
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $unconfirmed = session()->all();
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        sendBackSession($unconfirmed);
+
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+            ->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret, 1)])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
+
+        expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+    });
+});
