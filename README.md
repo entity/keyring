@@ -93,6 +93,12 @@ npm install @entity/keyring
 
 The [changelog](CHANGELOG.md) lists what each release changes, and the [upgrade guide](UPGRADE.md) covers anything you need to do when updating.
 
+## What's Stable
+
+What the docs describe is what a release keeps to: the config options, the route names and paths, the middleware aliases, the `Keyring` facade and `Keyring::for($user)`, the factor and policy builders, the contracts in `Keyring\Contracts`, the events and their properties, the email types and what each is passed, the security log's entry types, the commands and their options, the testing helpers, and the browser package's exports. A change to any of those is called out in the [upgrade guide](UPGRADE.md), and before 1.0 a minor release (0.2, 0.3) may make one.
+
+Everything else in `src/` is how Keyring does it and can change in any release: controllers, pipeline steps' internals, and anything in `Keyring\Support`. If you find yourself extending one of those, [Extending Keyring](docs/extending.md) probably has a supported way, and an issue is welcome when it doesn't.
+
 ## Security Vulnerabilities
 
 Please don't open a public issue for a security problem. See the [security policy](SECURITY.md) for how to report one.
@@ -108,6 +114,8 @@ composer check     # everything CI runs: Rector (dry run), Pint, PHPStan and Pes
 ```
 
 Run `composer check` before opening a pull request.
+
+`bin/ci` runs every job the GitHub workflow does on your own machine: the checks above, the oldest dependencies Keyring allows, PostgreSQL, MySQL (in Docker) and the browser package. `bin/ci tests js` runs only the jobs you name. Run one at a time.
 
 The race tests run operations in separate processes against a real database, so they need PostgreSQL or MySQL and run as their own suite (CI runs them on both):
 

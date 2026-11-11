@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#
+# Everything .github/workflows/tests.yml runs, on this machine: for when
+# GitHub can't run it, or before pushing.
+#
+#   bin/ci              every job
+#   bin/ci tests js     only the jobs named: tests, lowest, pgsql, mysql, js
+#
+# PostgreSQL is whichever server these point at (the workflow's own values
+# unless set): PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE. The database
+# has to exist. MySQL is started in Docker for the run, on MYSQL_PORT (3307),
+# bound to this machine only.
+#
+# One run at a time: the installer's tests publish into the test app every
+# run shares, so two at once fail each other.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+jobs=("$@")
+[ ${#jobs[@]} -eq 0 ] && jobs=(tests lowest pgsql mysql js)
+
+failed=()
+
+step() {
+    printf '\n\033[1m▸ %s\033[0m\n' "$*"
+    "$@" || return 1
+}
+
+tests() {
+    step composer audit --abandoned=report &&
+    step vendor/bin/rector --dry-run &&
+    step vendor/bin/pint --test &&
+    step vendor/bin/phpstan analyse --no-progress &&
+    step vendor/bin/phpstan analyse -c phpstan.stubs.neon --no-progress &&
+    step vendor/bin/pest --compact
+}
+
+# The oldest versions composer.json allows, in a copy, so this checkout's
+# vendor directory and lock file stay as they are.
+lowest() {
+    local copy index
+    copy=$(mktemp -d) && index=$(mktemp -u) || return 1
+
+    GIT_INDEX_FILE=$index git read-tree HEAD &&
+    GIT_INDEX_FILE=$index git checkout-index -a --prefix="$copy/" &&
+    (
+        cd "$copy" &&
+        step composer remove --dev calebdw/phpstan-laravel --no-update --no-interaction --quiet &&
+        step composer update --prefer-lowest --prefer-stable --no-interaction --prefer-dist --quiet &&
+        step vendor/bin/pest --compact
+    )
+    local status=$?
+
+    rm -rf "$copy" "$index"
+
+    return $status
+}
+
+database() {
+    step vendor/bin/pest --compact && step vendor/bin/pest --compact --testsuite=Concurrency
+}
+
+pgsql() {
+    DB_CONNECTION=pgsql DB_HOST=${PGHOST:-127.0.0.1} DB_PORT=${PGPORT:-5432} DB_DATABASE=${PGDATABASE:-keyring} \
+        DB_USERNAME=${PGUSER:-postgres} DB_PASSWORD=${PGPASSWORD-password} database
+}
+
+mysql() {
+    local name=keyring-ci-mysql port=${MYSQL_PORT:-3307}
+
+    docker run -d --rm --name "$name" -e MYSQL_DATABASE=keyring -e MYSQL_ROOT_PASSWORD=password \
+        -p "127.0.0.1:$port:3306" mysql:8.4 >/dev/null || return 1
+
+    # It answers a ping before it takes connections, so ask it a question.
+    for _ in $(seq 60); do
+        docker exec "$name" mysql -ppassword -e 'select 1' keyring >/dev/null 2>&1 && break
+        sleep 2
+    done
+
+    DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=$port DB_DATABASE=keyring DB_USERNAME=root DB_PASSWORD=password database
+    local status=$?
+
+    docker stop "$name" >/dev/null
+
+    return $status
+}
+
+js() {
+    (
+        cd js &&
+        step bun install --frozen-lockfile &&
+        step bun audit &&
+        step bun run typecheck &&
+        step bun test --randomize
+    )
+}
+
+for job in "${jobs[@]}"; do
+    case $job in
+        tests | lowest | pgsql | mysql | js)
+            printf '\n\033[1;34m━━ %s ━━\033[0m\n' "$job"
+            $job || failed+=("$job")
+            ;;
+        *)
+            echo "Unknown job: $job. Pick from: tests, lowest, pgsql, mysql, js." >&2
+            exit 2
+            ;;
+    esac
+done
+
+echo
+if [ ${#failed[@]} -gt 0 ]; then
+    printf '\033[1;31mFailed: %s\033[0m\n' "${failed[*]}"
+    exit 1
+fi
+
+printf '\033[1;32mPassed: %s\033[0m\n' "${jobs[*]}"
