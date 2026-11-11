@@ -152,7 +152,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 
 ```php
 'devices' => [
-    'cookie' => 'keyring_device',
+    'cookie' => null,
     'cookie_lifetime' => '400d',
     'limit' => 50,
     'trust_for' => '30d',
@@ -163,7 +163,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 ],
 ```
 
-`cookie` is the name of the device cookie and `cookie_lifetime` how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
+`cookie` is the name of the device cookie: `null` is `keyring_device`, with the `__Host-` prefix once your app is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)), and a name you set is used exactly as it is. `cookie_lifetime` is how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
 
 ## Sessions
 
@@ -180,7 +180,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
         'aal3' => ['idle' => '15m', 'absolute' => '12h'],
     ],
     'middleware' => true,
-    'remember_cookie' => 'keyring_remember',
+    'remember_cookie' => null,
 ],
 ```
 
@@ -193,7 +193,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `absolute` | The longest a session can last, however active it is. |
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
-| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. |
+| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `keyring_remember`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 

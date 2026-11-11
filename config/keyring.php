@@ -137,8 +137,10 @@ return [
     | Devices
     |--------------------------------------------------------------------------
     |
-    | Devices are recognised by a long-lived cookie. "trust_for" enables the
-    | "don't ask again on this device" option (set to null to turn it off).
+    | Devices are recognised by a long-lived cookie. With "cookie" null it's
+    | named keyring_device, and __Host-keyring_device once the app is served
+    | over HTTPS; a name you set is used exactly as it is. "trust_for" enables
+    | the "don't ask again on this device" option (set to null to turn it off).
     | A trusted device is only an input to your policy, never a factor.
     | An account keeps its "limit" most recently seen devices (null for no
     | limit): a new one beyond that takes the place of the oldest.
@@ -146,7 +148,7 @@ return [
     */
 
     'devices' => [
-        'cookie' => 'keyring_device',
+        'cookie' => null,
         'cookie_lifetime' => '400d',
         'limit' => 50,
         'trust_for' => '30d',
@@ -170,7 +172,8 @@ return [
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
     | again. "remember_cookie" names the cookie that ties "remember me" to
-    | the session it was ticked for.
+    | the session it was ticked for: null is keyring_remember, prefixed over
+    | HTTPS like the device cookie.
     |
     */
 
@@ -186,7 +189,7 @@ return [
             'aal3' => ['idle' => '15m', 'absolute' => '12h'],
         ],
         'middleware' => true,
-        'remember_cookie' => 'keyring_remember',
+        'remember_cookie' => null,
     ],
 
     /*

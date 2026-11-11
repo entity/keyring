@@ -15,6 +15,7 @@
     - [Writing a Driver](#writing-a-driver)
     - [The Session Middleware](#the-session-middleware)
     - ["Remember Me"](#remember-me)
+- [Keyring's Cookies](#keyrings-cookies)
 - [Timeouts](#timeouts)
 - [Pruning](#pruning)
 - [Events](#events)
@@ -46,7 +47,7 @@ With devices on, Keyring sets its cookie on sign in, offers "don't ask again on 
 
 ## Devices
 
-With `Features::devices()` on, on every sign in Keyring looks for its device cookie (`keyring_device` by default). If it's missing or unknown, Keyring creates a device with a new random token and sets the cookie. The cookie is httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts 400 days. Only a SHA-256 hash of the token is stored.
+With `Features::devices()` on, on every sign in Keyring looks for its device cookie. If it's missing or unknown, Keyring creates a device with a new random token and sets the cookie. The cookie is httpOnly, `SameSite=Lax` and lasts 400 days. Only a SHA-256 hash of the token is stored. See [Keyring's Cookies](#keyrings-cookies) for its name and when it's `Secure`.
 
 An account keeps its 50 most recently seen devices (`devices.limit`). A sign in from another new browser forgets the one seen longest ago and signs it out, so it's a new device if it comes back. Without a limit, one account could fill the table and its own devices page just by signing in from browsers that send no cookie.
 
@@ -276,7 +277,7 @@ A signed-out request is sent to the login page with the `signed-out` status, and
 
 Laravel's "remember me" cookie holds a token that is the same in every browser the user ticked it in, and nothing on the server makes it run out. On its own it would sign a browser back in for as long as the browser kept sending it, whatever had happened to the session it came with.
 
-So a remembered sign in also sets a Keyring cookie (`keyring_remember`, named in `sessions.remember_cookie`) holding that session's registry ID. It's httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts as long as the record does. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
+So a remembered sign in also sets a Keyring cookie holding that session's registry ID. It's httpOnly, `SameSite=Lax` and lasts as long as the record does. See [Keyring's Cookies](#keyrings-cookies) for its name and when it's `Secure`. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
 
 - If the record is the user's, hasn't been revoked, and is inside its `absolute` limit and its `idle` limit (when you set one), the new session carries it on. It's the same record with the same expiry, so coming back never starts the `absolute` limit again. The record's IP address, browser and last activity are updated, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
 - Otherwise the request is signed out like any other ended session, with both cookies cleared: there was no Keyring cookie, its record is gone (`expired`), or the record was revoked, timed out or belongs to someone else. A client that kept the cookies after a timeout or a risk response gets nowhere with them.
@@ -288,6 +289,24 @@ Your own `Auth::login($user, remember: true)` gets the Keyring cookie too, on th
 If Laravel's cookie first reaches a route without the middleware, Laravel signs it in there and Keyring notes that in the session. The next request the middleware sees is checked the same way.
 
 With an `idle` limit set, a remembered browser that stays away for longer than it has to sign in again, because its session idled out. Leave `idle` as `null` if "remember me" should last the whole `absolute` limit.
+
+## Keyring's Cookies
+
+Keyring sets two cookies of its own: the device cookie, and the one that ties ["remember me"](#remember-me) to its session. What they're called depends on how your app is served:
+
+| Your app | Device cookie | "Remember me" cookie |
+|---|---|---|
+| Served over HTTPS | `__Host-keyring_device` | `__Host-keyring_remember` |
+| Served over HTTPS, with `session.domain` set or `session.path` other than `/` | `__Secure-keyring_device` | `__Secure-keyring_remember` |
+| Served over plain HTTP, as on `http://localhost` | `keyring_device` | `keyring_remember` |
+
+Keyring takes your app to be served over HTTPS when `APP_URL` starts with `https://`, or when `session.secure` (`SESSION_SECURE_COOKIE`) is `true`. It goes by those settings and not by the request, because the name has to be the same on every request, and behind a proxy your app doesn't [trust](security.md#what-your-app-must-provide) every request looks like plain HTTP.
+
+Over HTTPS both cookies are always `Secure`. A browser only accepts a `__Host-` cookie that is `Secure`, has `Path=/` and no `Domain`, so another subdomain, or a page loaded over plain HTTP, can't set or replace it. A cookie shared with subdomains can't have that prefix, so Keyring falls back to `__Secure-`, which only promises that the cookie was set over HTTPS. Over plain HTTP a browser refuses both prefixes, so the plain names are used, and the cookies are `Secure` whenever the request itself came over HTTPS.
+
+To use names of your own, set `devices.cookie` and `sessions.remember_cookie`. Keyring uses a name you set exactly as it is, still `Secure` over HTTPS, and it's up to you to give it a prefix.
+
+A browser that was given the plain cookies before your app moved to HTTPS keeps its device and its remembered session. While it holds no cookie under the new name, Keyring reads the plain one. The next time that browser signs in, or "remember me" brings it back, it gets the cookie under the new name and the plain one is deleted. Anything on your domain could have set a plain cookie, so one is only ever used to find a device the account already has, never to start a new one.
 
 ## Timeouts
 

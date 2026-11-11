@@ -110,6 +110,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - A revocation can't be undone by a request saving a stale copy of its session.
 - Laravel's session ID is never stored by Keyring or written to the security log.
 - Devices are recognised by a random, httpOnly cookie, stored as a hash. A device is never a factor, only an input to your policy and risk signals.
+- Keyring's two cookies (the device cookie and the "remember me" one) are httpOnly and `SameSite=Lax`. Once the app is served over HTTPS (`APP_URL` is `https`, or `session.secure` is on) they are always `Secure` and carry the `__Host-` prefix, or `__Secure-` when your cookies are shared with subdomains. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies).
 - Signing out everywhere also stops trusting the other devices and cancels pending email changes, so whoever had the account can't skip the second factor on a device they trusted or finish a change they started.
 - A device is only trusted after a login that verified two categories, never after the password alone. A login that verifies two categories, and any grant of trust, gives the browser a new cookie, so neither can rest on a cookie planted in the browser before the user signed in.
 - Every device stops being trusted when the password changes, an authenticator is removed, an email change is applied or a signed-in request places a risk lock. A lock placed by a login attempt doesn't, as above.
