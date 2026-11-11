@@ -67,10 +67,20 @@ class RecordSecurityEvents
     /**
      * A failed second factor after a correct password is the classic sign of
      * a stolen password, so it's logged as an alert for the user.
+     *
+     * An account's own limits bound how often it can fail. A name nobody
+     * has can be made up without end, so those failures are a refusal like
+     * any other, and only so many are kept per IP address.
      */
     public function factorFailed(Events\FactorFailed $event): void
     {
         $user = $event->attempt?->user();
+
+        if ($user === null) {
+            $this->log->recordRefusal('factor_failed', factor: $event->factor);
+
+            return;
+        }
 
         $this->log->record('factor_failed', $user, $event->factor);
 
@@ -79,9 +89,15 @@ class RecordSecurityEvents
         }
     }
 
+    /**
+     * The event fires for every request a lock refuses, and a client can
+     * send those as fast as it likes. The log says once that the lock is
+     * there: one entry per factor and IP address, until the wait the lock
+     * gave is over.
+     */
     public function lockout(Events\Lockout $event): void
     {
-        $this->log->record('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter]);
+        $this->log->recordRefusal('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter], once: $event->factor, for: $event->retryAfter);
     }
 
     public function accountLocked(Events\AccountLocked $event): void
