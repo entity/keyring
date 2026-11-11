@@ -358,6 +358,8 @@ use Keyring\Login\SignIn;
 app(SignIn::class)->out($request);
 ```
 
+Your own `Auth::logout()` or `Auth::logoutCurrentDevice()` ends the registered session too, with its "remember me" cookie and what the session proved, so a sign-out route you already have keeps working. Invalidate the session after it as Laravel's docs do; `SignIn::out()` does that part for you.
+
 ## The Verification Pipeline
 
 Every verification, at login or step-up, goes through one pipeline of steps:
