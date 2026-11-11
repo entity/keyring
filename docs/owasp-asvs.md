@@ -44,7 +44,7 @@ Both standards verify an application or a service, not a package. Keyring can me
 - three [risk signals](risk.md): a session turning up in another browser, repeated failed second factors, and a sign in that follows several failures,
 - rate limits, the timebox, the session registry, and on every session a two hour inactivity limit (14 days for a browser that ticked "remember me"), a 30 day limit overall and a limit of 100 sessions per account.
 
-That covers Level 1, apart from what your own pages have to do and two things below: passwords are normalized before they're hashed ([6.2.8](#v62-password-security)), and an account you disable should be signed out everywhere by your own code ([7.4.2](#v74-session-termination)).
+That covers Level 1, apart from what your own pages have to do and two things below: passwords are normalised before they're hashed ([6.2.8](#v62-password-security)), and an account you disable should be signed out everywhere by your own code ([7.4.2](#v74-session-termination)).
 
 It doesn't cover Level 2. Nothing in it asks for a second factor, because there isn't one to set up. That is the one thing you have to choose: pick a second sign-in method when installing and the installer's next question, "Require a second factor for everyone?", defaults to yes ([6.3.3](#v63-general-authentication-security)).
 

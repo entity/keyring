@@ -101,6 +101,21 @@ An assessment that ends in `Action::allow()` dispatches nothing. See [Risk](risk
 
 None of these changes what the person who was refused sees. Each fires every time, however often it's repeated: only the [security log](security-log-and-emails.md#refusals-that-repeat) limits how many it writes down. A form that fails ordinary validation dispatches nothing.
 
+That makes them the place to count from. Keyring keeps no metrics of its own, so if you watch for credential stuffing, feed your counters from a listener:
+
+```php
+use Illuminate\Support\Facades\Event;
+use Keyring\Events\FactorFailed;
+use Keyring\Events\Lockout;
+use Keyring\Events\RateLimited;
+
+Event::listen(fn (FactorFailed $event) => Metrics::increment('auth.failed', ['factor' => $event->factor]));
+Event::listen(fn (Lockout $event) => Metrics::increment('auth.locked_out', ['factor' => $event->factor]));
+Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited', ['route' => $event->route]));
+```
+
+`Metrics` stands for whatever your app reports to.
+
 ## Laravel's Auth Events
 
 Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on, so the verification email it sends doesn't show in how long a new address takes to answer. Like Fortify, it also dispatches these next to its own, so listeners and packages built for them keep working:

@@ -93,7 +93,7 @@ Without `ifEnrolled()`, users who can't meet the requirement can't sign in at al
 
 ## Requiring a Second Factor
 
-`ifEnrolled()` lets users without a second factor carry on with just a password. To make everyone add one (OWASP ASVS 5.0.0, 6.3.3 asks for this at level 2), add the `keyring.enrolled` middleware to the routes they must not reach without one, usually the whole app:
+`ifEnrolled()` lets users without a second factor carry on with just a password. To make everyone add one (OWASP ASVS 5.0.0 asks for this at Level 2, in requirement 6.3.3), add the `keyring.enrolled` middleware to the routes they must not reach without one, usually the whole app:
 
 ```php
 // bootstrap/app.php

@@ -73,7 +73,7 @@ In `Keyring\Risk\Signals`:
 
 ### Telling the User
 
-OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, where Keyring asks for a second factor but sends nothing. Together they reach `Level::High`, which notifies. To email the user whenever either is found, without refusing anyone, answer for them in [your responder](#responding-to-risk) and register the `suspicious_activity` [notice](security-log-and-emails.md#email-types):
+OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, where Keyring asks for a second factor but sends nothing. Together they reach `Level::High`, which notifies. To email the user whenever either is found, without refusing anyone, answer for them in [your responder](#responding-to-risk). The `suspicious_activity` [notice](security-log-and-emails.md#email-types) is what's sent, and `keyring:install` registers it:
 
 ```php
 use Keyring\Risk\Action;
@@ -118,7 +118,7 @@ Without your own responder, Keyring does this at every checkpoint:
 | High | `Action::stepUp()->notify()` |
 | Critical | `Action::deny()->revokeAllSessions()->notify()` |
 
-At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's turned on, but the owner stays signed in everywhere else.
+At login, `revokeAllSessions()` is always ignored: a critical login is refused and the `suspicious_activity` email goes out if it's registered, as it is by `keyring:install`, but the owner stays signed in everywhere else.
 
 One finding is answered whatever the level: when `BreachedPassword` finds the password that was just used in a breach, `->requirePasswordChange()` is added to the action above. See [Requiring a New Password](#requiring-a-new-password).
 
@@ -160,7 +160,7 @@ Build an action with one of the static constructors and chain extras:
 | `Action::deny()` | Refuse the sign in with the usual "these credentials don't match" error. | Sign the session out. |
 | `->revokeAllSessions()` | Nothing, even from your own responder. Otherwise anyone with only the password could sign the owner out whenever they liked. | Sign out every session of the user, including this one, change their "remember me" token, stop trusting their devices and cancel any pending email change (`Sessions::signOutEverywhere()`). |
 | `->lockFor('1h')` | Refuse sign ins for that long. Trusted devices stay trusted, for the same reason sessions aren't revoked. | Refuse sign ins for that long, from now, and stop trusting the user's devices. |
-| `->notify()` | Send the `suspicious_activity` security email, if it's turned on. | The same. |
+| `->notify()` | Send the `suspicious_activity` security email, if it's registered. | The same. |
 | `->requirePasswordChange()` | Hold the user until they choose a new password. The sign in goes ahead unless the action also denies it, and the hold is there for whoever signs in next. | Hold them from this request on. |
 
 Locks are kept in the cache store named in `risk.store`. Clearing that store lifts every lock, so if it's your default store, `php artisan cache:clear` does too: give locks a persistent store of their own where that matters. A database or Redis store is the one to use. Octane's `octane` store loses every lock when the server restarts, among [other things](security.md#octanes-cache-store). While locked, every sign in fails with the usual generic error, and a "remember me" cookie is signed out instead of let back in. Sessions that are already signed in carry on. Password reset still works and lifts the lock, so a lock can't keep the owner out for good. Otherwise a lock lifts on its own when it expires.
