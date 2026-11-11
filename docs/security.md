@@ -16,6 +16,7 @@
     - [Random Values](#random-values)
     - [Changing an Algorithm](#changing-an-algorithm)
     - [Peppering Passwords](#peppering-passwords)
+- [What a Request Costs](#what-a-request-costs)
 - [Standards](#standards)
 - [Known Limitations](#known-limitations)
 
@@ -282,6 +283,20 @@ Then set `hashing.driver` to `peppered`. Three things to settle first:
 - **Rotation.** Changing the pepper is changing every hash. Keep the old one to check against, and rehash on sign in, as above.
 - **Length.** The HMAC is 44 characters whatever was typed, so bcrypt's 72 byte limit no longer cuts a long password short. Keyring's [password rules](protected-changes.md#password-rules) go by `hashing.driver`, so with a driver that isn't `bcrypt` they stop refusing passwords over 72 bytes. A password over 72 bytes is still refused at sign in while its stored hash is a bcrypt one, since Keyring can't tell a peppered bcrypt hash from a plain one: wrap Argon2id rather than bcrypt, or keep new passwords to 72 bytes with a rule of your own.
 
+## What a Request Costs
+
+The operations below are the expensive ones, each with what stops a stranger from running it without limit. All of it happens inside a request: Keyring starts no background work except the emails noted.
+
+| Operation | When | What bounds it |
+|---|---|---|
+| One password hash (bcrypt or Argon2id, at your cost setting) | Every password attempt the limits let through, including for a name with no account, which spends a hash on a random password so both take the same time | The [rate limits](#rate-limiting) are checked first, and a refused attempt hashes nothing: 5 a minute per account and per typed name, 20 a minute per IP address, with locks that double. The account's own limit refuses quietly, and that refusal still spends a hash so it takes as long as a wrong password, until the typed name's limit or the IP address's answers with a `429`. Hashing a new password on registration, a change or a reset is behind the `keyring` limiter, 6 a minute. |
+| A worker held for `timebox` (250ms) | Every refused verification, a `429` included | It's a sleep, not CPU, but it does hold a PHP worker, and Keyring doesn't bound how many: a rate-limited request waits like any other refusal, or the limits would show in the timing. What bounds it sits in front of PHP: the connection and request limits of your web server or load balancer, and the size of the worker pool. Lowering `timebox` gives each worker back sooner and makes timing less even. |
+| The breached-password lookup, an HTTPS request to Have I Been Pwned | Setting a password, in production by default (`passwords.uncompromised`); and at every password sign in if you add the `BreachedPassword` risk signal, which isn't on by default | Behind the `keyring` limiter for new passwords, and the sign-in limits for the signal. Laravel's verifier gives up after 30 seconds and then lets the password through, so an outage slows these requests rather than failing them. Turn the check off, or bind an `UncompromisedVerifier` of your own with a shorter timeout, if that's too long to hold a worker. |
+| WebAuthn verification: decoding the response and checking one signature | Adding a key, and every sign in or step-up with one | At sign in, the factor's rate limits, checked before the response is read; adding a key is behind the `keyring` limiter and a fresh verification. Usernameless options are limited to 60 a minute per IP address. An RSA key is bounded to 16,384 bits by the library, since the work grows with the key. |
+| Attestation: a certificate chain of at most six, checked against each root you list for the model | Adding a key to a factor with `requireAttestation()` | The `keyring` limiter on enrollment, the cap on chain length, and nothing being fetched: no revocation lookups, no metadata download. |
+| Mail | A reset link, an email change, a verification link, an emailed code, a security notice | Reset and email-change mail is sent after the response. A verification link and an emailed code are sent during the request, unless you queue those notifications: a code is limited to three per factor every 10 minutes per account (`limits.codes`). The published security notices are queued, five of a kind an hour per account (`limits.notices`). The routes that ask for mail are behind the `keyring` limiter. |
+| A session lock | Sign in, challenge and enrollment routes | Requests in one session wait for each other, for up to Laravel's 10 seconds, and one that waited that long fails. One session can't hold up another. |
+
 ## Standards
 
 Keyring's code and config say what each thing does. This is where the choices come from:
@@ -310,6 +325,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 ## Known Limitations
 
 - **Lockouts still reach new browsers.** Someone who knows a user's email can keep that account locked by guessing faster than the per-minute limit. If they guess under one of the account's names and the owner types another, the owner is told the password is wrong rather than to wait, because saying more would tell a stranger the two names are one account. With `Features::devices()` on, browsers the owner has signed in from before keep their own limit and keep working. Without devices, the lock reaches every browser while the guessing goes on. A password reset clears the password's counts and locks, but not a second factor's.
+- **Windows Hello keys that only sign RS256 aren't taken by default.** RS256 isn't an algorithm OWASP ASVS approves, so `webauthn.algorithms` leaves it out, and on a machine whose Windows Hello makes nothing else, a passkey can't be created with it. See [RS256 and Windows Hello](passkeys.md#rs256-and-windows-hello) for who that affects and how to turn it on.
 - **Attestation is off unless you ask for it, and only covers hardware keys.** By default any WebAuthn authenticator is accepted and AAGUIDs aren't verified. A factor set up with `requireAttestation()` checks `packed` and `fido-u2f` attestation against root certificates you list, and can then be limited to certain models. Platform formats (`tpm`, `android-key`, `apple`) aren't read, and certificates aren't looked up for revocation. See [Attestation and AAGUIDs](passkeys.md#attestation-and-aaguids).
 - **No clone detection for synced passkeys.** Their counters are usually always zero.
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
