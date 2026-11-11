@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;

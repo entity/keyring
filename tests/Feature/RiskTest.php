@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
 use App\Notifications\Keyring\NewDevice as NewDeviceNotice;
 use App\Notifications\Keyring\PasswordChanged;

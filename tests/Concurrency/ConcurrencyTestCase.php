@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Tests\Concurrency;
 
 use Illuminate\Support\Facades\DB;

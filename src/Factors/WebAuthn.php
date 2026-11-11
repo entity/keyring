@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -188,7 +190,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         $id = $this->ceremonies()->credentialId($credential);
         $actual = $authenticator->credential_id === $id
             ? $authenticator
-            : $attempt->keyring()->of($this->key())->firstWhere('credential_id', $id);
+            : $attempt->keyring()->of($this->key())->firstWhere('credential_id', '===', $id);
 
         if (! is_string($options) || $actual === null) {
             return null;

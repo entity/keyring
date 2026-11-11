@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
 use Keyring\Http\Middleware\PreventCaching;

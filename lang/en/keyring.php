@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
     'invalid' => 'That didn\'t work. Check it and try again.',
     'key_not_accepted' => 'This key couldn\'t be added. Only certain security keys are accepted here, and this doesn\'t appear to be one of them.',

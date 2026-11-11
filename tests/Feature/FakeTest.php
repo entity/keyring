@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;

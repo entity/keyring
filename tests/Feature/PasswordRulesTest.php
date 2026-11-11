@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Hashing\HashManager;
 use Illuminate\Http\Client\ConnectionException;
