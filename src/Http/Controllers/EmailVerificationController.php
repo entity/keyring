@@ -1,12 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\VerifiedResponse;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
+use Keyring\Http\Requests\VerifyEmailRequest;
 use Keyring\KeyringManager;
 
 class EmailVerificationController
@@ -24,7 +26,7 @@ class EmailVerificationController
             : $this->keyring->render('verify-email', ['status' => $this->statusMessage($request)]);
     }
 
-    public function verify(EmailVerificationRequest $request): mixed
+    public function verify(VerifyEmailRequest $request): mixed
     {
         if (! $this->verified($request)) {
             $request->fulfill();

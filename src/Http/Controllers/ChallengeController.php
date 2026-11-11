@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\RedirectResponse;
@@ -128,6 +130,12 @@ class ChallengeController
 
         $factor->send($attempt, $authenticator);
 
+        // Sending found the attempt out of guesses, where this copy of the
+        // session didn't know it.
+        if ($attempt->exhausted) {
+            return $this->startOver($request, $purpose);
+        }
+
         $this->attempts->save($attempt);
 
         return $this->status('code-sent');
@@ -181,9 +189,9 @@ class ChallengeController
      */
     protected function pick(Attempt $attempt, Collection $options, string $factor, mixed $id, bool $strict): ?Authenticator
     {
-        $candidates = $options->where('factor', $factor);
+        $candidates = $options->where('factor', '===', $factor);
 
-        return $candidates->firstWhere('id', $id ?? $attempt->presented($factor))
+        return $candidates->firstWhere('id', '===', $id ?? $attempt->presented($factor))
             ?? (! $strict || $candidates->count() === 1 ? $candidates->first() : null);
     }
 

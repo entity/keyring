@@ -1,10 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Testing;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Hash;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\SessionRegistry;
@@ -57,6 +60,15 @@ trait KeyringConformance
         return [];
     }
 
+    /**
+     * Whether your app keeps bcrypt on purpose, knowing its passwords stop
+     * at 72 bytes: 72 plain characters, and fewer of any other kind.
+     */
+    protected function keyringAcknowledgesBcryptLimit(): bool
+    {
+        return false;
+    }
+
     public function test_keyring_signs_in_with_a_password_or_asks_for_more(): void
     {
         $user = $this->keyringUser();
@@ -80,6 +92,18 @@ trait KeyringConformance
             [],
             array_values(array_diff(Keyring::dangerouslyChangedSteps(), $this->keyringAcknowledgedDangerousSteps())),
             'Mandatory pipeline steps were removed or replaced. If you meant to, list them in keyringAcknowledgedDangerousSteps().',
+        );
+    }
+
+    public function test_keyring_takes_passwords_of_64_characters(): void
+    {
+        $this->assertGreaterThanOrEqual(64, config('keyring.passwords.max'), 'The keyring.passwords.max option should allow passwords of at least 64 characters.');
+
+        $this->assertTrue(
+            Hash::getDefaultDriver() !== 'bcrypt' || $this->keyringAcknowledgesBcryptLimit(),
+            'Passwords are hashed with bcrypt, which only reads the first 72 bytes, so Keyring refuses longer ones: 64 characters of accented or non-Latin text, for one. '
+            .'Set HASH_DRIVER=argon2id to take every password up to keyring.passwords.max, with HASH_VERIFY=false while users still have bcrypt hashes. '
+            .'If you mean to keep bcrypt, return true from keyringAcknowledgesBcryptLimit().',
         );
     }
 

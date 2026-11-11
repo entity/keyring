@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring;
 
 use Illuminate\Auth\Events\Login;
@@ -7,6 +9,7 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Contracts\Foundation\Application;
@@ -31,12 +34,14 @@ use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireEnrollment;
 use Keyring\Http\Middleware\RequireFreshVerification;
 use Keyring\Http\Middleware\RequirePasswordChange;
+use Keyring\Http\Middleware\ValidateSignature;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Keyring\Support\PasswordRules;
 use Keyring\Support\Url;
 use Keyring\WebAuthn\ConfiguredRoots;
 
@@ -99,6 +104,11 @@ class KeyringServiceProvider extends ServiceProvider
             throw UnknownFeature::in($unknown);
         }
 
+        // And a password minimum under eight would only show once someone
+        // chose a password that short.
+        PasswordRules::min(withMfa: true);
+        PasswordRules::min(withMfa: false);
+
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'keyring');
 
         $this->registerMiddleware();
@@ -114,6 +124,7 @@ class KeyringServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->registerPublishing();
             $this->registerAboutSection();
+            $this->schedulePruning();
         }
     }
 
@@ -126,6 +137,7 @@ class KeyringServiceProvider extends ServiceProvider
         $router->aliasMiddleware('keyring.session', AuthenticateSession::class);
         $router->aliasMiddleware('keyring.enrolled', RequireEnrollment::class);
         $router->aliasMiddleware('keyring.password', RequirePasswordChange::class);
+        $router->aliasMiddleware('keyring.signed', ValidateSignature::class);
 
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);
@@ -260,6 +272,21 @@ class KeyringServiceProvider extends ServiceProvider
             'Features' => implode(', ', config('keyring.features')) ?: 'none',
             'Session registry' => config('keyring.sessions.driver'),
         ]);
+    }
+
+    /**
+     * Run keyring:prune every day, so what Keyring keeps is deleted when its
+     * time is up without the app having to remember to schedule it. Added
+     * once the schedule is asked for, which only scheduler commands do. Set
+     * "prune_at" to null to schedule it yourself.
+     */
+    protected function schedulePruning(): void
+    {
+        $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+            if (($at = config('keyring.prune_at')) !== null) {
+                $schedule->command(Console\PruneCommand::class)->dailyAt($at);
+            }
+        });
     }
 
     protected function registerPublishing(): void

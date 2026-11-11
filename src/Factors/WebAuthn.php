@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -199,7 +201,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         $id = $this->ceremonies()->credentialId($credential);
         $actual = $authenticator->credential_id === $id
             ? $authenticator
-            : $attempt->keyring()->of($this->key())->firstWhere('credential_id', $id);
+            : $attempt->keyring()->of($this->key())->firstWhere('credential_id', '===', $id);
 
         if (! is_string($options) || $actual === null) {
             return null;
@@ -220,8 +222,9 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
                     return false;
                 }
 
-                // Whether the key may sync is reported again on every sign in.
-                $locked->withMeta('backup_eligible', $result['backupEligible'])->forceFill([
+                // Whether the key may sync, and whether it has been backed up
+                // yet, are reported again on every sign in.
+                $locked->withMeta('backup_eligible', $result['backupEligible'])->withMeta('backed_up', $result['backedUp'])->forceFill([
                     'public_key' => $this->ceremonies()->toJson($result['record']),
                     'sign_count' => $result['record']->counter,
                 ]);
@@ -297,6 +300,7 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
             'meta' => [
                 'user_verified' => (bool) $record->uvInitialized,
                 'backup_eligible' => (bool) $record->backupEligible,
+                'backed_up' => (bool) $record->backupStatus,
             ],
         ]);
     }

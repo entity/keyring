@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Login;
 
 use Illuminate\Container\Attributes\Scoped;
@@ -81,13 +83,25 @@ class AttemptStore
         try {
             return ! $attempt->expired
                 && $attempt->guard === config('keyring.guard')
-                && ($purpose === Purpose::Login || $attempt->userId == auth()->guard($attempt->guard)->id())
+                && ($purpose === Purpose::Login || $this->isSignedIn($attempt))
                 && is_string($credentials)
                 && hash_equals($credentials, $this->credentials($attempt->user()))
                 && Keyring::allowsSignIn($attempt->user());
         } catch (AttemptExpired) {
             return false;
         }
+    }
+
+    /**
+     * Whether the attempt's user is the one signed in. IDs are compared as
+     * strings: one may be an integer and the other a string of it, and a
+     * loose comparison would also take "01" or "1e0" for 1.
+     */
+    protected function isSignedIn(Attempt $attempt): bool
+    {
+        $id = auth()->guard($attempt->guard)->id();
+
+        return $id !== null && (string) $attempt->userId === (string) $id;
     }
 
     /**

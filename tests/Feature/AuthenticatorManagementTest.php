@@ -1,8 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
+use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -12,6 +16,7 @@ use Keyring\Concerns\HasKeyring;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
@@ -20,6 +25,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
+use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
@@ -291,6 +297,49 @@ it('tells the user when a sign-in method is added', function () {
     Notification::assertSentTo($this->user, AuthenticatorAddedNotice::class);
 });
 
+it('tells the user when their recovery codes are replaced, once the app registers the notice', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->verifiedWith($totp);
+    Notification::fake();
+
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+    Notification::assertNothingSent();
+
+    sendNotifications(['recovery_codes_generated']);
+
+    $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+    $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+    $notice = Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole();
+
+    expect($notice->ip)->toBe('127.0.0.1')
+        ->and(renderedMail($notice->toMail($this->user))['text'])->toContain('Any codes you saved before no longer work.');
+});
+
+it('tells them about the recovery codes that come with a first sign-in method too', function () {
+    Notification::fake();
+    sendNotifications(['recovery_codes_generated']);
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+    Notification::assertSentToTimes($this->user, RecoveryCodesGeneratedNotice::class, 1);
+    Notification::assertSentToTimes($this->user, AuthenticatorAddedNotice::class, 1);
+});
+
+it('sends nothing for a new name or a new default, which change nothing about how anyone signs in', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $this->verifiedWith($totp);
+    Notification::fake();
+    sendNotifications();
+
+    $this->patchJson(route('keyring.authenticators.update', $totp), ['name' => 'Phone', 'default' => true])->assertOk();
+
+    Notification::assertNothingSent();
+});
+
 it('shows a name someone typed as plain text in the email, never as a link', function (string $name, string $html, string $text) {
     Notification::fake();
     sendNotifications();
@@ -335,6 +384,51 @@ class UnnotifiableAccount extends Authenticatable
 {
     use HasKeyring;
 }
+
+// Laravel's "cookie" session driver keeps the session in the browser, which
+// can send back an earlier copy: one that still holds an enrollment that has
+// since been confirmed.
+describe('a browser that sends back an earlier copy of its session', function () {
+    it('cannot bring back recovery codes that were replaced', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->verifiedWith($totp);
+
+        $first = $this->postJson(route('keyring.authenticators.store', 'recovery'))->json('enrollment.codes');
+        $unconfirmed = session()->all();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        $second = $this->postJson(route('keyring.authenticators.store', 'recovery'))->json('enrollment.codes');
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        sendBackSession($unconfirmed);
+
+        $this->actingAs($this->user)->verifiedWith($totp)
+            ->postJson(route('keyring.authenticators.confirm', 'recovery'))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
+
+        $set = $this->user->keyring->refresh()->of('recovery')->sole();
+        $attempt = Attempt::start(Purpose::Login, $this->user);
+
+        expect(Keyring::factor('recovery')->verify($attempt, $set, Request::create('/', 'POST', ['code' => $first[0]])))->toBeNull()
+            ->and(Keyring::factor('recovery')->verify($attempt, $set, Request::create('/', 'POST', ['code' => $second[0]])))->not->toBeNull();
+    });
+
+    it('cannot add the same authenticator app twice from one enrollment', function () {
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $unconfirmed = session()->all();
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        sendBackSession($unconfirmed);
+
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+            ->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret, 1)])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
+
+        expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+    });
+});
 
 // NIST SP 800-63B-4, Sec. 3.1.2.1: recovery codes handed over in an online
 // session need that session to be authenticated at AAL2.
@@ -439,7 +533,7 @@ describe('replacing recovery codes once one is used', function () {
         signInWithRecoveryCode('wrong-code')->assertSessionHasErrors('code');
         expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeFalse();
 
-        signInWithRecoveryCode('aaaaa-11111')->assertRedirect('/dashboard');
+        signInWithRecoveryCode('aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa')->assertRedirect('/dashboard');
         expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeTrue()
             ->and(Keyring::factor('recovery')->present(Keyring::for($this->user)->of('recovery')->sole()))->toMatchArray(['remaining' => 2, 'replace' => true]);
         Event::assertDispatched(RecoveryCodeUsed::class, fn (RecoveryCodeUsed $event) => $event->remaining === 2);
@@ -453,7 +547,7 @@ describe('replacing recovery codes once one is used', function () {
     });
 
     it('lets the session that used a code make the new set straight away, and stops asking', function () {
-        signInWithRecoveryCode('aaaaa-11111')->assertRedirect('/dashboard');
+        signInWithRecoveryCode('aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa')->assertRedirect('/dashboard');
 
         $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk()->json('enrollment.codes');
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
@@ -467,7 +561,7 @@ describe('replacing recovery codes once one is used', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
 
         $this->post(route('keyring.authenticators.store', 'totp'))->assertRedirect(route('keyring.confirm.challenge'));
-        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'bbbbb-22222']);
+        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb']);
 
         expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeTrue();
     });

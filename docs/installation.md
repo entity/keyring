@@ -15,7 +15,7 @@ The [Quick Start](quick-start.md) is the short version. This page has the detail
 - PHP 8.5 or later
 - Laravel 13.31 or later
 - Inertia v3 (optional). Without Inertia, Keyring renders Blade views instead (see [Pages](sign-in-flow.md#pages)).
-- The `sodium` PHP extension, if you want passkeys and security keys that sign with Ed25519. Without it, Keyring only offers ES256 and RS256 keys.
+- The `sodium` PHP extension, if you want passkeys and security keys that sign with Ed25519. Without it, Keyring only offers ES256 keys by default.
 
 ## Installing Keyring
 
@@ -124,13 +124,4 @@ To change the prefix, domain or middleware, or to turn routes off, see [Configur
 - Build your [pages](quick-start.md#your-pages).
 - Run a queue worker if your queue isn't `sync`. [Security emails](security-log-and-emails.md#security-emails) are queued, so they wait for one, while sign-in codes go out straight away.
 - Add [features](quick-start.md#adding-features) and [sign-in methods](quick-start.md#adding-sign-in-methods) as you need them.
-- Schedule `keyring:prune`, which clears out old devices, finished email changes, old security log entries and ended sessions:
-
-  ```php
-  // routes/console.php
-  use Illuminate\Support\Facades\Schedule;
-
-  Schedule::command('keyring:prune')->daily();
-  ```
-
-  See [Pruning](devices-and-sessions.md#pruning).
+- Run Laravel's scheduler (`* * * * * php artisan schedule:run`) if you don't already. Keyring adds `keyring:prune` to it, daily, which clears out old devices, finished email changes, old security log entries and ended sessions. See [Pruning](devices-and-sessions.md#pruning).

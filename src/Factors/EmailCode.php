@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -39,6 +41,10 @@ class EmailCode extends CodeFactor
         $this->length = $length ?? $this->length;
         $this->ttl = $expireAfter === null ? $this->ttl : Duration::seconds($expireAfter);
         $this->maxGuesses = $maxGuesses ?? $this->maxGuesses;
+
+        // Here as well as when it's registered, so the line that asked for
+        // a code too short or too long-lived is the one that fails.
+        $this->ensureCodesAreSafe();
     }
 
     /**
@@ -46,6 +52,7 @@ class EmailCode extends CodeFactor
      * a code is still AAL1.
      * Eight digits, good for ten minutes and five wrong guesses, unless you
      * say otherwise: EmailCode::asSecondFactor(length: 6, expireAfter: '5m').
+     * Six digits is the fewest and ten minutes the longest Keyring allows.
      */
     public static function asSecondFactor(?int $length = null, ?string $expireAfter = null, ?int $maxGuesses = null): static
     {

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Sessions;
 
 use Closure;
@@ -14,7 +16,8 @@ use Keyring\Contracts\SessionRegistry;
  * Use a persistent store: if the cache is cleared, everyone is signed out.
  *
  * Revocations live in their own key that saves never write, so a request
- * saving a stale copy of its session can't undo a revocation.
+ * saving a stale copy of its session can't undo a revocation. What replaced
+ * a record is kept the same way.
  */
 class CacheSessionRegistry implements SessionRegistry
 {
@@ -25,7 +28,7 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function save(RegisteredSession $session): void
     {
-        $this->cache->put($this->key($session->id), $session->with(['revokedAt' => null])->toArray(), $this->ttl($session));
+        $this->cache->put($this->key($session->id), $session->with(['revokedAt' => null, 'replacedBy' => null, 'replacedAt' => null])->toArray(), $this->ttl($session));
 
         if ($session->revokedAt !== null) {
             $this->cache->add($this->revokedKey($session->id), $session->revokedAt, $this->ttl($session));
@@ -40,16 +43,19 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function find(string $id): ?RegisteredSession
     {
-        $data = $this->cache->get($this->key($id));
+        $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id)]);
+        $data = $found[$this->key($id)] ?? null;
 
         if (! is_array($data)) {
             return null;
         }
 
-        $session = RegisteredSession::fromArray($data);
-        $revokedAt = $this->cache->get($this->revokedKey($id));
-
-        return $revokedAt === null ? $session : $session->with(['revokedAt' => (int) $revokedAt]);
+        return RegisteredSession::fromArray([
+            ...$data,
+            'revoked_at' => $found[$this->revokedKey($id)] ?? null,
+            'replaced_by' => $found[$this->replacedKey($id)]['by'] ?? null,
+            'replaced_at' => $found[$this->replacedKey($id)]['at'] ?? null,
+        ]);
     }
 
     public function forUser(Authenticatable $user): Collection
@@ -87,6 +93,40 @@ class CacheSessionRegistry implements SessionRegistry
         if ($session = $this->find($id)) {
             $this->cache->add($this->revokedKey($id), now()->getTimestamp(), $this->ttl($session));
         }
+    }
+
+    /**
+     * add() only writes a key that isn't there, which is what lets one of
+     * two requests through. The new record is stored before that, so a
+     * request that finds the old one replaced always finds what replaced it.
+     * A revocation that landed in the meantime wins: the new record goes.
+     */
+    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    {
+        $session = $this->find($id);
+
+        if ($session === null || $session->revokedAt !== null || $session->replacedBy !== null) {
+            return false;
+        }
+
+        $this->save($successor);
+
+        $now = now()->getTimestamp();
+        $ttl = $this->ttl($session);
+
+        // Revoked before it's replaced, so it's never found replaced only.
+        $replaced = (! $revoke || $this->cache->add($this->revokedKey($id), $now, $ttl))
+            && $this->cache->add($this->replacedKey($id), ['by' => $successor->id, 'at' => $now], $ttl)
+            && ($revoke || $this->cache->missing($this->revokedKey($id)));
+
+        if (! $replaced) {
+            $this->cache->forget($this->key($successor->id));
+        }
+
+        // A replaced record is found by its ID, and never listed again.
+        $this->index($session->userId, fn (array $ids) => array_diff_key($ids, [($replaced ? $id : $successor->id) => true]));
+
+        return $replaced;
     }
 
     public function revokeAll(Authenticatable $user, ?string $except = null): int
@@ -152,5 +192,10 @@ class CacheSessionRegistry implements SessionRegistry
     protected function revokedKey(string $id): string
     {
         return $this->key($id).':revoked';
+    }
+
+    protected function replacedKey(string $id): string
+    {
+        return $this->key($id).':replaced';
     }
 }

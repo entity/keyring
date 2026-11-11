@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Risk\Signals;
 
 use Keyring\Facades\Keyring;
@@ -20,9 +22,9 @@ class ImpossibleTravel extends Signal
 
     public function assess(Assessment $assessment): ?Finding
     {
-        $here = $assessment->location();
+        $here = $this->coordinates($assessment->location());
 
-        if (! isset($here['latitude'], $here['longitude'])) {
+        if ($here === null) {
             return null;
         }
 
@@ -33,18 +35,33 @@ class ImpossibleTravel extends Signal
             ->latest('last_seen_at')
             ->first();
 
-        $there = $last?->location;
+        $there = $this->coordinates($last?->location);
 
-        if ($last?->last_seen_at === null || ! isset($there['latitude'], $there['longitude'])) {
+        if ($last?->last_seen_at === null || $there === null) {
             return null;
         }
 
-        $km = $this->distance($there['latitude'], $there['longitude'], $here['latitude'], $here['longitude']);
+        $km = $this->distance(...$there, ...$here);
         $hours = max(1 / 60, $last->last_seen_at->diffInSeconds(now()) / 3600);
 
         return $km >= $this->minKm && $km / $hours > $this->maxKph
             ? new Finding('impossible_travel', $this->score, sprintf('%d km from the last sign in, %d minutes later.', $km, $hours * 60))
             : null;
+    }
+
+    /**
+     * A location's latitude and longitude, when it has both as numbers. A
+     * locator may hand them over as it read them, as text.
+     *
+     * @param  array<string, mixed>|null  $location
+     * @return array{float, float}|null
+     */
+    protected function coordinates(?array $location): ?array
+    {
+        $latitude = $location['latitude'] ?? null;
+        $longitude = $location['longitude'] ?? null;
+
+        return is_numeric($latitude) && is_numeric($longitude) ? [(float) $latitude, (float) $longitude] : null;
     }
 
     protected function distance(float $lat1, float $lon1, float $lat2, float $lon2): float

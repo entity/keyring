@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -13,9 +15,11 @@ use Keyring\Enums\Assurance;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
+use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SoftDeletingUser;
+use Keyring\Tests\Fixtures\User;
 
 it('removes sign-in methods, devices, pending changes and sessions with the user', function () {
     $user = taylor();
@@ -162,4 +166,35 @@ it('ends a soft deleted user\'s reset links, so a restore does not bring them ba
     $user->restore();
 
     expect(Password::broker()->tokenExists($user->fresh(), $token))->toBeFalse();
+});
+
+it('deletes a user\'s security log entries with them, and nobody else\'s', function () {
+    $user = taylor();
+    $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong']);
+    $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'wrong']);
+    $this->post('/login', ['email' => 'nobody@example.com', 'password' => 'wrong']);
+
+    expect(SecurityEvent::query()->ownedBy($user)->sole())->ip->toBe('127.0.0.1')->user_agent->toBe(FIREFOX);
+
+    $user->delete();
+
+    expect(SecurityEvent::query()->ownedBy($user)->count())->toBe(0)
+        ->and(SecurityEvent::query()->ownedBy($other)->count())->toBe(1)
+        ->and(SecurityEvent::query()->whereNull('authenticatable_id')->count())->toBe(1);
+});
+
+it('keeps a soft deleted user\'s security log entries, in case they are restored', function () {
+    Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+    config(['auth.providers.users.model' => SoftDeletingUser::class]);
+    $user = SoftDeletingUser::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong']);
+
+    $user->delete();
+    expect(SecurityEvent::query()->ownedBy($user)->count())->toBe(1);
+
+    $user->forceDelete();
+    expect(SecurityEvent::query()->ownedBy($user)->count())->toBe(0);
 });

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Contracts;
 
 use Illuminate\Cache\RateLimiting\Limit;

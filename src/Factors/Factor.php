@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Closure;
@@ -45,7 +47,7 @@ abstract class Factor implements FactorContract
 
     public function authenticators(Authenticatable&Model $user, Collection $stored): Collection
     {
-        return $stored->where('factor', $this->key())->values();
+        return $stored->where('factor', '===', $this->key())->values();
     }
 
     public function challenge(Attempt $attempt, Authenticator $authenticator): array

@@ -1,12 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Models\Concerns;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Str;
+use Keyring\Events\AccessRefused;
 
 /**
  * Keyring's records belong to any authenticatable model, through the
@@ -43,6 +48,21 @@ trait BelongsToUser
         $owner = $this->authenticatable()->withoutGlobalScopes()->first();
 
         return $owner instanceof Authenticatable ? $owner : null;
+    }
+
+    /**
+     * Refuse a request for one of these that the user doesn't have. The
+     * answer is the 404 a missing one gets, so it doesn't say whether the ID
+     * is someone else's, and the attempt goes on record.
+     *
+     * @throws ModelNotFoundException<static>
+     */
+    public static function refuse(Authenticatable&Model $user, string $id): never
+    {
+        // Named after Keyring's model, whichever of the app's stands in for it.
+        AccessRefused::dispatch($user, Str::snake(class_basename(self::class)), $id);
+
+        throw new ModelNotFoundException()->setModel(static::class, $id);
     }
 
     /**

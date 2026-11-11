@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Http\Request;
 use Illuminate\Routing\RouteCollection;
@@ -144,6 +146,38 @@ it('caps a passkey that syncs at aal2, as nist does', function () {
     expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
         ->and($this->user->keyring->canMeet(Requirement::aal3()))->toBeFalse();
 });
+
+it('keeps whether a passkey has been backed up, as it reports it on every sign in', function () {
+    // One that can sync, and hasn't yet.
+    $key = new VirtualAuthenticator(synced: true, backedUp: false);
+    enroll('passkey', $key);
+
+    $passkey = fn () => Authenticator::where('factor', 'passkey')->sole();
+
+    expect($passkey()->meta('backup_eligible'))->toBeTrue()
+        ->and($passkey()->meta('backed_up'))->toBeFalse();
+
+    foreach ([true, false] as $backedUp) {
+        $key->backedUp = $backedUp;
+
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+
+        expect($passkey()->meta('backed_up'))->toBe($backedUp)
+            ->and($passkey()->meta('backup_eligible'))->toBeTrue();
+
+        $this->post('/logout');
+    }
+});
+
+it('records a key that can not sync as not backed up, and one that syncs as backed up', function (VirtualAuthenticator $key, bool $backedUp) {
+    enroll('passkey', $key);
+
+    expect(Authenticator::where('factor', 'passkey')->sole()->meta('backed_up'))->toBe($backedUp);
+})->with([
+    'device bound' => [fn () => new VirtualAuthenticator, false],
+    'synced' => [fn () => new VirtualAuthenticator(synced: true), true],
+]);
 
 it('will not sign in with a passkey that belongs to another model with the same id', function () {
     $user = $this->user;

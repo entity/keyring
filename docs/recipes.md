@@ -160,7 +160,7 @@ A template is a Vue file. Whatever changes per email is a Blade variable inside 
 </template>
 ```
 
-`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. The published `SecurityNotice` then returns them, and all ten notices use the one template:
+`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. The published `SecurityNotice` then returns them, and every notice uses the one template:
 
 ```php
 // app/Notifications/Keyring/SecurityNotice.php
@@ -528,7 +528,7 @@ How long things are kept is config too:
 'email_changes' => ['keep_ended_for' => '7d'],
 ```
 
-`keyring:prune` deletes what's past those, so [schedule it daily](devices-and-sessions.md#pruning). To record nothing at all, leave `Features::securityLog()` and `Features::devices()` off.
+`keyring:prune` deletes what's past those, and Keyring [schedules it daily](devices-and-sessions.md#pruning) for you. Force deleting a user deletes their devices, sign-in methods, pending changes and log entries at once. To keep no devices, leave `Features::devices()` off. Without `Features::securityLog()` there's no log table, and the events go to [your app's log](security-log-and-emails.md#without-the-table) instead, where what's kept is up to that channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists it all.
 
 ## Accounts an Admin Approves
 

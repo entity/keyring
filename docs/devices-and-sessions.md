@@ -15,6 +15,7 @@
     - [Writing a Driver](#writing-a-driver)
     - [The Session Middleware](#the-session-middleware)
     - ["Remember Me"](#remember-me)
+    - [A Cookie Used Twice](#a-cookie-used-twice)
 - [Timeouts](#timeouts)
 - [Pruning](#pruning)
 - [Events](#events)
@@ -32,7 +33,7 @@ Keyring tracks two things:
 ],
 ```
 
-With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry` and `ImpossibleTravel` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
+With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry`, `ImpossibleTravel` and `InactiveAccount` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
 
 ## Routes
 
@@ -204,6 +205,8 @@ Laravel keeps one "remember me" token per user, so changing it signs out every r
 
 Every signed-in session gets a record in Keyring's registry, with its own random ID, the user, the device, the assurance level, the IP address, the user agent, and its timestamps. Laravel's session ID is never stored. The registry ID lives inside the session.
 
+A session can move to a new record: when ["remember me"](#remember-me) carries it on, after a mid-session [step-up](risk.md#actions), and with `rotate()` on the `cookie` session driver. The old record then names the new one (`replacedBy`, `replacedAt`) and stops being a session: it isn't listed, counted or revoked with the user's sessions.
+
 Because Keyring checks the registry on every request, revoking a session takes effect on its next request, whichever session driver you use.
 
 ### Drivers
@@ -237,14 +240,15 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 
 | Method | Does |
 |---|---|
-| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime. |
+| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime, or what a record was replaced by. |
 | `find($id)` | The session, or `null`. |
-| `forUser($user)` | The user's sessions that haven't expired or been revoked, most recent first. |
+| `forUser($user)` | The user's sessions that haven't expired, been revoked or been replaced, most recent first. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names are as on `RegisteredSession`; `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |
-| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many. `Sessions::signOutEverywhere()` calls it, then also changes the remember token, stops trusting the other devices and cancels a pending email change, so call that one from your own code. |
+| `replace($id, $successor, $revoke = false)` | Moves a session to a new record: stores `$successor` and sets the old record's `replacedBy` and `replacedAt` (and revokes it, with `$revoke`). It only does so for a record that is neither revoked nor replaced, and returns whether it did. Of two calls for the same record at the same moment exactly one may return `true`, and the other's record must not be left behind: "remember me" being single use rests on this. The database driver uses one conditional `UPDATE` in a transaction, the cache driver the store's `add()`. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many, not counting replaced records. `Sessions::signOutEverywhere()` calls it, then also changes the remember token, stops trusting the other devices and cancels a pending email change, so call that one from your own code. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
-| `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A store that expires records itself can return `0`. |
+| `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A replaced record is kept until it expires, revoked or not: it's how a used "remember me" cookie is told from one that was never issued. A store that expires records itself can return `0`. |
 
 ### The Session Middleware
 
@@ -262,7 +266,7 @@ It only checks routes it runs on, and it needs Laravel's session to have started
 
 On each signed-in request it:
 
-- signs the user out if their registry record was revoked, has expired, belongs to someone else, or has been idle too long,
+- signs the user out if their registry record was revoked, has expired, belongs to someone else, has been idle too long, or was [carried on by "remember me" somewhere else](#a-cookie-used-twice),
 - registers sessions that started some other way, such as your own `Auth::login()` (on the response that signs in),
 - carries a remembered session on when a ["remember me" cookie](#remember-me) signs its browser back in, or signs it out if that session has ended,
 - runs the cheap [risk signals](risk.md#checkpoints),
@@ -280,8 +284,8 @@ Laravel's "remember me" cookie holds a token that is the same in every browser t
 
 So a remembered sign in also sets a Keyring cookie (`keyring_remember`, named in `sessions.remember_cookie`) holding that session's registry ID. It's httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts as long as the record does. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
 
-- If the record is the user's, hasn't been revoked, and is inside its `absolute` limit and its `idle` limit (when you set one), the new session carries it on. It's the same record with the same expiry, so coming back never starts the `absolute` limit again. The record's IP address, browser and last activity are updated, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
-- Otherwise the request is signed out like any other ended session, with both cookies cleared: there was no Keyring cookie, its record is gone (`expired`), or the record was revoked, timed out or belongs to someone else. A client that kept the cookies after a timeout or a risk response gets nowhere with them.
+- If the record is the user's, hasn't been revoked, and is inside its `absolute` limit and its `idle` limit (when you set one), the new session carries it on, under a new record and a new cookie. The new record is a copy of the old one with the same start and the same expiry, so coming back never starts the `absolute` limit again. Its device, IP address and browser are those of the request that came back, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
+- Otherwise the request is signed out like any other ended session, with both cookies cleared: there was no Keyring cookie, its record is gone or was never issued (`expired`), or the record was revoked, timed out or belongs to someone else. A client that kept the cookies after a timeout or a risk response gets nowhere with them.
 
 It's also refused while the account is [risk locked](risk.md#actions).
 
@@ -290,6 +294,34 @@ Your own `Auth::login($user, remember: true)` gets the Keyring cookie too, on th
 If Laravel's cookie first reaches a route without the middleware, Laravel signs it in there and Keyring notes that in the session. The next request the middleware sees is checked the same way.
 
 With an `idle` limit set, a remembered browser that stays away for longer than it has to sign in again, because its session idled out. Leave `idle` as `null` if "remember me" should last the whole `absolute` limit.
+
+### A Cookie Used Twice
+
+Each Keyring cookie works once. Coming back replaces the record it names and gives the browser a new cookie, so of two browsers holding the same pair, a copy and the one it was copied from, only the first to come back gets the session.
+
+When the other one turns up, Keyring can't tell which of them is the owner, so the session ends for both:
+
+- the request is signed out, with `reused` as the reason,
+- the record the session has moved to since is revoked, however many times it was carried on, which signs the other browser out on its next request (`revoked`),
+- `Keyring\Events\RememberMeReused` is dispatched with the `user` and the `session` that was ended, and logged as `remember_me_reused`, one of the default ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts).
+
+That happens when a used cookie is sent again, and when a browser is still signed in on a record that "remember me" carried on somewhere else. If the session had already ended some other way, the request is just signed out and nothing is reported.
+
+The user's remember token is left alone, so their other remembered browsers stay signed in: neither holder's cookies lead to a record that still works. To do more, such as sign the account out everywhere or ask for a new password, listen for the event:
+
+```php
+use Illuminate\Support\Facades\Event;
+use Keyring\Events\RememberMeReused;
+use Keyring\Sessions\Sessions;
+
+Event::listen(function (RememberMeReused $event) {
+    app(Sessions::class)->signOutEverywhere($event->user);
+});
+```
+
+A browser that comes back usually sends several requests at once, the page and whatever it loads alongside, all with the cookie the first of them uses up. So for a few seconds (`sessions.remember_grace`, 10 seconds by default) a request with the cookie that was just replaced joins the session the first one resumed, as long as it comes from the same browser (the same user agent). It gets the same new cookie and its own Laravel session pointing at the same record. It doesn't start another session, change the record or record a device, and the seconds count from when the cookie was replaced, so sending it again doesn't keep it alive. A used cookie from a different browser counts as used twice, however soon it comes.
+
+A shorter time leaves less room for a copy to slip in next to the owner, and more chance that a slow request of the owner's own ends their session. Set it to `0` only if a browser's requests never overlap.
 
 ## Timeouts
 
@@ -306,7 +338,7 @@ With an `idle` limit set, a remembered browser that stays away for longer than i
 ```
 
 - **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
-- **`absolute`** ends a session this long after sign in, however active it is. A browser that comes back on ["remember me"](#remember-me) carries the same session on, so that doesn't start the limit again. The browser is asked to keep Laravel's "remember me" cookie no longer either, unless you set your guard's `remember` (in minutes) yourself. That only changes how long the browser holds it: it still stops working when its session ends.
+- **`absolute`** ends a session this long after sign in, however active it is. A browser that comes back on ["remember me"](#remember-me) carries the same session on, under a new record with the same expiry, so that doesn't start the limit again. The browser is asked to keep Laravel's "remember me" cookie no longer either, unless you set your guard's `remember` (in minutes) yourself. That only changes how long the browser holds it: it still stops working when its session ends.
 - **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B-4's reauthentication limits (Sec. 2.2.3 and 2.3.3).
 - **`end_on_lapse`** ends a session when the level it signed in at runs out. See [below](#ending-a-session-with-its-level).
 
@@ -339,16 +371,25 @@ That isn't enough where the whole app is meant to be AAL2, or where you want NIS
 - devices revoked more than 30 days ago, or not seen for a year (`devices.keep_revoked_for` and `devices.keep_unseen_for`),
 - email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago (`email_changes.keep_ended_for`), since they hold both addresses,
 - security log entries older than `security_log.keep_for`,
-- registered sessions that have expired or been revoked, through the registry's `prune()`. The cache driver's records expire on their own.
+- registered sessions that have expired or been revoked, through the registry's `prune()`. A record "remember me" replaced stays until it would have expired, so its cookie is still recognised as used. The cache driver's records expire on their own.
 
-Schedule it daily:
+Keyring adds it to Laravel's scheduler itself, every day at 03:00, so it runs wherever your app's `schedule:run` does and nothing is kept past its time because a line was left out of `routes/console.php`. `php artisan schedule:list` shows it. To run it at another time, change `prune_at`:
+
+```php
+// config/keyring.php
+'prune_at' => '01:30',
+```
+
+Set it to `null` and Keyring schedules nothing, which leaves it to you: on one server only, say, or from a job of your own.
 
 ```php
 // routes/console.php
 use Illuminate\Support\Facades\Schedule;
 
-Schedule::command('keyring:prune')->daily();
+Schedule::command('keyring:prune')->daily()->onOneServer();
 ```
+
+Either way it only runs if your server runs Laravel's scheduler (`* * * * * php artisan schedule:run`), as any scheduled task does.
 
 It runs Laravel's `model:prune` for Keyring's models, including your own [device model](#your-own-device-model). Laravel's plain `model:prune` only looks in `app/Models`, so it won't find them on its own.
 
@@ -361,3 +402,6 @@ In `Keyring\Events`:
 | `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = null)` |
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
 | `SessionsRevoked` | `user`, `count` |
+| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
+| `AccessRefused` | `user`, `resource` (`device`), `id`: a request to sign out a device that isn't the user's, answered with a 404 |
+| `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`): a "this wasn't me" link that was refused |

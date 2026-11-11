@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -81,7 +83,7 @@ class UserKeyring
      */
     public function of(string $factor): Collection
     {
-        return $this->all()->where('factor', $factor)->values();
+        return $this->all()->where('factor', '===', $factor)->values();
     }
 
     public function find(?string $id): ?Authenticator

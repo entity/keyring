@@ -146,7 +146,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | State | Creates |
 |---|---|
 | `totp($secret = null)` | An authenticator app with a random (or the given) secret. This is also the default state. |
-| `recoveryCodes($codes = ['aaaaa-11111', 'bbbbb-22222', 'ccccc-33333'])` | A set of recovery codes that accepts the given codes. |
+| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the given codes. Each must be in the form Keyring makes them, 24 base32 characters (`a`-`z` and `2`-`7`), with or without dashes: anything else throws an `InvalidArgumentException`. |
 | `emailCode()` | Email codes. |
 | `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. One that isn't synced is device bound, and reaches AAL3 when it's `attested()` and its factor requires attestation. |
 | `securityKey($userVerified = false)` | A security key. |
@@ -162,7 +162,7 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->post(route('keyring.login.verify', 'totp'), ['code' => $this->totpCode($totp)]);
 ```
 
-Each code works once, as in real life, so enrolling an app and then signing in with it in the same 30 seconds fails. Keyring keeps TOTP time on Laravel's clock, so `$this->travel(30)->seconds()` moves on to the next code, or pass a later step: `$this->totpCode($totp, step: 1)`.
+Each code works once, as in real life, so enrolling an app and then signing in with it in the same 30 seconds fails. Keyring keeps TOTP time on Laravel's clock, so `$this->travel(30)->seconds()` moves on to the next code, or pass a later step: `$this->totpCode($totp, step: 1)`. An authenticator's code is made with the digest it was set up with; for a bare secret that's SHA-1 unless you pass `algorithm: 'sha256'`.
 
 The `passkey()` and `securityKey()` states have no real public key, so they only verify with `Keyring::fake()`. For real WebAuthn responses, enroll a virtual authenticator instead.
 
@@ -206,10 +206,12 @@ The constructor options:
 | `origin` | Your `APP_URL`'s origin | The origin it claims to be on. By default, the first origin Keyring accepts. |
 | `userVerification` | `true` | Whether it reports verifying the user. Use `false` for a basic security key. |
 | `aaguid` | 16 zero bytes | The AAGUID it reports, as raw bytes. |
-| `algorithm` | `ES256` | `ES256` or `EdDSA`. |
+| `algorithm` | `ES256` | `ES256`, `EdDSA` or `RS256`. |
+| `bits` | `2048` | How long an `RS256` key is. |
+| `backedUp` | `null` | Whether a `synced` key reports having been backed up yet. `null` means it has. |
 | `synced` | `false` | Whether it reports being a passkey that syncs between devices. |
 
-`VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys.
+`VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys. `VirtualAuthenticator::rsa()` makes one that signs with RS256, which Keyring only takes once [`webauthn.algorithms`](passkeys.md#signature-algorithms) lists it; `rsa(1024)` makes a key too short to be accepted.
 
 `$key->assert($options, $origin)` can answer from another origin, to test that Keyring rejects it. `$key->rewindCounter()` makes the next response reuse an old counter, as a cloned key would.
 
@@ -274,8 +276,18 @@ The suite checks that:
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
+- passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
 If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
+
+A new Laravel app hashes with bcrypt, so the password length check fails until you set `HASH_DRIVER=argon2id` (see [Passwords](configuration.md#passwords)). If your tests run on bcrypt for speed and production doesn't, set the driver for this test class. To keep bcrypt and its limit, say so:
+
+```php
+protected function keyringAcknowledgesBcryptLimit(): bool
+{
+    return true;
+}
+```
 
 `KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

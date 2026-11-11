@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Closure;
@@ -89,10 +91,18 @@ class FactorRegistry
      */
     protected function resolve(string|Factor|Closure $definition): Factor
     {
-        return match (true) {
+        $factor = match (true) {
             $definition instanceof Factor => $definition,
             $definition instanceof Closure => $definition(app()),
             default => app($definition),
         };
+
+        // Whatever a code factor's subclass set its codes to, it can't be
+        // registered with ones too short or too long-lived.
+        if ($factor instanceof CodeFactor) {
+            $factor->ensureCodesAreSafe();
+        }
+
+        return $factor;
     }
 }
