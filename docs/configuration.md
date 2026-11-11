@@ -225,13 +225,35 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
     'min_without_mfa' => 15,
     'max' => 128,
     'uncompromised' => null,
+    'refuse_unchecked' => false,
+    'context' => [],
     'broker' => null,
 ],
 ```
 
 See [Password Rules](protected-changes.md#password-rules). `broker` is the password broker used for resets; `null` is your default broker.
 
+`min_with_mfa` and `min_without_mfa` are counted in characters, and neither can be set below 8, the shortest password OWASP ASVS 6.2.1 and NIST SP 800-63B allow. With a lower one Keyring throws a `LogicException` as the app boots, and again wherever the option is read, instead of quietly using 8.
+
+`max` is counted in characters, and how much of it you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password, so with bcrypt Keyring refuses anything longer instead of ignoring the end of it. That makes the real limit 72 bytes, not 128 characters: 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese or Korean ones, or 18 emoji. OWASP ASVS 6.2.9 asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. Hash with argon2id to take every password up to `max`:
+
+```ini
+HASH_DRIVER=argon2id
+# While some users still have bcrypt hashes. They're rehashed as they sign in.
+HASH_VERIFY=false
+```
+
+Keyring doesn't hash a password before bcrypt to get around the limit: the hashes would no longer be ones Laravel's own hasher can check. The [conformance suite](testing.md#the-conformance-suite) fails on bcrypt until you switch or say you're keeping it.
+
+`context` is your list of words a password mustn't contain: the names of your organisation, products, systems, projects, departments and roles. It's the documented list OWASP ASVS 6.1.2 asks for, and Keyring always adds your app's name and what it knows about the user. See [Context-Specific Words](protected-changes.md#context-specific-words) for how they're compared.
+
 `uncompromised` checks new passwords against Have I Been Pwned over the network. The default, `null`, runs it only when the app is in production, so local development and tests make no network calls. Set `true` or `false` to choose for every environment.
+
+The check is Laravel's (`Password::uncompromised()`), and it fails open: when Have I Been Pwned can't be reached, times out or answers with an error, Laravel reports the exception and lets the password through. On those requests only the [bundled list](protected-changes.md#password-rules) of common passwords stands between a user and a breached password.
+
+Set `refuse_unchecked` to `true` to refuse instead. Keyring then makes the request itself, the same way (only the first five characters of the password's SHA-1 leave your server), and a password it gets no answer about is refused with `keyring::keyring.password_unchecked`, which asks the user to try again in a moment. The cost is that nobody can register, or change or reset a password, while the service is unreachable from your servers. It only applies where `uncompromised` runs, and waits up to 10 seconds for an answer.
+
+Laravel's check goes through whatever `Illuminate\Contracts\Validation\UncompromisedVerifier` is bound in the container, so you can bind one of your own, say for a copy of the breach data you host yourself. `refuse_unchecked` doesn't use it, since a verifier can only answer yes or no: leave the option off, and have your verifier answer `false` when it can't check.
 
 ## Risk
 
@@ -262,7 +284,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 
 `keep_for` is how long entries are kept before [`keyring:prune`](devices-and-sessions.md#pruning) deletes them. `alerts` lists the entry types shown once as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts) at the next sign in.
 
-The table is `Features::securityLog()`, which is on by default. Without it the same events are written to the log `channel` (`null` is your default channel), and "was this you?" alerts and the `RepeatedFactorFailures` risk signal don't work, since both read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
+The table is `Features::securityLog()`, which is on by default. Without it the same events are written to the log `channel` (`null` is your default channel), and "was this you?" alerts and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
 
 `context_key` is the key in Laravel's Context your app keeps a request's ID under, if it does, which every entry the request writes then carries. Without one Keyring makes an ID of its own for the request. `null` leaves it out. See [Request IDs](security-log-and-emails.md#request-ids).
 

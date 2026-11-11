@@ -67,6 +67,12 @@ class AuthenticatorController
 
         $authenticator = $this->confirmed($factor, $enrollment, $request);
 
+        // Each enrollment adds its authenticator once, whichever copy of the
+        // session it comes back in.
+        if (! $this->enrollments->claim($enrollment)) {
+            throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
+        }
+
         $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
 
         $this->enrollments->forget($factor->key());

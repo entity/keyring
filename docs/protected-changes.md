@@ -171,16 +171,15 @@ However a change is cancelled, the old address's "this wasn't me" link keeps wor
 
 ## Changing the Password
 
-`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification). It passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates it and saves the new password. The published action takes these fields:
+`PUT /user/password` needs a [fresh verification](step-up.md#fresh-verification) and, when the user has a password, their current one. Keyring checks both before it passes the request to your `UpdatesUserPasswords` action (published to `app/Actions/Keyring/UpdateUserPassword.php`), which validates the new password and saves it.
 
 | Field | |
 |---|---|
-| `current_password` | Required when the user has a password. Checked with the `Keyring\Rules\CurrentPassword` rule. |
-| `password`, `password_confirmation` | The new password, checked against the [password rules](#password-rules). |
+| `current_password` | Required when the user has a password. Keyring checks it itself, with the `Keyring\Rules\CurrentPassword` rule, so a change always takes the current password whatever your action does (OWASP ASVS 6.2.3). A fresh verification can be a passkey or a code, which doesn't show the user knows the password they're replacing. |
+| `password`, `password_confirmation` | The new password, checked by the published action against the [password rules](#password-rules). |
+| `sign_out_others` | Optional boolean, `true` by default. Read by Keyring. |
 
-Keyring itself reads `sign_out_others`, an optional boolean that defaults to `true`.
-
-`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one. Use it wherever your own code asks for the current password:
+`CurrentPassword` works like Laravel's `current_password` rule, except that a password too long for the stored hash (over 72 bytes for bcrypt, which only reads the first 72) fails like any wrong one, without reaching the hasher. Use it wherever your own code asks for the current password:
 
 ```php
 use Keyring\Rules\CurrentPassword;
@@ -188,7 +187,7 @@ use Keyring\Rules\CurrentPassword;
 $request->validate(['current_password' => ['required', 'string', new CurrentPassword($request->user())]]);
 ```
 
-For an action that still uses Laravel's rule, Keyring replaces an over-long `current_password` with a random value before the action sees it.
+Your action doesn't need to check `current_password` again. One that still does, such as an action carried over from Fortify, keeps working: it's given the same input.
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
@@ -196,18 +195,46 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 ## Password Rules
 
-`Keyring\Support\PasswordRules::for($user)` returns validation rules that follow OWASP's guidance:
+`Keyring\Support\PasswordRules::for($user)` returns validation rules that follow the password requirements of OWASP ASVS 5.0.0 (section 6.2), which [Standards](security.md#standards) lists one by one:
 
-- at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)),
-- at most `max` characters (128),
-- no composition rules by default (no "one uppercase, one symbol"),
-- breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),
-- the most common passwords rejected always, from a list bundled with Keyring (the long-enough entries of SecLists' 10,000 most common, MIT licensed),
-- no passwords containing the site's name, or the user's name or email username (words of four characters or more),
-- with bcrypt, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest,
+- at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)). Neither option can be set below 8: Keyring throws a `LogicException` rather than accept a shorter minimum,
+- at most `max` characters (128) with a hasher that reads a whole password, such as argon2id,
+- no composition rules (no "one uppercase, one symbol"): any characters are accepted, with spaces, punctuation and emoji among them,
+- breached passwords rejected, in production by default. Laravel's check lets a password through when Have I Been Pwned can't be reached; set [`passwords.refuse_unchecked`](configuration.md#passwords) to refuse it instead,
+- the most common passwords rejected always, whatever their case and with or without spaces around them, from a list bundled with Keyring: the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, 13,052 in all, taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source,
+- no passwords containing [context-specific words](#context-specific-words): the site's name, the words you list, and the user's name, email username and email domain,
+- with bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. That's 72 plain characters but as few as 18 emoji, so 64 characters don't always fit. Set `HASH_DRIVER=argon2id` to accept every password up to `max`, which is what OWASP ASVS 6.2.9 needs (see [Passwords](configuration.md#passwords)),
 - and `confirmed`, so the request needs `password_confirmation`.
 
-`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass the words yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+`PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. At registration there's no user to take a name from, so pass theirs yourself, as the published `CreateNewUser` does: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+
+### Context-Specific Words
+
+A password that names your app, your company or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 6.1.2 asks you to keep a list of such words, and 6.2.11 to refuse passwords that use them. The list goes in the `passwords.context` option:
+
+```php
+'passwords' => [
+    'context' => ['Acme', 'Acme Rockets', 'Roadrunner', 'Wile E'],
+],
+```
+
+Put in the names of your organisation, products, systems, projects, departments and roles. Keyring adds what it can work out itself, and refuses a password containing any of:
+
+| | From |
+|---|---|
+| Your app's name | `app.name` |
+| The words you list | `passwords.context` |
+| The user's name | Their `name` attribute, or the `context` argument at registration |
+| Their email username | What's before the `@` in their username and email attributes |
+| The organisation they're at | The first label of their email domain: `megacorp` in `megacorp.example`. Skipped for providers anyone can have an address at (Gmail, Googlemail, Outlook, Hotmail, Live, Yahoo, Ymail, iCloud, Proton, Fastmail, Tutanota, Yandex, Zoho, and any domain starting `mail.` or `email.`). |
+
+How they're compared:
+
+- Case doesn't matter, and each value is also taken word by word, split at anything that isn't a letter or a digit: `Acme Rockets` refuses `acme` and `rockets`.
+- Characters that stand in for letters count as those letters: `0` as `o`, `1` and `l` as `i`, `3` as `e`, `4` and `@` as `a`, `5` and `$` as `s`, `7` as `t`. So `k3yr1ng` is `keyring`.
+- Words under four characters are ignored, because they turn up by chance in ordinary passwords: nobody called Amy is stopped from using `dreamy`.
+- The exception is your app's name or a listed entry as a whole, which counts from three characters, so an app called `IBM` refuses `ibm2026`. Two characters or fewer never count. Keep that in mind before listing a short common word: `Box` would refuse `inbox` and `sandbox`.
+- A name of several words also counts run together, however the password separates them: `My App` refuses `myapp`, `my-app` and `my app`, though `my` and `app` alone are too short to count. Only your app's names are joined up like this, so a user called Thor can still use `correct horse`.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's the place to change them. To add to Keyring's rule, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule (with its length already set for the user) and returns it:
 
@@ -216,9 +243,12 @@ use Illuminate\Validation\Rules\Password;
 
 protected function passwordRules((Authenticatable&Model)|null $user = null, array $context = []): array
 {
-    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->mixedCase()->symbols() : $rule, $context);
+    // Administrators need 20 characters, second factor or not.
+    return PasswordRules::for($user, fn (Password $rule) => $user?->is_admin ? $rule->rules(['min:20']) : $rule, $context);
 }
 ```
+
+Ask for more length, not for kinds of character. A composition rule (`mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match) takes your app out of OWASP ASVS 6.2.5, which wants passwords of any composition accepted, and NIST SP 800-63B says the same. People meet such rules with `Password1!`, which the length rules and the lists above deal with better.
 
 ## Resetting the Password
 

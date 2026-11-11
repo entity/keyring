@@ -38,6 +38,7 @@ use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Keyring\Support\PasswordRules;
 use Keyring\Support\Url;
 use Keyring\WebAuthn\ConfiguredRoots;
 
@@ -98,6 +99,11 @@ class KeyringServiceProvider extends ServiceProvider
         if (($unknown = array_values(array_diff(config('keyring.features'), Features::all()))) !== []) {
             throw UnknownFeature::in($unknown);
         }
+
+        // And a password minimum under eight would only show once someone
+        // chose a password that short.
+        PasswordRules::min(withMfa: true);
+        PasswordRules::min(withMfa: false);
 
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'keyring');
 

@@ -38,7 +38,7 @@ It's on as shipped: `Features::securityLog()` is in Keyring's default features, 
 ],
 ```
 
-The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report()`, writes the entry to [the app's log](#without-the-table) instead and carries on, so the sign in, refusal or email goes ahead. If the log can't be read, there are no alerts and `RepeatedFactorFailures` finds nothing.
+The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report()`, writes the entry to [the app's log](#without-the-table) instead and carries on, so the sign in, refusal or email goes ahead. If the log can't be read, there are no alerts and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals find nothing.
 
 The one exception is `protection_bypassed`. If that entry can't be written, [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection) throws before it runs your callback, so a bypass never happens unlogged.
 
@@ -55,7 +55,7 @@ Take `Features::securityLog()` out of your features and nothing is written to `k
 KEYRING_LOG_CHANNEL=security
 ```
 
-How long those lines are kept, and who can read them, is then up to that channel. ["Was this you?" alerts](#was-this-you-alerts), [`Keyring::activity()`](#showing-recent-activity) and the `RepeatedFactorFailures` risk signal read from the table, so they need the feature on.
+How long those lines are kept, and who can read them, is then up to that channel. ["Was this you?" alerts](#was-this-you-alerts), [`Keyring::activity()`](#showing-recent-activity) and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals read from the table, so they need the feature on.
 
 ### Entry Types
 
@@ -148,7 +148,7 @@ Whoever is refused can ask again as often as they like, and entries are kept for
 - **Refusals are counted.** `locked_out`, `access_refused`, `enrollment_refused`, `authenticator_removal_refused`, `link_refused`, `verification_refused`, and `factor_failed` for a name nobody has, are each written at most `security_log.refusals` times every `refusals_per` (20 an hour). They're counted about the account the entry is linked to, or per IP address when it's linked to nobody.
 - **The log says where it stopped.** The first entry left out is replaced by one `refusals_limited` entry naming its type, so a gap in the log is never silent.
 
-A failed factor for a real account isn't counted this way: the account's own [rate limits](security.md#rate-limiting) already bound how often it can fail, and `RepeatedFactorFailures` reads those entries. Set `refusals` to `null` to write every refusal. The counts live in the rate limiter's cache store, like the limits themselves.
+A failed factor for a real account isn't counted this way: the account's own [rate limits](security.md#rate-limiting) already bound how often it can fail, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals count those entries. Set `refusals` to `null` to write every refusal. The counts live in the rate limiter's cache store, like the limits themselves.
 
 ### Refused Links
 
@@ -246,13 +246,19 @@ Keyring::notifications([
     'authenticator_added' => Notifications\AuthenticatorAdded::class,
     'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
     'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
+    // 'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
+    // 'account_locked' => Notifications\AccountLocked::class,
     // 'new_device' => Notifications\NewDevice::class,
     // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
     // ...
 ]);
 ```
 
-A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on; the rest are there commented out. Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
+A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on. Every notice's class is published either way, so turning another on is one line in that list.
+
+OWASP ASVS 5.0.0 asks for more. Requirement 6.3.7 is a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated` and `email_changed`. Requirement 6.3.5 is a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` with the [risk signals](risk.md#built-in-signals) you pick. Register those to meet them.
+
+Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
 An account is sent each kind of notice five times an hour at most (`limits.notices` every `limits.notices_per`), so nobody can make your app mail one person without end, by signing in from a new browser over and over, say. The [security log](#the-security-log) records every event either way. A `MustVerifyEmail` user gets none until their address is verified, because until then it's only what someone typed when registering.
 
@@ -270,12 +276,16 @@ The security notices, each sent to the user:
 | `authenticator_removed` | A sign-in method was removed. | `name` |
 | `second_factor_failed` | Someone got the password right but failed the next factor. | |
 | `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
+| `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. Sent for the set that comes with a user's first extra sign-in method too. | |
+| `account_locked` | Failed attempts locked the account until its password is reset (only with [`limits.lock_after`](security.md#locking-until-a-reset)). | `url`, the password reset form (the `password.request` route), when the app has one. `device` and `ip` are those of the attempt that locked it. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. | `reasons` |
 | `clone_suspected` | A passkey or security key looked cloned. | `name` |
 | `email_changed` | An email change applied. Sent to both the old and the new address. | |
 | `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. | |
 
 Every notice is also passed `when` (the time as text, in the app's timezone), `at` (the same moment as a date, to format for the user's own timezone or language), and the `device` and `ip` of the request that caused it. The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
+
+Renaming a sign-in method, or choosing another as the default, sends nothing: neither changes what can sign in to the account.
 
 `name`, `device` and `reasons` can hold what a user or browser sent: a key's name is whatever was typed. Keyring cuts each to one line of at most 500 characters, and it's still text to escape for wherever you show it. The published classes pass it through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown and a name could otherwise add a link to a genuine security email.
 
@@ -324,7 +334,7 @@ class PasswordChanged extends SecurityNotice
 }
 ```
 
-Blade's `{{ }}` escapes those values for HTML. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through it, and the [example app](https://github.com/entity/keyring-example#emails) builds every email this way: Maizzle templates compiled to Blade views, one shared by all ten notices, with a local page to preview them. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
+Blade's `{{ }}` escapes those values for HTML. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through it, and the [example app](https://github.com/entity/keyring-example#emails) builds every email this way: Maizzle templates compiled to Blade views, one shared by every notice, with a local page to preview them. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
 
 ### Slack, SMS and Other Channels
 
