@@ -55,7 +55,7 @@ function login(array $cookies = []): TestResponse
 
 function deviceCookie(TestResponse $response): string
 {
-    return $response->getCookie('keyring_device')->getValue();
+    return $response->getCookie('known_device')->getValue();
 }
 
 dataset('registries', ['database', 'cache']);
@@ -63,7 +63,7 @@ dataset('registries', ['database', 'cache']);
 it('remembers devices and announces new ones', function () {
     Event::fake([NewDeviceSignedIn::class]);
 
-    $response = login()->assertCookie('keyring_device');
+    $response = login()->assertCookie('known_device');
     $token = deviceCookie($response);
 
     $device = Device::sole();
@@ -73,7 +73,7 @@ it('remembers devices and announces new ones', function () {
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
 
     $this->post('/logout');
-    login(['keyring_device' => $token]);
+    login(['known_device' => $token]);
 
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
     expect(Device::count())->toBe(1);
@@ -90,7 +90,7 @@ describe('an account that keeps signing in from new browsers', function () {
         test()->flushSession();
         Auth::forgetGuards();
 
-        return deviceCookie(login(['keyring_device' => 'not a device the account has'])->assertRedirect('/dashboard'));
+        return deviceCookie(login(['known_device' => 'not a device the account has'])->assertRedirect('/dashboard'));
     }
 
     it('keeps as many devices as the limit, forgetting whichever was seen longest ago', function () {
@@ -105,7 +105,7 @@ describe('an account that keeps signing in from new browsers', function () {
         // The forgotten browser is new to the account again.
         Event::fake([NewDeviceSignedIn::class]);
         $this->post('/logout');
-        login(['keyring_device' => $first]);
+        login(['known_device' => $first]);
 
         Event::assertDispatchedTimes(NewDeviceSignedIn::class, 1);
         expect(Device::count())->toBe(3);
@@ -134,7 +134,7 @@ describe('an account that keeps signing in from new browsers', function () {
         $this->travel(1)->minutes();
         $this->flushSession();
         Auth::forgetGuards();
-        login(['keyring_device' => $first])->assertRedirect('/dashboard');
+        login(['known_device' => $first])->assertRedirect('/dashboard');
 
         newBrowser();
 
@@ -362,7 +362,7 @@ it('lets the policy skip the second factor on a trusted device', function () {
     $token = deviceCookie($response);
     $this->post('/logout');
 
-    login(['keyring_device' => $token])->assertRedirect('/dashboard');
+    login(['known_device' => $token])->assertRedirect('/dashboard');
 });
 
 it('signs a revoked session out on its next request', function (string $driver) {
@@ -504,7 +504,7 @@ it('does not list a session that has idled out, or count it on its device', func
     $this->flushSession();
     Auth::forgetGuards();
 
-    login(['keyring_device' => $token]);
+    login(['known_device' => $token]);
 
     expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(2)
         ->and(app(Sessions::class)->active($this->user)->map->id->all())->toBe([session(Sessions::KEY)]);
@@ -540,7 +540,7 @@ describe('coming back with a "remember me" cookie', function () {
         // "Remember me" is Laravel's cookie and the one naming its session.
         $remembered = [
             Auth::guard()->getRecallerName() => $user->id.'|'.$user->remember_token.'|'.$user->password,
-            'keyring_remember' => $this->registered,
+            'remembered_session' => $this->registered,
         ];
 
         // The session is gone and only the cookies are left.
@@ -555,7 +555,7 @@ describe('coming back with a "remember me" cookie', function () {
     it('carries the session on, on the device it was remembered on', function () {
         Event::fake([NewDeviceSignedIn::class]);
 
-        ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
+        ($this->comeBack)(['known_device' => $this->device])->assertOk();
 
         expect(Device::count())->toBe(1)
             ->and(app(SessionRegistry::class)->find($this->registered)->replacedBy)->toBe(session(Sessions::KEY))
@@ -567,7 +567,7 @@ describe('coming back with a "remember me" cookie', function () {
         Event::fake([NewDeviceSignedIn::class]);
         $first = Device::sole();
 
-        ($this->comeBack)()->assertOk()->assertCookie('keyring_device');
+        ($this->comeBack)()->assertOk()->assertCookie('known_device');
 
         // The record left behind keeps the device its cookie was issued on.
         expect(Device::count())->toBe(2)
@@ -579,14 +579,14 @@ describe('coming back with a "remember me" cookie', function () {
     it('is refused while the account is risk locked', function () {
         app(RiskLocks::class)->lock($this->user, 3600);
 
-        ($this->comeBack)(['keyring_device' => $this->device])->assertRedirect('/login');
+        ($this->comeBack)(['known_device' => $this->device])->assertRedirect('/login');
 
         $this->assertGuest();
         expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'risk']);
     });
 
     it('leaves a session that is already signed in alone while the account is risk locked', function () {
-        ($this->comeBack)(['keyring_device' => $this->device])->assertOk();
+        ($this->comeBack)(['known_device' => $this->device])->assertOk();
         app(RiskLocks::class)->lock($this->user, 3600);
 
         $this->withHeader('User-Agent', FIREFOX)->get('/home')->assertOk();
@@ -693,7 +693,7 @@ it('keeps recognising two accounts that share a browser', function () {
     Event::fake([NewDeviceSignedIn::class]);
     User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
 
-    $abigail = fn (string $token) => test()->withHeader('User-Agent', FIREFOX)->withCookies(['keyring_device' => $token])
+    $abigail = fn (string $token) => test()->withHeader('User-Agent', FIREFOX)->withCookies(['known_device' => $token])
         ->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
 
     $token = deviceCookie(login());
@@ -702,7 +702,7 @@ it('keeps recognising two accounts that share a browser', function () {
     $this->post('/logout');
     $abigail($token);
     $this->post('/logout');
-    login(['keyring_device' => $token]);
+    login(['known_device' => $token]);
 
     Event::assertDispatchedTimes(NewDeviceSignedIn::class, 2);
     expect(Device::count())->toBe(2);
@@ -711,7 +711,7 @@ it('keeps recognising two accounts that share a browser', function () {
 it('signs this session out when its own device is revoked', function () {
     $token = deviceCookie(login());
 
-    $this->withCookie('keyring_device', $token)->withAssurance(Assurance::AAL1)
+    $this->withCookie('known_device', $token)->withAssurance(Assurance::AAL1)
         ->delete(route('keyring.devices.destroy', Device::sole()->id))
         ->assertRedirect(route('login'));
 
@@ -742,14 +742,14 @@ describe('whose token a device gets', function () {
     it('never stores a token nobody issued', function () {
         $planted = str_repeat('a', 40);
 
-        $token = deviceCookie(trustThisDevice($this->totp, ['keyring_device' => $planted]));
+        $token = deviceCookie(trustThisDevice($this->totp, ['known_device' => $planted]));
 
         expect($token)->not->toBe($planted)
             ->and(Device::sole()->token_hash)->toBe(hash('sha256', $token));
 
         $this->post('/logout');
 
-        login(['keyring_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
         $this->assertGuest();
     });
 
@@ -762,17 +762,17 @@ describe('whose token a device gets', function () {
             ->post('/login', ['email' => 'mallory@example.com', 'password' => 'password']));
         $this->post('/logout');
 
-        $victims = deviceCookie(trustThisDevice($this->totp, ['keyring_device' => $planted]));
+        $victims = deviceCookie(trustThisDevice($this->totp, ['known_device' => $planted]));
 
         expect($victims)->not->toBe($planted)
             ->and($this->user->devices()->sole()->isTrusted())->toBeTrue();
 
         $this->post('/logout');
 
-        login(['keyring_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
         $this->assertGuest();
 
-        login(['keyring_device' => $victims])->assertRedirect('/dashboard');
+        login(['known_device' => $victims])->assertRedirect('/dashboard');
     });
 
     it('moves everyone on a shared browser to the new token when one account trusts it', function () {
@@ -783,12 +783,12 @@ describe('whose token a device gets', function () {
             ->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']));
         $this->post('/logout');
 
-        $rotated = deviceCookie(trustThisDevice($this->totp, ['keyring_device' => $shared]));
+        $rotated = deviceCookie(trustThisDevice($this->totp, ['known_device' => $shared]));
         $this->post('/logout');
 
         expect($rotated)->not->toBe($shared);
 
-        $this->withHeader('User-Agent', FIREFOX)->withCookie('keyring_device', $rotated)
+        $this->withHeader('User-Agent', FIREFOX)->withCookie('known_device', $rotated)
             ->post('/login', ['email' => 'abigail@example.com', 'password' => 'password'])
             ->assertRedirect('/dashboard');
 
@@ -803,7 +803,7 @@ describe('whose token a device gets', function () {
         $first = deviceCookie($this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]));
         $this->post('/logout');
 
-        login(['keyring_device' => $first])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $first])->assertRedirect(route('keyring.login.challenge'));
         $second = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1), 'trust' => true]);
 
         expect(deviceCookie($second))->not->toBe($first)
@@ -811,7 +811,7 @@ describe('whose token a device gets', function () {
 
         $this->post('/logout');
 
-        login(['keyring_device' => $first])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $first])->assertRedirect(route('keyring.login.challenge'));
     });
 
     it('stops a planted token working once this account proves a second factor', function () {
@@ -822,7 +822,7 @@ describe('whose token a device gets', function () {
             ->post('/login', ['email' => 'mallory@example.com', 'password' => 'password']));
         $this->post('/logout');
 
-        login(['keyring_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
         $victims = deviceCookie($this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect('/dashboard'));
 
         expect($victims)->not->toBe($planted)
@@ -830,7 +830,7 @@ describe('whose token a device gets', function () {
 
         $this->post('/logout');
 
-        login(['keyring_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $planted])->assertRedirect(route('keyring.login.challenge'));
         $this->assertGuest();
     });
 
@@ -839,7 +839,7 @@ describe('whose token a device gets', function () {
         $first = deviceCookie($this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]));
         $this->post('/logout');
 
-        login(['keyring_device' => $first])->assertRedirect(route('keyring.login.challenge'));
+        login(['known_device' => $first])->assertRedirect(route('keyring.login.challenge'));
         $second = deviceCookie($this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)]));
 
         expect($second)->not->toBe($first)
@@ -850,7 +850,7 @@ describe('whose token a device gets', function () {
 it('does not store a token nobody issued on a sign-in without trust', function () {
     $planted = str_repeat('a', 40);
 
-    login(['keyring_device' => $planted])->assertRedirect('/dashboard');
+    login(['known_device' => $planted])->assertRedirect('/dashboard');
 
     expect(Device::sole()->token_hash)->not->toBe(hash('sha256', $planted));
 });
@@ -886,7 +886,7 @@ describe('earning trust', function () {
 
         $this->travel(5)->days();
 
-        $this->withHeader('User-Agent', FIREFOX)->withCookie('keyring_device', $token)
+        $this->withHeader('User-Agent', FIREFOX)->withCookie('known_device', $token)
             ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'trust' => true])
             ->assertRedirect('/dashboard');
 
@@ -1238,7 +1238,7 @@ describe('the sessions a user can see and end', function () {
         $this->travel(1)->minutes();
         $this->flushSession();
         Auth::forgetGuards();
-        login(['keyring_device' => $token]);
+        login(['known_device' => $token]);
 
         ($this->session)('no-device');
 
@@ -1307,7 +1307,7 @@ describe('the sessions a user can see and end', function () {
         foreach ($handles as $handle) {
             $this->flushSession();
             Auth::forgetGuards();
-            $this->withCookies([...$recaller, 'keyring_remember' => $handle])->get('/home')->assertRedirect('/login');
+            $this->withCookies([...$recaller, 'remembered_session' => $handle])->get('/home')->assertRedirect('/login');
             $this->assertGuest();
         }
 
@@ -1369,11 +1369,11 @@ describe('the sessions a user can see and end', function () {
         ($this->session)('phone');
 
         // Exactly what POST /logout answers.
-        $this->withCredentials()->withCookie('keyring_remember', $here)
+        $this->withCredentials()->withCookie('remembered_session', $here)
             ->deleteJson(route('keyring.sessions.destroy', ($this->handle)($here)))
             ->assertNoContent()
             ->assertHeader('Clear-Site-Data', '"cache", "storage"')
-            ->assertCookieExpired('keyring_remember');
+            ->assertCookieExpired('remembered_session');
 
         $this->assertGuest();
         expect(app(SessionRegistry::class)->find($here)->revokedAt)->not->toBeNull()

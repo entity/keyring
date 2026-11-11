@@ -215,12 +215,13 @@ class DeviceManager
     }
 
     /**
-     * "devices.cookie", or keyring_device with the prefix the app's setup
-     * allows: __Host-keyring_device over HTTPS.
+     * "devices.cookie", or known_device with the prefix the app's setup
+     * allows: __Host-known_device over HTTPS. Named for what it does and not
+     * for Keyring, so the cookie doesn't tell anyone what the app runs.
      */
     public function cookie(): string
     {
-        return Cookies::name(config('keyring.devices.cookie'), 'keyring_device');
+        return Cookies::name(config('keyring.devices.cookie'), 'known_device');
     }
 
     /**

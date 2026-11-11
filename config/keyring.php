@@ -186,7 +186,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Devices are recognised by a long-lived cookie. With "cookie" null it's
-    | named keyring_device, and __Host-keyring_device once the app is served
+    | named known_device, and __Host-known_device once the app is served
     | over HTTPS; a name you set is used exactly as it is. "trust_for" enables
     | the "don't ask again on this device" option (set to null to turn it off).
     | A trusted device is only an input to your policy, never a factor.
@@ -230,7 +230,7 @@ return [
     | signed in at runs out, as NIST SP 800-63B words it, and "remember me"
     | brings nothing back. "remember_cookie" names the cookie that ties
     | "remember me" to the session it was ticked for: null is
-    | keyring_remember, prefixed over HTTPS like the device cookie. Each one
+    | remembered_session, prefixed over HTTPS like the device cookie. Each one
     | works once and is replaced. For "remember_grace" a browser's other
     | requests, sent with the one that used it, are still let in on the same
     | session. Used after that, the session ends for everyone holding it.

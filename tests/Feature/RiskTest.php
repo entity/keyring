@@ -128,7 +128,7 @@ it('asks for another factor when risk is medium', function () {
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $this->locator->location = ['country' => 'GB'];
 
-    $cookie = signInAs()->assertRedirect('/dashboard')->getCookie('keyring_device')->getValue();
+    $cookie = signInAs()->assertRedirect('/dashboard')->getCookie('known_device')->getValue();
     $this->post('/logout');
 
     $this->locator->location = ['country' => 'BR'];
@@ -153,13 +153,13 @@ it('does not ask for more on a familiar device and country', function () {
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $this->locator->location = ['country' => 'GB'];
 
-    $cookie = signInAs()->getCookie('keyring_device')->getValue();
+    $cookie = signInAs()->getCookie('known_device')->getValue();
     $this->post('/logout');
 
     // Each enough on its own to ask for the second factor, had it fired.
     Keyring::risk()->signals([new NewDevice(score: 30), NewCountry::class]);
 
-    signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+    signInAs(cookies: ['known_device' => $cookie])->assertRedirect('/dashboard');
 });
 
 /**
@@ -338,7 +338,7 @@ it('logs security events and shows recent activity', function () {
 });
 
 it('keeps "was this you?" for a browser the account has used before', function () {
-    $device = signInAs()->getCookie('keyring_device')->getValue();
+    $device = signInAs()->getCookie('known_device')->getValue();
     $this->post('/logout');
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
@@ -348,7 +348,7 @@ it('keeps "was this you?" for a browser the account has used before', function (
         ->assertSessionHas('keyring.alerts', []);
     $this->post('/logout');
 
-    signInAs(cookies: ['keyring_device' => $device]);
+    signInAs(cookies: ['known_device' => $device]);
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret, 1)])
         ->assertSessionHas('keyring.alerts', fn ($alerts) => $alerts[0]['type'] === 'second_factor_failed');
 
@@ -609,7 +609,7 @@ describe('a sign in after a long quiet period', function () {
      */
     function lastSignedIn(int $daysAgo): string
     {
-        $cookie = signInAs()->assertRedirect('/dashboard')->getCookie('keyring_device')->getValue();
+        $cookie = signInAs()->assertRedirect('/dashboard')->getCookie('known_device')->getValue();
         test()->post('/logout');
         test()->travel($daysAgo)->days();
 
@@ -626,7 +626,7 @@ describe('a sign in after a long quiet period', function () {
             $assessed = $event;
         });
 
-        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect(route('keyring.login.challenge'));
+        signInAs(cookies: ['known_device' => $cookie])->assertRedirect(route('keyring.login.challenge'));
 
         expect($assessed->risk->has('inactive_account'))->toBeTrue()
             ->and($assessed->risk->score)->toBe(30)
@@ -637,7 +637,7 @@ describe('a sign in after a long quiet period', function () {
         Keyring::risk()->signals([InactiveAccount::class])->respond(fn (Risk $risk) => $risk->has('inactive_account') ? Action::deny() : Action::allow());
         $cookie = lastSignedIn(daysAgo: 89);
 
-        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+        signInAs(cookies: ['known_device' => $cookie])->assertRedirect('/dashboard');
     });
 
     it('takes the period the app gives it', function () {
@@ -660,9 +660,9 @@ describe('a sign in after a long quiet period', function () {
         sendNotifications(['suspicious_activity']);
         $cookie = lastSignedIn(daysAgo: 91);
 
-        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+        signInAs(cookies: ['known_device' => $cookie])->assertRedirect('/dashboard');
         $this->post('/logout');
-        signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+        signInAs(cookies: ['known_device' => $cookie])->assertRedirect('/dashboard');
 
         Notification::assertSentToTimes($this->user, SuspiciousActivity::class, 1);
     });
@@ -792,7 +792,7 @@ it('tells the user about either, and refuses neither, when both are found at onc
     sendNotifications(['suspicious_activity']);
     Keyring::risk()->signals([InactiveAccount::class, SuccessAfterFailures::class]);
 
-    $cookie = signInAs()->getCookie('keyring_device')->getValue();
+    $cookie = signInAs()->getCookie('known_device')->getValue();
     $this->post('/logout');
     $this->travel(91)->days();
 
@@ -800,7 +800,7 @@ it('tells the user about either, and refuses neither, when both are found at onc
         signInAs(password: 'nope');
     }
 
-    signInAs(cookies: ['keyring_device' => $cookie])->assertRedirect('/dashboard');
+    signInAs(cookies: ['known_device' => $cookie])->assertRedirect('/dashboard');
 
     $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
 

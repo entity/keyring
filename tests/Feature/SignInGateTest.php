@@ -114,7 +114,7 @@ it('signs out a session that is already signed in, and says why in the log', fun
 
 it('refuses a "remember me" cookie', function () {
     $response = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
-    $cookies = collect([Auth::guard()->getRecallerName(), 'keyring_remember'])
+    $cookies = collect([Auth::guard()->getRecallerName(), 'remembered_session'])
         ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)->getValue()])
         ->all();
 

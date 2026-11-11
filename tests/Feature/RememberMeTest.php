@@ -53,7 +53,7 @@ function browser(array $cookies = [], string $agent = FIREFOX): TestCase
 
     return test()->withHeader('User-Agent', $agent)
         ->withCredentials()
-        ->withCookies([config('session.cookie') => '', Auth::guard()->getRecallerName() => '', 'keyring_remember' => '', 'keyring_device' => '', ...$cookies]);
+        ->withCookies([config('session.cookie') => '', Auth::guard()->getRecallerName() => '', 'remembered_session' => '', 'known_device' => '', ...$cookies]);
 }
 
 /**
@@ -63,7 +63,7 @@ function browser(array $cookies = [], string $agent = FIREFOX): TestCase
  */
 function keptCookies(TestResponse $response): array
 {
-    return collect([Auth::guard()->getRecallerName(), 'keyring_remember', 'keyring_device'])
+    return collect([Auth::guard()->getRecallerName(), 'remembered_session', 'known_device'])
         ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)?->getValue()])
         ->filter()
         ->all();
@@ -161,7 +161,7 @@ it('gives a remembered sign in a cookie naming its session, for as long as the s
     config(['keyring.sessions.absolute' => '7d', 'session.secure' => true]);
 
     $response = browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
-    $cookie = $response->getCookie('__Host-keyring_remember');
+    $cookie = $response->getCookie('__Host-remembered_session');
 
     expect($cookie->getValue())->toBe(session(Sessions::KEY))
         ->and($cookie->isHttpOnly())->toBeTrue()
@@ -173,7 +173,7 @@ it('gives a remembered sign in a cookie naming its session, for as long as the s
 it('gives a sign in that did not tick "remember me" no such cookie', function () {
     browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
         ->assertRedirect()
-        ->assertCookieMissing('keyring_remember');
+        ->assertCookieMissing('remembered_session');
 });
 
 it('signs a remembered browser back in under a new record, with the limits its session started with', function (string $driver) {
@@ -193,8 +193,8 @@ it('signs a remembered browser back in under a new record, with the limits its s
 
     // The cookie that came is used up, and the browser has the next one.
     expect($record->id)->not->toBe($old->id)
-        ->and($response->getCookie('keyring_remember')->getValue())->toBe($record->id)
-        ->and($response->getCookie('keyring_remember')->getExpiresTime())->toBe($old->expiresAt)
+        ->and($response->getCookie('remembered_session')->getValue())->toBe($record->id)
+        ->and($response->getCookie('remembered_session')->getExpiresTime())->toBe($old->expiresAt)
         ->and($replaced->replacedBy)->toBe($record->id)
         ->and($replaced->replacedAt)->toBe(now()->getTimestamp())
         ->and($replaced->isActive(now()->getTimestamp()))->toBeFalse()
@@ -224,7 +224,7 @@ it('refuses kept "remember me" cookies after the absolute limit ended their sess
 
     browser($cookies)->get('/home')
         ->assertRedirect('/login')
-        ->assertCookieExpired('keyring_remember')
+        ->assertCookieExpired('remembered_session')
         ->assertCookieExpired(Auth::guard()->getRecallerName());
 
     expectKeptCookiesRefused($cookies);
@@ -240,7 +240,7 @@ it('refuses kept "remember me" cookies after the idle limit ended their session'
 
     $this->travel(11)->minutes();
 
-    browser($cookies)->get('/home')->assertRedirect('/login')->assertCookieExpired('keyring_remember');
+    browser($cookies)->get('/home')->assertRedirect('/login')->assertCookieExpired('remembered_session');
     expect(sessionEndedReasons())->toBe(['idle']);
 
     expectKeptCookiesRefused($cookies);
@@ -270,7 +270,7 @@ it('refuses kept "remember me" cookies after a risk response ended their session
         ->respond(fn ($risk) => $risk->isElevated() ? $action : Action::allow());
 
     // The session turns up in another browser.
-    browser($cookies, CHROME)->get('/home')->assertRedirect('/login')->assertCookieExpired('keyring_remember');
+    browser($cookies, CHROME)->get('/home')->assertRedirect('/login')->assertCookieExpired('remembered_session');
     expect(sessionEndedReasons())->toBe(['risk']);
 
     expectKeptCookiesRefused($cookies, CHROME);
@@ -352,7 +352,7 @@ it('refuses a "remember me" cookie that comes without the cookie naming its sess
     $cookies = rememberedSignIn();
     $id = session(Sessions::KEY);
 
-    expectKeptCookiesRefused(Arr::except($cookies, 'keyring_remember'), sessionsLeft: 1);
+    expectKeptCookiesRefused(Arr::except($cookies, 'remembered_session'), sessionsLeft: 1);
 
     // The session it was issued with is still there for the browser that has both.
     expect(sessionEndedReasons())->toBe(['expired', 'expired'])
@@ -367,7 +367,7 @@ it('refuses a "remember me" cookie sent with the cookie of someone else\'s sessi
     $taylor = rememberedSignIn();
 
     $this->flushSession();
-    browser([...$taylor, 'keyring_remember' => $abigail['keyring_remember']])->get('/home')->assertRedirect('/login');
+    browser([...$taylor, 'remembered_session' => $abigail['remembered_session']])->get('/home')->assertRedirect('/login');
 
     $this->assertGuest();
     expect(sessionEndedReasons())->toBe(['other_user'])
@@ -394,7 +394,7 @@ it('keeps an app\'s own remembered sign in working after laravel\'s session expi
     $cookies = keptCookies(browser()->post('/oauth/callback')->assertOk());
     $id = session(Sessions::KEY);
 
-    expect($cookies['keyring_remember'])->toBe($id);
+    expect($cookies['remembered_session'])->toBe($id);
 
     $this->flushSession();
     browser($cookies)->get('/home')->assertOk();
@@ -406,7 +406,7 @@ it('keeps an app\'s own remembered sign in working after laravel\'s session expi
 it('gives an app\'s own sign in without "remember me" no cookie naming its session', function () {
     Route::middleware('web')->post('/oauth/callback', fn () => tap('welcome', fn () => Auth::login($this->user)));
 
-    browser()->post('/oauth/callback')->assertOk()->assertCookieMissing('keyring_remember');
+    browser()->post('/oauth/callback')->assertOk()->assertCookieMissing('remembered_session');
 
     expect(session(Sessions::KEY))->not->toBeNull();
 });
@@ -469,7 +469,7 @@ describe('how long a remembered browser may stay away', function () {
 
         $this->travel(14)->days();
         $this->travel(1)->minutes();
-        comeBack($cookies)->assertRedirect('/login')->assertCookieExpired('keyring_remember');
+        comeBack($cookies)->assertRedirect('/login')->assertCookieExpired('remembered_session');
 
         expect(sessionEndedReasons())->toBe(['idle']);
         expectKeptCookiesRefused($cookies);
@@ -551,8 +551,8 @@ it('moves "remember me" to the new record when a session is given one', function
     $new = session(Sessions::KEY);
 
     expect($new)->not->toBe($old)
-        ->and($response->getCookie('keyring_remember')->getValue())->toBe($new)
-        ->and($response->getCookie('keyring_remember')->getExpiresTime())->toBe(app(SessionRegistry::class)->find($new)->expiresAt);
+        ->and($response->getCookie('remembered_session')->getValue())->toBe($new)
+        ->and($response->getCookie('remembered_session')->getExpiresTime())->toBe(app(SessionRegistry::class)->find($new)->expiresAt);
 
     // A copy of the cookie from before names the record that was revoked.
     $this->flushSession();
@@ -560,7 +560,7 @@ it('moves "remember me" to the new record when a session is given one', function
 
     // Nothing happened to the session the browser with the new cookie is on.
     $this->flushSession();
-    browser([...$cookies, 'keyring_remember' => $new], CHROME)->get('/home')->assertOk();
+    browser([...$cookies, 'remembered_session' => $new], CHROME)->get('/home')->assertOk();
 
     expect(app(SessionRegistry::class)->find($new)->replacedBy)->toBe(session(Sessions::KEY))
         ->and(SecurityEvent::query()->where('type', 'remember_me_reused')->exists())->toBeFalse();
@@ -572,7 +572,7 @@ it('does not start remembering a session when it is given a new record', functio
     browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $old = session(Sessions::KEY);
 
-    browser(agent: CHROME)->get('/home')->assertOk()->assertCookieMissing('keyring_remember');
+    browser(agent: CHROME)->get('/home')->assertOk()->assertCookieMissing('remembered_session');
 
     expect(session(Sessions::KEY))->not->toBe($old);
 });
@@ -580,7 +580,7 @@ it('does not start remembering a session when it is given a new record', functio
 it('clears the cookie naming the session on sign out', function () {
     $cookies = rememberedSignIn();
 
-    browser($cookies)->post('/logout')->assertCookieExpired('keyring_remember');
+    browser($cookies)->post('/logout')->assertCookieExpired('remembered_session');
 });
 
 describe('a "remember me" cookie first sent to a route without the session middleware', function () {
@@ -600,7 +600,7 @@ describe('a "remember me" cookie first sent to a route without the session middl
         expect(session(Sessions::KEY))->toBeNull();
 
         // The browser now has a signed-in session, and still its cookies.
-        browser($cookies)->get('/home')->assertOk()->assertCookie('keyring_remember', session(Sessions::KEY));
+        browser($cookies)->get('/home')->assertOk()->assertCookie('remembered_session', session(Sessions::KEY));
 
         expect(app(SessionRegistry::class)->find($id)->replacedBy)->toBe(session(Sessions::KEY))
             ->and(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
@@ -694,10 +694,10 @@ describe('a "remember me" cookie that has been used', function () {
         $this->travel(3)->hours();
         $third = [...$second, ...keptCookies(comeBack($second)->assertOk())];
 
-        expect(array_unique([$first['keyring_remember'], $second['keyring_remember'], $third['keyring_remember']]))->toHaveCount(3)
-            ->and($registry->find($first['keyring_remember'])->replacedBy)->toBe($second['keyring_remember'])
-            ->and($registry->find($second['keyring_remember'])->replacedBy)->toBe($third['keyring_remember'])
-            ->and(session(Sessions::KEY))->toBe($third['keyring_remember'])
+        expect(array_unique([$first['remembered_session'], $second['remembered_session'], $third['remembered_session']]))->toHaveCount(3)
+            ->and($registry->find($first['remembered_session'])->replacedBy)->toBe($second['remembered_session'])
+            ->and($registry->find($second['remembered_session'])->replacedBy)->toBe($third['remembered_session'])
+            ->and(session(Sessions::KEY))->toBe($third['remembered_session'])
             ->and($registry->forUser($this->user))->toHaveCount(1)
             ->and(reuses())->toBeEmpty();
     })->with('session registries');
@@ -711,11 +711,11 @@ describe('a "remember me" cookie that has been used', function () {
 
         // Sent with the same cookies, a few seconds behind and by another route.
         $this->travel(9)->seconds();
-        $second = comeBack(Arr::except($cookies, 'keyring_device'), ip: '198.51.100.7')->assertOk();
+        $second = comeBack(Arr::except($cookies, 'known_device'), ip: '198.51.100.7')->assertOk();
 
         // The same session and the same new cookie, not a third.
         expect(session(Sessions::KEY))->toBe($session->id)
-            ->and($second->getCookie('keyring_remember')->getValue())->toBe($first->getCookie('keyring_remember')->getValue())
+            ->and($second->getCookie('remembered_session')->getValue())->toBe($first->getCookie('remembered_session')->getValue())
             ->and(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1)
             ->and(session(Sessions::REMEMBERED))->toBeTrue()
             ->and(app(SessionAssurance::class)->level())->toBe(Assurance::None);
@@ -746,7 +746,7 @@ describe('a "remember me" cookie that has been used', function () {
 
         comeBack($cookies)
             ->assertRedirect('/login')
-            ->assertCookieExpired('keyring_remember')
+            ->assertCookieExpired('remembered_session')
             ->assertCookieExpired(Auth::guard()->getRecallerName());
 
         $this->assertGuest();
@@ -862,8 +862,8 @@ describe('a "remember me" cookie that has been used', function () {
         $resumed = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];
 
         // A step-up answer to the session changing browser swaps its record.
-        $swapped = browser($resumed, CHROME)->get('/home')->assertOk()->getCookie('keyring_remember')->getValue();
-        expect($swapped)->not->toBe($resumed['keyring_remember']);
+        $swapped = browser($resumed, CHROME)->get('/home')->assertOk()->getCookie('remembered_session')->getValue();
+        expect($swapped)->not->toBe($resumed['remembered_session']);
 
         $this->travel(1)->minutes();
         comeBack($cookies)->assertRedirect('/login');
@@ -894,7 +894,7 @@ describe('a "remember me" cookie that has been used', function () {
         $response = comeBack($cookies)->assertOk();
 
         expect(session(Sessions::KEY))->toBe($winner->id)
-            ->and($response->getCookie('keyring_remember')->getValue())->toBe($winner->id)
+            ->and($response->getCookie('remembered_session')->getValue())->toBe($winner->id)
             ->and($registry->forUser($this->user))->toHaveCount(1)
             ->and($registry->forUser($this->user)->first()->id)->toBe($winner->id)
             ->and(reuses())->toBeEmpty();
@@ -906,7 +906,7 @@ describe('a "remember me" cookie that has been used', function () {
         $cookies = rememberedSignIn();
         $id = session(Sessions::KEY);
 
-        comeBack([...$cookies, 'keyring_remember' => Str::random(40)])->assertRedirect('/login');
+        comeBack([...$cookies, 'remembered_session' => Str::random(40)])->assertRedirect('/login');
 
         // Nothing is ended for it, and the real cookie still works.
         expect(sessionEndedReasons())->toBe(['expired'])
@@ -926,7 +926,7 @@ describe('a "remember me" cookie that has been used', function () {
         $taylor = rememberedSignIn();
         $this->travel(1)->minutes();
 
-        comeBack([...$taylor, 'keyring_remember' => $abigail['keyring_remember']])->assertRedirect('/login');
+        comeBack([...$taylor, 'remembered_session' => $abigail['remembered_session']])->assertRedirect('/login');
 
         expect(sessionEndedReasons())->toBe(['other_user'])
             ->and(app(SessionRegistry::class)->find($hers)->revokedAt)->toBeNull()
@@ -947,15 +947,15 @@ describe('a "remember me" cookie that has been used', function () {
         $second = comeBack($cookies)->assertOk();
         $resumed = [...$cookies, ...keptCookies($first)];
 
-        expect($resumed['keyring_remember'])->not->toBe($id)
-            ->and($second->getCookie('keyring_remember')->getValue())->toBe($resumed['keyring_remember'])
+        expect($resumed['remembered_session'])->not->toBe($id)
+            ->and($second->getCookie('remembered_session')->getValue())->toBe($resumed['remembered_session'])
             ->and(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
 
         foreach ([$first, $second] as $response) {
             $this->flushSession();
             browser([...$resumed, ...cookieSession($response)])->get('/home')->assertOk();
 
-            expect(session(Sessions::KEY))->toBe($resumed['keyring_remember']);
+            expect(session(Sessions::KEY))->toBe($resumed['remembered_session']);
         }
 
         // Sent again later, the used cookie ends that session, and a copy of
@@ -982,7 +982,7 @@ describe('a "remember me" cookie that has been used', function () {
         comeBack($resumed)->assertRedirect('/login');
 
         expect(sessionEndedReasons())->toBe(['idle'])
-            ->and(app(SessionRegistry::class)->find($resumed['keyring_remember'])->revokedAt)->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find($resumed['remembered_session'])->revokedAt)->not->toBeNull()
             ->and(reuses())->toBeEmpty();
     })->with('session registries');
 
@@ -992,7 +992,7 @@ describe('a "remember me" cookie that has been used', function () {
         $cookies = rememberedSignIn();
         $resumed = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];
 
-        app(SessionRegistry::class)->revoke($resumed['keyring_remember']);
+        app(SessionRegistry::class)->revoke($resumed['remembered_session']);
 
         // Not the new cookie, and not the used one inside its few seconds.
         comeBack($resumed)->assertRedirect('/login');
@@ -1102,12 +1102,12 @@ describe('replacing a session\'s record', function () {
         expect($resumed->id)->not->toBe('old')
             ->and($resumed->assurance)->toBe(Assurance::None)
             ->and($resumed->expiresAt)->toBe($read->expiresAt)
-            ->and(Cookie::queued('keyring_remember')->getValue())->toBe($resumed->id);
+            ->and(Cookie::queued('remembered_session')->getValue())->toBe($resumed->id);
 
         // The other request still holds the record as it was.
         expect(app(Sessions::class)->resume($request, $this->user, $read))->toBeNull()
             ->and($request->session()->get(Sessions::KEY))->toBe($resumed->id)
-            ->and(Cookie::queued('keyring_remember')->getValue())->toBe($resumed->id)
+            ->and(Cookie::queued('remembered_session')->getValue())->toBe($resumed->id)
             ->and($registry->forUser($this->user)->map->id->all())->toBe([$resumed->id]);
     })->with('session registries');
 

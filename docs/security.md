@@ -302,7 +302,7 @@ Keyring's own cookies don't depend on this, since they go by `APP_URL`. Only tru
 
 Set `SESSION_SECURE_COOKIE=true` in production. Laravel then marks its session cookie, its CSRF cookie and its "remember me" cookie `Secure` on every response, whatever the request looked like. Keyring reads the same setting, as well as `APP_URL`, to decide about its own.
 
-Keyring's two cookies need nothing from you: over HTTPS they're `Secure`, httpOnly, `SameSite=Lax` and named `__Host-keyring_device` and `__Host-keyring_remember`, or `__Secure-` when `SESSION_DOMAIN` shares your cookies with subdomains. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). If you set your own names (`devices.cookie`, `sessions.remember_cookie`), they're used exactly as written and the prefix is yours to add.
+Keyring's two cookies need nothing from you: over HTTPS they're `Secure`, httpOnly, `SameSite=Lax` and named `__Host-known_device` and `__Host-remembered_session`, or `__Secure-` when `SESSION_DOMAIN` shares your cookies with subdomains. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). If you set your own names (`devices.cookie`, `sessions.remember_cookie`), they're used exactly as written and the prefix is yours to add.
 
 The session cookie is Laravel's, and its name is yours. Give it the prefix as well:
 
@@ -516,6 +516,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | `X-Content-Type-Options: nosniff` on every response, and a referrer policy | OWASP ASVS 3.4.4 and 3.4.5 |
 | `X-Frame-Options: DENY` on every response, unless the app's own policy says who may frame it | OWASP's Clickjacking Defense Cheat Sheet. OWASP ASVS 3.4.6 asks for `frame-ancestors` in a content security policy, which is your app's to send |
 | `Secure` cookies with the `__Host-` prefix | OWASP ASVS 3.3.1 and 3.3.3, and OWASP's Session Management Cheat Sheet |
+| Cookie names that say what the cookie is for and not what set it (`known_device`, `remembered_session`) | OWASP's Session Management Cheat Sheet, on session ID name fingerprinting |
 | No referrer from pages whose URL holds a token | OWASP's Forgot Password Cheat Sheet |
 | Emailed links that only act on a `POST`, with the token or signature in its body | OWASP ASVS 3.5.3 and 14.2.1, and OWASP's Cross-Site Request Forgery Prevention Cheat Sheet |
 | Passwords, codes, credentials and tokens read from the body, never the query string of a `POST` | OWASP ASVS 14.2.1 and 15.3.7 |

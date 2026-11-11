@@ -424,12 +424,13 @@ class Sessions
     }
 
     /**
-     * "sessions.remember_cookie", or keyring_remember with the prefix the
-     * app's setup allows: __Host-keyring_remember over HTTPS.
+     * "sessions.remember_cookie", or remembered_session with the prefix the
+     * app's setup allows: __Host-remembered_session over HTTPS. Like the
+     * device cookie's, the name says nothing of what set it.
      */
     public function rememberCookie(): string
     {
-        return Cookies::name(config('keyring.sessions.remember_cookie'), 'keyring_remember');
+        return Cookies::name(config('keyring.sessions.remember_cookie'), 'remembered_session');
     }
 
     /**
