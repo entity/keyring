@@ -19,6 +19,7 @@ use Keyring\Contracts\Factor;
 use Keyring\Database\Factories\AuthenticatorFactory;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Concerns\BelongsToUser;
+use Keyring\Support\FailureCounts;
 use LogicException;
 
 /**
@@ -50,6 +51,16 @@ class Authenticator extends Model
 {
     /** @use HasFactory<AuthenticatorFactory> */
     use BelongsToUser, HasFactory, HasUlids;
+
+    /**
+     * Failures in a row are counted against the authenticator, so they go
+     * with it. One the cap got refused is set up again by removing it and
+     * adding it back, and the new one starts from nothing.
+     */
+    protected static function booted(): void
+    {
+        static::deleted(fn (self $authenticator) => app(FailureCounts::class)->forget($authenticator));
+    }
 
     protected function casts(): array
     {

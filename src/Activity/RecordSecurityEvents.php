@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Keyring\Events;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
+use Keyring\Support\Duration;
 
 /**
  * Turns Keyring's events into security log entries.
@@ -101,11 +102,12 @@ class RecordSecurityEvents
      * The event fires for every request a lock refuses, and a client can
      * send those as fast as it likes. The log says once that the lock is
      * there: one entry per factor and IP address, until the wait the lock
-     * gave is over.
+     * gave is over. A refusal that waiting won't end, at the cap on
+     * failures in a row, is noted once for as long as the longest lock.
      */
     public function lockout(Events\Lockout $event): void
     {
-        $this->log->recordRefusal('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter], once: $event->factor, for: $event->retryAfter);
+        $this->log->recordRefusal('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter], once: $event->factor, for: $event->retryAfter ?? Duration::seconds(config('keyring.limits.longest_lock')));
     }
 
     public function accountLocked(Events\AccountLocked $event): void

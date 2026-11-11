@@ -34,8 +34,8 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `FactorChallenged` | The challenge page showed a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (null when the user wasn't found), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. Dispatched for every request the limit refuses; the [security log](security-log-and-emails.md#refusals-that-repeat) notes it once per lock. | `request`, `factor`, `retryAfter` (seconds) |
-| `AccountLocked` | Failed attempts locked the account out of a factor that can start a sign in until a password reset or `Keyring::unlock()`. Only with `limits.lock_after` set. | `user`, `factor` |
+| `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. Dispatched for every request the limit refuses; the [security log](security-log-and-emails.md#refusals-that-repeat) notes it once per lock. | `request`, `factor`, `retryAfter` (seconds, or `null` when waiting won't help: the factor is refused until its failures in a row are cleared) |
+| `AccountLocked` | Failed attempts got a factor that can start a sign in refused for the account until a password reset or `Keyring::unlock()`: it used up its failures in a row, or `limits.lock_after` held it. Browsers the account has signed in from may still get in. | `user`, `factor` |
 | `Authenticated` | A login completed and the user was signed in. | `user`, `attempt`, `device` (null without `Features::devices()`) |
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |

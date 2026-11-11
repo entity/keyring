@@ -21,7 +21,7 @@ use Keyring\Http\Controllers\AuthenticatedSessionController;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Models\SecurityEvent;
-use Keyring\Pipeline\ConsecutiveLimit;
+use Keyring\Pipeline\NameLimit;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
 use Keyring\Tests\Fixtures\User;
@@ -49,10 +49,10 @@ it('gives users as long to finish adding a sign-in method as the app says', func
     expect(Enrollment::make('totp')->expiresAt)->toBe(now()->addHour()->getTimestamp());
 });
 
-it('forgets failures in a row after as long as the app says', function () {
-    config(['keyring.limits.remember_failures_for' => '1d']);
+it('forgets a typed name\'s failures in a row after as long as the app says', function () {
+    config(['keyring.limits.remember_names_for' => '1d']);
 
-    expect(ConsecutiveLimit::of(100, 'totp', '1')->decaySeconds)->toBe(86400);
+    expect(NameLimit::of(100, 'password', 'typed:taylor@example.com')->decaySeconds)->toBe(86400);
 });
 
 it('prunes devices on the app\'s schedule', function () {

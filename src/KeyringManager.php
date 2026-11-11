@@ -405,11 +405,24 @@ class KeyringManager
     /**
      * Let a user who's been locked out try again without resetting their
      * password, from a support tool say. Lifts their risk lock and clears
-     * the limits and locks on the factors that can start a sign in, as a
-     * completed password reset does. A second factor's stay.
+     * the limits on the factors that can start a sign in, with whatever
+     * their failures in a row had got refused, as a completed password
+     * reset does. A second factor's stay.
+     *
+     * Name a factor to clear that one's instead, whichever kind it is: a
+     * second factor refused at the cap has nothing else that brings it
+     * back short of removing it. Check who's asking first. Nothing here
+     * does, and for a second factor that's the only thing between whoever
+     * has the password and another round of guesses.
      */
-    public function unlock(Authenticatable&Model $user): void
+    public function unlock(Authenticatable&Model $user, ?string $factor = null): void
     {
+        if ($factor !== null) {
+            app(Throttle::class)->clearFactor($user, $this->factor($factor));
+
+            return;
+        }
+
         app(RiskLocks::class)->unlock($user);
         app(Throttle::class)->clearAccount($user);
     }

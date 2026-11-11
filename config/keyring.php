@@ -410,19 +410,24 @@ return [
     |--------------------------------------------------------------------------
     |
     | Default attempts per minute, per account and per IP address, and the
-    | failures in a row an account's factor allows however slowly they come
-    | (null for no cap). At that cap the factor is refused until the count is
-    | forgotten ("remember_failures_for"), or for a password until a reset.
-    | Factors may declare their own limits.
+    | failures in a row one of an account's authenticators allows however
+    | slowly they come (100 is the most NIST SP 800-63B allows, null is no
+    | cap). They're counted in the database, and at the cap the authenticator
+    | is refused until a password reset or Keyring::unlock() clears it, or a
+    | second factor is removed and added again. "consecutive_elsewhere" is
+    | how many of them browsers the account hasn't signed in from may make,
+    | which keeps the rest for the owner's own. Factors may declare their own
+    | limits.
     |
     | Each lockout lasts twice as long as the one before, up to "longest_lock",
     | or "longest_ip_lock" for a whole IP address. With "lock_after" set, an
-    | account locked out of signing in that many times in a day stays locked
-    | for "remember_failures_for", or until its password is reset or you call
-    | Keyring::unlock(). "codes" is how many codes an account can be sent for
-    | one factor every "codes_per", and "notices" how many security notices
-    | of one kind, or email change requests, an account or an address can be
-    | sent every "notices_per".
+    | account locked out of signing in that many times in a day is refused
+    | as it would be at the cap. A typed username nobody has can't be counted
+    | in the database, so every name's own failures in a row are counted in
+    | the cache as well, for "remember_names_for". "codes" is how many codes
+    | an account can be sent for one factor every "codes_per", and "notices"
+    | how many security notices of one kind, or email change requests, an
+    | account or an address can be sent every "notices_per".
     |
     */
 
@@ -430,7 +435,8 @@ return [
         'per_account' => 5,
         'per_ip' => 20,
         'consecutive' => 100,
-        'remember_failures_for' => '30d',
+        'consecutive_elsewhere' => 80,
+        'remember_names_for' => '30d',
         'longest_lock' => '24h',
         'longest_ip_lock' => '15m',
         'lock_after' => null,

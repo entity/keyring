@@ -205,7 +205,7 @@ Your action doesn't need to check `current_password` again. One that still does,
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 
-Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, cancels any pending email change, ends any reset links still outstanding and stops trusting the user's devices, including this one. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
+Keyring runs your action as one of its own flows, so it may change the protected `password` attribute, and only that: changing `email` there still throws. The action must save a new password or throw a `ValidationException`; returning without saving throws a `LogicException`, since everything that follows assumes the password changed. Afterwards Keyring regenerates the session ID, destroying the old one, cancels any pending email change, ends any reset links still outstanding, stops trusting the user's devices, including this one, and starts the account's sign-in limits over as a reset does, so a password that too many wrong guesses had got refused works again. With `sign_out_others` on, it also revokes every other session and changes the "remember me" token. The response is the `password-updated` [status response](sign-in-flow.md#status-responses).
 
 ## Requiring a Password Change
 
@@ -315,7 +315,7 @@ The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword`, sent t
 - revokes every session and changes the "remember me" token,
 - cancels any pending email change,
 - lifts any [risk lock](risk.md#actions) on the account,
-- clears the account's sign-in lockouts and failure counts, the in-a-row ones too, on the factors that can start a sign in, and logs that it did. Second factors keep theirs. Per-IP limits stay,
+- clears the account's sign-in lockouts and failure counts, the in-a-row ones too, on the factors that can start a sign in, and logs that it did. A password or passkey that was refused [at the cap](security.md#at-the-cap) works again. Second factors keep theirs. Per-IP limits stay,
 - dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`,
 - redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.
 

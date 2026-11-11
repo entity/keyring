@@ -22,7 +22,8 @@ final class Context
 
     public ?Outcome $outcome = null;
 
-    public int $retryAfter = 0;
+    /** Seconds until a rate limit that refused the request lets one through. Null when waiting won't do it. */
+    public ?int $retryAfter = 0;
 
     /** Whether the rate limits were checked for this request. */
     public bool $throttleChecked = false;
@@ -70,7 +71,7 @@ final class Context
         return $this;
     }
 
-    public function lockout(int $retryAfter): self
+    public function lockout(?int $retryAfter): self
     {
         $this->outcome = Outcome::LockedOut;
         $this->retryAfter = $retryAfter;
@@ -82,7 +83,7 @@ final class Context
      * A rate limit refused the request without saying so. It carries on down
      * the pipeline and fails like a wrong proof, which is never looked at.
      */
-    public function refuse(int $retryAfter): self
+    public function refuse(?int $retryAfter): self
     {
         $this->refused = true;
         $this->retryAfter = $retryAfter;
