@@ -1293,7 +1293,7 @@ describe('the sessions a user can see and end', function () {
         $this->deleteJson('/user/sessions/theirs')->assertNotFound();
 
         expect(app(SessionRegistry::class)->find('theirs')->revokedAt)->toBeNull()
-            ->and(SecurityEvent::query()->where('type', 'access_refused')->sole()->meta)->toBe(['resource' => 'session', 'id' => $handle]);
+            ->and(SecurityEvent::query()->where('type', 'access_refused')->sole()->meta)->toEqual(['resource' => 'session', 'id' => $handle]);
     })->with('registries');
 
     it('signs out when the session it ends is this one', function (string $driver) {
