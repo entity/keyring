@@ -28,6 +28,9 @@ final class KeyedHash
     /** The handle a passkey knows its user by. */
     public const string USER_HANDLES = 'webauthn-user-handles';
 
+    /** The handle a page knows one of a user's sessions by. */
+    public const string SESSION_HANDLES = 'session-handles';
+
     public static function make(string $purpose, #[\SensitiveParameter] string $value): string
     {
         return self::candidates($purpose, $value)[0];

@@ -51,8 +51,14 @@ export function makeDefault(id: string) {
 /**
  * Remove an authenticator. Removing the user's last second factor also needs
  * their password, so Keyring can check it's long enough on its own; without
- * it the request fails with an error on `password`.
+ * it the request fails with an error on `password`. `signOutOthers` ends the
+ * user's other sessions along with it.
  */
-export function removeAuthenticator(id: string, password?: string) {
-  return json('DELETE', routes.authenticator(id), password === undefined ? undefined : { password })
+export function removeAuthenticator(id: string, password?: string, { signOutOthers }: { signOutOthers?: boolean } = {}) {
+  const body = {
+    ...(password !== undefined && { password }),
+    ...(signOutOthers !== undefined && { sign_out_others: signOutOthers }),
+  }
+
+  return json('DELETE', routes.authenticator(id), Object.keys(body).length === 0 ? undefined : body)
 }

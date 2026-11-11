@@ -9,7 +9,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
-use Keyring\Events\SessionsRevoked;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -59,12 +58,7 @@ class DeviceController
      */
     public function destroyOthers(Request $request): StatusResponse
     {
-        $count = $this->sessions->signOutEverywhere($this->keyring->user(), except: $this->sessions->current($request)?->id);
-
-        // Someone who copied this session's cookie doesn't get to stay either.
-        $this->sessions->rotate($request);
-
-        SessionsRevoked::dispatch($this->keyring->user(), $count);
+        $this->sessions->signOutOthers($request, $this->keyring->user());
 
         return $this->status('sessions-revoked');
     }

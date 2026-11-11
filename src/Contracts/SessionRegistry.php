@@ -56,6 +56,14 @@ interface SessionRegistry
     public function revokeDevice(Authenticatable $user, string $deviceId): int;
 
     /**
+     * Revoke every session of every user that signed in up to now, however
+     * many records each has moved through since. One that is moving to a new
+     * record as this runs is revoked there too, so "remember me" can't carry
+     * it past this. A sign in after it starts a session as usual.
+     */
+    public function revokeEveryone(): void;
+
+    /**
      * Forget sessions that have expired or been revoked. Returns how many.
      * A replaced one is kept until it expires: it's how its ID is known to
      * have been used up.

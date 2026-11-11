@@ -10,6 +10,7 @@
 - [Recovery Codes](#recovery-codes)
 - [Renaming and Choosing the Default](#renaming-and-choosing-the-default)
 - [Removing Authenticators](#removing-authenticators)
+- [Signing Out Other Sessions](#signing-out-other-sessions)
 - [Responses](#responses)
 - [From JavaScript](#from-javascript)
 - [From PHP](#from-php)
@@ -161,6 +162,19 @@ Removing an authenticator stops trusting all of the user's devices (see [Trusted
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
 Removing the user's last second factor (the last one beyond recovery codes and email codes) also needs their current password in the request as `password`. Their password may have been as short as `min_with_mfa` while it had a second factor beside it, and on its own NIST SP 800-63B asks for `min_without_mfa`. Keyring only stores a hash, so it checks the length then: a missing or wrong password, or one that's too short, gets an error on `password` asking them to change it first.
+
+## Signing Out Other Sessions
+
+Someone else being signed in is often why a user adds or removes a sign-in method. Confirming an enrollment (new recovery codes included) and removing an authenticator both take an optional boolean, `sign_out_others`. When it's `true` and the change went through, Keyring signs the user out everywhere but here, as [`DELETE /user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) does: every other session is revoked, the "remember me" token is changed, no other device stays trusted, a pending email change is cancelled, and this session carries on under a new ID.
+
+```ts
+await confirmEnrollment('totp', enrollment, { code, sign_out_others: true })
+await removeAuthenticator(id, undefined, { signOutOthers: true })
+```
+
+It's off unless the request asks, so offer it as a checkbox next to the button. A password change is the other way round, [on unless told otherwise](protected-changes.md#changing-the-password), because everyone who was signed in knew the old password. A new passkey takes nothing away from a session that signed in without it, and an authenticator that's removed already stops counting in every session it was used in.
+
+Anything but a boolean fails with an error on `sign_out_others` before the enrollment is spent, and a change that's refused ends no sessions.
 
 ## Responses
 

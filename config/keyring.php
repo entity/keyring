@@ -194,8 +194,15 @@ return [
     | listed and revoked on any session driver. Drivers: "database" (the
     | keyring_sessions table) or "cache" (any persistent cache store).
     |
+    | An account can be signed in "max" times at once. A sign in beyond that
+    | ends whichever of its sessions has gone unused longest (null for no
+    | limit).
+    |
     | Timeouts accept "30m", "12h", "30d"... "idle" and "absolute" end the
-    | session ("idle" null leaves inactivity to Laravel's session lifetime).
+    | session: after that long unused, and that long after sign in. A browser
+    | that ticked "remember me" is signed back in with nothing proved for as
+    | long as it comes back within "remember_idle", which is the whole point
+    | of ticking it. Null for either leaves that inactivity unlimited.
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
     | again. With "end_on_lapse" a session ends instead when the level it
@@ -214,7 +221,9 @@ return [
         'connection' => null,
         'table' => 'keyring_sessions',
         'store' => null,
-        'idle' => null,
+        'max' => 100,
+        'idle' => '2h',
+        'remember_idle' => '14d',
         'absolute' => '30d',
         'levels' => [
             'aal2' => ['idle' => '1h', 'absolute' => '24h'],

@@ -10,12 +10,12 @@ The first release. Nothing is tagged yet.
 - Many authenticators per user, with a default and "try another way".
 - Policies built from assurance levels, with `ifEnrolled()` and `noDowngrade()`.
 - Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`.
-- Devices and sessions: trusted devices, new-device emails with a "this wasn't me" link, and signing out everywhere else, on any session driver.
+- Devices and sessions: trusted devices, new-device emails with a "this wasn't me" link, a list of the user's sessions to end one by one, and signing out everywhere else, on any session driver. A limit on sessions per account, and idle and absolute timeouts.
 - "Remember me" tied to the session it was ticked for: it carries that session on and can't outlast its timeouts, a revocation or a risk response. Its cookie works once and is replaced each time. A used one sent again ends the session for everyone holding it, with a `RememberMeReused` event and a `remember_me_reused` log entry.
 - Protected `email` and `password` attributes, with email changes confirmed from both addresses and revertable from the old one.
 - Risk signals with an action for each level.
 - A security log, "was this you?" alerts and security emails, each a notification published into your app.
-- `keyring:install`, `keyring:import fortify` and `keyring:prune`.
+- `keyring:install`, `keyring:import fortify`, `keyring:prune`, and `keyring:sign-out` to end one user's sessions or everyone's.
 - `Keyring::attempt()` to start a sign in from your own route, for social logins and the like.
 - `Keyring::allowSignInWhen()` to keep banned or unapproved accounts out, however they try to sign in.
 - `Keyring::requirePasswordChange()`, and a risk action of the same name, to hold a user until they choose a new password when theirs is known to someone else.

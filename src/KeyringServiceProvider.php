@@ -291,7 +291,7 @@ class KeyringServiceProvider extends ServiceProvider
 
     protected function registerPublishing(): void
     {
-        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class, Console\PruneCommand::class]);
+        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class, Console\PruneCommand::class, Console\SignOutCommand::class]);
 
         $this->publishes([__DIR__.'/../config/keyring.php' => config_path('keyring.php')], 'keyring-config');
         $this->publishesMigrations([__DIR__.'/../database/migrations' => database_path('migrations')], 'keyring-migrations');

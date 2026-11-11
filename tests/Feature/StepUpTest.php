@@ -160,6 +160,8 @@ it('asks a user with two factors for both once the window has passed', function 
 
 it('also satisfies laravel password confirmation', function () {
     Route::middleware(['web', 'auth', 'password.confirm'])->get('/legacy', fn () => 'legacy');
+    // Long enough for Laravel to want the password again, in a session that's still open.
+    config(['keyring.sessions.idle' => null]);
     signIn();
     $this->travel(4)->hours();
 

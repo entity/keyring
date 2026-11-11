@@ -235,7 +235,7 @@ it('refuses kept "remember me" cookies after the absolute limit ended their sess
 })->with('session registries');
 
 it('refuses kept "remember me" cookies after the idle limit ended their session', function (string $driver) {
-    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_idle' => '10m']);
     $cookies = rememberedSignIn();
 
     $this->travel(11)->minutes();
@@ -247,7 +247,7 @@ it('refuses kept "remember me" cookies after the idle limit ended their session'
 })->with('session registries');
 
 it('refuses "remember me" cookies whose session passed a limit while the browser was away', function (string $driver, string $limit, int $minutes, array $reasons) {
-    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.absolute' => '2h', ...$limit === 'idle' ? ['keyring.sessions.idle' => '10m'] : []]);
+    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.absolute' => '2h', ...$limit === 'idle' ? ['keyring.sessions.remember_idle' => '10m'] : []]);
     $cookies = rememberedSignIn();
 
     // No request ever saw the session end, so its record was never revoked.
@@ -288,6 +288,64 @@ it('refuses kept "remember me" cookies after their session was revoked', functio
     expectKeptCookiesRefused($cookies);
     expect(sessionEndedReasons())->toBe(['revoked', 'revoked']);
 })->with('session registries');
+
+describe('after an administrator signs everyone out', function () {
+    it('refuses the "remember me" cookies of a browser that was away', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $cookies = rememberedSignIn();
+
+        $this->travel(1)->hours();
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        expectKeptCookiesRefused($cookies);
+        expect(sessionEndedReasons())->toBe(['revoked', 'revoked']);
+    })->with('session registries');
+
+    it('refuses the cookies a browser came back with before, and the ones it was given then', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_grace' => '1h']);
+        $cookies = rememberedSignIn();
+
+        $this->travel(3)->hours();
+        $resumed = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];
+
+        $this->travel(1)->minutes();
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        // The used cookie, still inside the time it could join the session
+        // it was used for, and the one that replaced it.
+        expectKeptCookiesRefused($cookies);
+        expectKeptCookiesRefused($resumed);
+
+        // Signed out, not taken for a cookie two browsers hold.
+        expect(sessionEndedReasons())->toBe(['revoked', 'revoked', 'revoked', 'revoked']);
+    })->with('session registries');
+
+    it('signs a browser that is still open out on its next request', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $cookies = rememberedSignIn();
+        $session = session()->all();
+
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        carryOn($session, $cookies)->assertRedirect('/login');
+        $this->assertGuest();
+
+        expect(sessionEndedReasons())->toBe(['revoked']);
+    })->with('session registries');
+
+    it('lets the same browser sign in again', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        rememberedSignIn();
+
+        $this->artisan('keyring:sign-out', ['--all' => true, '--force' => true])->assertSuccessful();
+
+        $this->travel(1)->seconds();
+        $cookies = rememberedSignIn();
+
+        $this->travel(3)->hours();
+        comeBack($cookies)->assertOk();
+    })->with('session registries');
+});
 
 it('refuses a "remember me" cookie that comes without the cookie naming its session', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);
@@ -354,7 +412,7 @@ it('gives an app\'s own sign in without "remember me" no cookie naming its sessi
 });
 
 it('leaves other browsers remembered when one browser\'s session times out', function (string $driver) {
-    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_idle' => '10m']);
 
     $firefox = rememberedSignIn(FIREFOX);
     $firefoxSession = session()->all();
@@ -386,6 +444,100 @@ it('leaves other browsers remembered when one browser\'s session times out', fun
 
     expectKeptCookiesRefused($firefox, FIREFOX, sessionsLeft: 1);
 })->with('session registries');
+
+describe('how long a remembered browser may stay away', function () {
+    it('is longer than a session nobody asked to be remembered may sit unused', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+
+        $cookies = rememberedSignIn();
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeTrue();
+
+        // Days past the idle limit, and long after Laravel's session went.
+        $this->travel(13)->days();
+        comeBack($cookies)->assertOk();
+
+        // It's still the remembered session, with nothing proved.
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeTrue()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::None)
+            ->and(sessionEndedReasons())->toBe([]);
+    })->with('session registries');
+
+    it('is two weeks unless the app says otherwise', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        $cookies = rememberedSignIn();
+
+        $this->travel(14)->days();
+        $this->travel(1)->minutes();
+        comeBack($cookies)->assertRedirect('/login')->assertCookieExpired('keyring_remember');
+
+        expect(sessionEndedReasons())->toBe(['idle']);
+        expectKeptCookiesRefused($cookies);
+    })->with('session registries');
+
+    it('counts from when the browser was last here, not from when it signed in', function () {
+        $cookies = rememberedSignIn();
+
+        $this->travel(10)->days();
+        $cookies = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];
+
+        $this->travel(10)->days();
+        comeBack($cookies)->assertOk();
+    });
+
+    it('has no limit of its own when the app takes it off', function () {
+        config(['keyring.sessions.remember_idle' => null]);
+
+        $cookies = rememberedSignIn();
+
+        $this->travel(29)->days();
+        comeBack($cookies)->assertOk();
+    });
+
+    it('applies while the remembered session is still open, in place of the idle limit', function () {
+        $cookies = rememberedSignIn();
+        $session = session()->all();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+
+        // Past the idle limit it stays signed in, with nothing proved any more.
+        $this->travel(3)->hours();
+        carryOn($session, $cookies)->assertOk();
+        $session = session()->all();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::None);
+
+        $this->travel(14)->days();
+        $this->travel(1)->minutes();
+        carryOn($session, $cookies)->assertRedirect('/login');
+
+        expect(sessionEndedReasons())->toBe(['idle']);
+    });
+
+    it('is not given to a session that did not tick "remember me"', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $session = session()->all();
+
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeFalse();
+
+        $this->travel(3)->hours();
+        carryOn($session, [])->assertRedirect('/login');
+
+        expect(sessionEndedReasons())->toBe(['idle']);
+    })->with('session registries');
+
+    it('stays with a session that is given a new record', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Keyring::risk()->signals([SessionFingerprintChanged::class]);
+
+        $cookies = rememberedSignIn();
+        browser($cookies, CHROME)->get('/home')->assertOk();
+
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeTrue();
+    })->with('session registries');
+});
 
 it('moves "remember me" to the new record when a session is given one', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);
@@ -821,7 +973,7 @@ describe('a "remember me" cookie that has been used', function () {
     })->with('session registries');
 
     it('keeps the limits of the session through every record', function (string $driver) {
-        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_idle' => '10m']);
 
         $cookies = rememberedSignIn();
         $resumed = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];
@@ -945,7 +1097,7 @@ describe('replacing a session\'s record', function () {
         $request = Request::create('/');
         $request->setLaravelSession(app('session.store'));
 
-        $resumed = app(Sessions::class)->resume($request, $read);
+        $resumed = app(Sessions::class)->resume($request, $this->user, $read);
 
         expect($resumed->id)->not->toBe('old')
             ->and($resumed->assurance)->toBe(Assurance::None)
@@ -953,7 +1105,7 @@ describe('replacing a session\'s record', function () {
             ->and(Cookie::queued('keyring_remember')->getValue())->toBe($resumed->id);
 
         // The other request still holds the record as it was.
-        expect(app(Sessions::class)->resume($request, $read))->toBeNull()
+        expect(app(Sessions::class)->resume($request, $this->user, $read))->toBeNull()
             ->and($request->session()->get(Sessions::KEY))->toBe($resumed->id)
             ->and(Cookie::queued('keyring_remember')->getValue())->toBe($resumed->id)
             ->and($registry->forUser($this->user)->map->id->all())->toBe([$resumed->id]);

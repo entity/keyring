@@ -276,10 +276,20 @@ The suite checks that:
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
+- every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out doesn't keep working there,
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
 
 If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class.
+
+The route check reads your app's routes as they're registered: `auth:{guard}` by name, plain `auth` when Keyring's guard is the default, and `auth:sanctum` on routes with Sanctum's `statefulApi()`, where a single-page app is signed in by its session. It fails with the URIs that are missing the middleware. Add `keyring.session` to their group, or, for a route you leave unchecked on purpose, return its URI from `keyringAcknowledgedUncheckedRoutes()`:
+
+```php
+protected function keyringAcknowledgedUncheckedRoutes(): array
+{
+    return ['internal/health'];
+}
+```
 
 A new Laravel app hashes with bcrypt, so the password length check fails until you set `HASH_DRIVER=argon2id` (see [Passwords](configuration.md#passwords)). If your tests run on bcrypt for speed and production doesn't, set the driver for this test class. To keep bcrypt and its limit, say so:
 

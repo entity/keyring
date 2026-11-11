@@ -126,7 +126,7 @@ class DeviceManager
             ->pluck('id');
 
         foreach ($oldest as $id) {
-            $this->sessions->registry()->revokeDevice($user, $id);
+            $this->sessions->revokeDevice($user, $id);
         }
 
         $this->keyring->deviceModel()::query()->whereKey($oldest->all())->delete();
@@ -159,7 +159,7 @@ class DeviceManager
         $device->forceFill(['revoked_at' => now(), 'trusted_until' => null])->save();
 
         if ($user = $device->owner()) {
-            $this->sessions->registry()->revokeDevice($user, $device->id);
+            $this->sessions->revokeDevice($user, $device->id);
             $this->sessions->cycleRememberToken($user);
 
             DeviceRevoked::dispatch($user, $device, $reported);
@@ -175,7 +175,7 @@ class DeviceManager
     public function list(Request $request, Authenticatable&Model $user): Collection
     {
         $current = $this->find($request, $user)?->id;
-        $sessions = $this->sessions->registry()->forUser($user)->groupBy(fn (RegisteredSession $session) => $session->deviceId ?? '');
+        $sessions = $this->sessions->active($user)->groupBy(fn (RegisteredSession $session) => $session->deviceId ?? '');
 
         return $this->query($user)
             ->active()
