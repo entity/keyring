@@ -1,9 +1,12 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
@@ -127,4 +130,26 @@ it('puts the address back when a later change is confirmed while an earlier one 
     expect($reverted)->toBeTrue()
         ->and($user->fresh()->email)->toBe('taylor@example.com')
         ->and($second->fresh()->canRevert())->toBeFalse();
+});
+
+it('lets one of two requests use a "remember me" cookie, and starts one session between them', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    // Both read the record before either can replace it.
+    $results = contend(sessionRow('remembered'), [
+        ['resume-session', 'remembered'],
+        ['resume-session', 'remembered'],
+    ]);
+
+    // The one that lost is told so, and joins the other's session (the
+    // middleware looks the record up again).
+    $resumed = $registry->find('remembered')->replacedBy;
+
+    expect(outcomes($results, null))->toBe(1)
+        ->and(outcomes($results, $resumed))->toBe(1)
+        ->and($registry->forUser($user)->map->id->all())->toBe([$resumed])
+        ->and(DB::table('keyring_sessions')->count())->toBe(2);
 });

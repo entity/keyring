@@ -181,6 +181,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
     ],
     'middleware' => true,
     'remember_cookie' => 'keyring_remember',
+    'remember_grace' => '10s',
 ],
 ```
 
@@ -194,6 +195,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
 | `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. |
+| `remember_grace` | How long after that cookie is used the same browser's other requests, sent with it, are still let in on the same session. Each cookie works once; after this, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. `0` leaves no room at all, so requests a browser sends together end it too. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
@@ -248,7 +250,7 @@ See [Password Rules](protected-changes.md#password-rules). `broker` is the passw
 ```php
 'security_log' => [
     'keep_for' => '180d',
-    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
+    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
 ],
 ```
 
