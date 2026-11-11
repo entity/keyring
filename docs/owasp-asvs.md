@@ -306,7 +306,7 @@ Whatever level you aim for, these are outside what a package can do:
 
 - **TLS everywhere**, with `SESSION_SECURE_COOKIE=true` and trusted proxies configured, so rate limits see real addresses.
 - **Your pages.** Keyring ships none: masked password fields, paste and password managers left alone, a visible sign-out button, and telling users the risks of a weaker factor are in your templates.
-- **Headers on your own pages.** Keyring's responses send `Cache-Control: no-store` and `Referrer-Policy: same-origin`. A content security policy and the rest are yours, for every page.
+- **Headers on your own pages.** Keyring's responses send `Cache-Control: no-store`, `Referrer-Policy: same-origin` and `X-Frame-Options: DENY`. A content security policy and the rest are yours, for every page.
 - **Your mail provider.** Verification links, reset links and security notices are only as private and as prompt as the mail that carries them. Its bounce and delivery reports sit outside the request, where Keyring can't make two answers look alike.
 - **Your session and cache stores.** A server-side session driver, and a rate limiter store that doesn't lose its keys: limits, locks, sent codes and answered WebAuthn challenges are kept there.
 - **Your documentation.** ASVS asks for your password word list, your session timeouts and your sign-in pathways in writing.

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -23,6 +24,7 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Features;
+use Keyring\Http\Middleware\AddSecurityHeaders;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
@@ -329,7 +331,7 @@ it('gives new device events a working "this wasn\'t me" link', function () {
 
     // Opening the link only shows a page, so mail scanners can't sign anyone out.
     // Its URL is the signed link, so the page sends no Referer to anyone.
-    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report')->assertHeader('Referrer-Policy', 'no-referrer');
+    $this->inertia()->get($url)->assertOk()->assertJsonPath('component', 'auth/device-report')->assertHeader('Referrer-Policy', 'no-referrer')->assertHeader('X-Frame-Options', 'DENY');
     $this->flushHeaders();
     expect(Device::sole()->isRevoked())->toBeFalse();
 
@@ -612,11 +614,69 @@ it('tells the browser not to guess the type of a page, a redirect or JSON', func
     $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertUnprocessable()->assertHeader('X-Content-Type-Options', 'nosniff');
 });
 
+it('will not be shown in a frame, whether it answers with a page, a redirect or JSON', function () {
+    Route::middleware(['web', 'auth', 'keyring.fresh:5m'])->get('/billing', fn () => 'billing');
+
+    $this->inertia()->get('/login')->assertOk()->assertHeader('X-Frame-Options', 'DENY');
+    $this->flushHeaders()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect()->assertHeader('X-Frame-Options', 'DENY');
+    $this->getJson('/user/devices')->assertOk()->assertHeader('X-Frame-Options', 'DENY');
+
+    // The confirm page, where a password or a code is typed again.
+    $this->freshAt(now()->subHour())->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->inertia()->get(route('keyring.confirm.challenge'))->assertOk()->assertHeader('X-Frame-Options', 'DENY');
+
+    $this->flushHeaders()->postJson('/logout')->assertNoContent()->assertHeader('X-Frame-Options', 'DENY');
+    $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertUnprocessable()->assertHeader('X-Frame-Options', 'DENY');
+});
+
+/**
+ * Keyring's routes, with a middleware of the app's inside Keyring's own
+ * that sends these headers on every response.
+ *
+ * @param  array<string, string|list<string>>  $headers
+ */
+function withAppHeaders(array $headers): void
+{
+    Route::aliasMiddleware('app.headers', function (Request $request, Closure $next) use ($headers) {
+        $response = $next($request);
+        $response->headers->add($headers);
+
+        return $response;
+    });
+
+    config(['keyring.middleware' => ['web', AddSecurityHeaders::class, 'app.headers']]);
+    withFeatures(Features::all());
+}
+
+it('leaves framing to an app whose response already says who may frame it', function (array $headers, ?string $expected) {
+    withAppHeaders($headers);
+
+    $response = $this->inertia()->get('/login')->assertOk();
+
+    expect($response->headers->get('X-Frame-Options'))->toBe($expected);
+})->with([
+    'a policy with frame-ancestors' => [['Content-Security-Policy' => "default-src 'self'; frame-ancestors 'self'"], null],
+    'a policy that is only frame-ancestors' => [['Content-Security-Policy' => "frame-ancestors 'none'"], null],
+    'a directive written in capitals' => [['Content-Security-Policy' => "default-src 'self';Frame-Ancestors https://example.com"], null],
+    'the second of two policies' => [['Content-Security-Policy' => ["default-src 'self'", "frame-ancestors 'self'"]], null],
+    'its own X-Frame-Options' => [['X-Frame-Options' => 'SAMEORIGIN'], 'SAMEORIGIN'],
+]);
+
+it('still refuses to be framed when the app\'s headers do not say who may', function (array $headers) {
+    withAppHeaders($headers);
+
+    $this->inertia()->get('/login')->assertOk()->assertHeader('X-Frame-Options', 'DENY');
+})->with([
+    'a policy without frame-ancestors' => [['Content-Security-Policy' => "default-src 'self'; script-src 'self'"]],
+    'a source that only looks like the directive' => [['Content-Security-Policy' => "default-src 'self' https://frame-ancestors.example"]],
+    'a policy that only reports' => [['Content-Security-Policy-Report-Only' => "frame-ancestors 'self'"]],
+]);
+
 it('leaves caching to an app that takes the middleware out of the config', function () {
     config(['keyring.middleware' => ['web']]);
     withFeatures(Features::all());
 
-    $this->get('/login')->assertHeaderMissing('Referrer-Policy')->assertHeaderMissing('X-Content-Type-Options');
+    $this->get('/login')->assertHeaderMissing('Referrer-Policy')->assertHeaderMissing('X-Content-Type-Options')->assertHeaderMissing('X-Frame-Options');
 });
 
 it('cycles the remember token when a device is revoked', function () {

@@ -88,8 +88,8 @@ return [
     |
     | Keyring registers its routes under these middleware. Set "routes" to
     | false to register them yourself with Keyring::routes(). AddSecurityHeaders
-    | keeps auth pages out of caches, their URLs out of Referer headers and
-    | their responses from being read as another content type.
+    | keeps auth pages out of caches and out of frames, their URLs out of
+    | Referer headers and their responses from being read as another type.
     |
     */
 

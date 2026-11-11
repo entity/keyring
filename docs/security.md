@@ -53,7 +53,7 @@ Guarantees about a [feature](quick-start.md#adding-features), such as devices or
 - With that registration, an account can't be signed in until its address is verified, and a correct password is answered like a wrong one until then. Verifying takes the emailed link and the password together, so neither someone who registered an address they can't read mail for, nor its owner who never chose that password, ends up with a verified account. A finished password reset also verifies the address.
 - Checking a password can rehash it under the app's current settings. The new hash is only saved over the one that was checked, under a row lock, so a sign in that overlaps a reset can't write the old password back, and whatever device trust it was given is withdrawn when it's ended.
 - A login attempt can't sign the owner out. Risk responses at login never revoke sessions, change the "remember me" token or stop trusting devices, even from a custom responder.
-- Keyring's responses send `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` (`no-referrer` on the pages emailed links open), and signing out sends `Clear-Site-Data`.
+- Keyring's responses send `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: same-origin` (`no-referrer` on the pages emailed links open), and signing out sends `Clear-Site-Data`.
 
 ### Rate Limiting
 
@@ -200,6 +200,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - Signed links are signed over the path and query only, and checked with `keyring.signed:relative` (Laravel's `signed` middleware, with refused links logged), so a forged `Host` header can't redirect them.
 - Pages opened from emailed links (password resets, email verification, email changes, "this wasn't me") have the link's token or signature in their URL, so they're sent with `Referrer-Policy: no-referrer`: nothing the page loads is told its URL, your own assets and analytics included. A failed form still finds its way back, because Keyring notes the page in the session.
 - Every other Keyring response sends `Referrer-Policy: same-origin`, so other sites never see its URL and your own app still does.
+- No Keyring response may be shown in a frame: each is sent with `X-Frame-Options: DENY`. That covers the pages that act on one press of a button (confirming an email change, undoing one, reporting a device, verifying an address) and the sign-in, challenge and confirm pages, which are what a page on another site would load invisibly and line its own button up over. A response that already says who may frame it is left as it is: one with an `X-Frame-Options` of its own, or a `Content-Security-Policy` with a `frame-ancestors` directive. See [A Content Security Policy](#a-content-security-policy).
 - An Inertia app keeps the policy of the page it first loaded. So when the form on an emailed link's page succeeds, Keyring answers Inertia with a full page visit (`409` with `X-Inertia-Location`), and the next page comes with its own policy. Otherwise every page after it would send no `Referer` either, signed in or not.
 
 #### Emailed Links
@@ -276,8 +277,8 @@ Keyring sets the headers and cookies of its own responses. The rest of what a br
 | HTTPS on every request, and HSTS | Builds emailed links from `APP_URL`, and keeps its own cookies to HTTPS once `APP_URL` is `https` | Redirect HTTP to HTTPS, or send `Strict-Transport-Security` |
 | Trusted proxies, behind a load balancer | Reads the client's address and scheme from the request Laravel gives it | Work out which proxies to trust |
 | `SESSION_SECURE_COOKIE=true` | Makes its own two cookies `Secure` and gives them the `__Host-` prefix | Change the flags or name of Laravel's session, CSRF or "remember me" cookies |
-| A `Content-Security-Policy` with `frame-ancestors` | Sends none: your layout and assets decide what a policy has to allow | Stop its pages being framed |
-| `X-Content-Type-Options: nosniff` on your own responses | Sends it, with `Cache-Control: no-store` and a `Referrer-Policy`, on every Keyring response | Add headers to routes that aren't Keyring's |
+| A `Content-Security-Policy`, with `frame-ancestors` | Sends `X-Frame-Options: DENY` on its own responses, unless yours already say who may frame them | Send a policy: your layout and assets decide what one has to allow. Stop your other pages being framed |
+| `X-Content-Type-Options: nosniff` on your own responses | Sends it, with `Cache-Control: no-store`, `X-Frame-Options: DENY` and a `Referrer-Policy`, on every Keyring response | Add headers to routes that aren't Keyring's |
 
 ### HTTPS and HSTS
 
@@ -324,18 +325,22 @@ Whatever else yours says, include `frame-ancestors`:
 Content-Security-Policy: frame-ancestors 'none'
 ```
 
-Use `'self'` if your app frames its own pages. Add `X-Frame-Options: DENY` (or `SAMEORIGIN`) for older browsers. It matters most on these pages:
+Use `'self'` if your app frames its own pages. Without it another site can load a page in an invisible frame and line a button of its own up over yours. The CSRF token doesn't help there, because the press really does come from your page. `SameSite=Lax` cookies aren't sent to a framed page on another site, which stops the signed-in cases in current browsers, but a page that works signed out is still exposed.
+
+Keyring's own pages are covered without it. Every Keyring response is sent with `X-Frame-Options: DENY`, which is where it matters most:
 
 - the login, challenge and confirm pages, where someone types a password or a code,
-- the pages emailed links open (`reset-password`, `email-verification`, `email-change`, `device-report`). Three of those do their work with one press of a button, which is exactly what a hidden frame on another site can trick someone into.
+- the pages emailed links open (`reset-password`, `email-verification`, `email-change`, `device-report`). Three of those do their work with one press of a button, and they work signed out.
 
-Send it on every HTML response rather than on those routes alone. Without it another site can load these pages in an invisible frame and line a button of its own up over yours. The CSRF token doesn't help there, because the press really does come from your page. `SameSite=Lax` cookies aren't sent to a framed page on another site, which stops the signed-in cases in current browsers, but the emailed-link pages work signed out.
+That header is Keyring's default, and your policy can take its place. When a Keyring response already carries a `Content-Security-Policy` with `frame-ancestors`, or an `X-Frame-Options` of its own, Keyring adds nothing: your app has decided. Keyring's middleware sees the headers set by whatever runs inside it, which is the route itself and any middleware listed after it in `keyring.middleware`. A policy added further out (your `web` group, a global middleware or your web server) arrives after Keyring has added `DENY`, and browsers then go by `frame-ancestors` and ignore `X-Frame-Options`, so a policy of `'self'` still lets your app frame those pages. Two different `X-Frame-Options` headers on one response are read as `DENY`, so if your web server sends `SAMEORIGIN` everywhere and you do want to frame Keyring's pages, send it from inside as well, or say so with `frame-ancestors`.
+
+Your other pages get nothing from Keyring, so send the policy on every HTML response, with `X-Frame-Options: DENY` (or `SAMEORIGIN`) beside it for older browsers.
 
 ### Headers on Your Other Responses
 
 Keyring's middleware (`Keyring\Http\Middleware\AddSecurityHeaders`) is on Keyring's routes only. Send `X-Content-Type-Options: nosniff` on the rest of your app too, so a browser never treats a response as a type it doesn't say it is, and decide your own `Referrer-Policy` and `Cache-Control` for pages that show account details. A small middleware on your `web` and `api` groups, or your web server's config, covers all of it.
 
-If you take Keyring's middleware out of `keyring.middleware`, its responses lose `no-store`, `nosniff` and their referrer policy unless yours send them. The pages emailed links open have a token in their URL, so they need `Referrer-Policy: no-referrer`.
+If you take Keyring's middleware out of `keyring.middleware`, its responses lose `no-store`, `nosniff`, `X-Frame-Options` and their referrer policy unless yours send them. The pages emailed links open have a token in their URL, so they need `Referrer-Policy: no-referrer`.
 ## Cryptography
 
 Everything Keyring does with a key or an algorithm, and where. It adds no cipher or hash of its own: each one below is PHP's, Laravel's or a library's.
@@ -509,6 +514,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
 | `X-Content-Type-Options: nosniff` on every response, and a referrer policy | OWASP ASVS 3.4.4 and 3.4.5 |
+| `X-Frame-Options: DENY` on every response, unless the app's own policy says who may frame it | OWASP's Clickjacking Defense Cheat Sheet. OWASP ASVS 3.4.6 asks for `frame-ancestors` in a content security policy, which is your app's to send |
 | `Secure` cookies with the `__Host-` prefix | OWASP ASVS 3.3.1 and 3.3.3, and OWASP's Session Management Cheat Sheet |
 | No referrer from pages whose URL holds a token | OWASP's Forgot Password Cheat Sheet |
 | Emailed links that only act on a `POST`, with the token or signature in its body | OWASP ASVS 3.5.3 and 14.2.1, and OWASP's Cross-Site Request Forgery Prevention Cheat Sheet |
