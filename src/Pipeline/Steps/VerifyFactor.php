@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Pipeline\Steps;
 
 use Closure;
@@ -16,6 +18,7 @@ use Keyring\Login\AttemptStore;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
+use Keyring\Support\Input;
 
 /**
  * Identifies the user (for primary factors) and checks the proof. The
@@ -30,7 +33,7 @@ class VerifyFactor
 
     public function handle(Context $context, Closure $next): Context
     {
-        $context->request->validate($this->rules($context));
+        Input::validate($context->request, $this->rules($context));
 
         return $this->verify($context, $next);
     }

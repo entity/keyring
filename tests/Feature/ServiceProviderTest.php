@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\RateLimiter as Limiter;
 use Illuminate\Cache\RateLimiting\Limit;

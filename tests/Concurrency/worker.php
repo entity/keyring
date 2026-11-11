@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * One side of a race: boots the app the way the tests do, against the same
  * database, says it's ready, then runs one operation and prints what happened

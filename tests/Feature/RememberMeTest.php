@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Http\Request;
@@ -159,7 +161,7 @@ it('gives a remembered sign in a cookie naming its session, for as long as the s
     config(['keyring.sessions.absolute' => '7d', 'session.secure' => true]);
 
     $response = browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
-    $cookie = $response->getCookie('keyring_remember');
+    $cookie = $response->getCookie('__Host-keyring_remember');
 
     expect($cookie->getValue())->toBe(session(Sessions::KEY))
         ->and($cookie->isHttpOnly())->toBeTrue()

@@ -1,15 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Input;
 
 /**
  * Where the user is signed in, and signing devices out.
@@ -60,8 +64,9 @@ class DeviceController
     }
 
     /**
-     * The page the signed "this wasn't me" link opens. It changes nothing;
-     * its button POSTs back to the same signed URL.
+     * The page the signed "this wasn't me" link opens. It changes nothing.
+     * Its button posts the link's signature in the body, to the same path
+     * without it (ValidatePostedSignature).
      */
     public function page(Request $request, string $device): mixed
     {
@@ -69,7 +74,9 @@ class DeviceController
 
         return $this->keyring->render('device-report', [
             'device' => $device->description(),
-            'url' => $request->getRequestUri(),
+            'url' => Str::before($request->getRequestUri(), '?'),
+            'expires' => Input::text($request, 'expires'),
+            'signature' => Input::text($request, 'signature'),
         ]);
     }
 

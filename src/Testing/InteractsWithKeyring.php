@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Testing;
 
 use DateTimeInterface;
@@ -96,10 +98,14 @@ trait InteractsWithKeyring
      * The code an authenticator app would show right now for a TOTP
      * authenticator, or for a secret. Each code works once, so to use the
      * same app again in a test, travel 30 seconds or pass a later step.
+     * An authenticator's own digest is used; a secret's is SHA-1 unless
+     * you pass another.
      */
-    public function totpCode(Authenticator|string $authenticator, int $step = 0): string
+    public function totpCode(Authenticator|string $authenticator, int $step = 0, ?string $algorithm = null): string
     {
-        return app(Google2FA::class)->oathTotp($authenticator instanceof Authenticator ? (string) $authenticator->secret : $authenticator, Totp::timestep($step));
+        $algorithm ??= $authenticator instanceof Authenticator ? $authenticator->meta('algorithm', 'sha1') : 'sha1';
+
+        return (clone app(Google2FA::class))->setAlgorithm($algorithm)->oathTotp($authenticator instanceof Authenticator ? (string) $authenticator->secret : $authenticator, Totp::timestep($step));
     }
 
     protected function withKeyringSession(): static

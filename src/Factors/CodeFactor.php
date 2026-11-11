@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -15,6 +17,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Support\Duration;
+use Keyring\Support\Input;
 use Keyring\Support\KeyedHash;
 use LogicException;
 
@@ -131,7 +134,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         $ours = ($sent['for'] ?? null) === (string) $authenticator->getKey();
 
         // The count lasts as long as the attempt can.
-        ['valid' => $valid, 'guesses' => $guesses] = $this->check($owner, $ours ? $sent : null, (string) $request->input('code'), $attempt->expiresAt - now()->getTimestamp());
+        ['valid' => $valid, 'guesses' => $guesses] = $this->check($owner, $ours ? $sent : null, (string) Input::get($request, 'code'), $attempt->expiresAt - now()->getTimestamp());
 
         if ($guesses >= $this->maxGuesses) {
             $attempt->exhausted = true;
@@ -178,7 +181,7 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
         // enrollment started before the one the code went out for.
         $ours = is_string($sent['for'] ?? null) && $sent['for'] === $enrollment->state('reference');
 
-        ['valid' => $valid, 'guesses' => $guesses] = $this->check($owner, $ours ? $sent : null, (string) $request->input('code'), Duration::seconds(config('keyring.enrollments.keep_for')));
+        ['valid' => $valid, 'guesses' => $guesses] = $this->check($owner, $ours ? $sent : null, (string) Input::get($request, 'code'), Duration::seconds(config('keyring.enrollments.keep_for')));
 
         if (! $valid) {
             if ($guesses >= $this->maxGuesses) {
@@ -298,6 +301,6 @@ abstract class CodeFactor extends Factor implements Enrollable, SendsCodes
 
     protected function hash(#[\SensitiveParameter] string $code): string
     {
-        return KeyedHash::make($this->key().'|'.$code);
+        return KeyedHash::make(KeyedHash::ONE_TIME_CODES, $this->key().'|'.$code);
     }
 }

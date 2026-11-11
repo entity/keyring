@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Http\Request;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
@@ -7,6 +9,7 @@ use Keyring\Factors\SentCodes;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Support\KeyedHash;
+use ParagonIE\ConstantTime\Base32;
 
 beforeEach(function () {
     $this->user = taylor();
@@ -28,7 +31,7 @@ it('accepts a totp code once even when two requests race', function () {
 it('accepts a recovery code once even when two requests race', function () {
     $id = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create()->id;
     [$first, $second] = [Authenticator::find($id), Authenticator::find($id)];
-    $request = Request::create('/', 'POST', ['code' => 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA']);
+    $request = Request::create('/', 'POST', ['code' => 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AA']);
 
     expect(Keyring::factor('recovery')->verify($this->attempt, $first, $request))->not->toBeNull()
         ->and(Keyring::factor('recovery')->verify($this->attempt, $second, $request))->toBeNull()
@@ -64,8 +67,8 @@ it('keeps other recovery codes usable when two different codes are used at once'
     $id = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create()->id;
     [$first, $second] = [Authenticator::find($id), Authenticator::find($id)];
 
-    expect(Keyring::factor('recovery')->verify($this->attempt, $first, Request::create('/', 'POST', ['code' => 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA'])))->not->toBeNull()
-        ->and(Keyring::factor('recovery')->verify($this->attempt, $second, Request::create('/', 'POST', ['code' => 'BBBB-BBBB-BBBB-BBBB-BBBB-BBBB'])))->not->toBeNull()
+    expect(Keyring::factor('recovery')->verify($this->attempt, $first, Request::create('/', 'POST', ['code' => 'AAAA-AAAA-AAAA-AAAA-AAAA-AAAA-AA'])))->not->toBeNull()
+        ->and(Keyring::factor('recovery')->verify($this->attempt, $second, Request::create('/', 'POST', ['code' => 'BBBB-BBBB-BBBB-BBBB-BBBB-BBBB-BB'])))->not->toBeNull()
         ->and(Keyring::factor('recovery')->present(Authenticator::find($id))['remaining'])->toBe(1);
 });
 
@@ -73,14 +76,15 @@ it('keeps recovery codes working after APP_KEY is rotated', function () {
     $id = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create()->id;
     config(['app.previous_keys' => [config('app.key')], 'app.key' => 'base64:'.base64_encode(random_bytes(32))]);
 
-    expect(Keyring::factor('recovery')->verify($this->attempt, Authenticator::find($id), Request::create('/', 'POST', ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])))->not->toBeNull();
+    expect(Keyring::factor('recovery')->verify($this->attempt, Authenticator::find($id), Request::create('/', 'POST', ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])))->not->toBeNull();
 });
 
-it('makes recovery codes with 120 random bits each', function () {
+it('makes recovery codes with 128 random bits each', function () {
     ['codes' => $codes, 'secret' => $secret] = Keyring::factor('recovery')->generate();
 
-    expect($codes)->each->toMatch('/^[a-z2-7]{4}(-[a-z2-7]{4}){5}$/')
-        ->and(array_unique($codes))->toHaveCount(count($codes));
+    expect($codes)->each->toMatch('/^[a-z2-7]{4}(-[a-z2-7]{4}){5}-[a-z2-7]{2}$/')
+        ->and(array_unique($codes))->toHaveCount(count($codes))
+        ->and(array_map(fn (string $code) => strlen(Base32::decodeNoPadding(str_replace('-', '', $code))), $codes))->each->toBe(16);
 
     $new = Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'recovery', 'secret' => $secret]);
     $typed = strtoupper(str_replace('-', ' ', $codes[0]));
@@ -89,12 +93,12 @@ it('makes recovery codes with 120 random bits each', function () {
 
 });
 
-// Before recovery codes had 120 bits they were ten characters, about 52
+// Before recovery codes had 128 bits they were ten characters, about 52
 // bits: far too few to keep as a keyed hash (OWASP ASVS 6.5.2).
 it('no longer takes a ten character code, even from a set that holds its hash', function () {
     $old = Authenticator::factory()->for($this->user, 'authenticatable')->create([
         'factor' => 'recovery',
-        'secret' => json_encode([KeyedHash::make('aaaaa11111')]),
+        'secret' => json_encode([KeyedHash::make(KeyedHash::RECOVERY_CODES, 'aaaaa11111')]),
     ]);
 
     expect(Keyring::factor('recovery')->verify($this->attempt, $old, Request::create('/', 'POST', ['code' => 'aaaaa-11111'])))->toBeNull()
@@ -102,12 +106,13 @@ it('no longer takes a ten character code, even from a set that holds its hash', 
 });
 
 it('refuses to store a recovery code with fewer than 112 random bits', function (string $code) {
-    Keyring::factor('recovery')->secretFor(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa', $code]);
+    Keyring::factor('recovery')->secretFor(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', $code]);
 })->with([
     'the old ten characters' => ['aaaaa-11111'],
-    'one character short of its own format' => ['aaaa-aaaa-aaaa-aaaa-aaaa-aaa'],
+    'one character short of its own format' => ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-a'],
+    'the 24 characters of 120 bits, which it no longer makes' => ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'],
     'one character short of fortify\'s' => ['aBcDeFgHi1-aBcDeFgHi'],
-    'a character base32 has no place for' => ['aaaa-aaaa-aaaa-aaaa-aaaa-aaa1'],
+    'a character base32 has no place for' => ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-a1'],
     'nothing' => [''],
 ])->throws(InvalidArgumentException::class, 'Keyring only stores recovery codes with 112 random bits or more');
 

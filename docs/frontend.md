@@ -2,6 +2,7 @@
 
 - [Introduction](#introduction)
 - [Building the Pages](#building-the-pages)
+- [The Pages Emailed Links Open](#the-pages-emailed-links-open)
 - [The Challenge Page](#the-challenge-page)
     - [Vue](#vue)
     - [React](#react)
@@ -49,6 +50,36 @@ Keyring renders the components `auth/login`, `auth/challenge` and so on. [Pages]
 - **The login page** can offer passkeys, with [`usePasskeyLogin()`](#signing-in-with-a-passkey).
 
 Settings pages for authenticators, sessions, devices and the email address are yours too, built on the [helpers below](#managing-authenticators) and the JSON routes. The [example app](https://github.com/entity/keyring-example) has every page, in React with the Laravel starter kit's components, if you'd like a reference.
+
+## The Pages Emailed Links Open
+
+Four pages are where an emailed link lands: `reset-password`, `email-verification`, `email-change` and `device-report`. Each link carries a token or a signature in its URL, and none of them does anything when it's only opened. The page's form posts that secret in the request's body, to a URL without it:
+
+| Page | Post to | With |
+|---|---|---|
+| `reset-password` | `/reset-password` | `token`, `email`, `password`, `password_confirmation` |
+| `email-change` | its `url` prop | `token` |
+| `email-verification` | its `url` prop | `expires`, `signature` |
+| `device-report` | its `url` prop | `expires`, `signature` |
+
+The last three are one button each. In React, with Inertia's `<Form>`:
+
+```tsx
+import { Form } from '@inertiajs/react'
+
+export default function DeviceReport({ device, url, expires, signature }: { device: string, url: string, expires: string, signature: string }) {
+  return (
+    <Form action={url} method="post" transform={data => ({ ...data, expires, signature })}>
+      <p>This signs out {device}.</p>
+      <button type="submit">Sign that device out</button>
+    </Form>
+  )
+}
+```
+
+`email-verification` is the same with its own wording, and `email-change` posts `{ token }` and reads `action` (`confirm` or `revert`) to choose that wording. Hidden inputs work as well as `transform`. Don't put the token or signature back in the URL you post to: Keyring reads them from the body only.
+
+These pages are sent with `Referrer-Policy: no-referrer`, since their address holds the secret. When the form succeeds, Keyring has Inertia load the next page in full, so the rest of your app goes back to sending a referrer. There's nothing to do for that, but it's why the visit after one of these pages isn't a client-side one.
 
 ## The Challenge Page
 

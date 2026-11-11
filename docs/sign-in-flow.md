@@ -69,6 +69,8 @@ Post the username and password to `/login`:
 
 A wrong password and an unknown account produce the same error, on the username field, using Laravel's `auth.failed` message. Both take the same time.
 
+Send them in the body, as a form or as JSON. Keyring doesn't read a `POST`'s query string for these, so `POST /login?password=...` fails as if no password was sent. See [Request Input](security.md#request-input).
+
 ### Finding the User
 
 By default Keyring looks the user up by the `username` attribute, trimmed and lowercased. Change either in your `KeyringServiceProvider`:
@@ -474,8 +476,9 @@ Keyring renders these pages:
 | `forgot-password` | `status` (a translated message) |
 | `reset-password` | `token`, `email` |
 | `verify-email` | `status` (a translated message) |
-| `email-change` | `action` (`confirm` or `revert`) and `url` (where its button posts). See [Protected Changes](protected-changes.md#the-emailed-links). |
-| `device-report` | `device` (a description) and `url` (where its button posts). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
+| `email-verification` | `email` (the address being verified), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [Email Verification](protected-changes.md#email-verification). |
+| `email-change` | `action` (`confirm` or `revert`), `url` (where its button posts) and `token` (posted in the body). See [Protected Changes](protected-changes.md#the-emailed-links). |
+| `device-report` | `device` (a description), `url` (where its button posts), and `expires` and `signature` (posted in the body). See [The "This Wasn't Me" Link](devices-and-sessions.md#the-this-wasnt-me-link). |
 
 With Inertia installed, each renders the component `auth/{name}`, such as `auth/login`. Without Inertia, Keyring renders the Blade view `auth.{name}`, such as `resources/views/auth/login.blade.php`, with the props as view data. Keyring doesn't ship Blade views, so you write them. Until you do, the page throws a `Keyring\Exceptions\MissingPage` exception naming the view to create and the data it receives.
 

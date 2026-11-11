@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Factors;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -16,6 +18,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Input;
 use Keyring\Support\PasswordRules;
 use Keyring\Support\RowLock;
 
@@ -96,7 +99,7 @@ class Password extends Factor implements PrimaryFactor
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         $user = $authenticator->user();
-        $credentials = ['password' => PasswordRules::forVerifying((string) $request->input('password'), $user->getAuthPassword())];
+        $credentials = ['password' => PasswordRules::forVerifying((string) Input::get($request, 'password'), $user->getAuthPassword())];
 
         if (! $this->provider()->validateCredentials($user, $credentials)) {
             return null;

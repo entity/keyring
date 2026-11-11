@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Tests;
 
 use App\Actions\Keyring\CreateNewUser;
@@ -70,6 +72,18 @@ abstract class TestCase extends Orchestra
     {
         $this->loadMigrationsFrom(__DIR__.'/database/migrations');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+    }
+
+    /**
+     * Send these cookies and none of the ones set for earlier requests.
+     *
+     * @param  array<string, string>  $cookies
+     */
+    public function withOnlyCookies(array $cookies): static
+    {
+        $this->defaultCookies = [];
+
+        return $this->withCookies($cookies);
     }
 
     /**

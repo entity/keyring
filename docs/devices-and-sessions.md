@@ -18,6 +18,7 @@
     - [The Session Middleware](#the-session-middleware)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
+- [Keyring's Cookies](#keyrings-cookies)
 - [For Administrators](#for-administrators)
 - [Timeouts](#timeouts)
     - [Inactivity and "Remember Me"](#inactivity-and-remember-me)
@@ -52,13 +53,13 @@ With devices on, Keyring sets its cookie on sign in, offers "don't ask again on 
 | `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
 | `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
 | `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
-| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signed, `keyring` limiter | Signs the device out. |
+| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signature in the body, `keyring` limiter | Signs the device out. |
 
 The three session routes are always registered. The device routes need `Features::devices()`. Looking needs only a signed-in user. Ending anything also needs `changes_middleware`, a [fresh verification](step-up.md#fresh-verification) by default.
 
 ## Devices
 
-With `Features::devices()` on, on every sign in Keyring looks for its device cookie (`keyring_device` by default). If it's missing or unknown, Keyring creates a device with a new random token and sets the cookie. The cookie is httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts 400 days. Only a SHA-256 hash of the token is stored.
+With `Features::devices()` on, on every sign in Keyring looks for its device cookie. If it's missing or unknown, Keyring creates a device with a new random token and sets the cookie. The cookie is httpOnly, `SameSite=Lax` and lasts 400 days. Only a SHA-256 hash of the token is stored. See [Keyring's Cookies](#keyrings-cookies) for its name and when it's `Secure`.
 
 An account keeps its 50 most recently seen devices (`devices.limit`). A sign in from another new browser forgets the one seen longest ago and signs it out, so it's a new device if it comes back. Without a limit, one account could fill the table and its own devices page just by signing in from browsers that send no cookie.
 
@@ -97,9 +98,20 @@ Event::listen(function (NewDeviceSignedIn $event) {
 
 ### The "This Wasn't Me" Link
 
-`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`, valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page (props: `device`, a description such as "Chrome on macOS", and `url`), whose button POSTs back to the same signed URL. That revokes the device without the user signing in: its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
+`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`, valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page. Its props are `device` (a description such as "Chrome on macOS"), `url`, `expires` and `signature`, and its button posts `expires` and `signature` in the body to `url`, which is the link's path without its query string. That revokes the device without the user signing in: its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
 
 The link is built from `APP_URL`, and its signature covers only the path and query, so a forged `Host` header can't point it at another site. Like the email change links, opening it changes nothing, so mail scanners that open links can't sign anyone out.
+
+The link has to carry its signature in the URL. The request that acts posts it instead, so it isn't written to access logs and proxies a second time. Keyring checks the posted fields as it checked the link: the same signature, over the same path, with the same expiry. A signature left in the `POST`'s URL is refused with a `403`.
+
+```html
+<form method="POST" action="{{ $url }}">
+    @csrf
+    <input type="hidden" name="expires" value="{{ $expires }}">
+    <input type="hidden" name="signature" value="{{ $signature }}">
+    <button>Sign {{ $device }} out</button>
+</form>
+```
 
 ### Locations
 
@@ -361,7 +373,7 @@ A signed-out request is sent to the login page with the `signed-out` status, and
 
 Laravel's "remember me" cookie holds a token that is the same in every browser the user ticked it in, and nothing on the server makes it run out. On its own it would sign a browser back in for as long as the browser kept sending it, whatever had happened to the session it came with.
 
-So a remembered sign in also sets a Keyring cookie (`keyring_remember`, named in `sessions.remember_cookie`) holding that session's registry ID. It's httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts as long as the record does. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
+So a remembered sign in also sets a Keyring cookie holding that session's registry ID. It's httpOnly, `SameSite=Lax` and lasts as long as the record does. See [Keyring's Cookies](#keyrings-cookies) for its name and when it's `Secure`. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
 
 - If the record is the user's, hasn't been revoked, is inside its `absolute` limit, and was last used within `remember_idle`, the new session carries it on, under a new record and a new cookie. The new record is a copy of the old one with the same start and the same expiry, so coming back never starts the `absolute` limit again. Its device, IP address and browser are those of the request that came back, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
 - Otherwise the request is signed out like any other ended session, with both cookies cleared: there was no Keyring cookie, its record is gone or was never issued (`expired`), or the record was revoked, timed out or belongs to someone else. A client that kept the cookies after a timeout or a risk response gets nowhere with them.
@@ -401,6 +413,24 @@ Event::listen(function (RememberMeReused $event) {
 A browser that comes back usually sends several requests at once, the page and whatever it loads alongside, all with the cookie the first of them uses up. So for a few seconds (`sessions.remember_grace`, 10 seconds by default) a request with the cookie that was just replaced joins the session the first one resumed, as long as it comes from the same browser (the same user agent). It gets the same new cookie and its own Laravel session pointing at the same record. It doesn't start another session, change the record or record a device, and the seconds count from when the cookie was replaced, so sending it again doesn't keep it alive. A used cookie from a different browser counts as used twice, however soon it comes.
 
 A shorter time leaves less room for a copy to slip in next to the owner, and more chance that a slow request of the owner's own ends their session. Set it to `0` only if a browser's requests never overlap.
+
+## Keyring's Cookies
+
+Keyring sets two cookies of its own: the device cookie, and the one that ties ["remember me"](#remember-me) to its session. What they're called depends on how your app is served:
+
+| Your app | Device cookie | "Remember me" cookie |
+|---|---|---|
+| Served over HTTPS | `__Host-keyring_device` | `__Host-keyring_remember` |
+| Served over HTTPS, with `session.domain` set or `session.path` other than `/` | `__Secure-keyring_device` | `__Secure-keyring_remember` |
+| Served over plain HTTP, as on `http://localhost` | `keyring_device` | `keyring_remember` |
+
+Keyring takes your app to be served over HTTPS when `APP_URL` starts with `https://`, or when `session.secure` (`SESSION_SECURE_COOKIE`) is `true`. It goes by those settings and not by the request, because the name has to be the same on every request, and behind a proxy your app doesn't [trust](security.md#what-your-app-must-provide) every request looks like plain HTTP.
+
+Over HTTPS both cookies are always `Secure`. A browser only accepts a `__Host-` cookie that is `Secure`, has `Path=/` and no `Domain`, so another subdomain, or a page loaded over plain HTTP, can't set or replace it. A cookie shared with subdomains can't have that prefix, so Keyring falls back to `__Secure-`, which only promises that the cookie was set over HTTPS. Over plain HTTP a browser refuses both prefixes, so the plain names are used, and the cookies are `Secure` whenever the request itself came over HTTPS.
+
+To use names of your own, set `devices.cookie` and `sessions.remember_cookie`. Keyring uses a name you set exactly as it is, still `Secure` over HTTPS, and it's up to you to give it a prefix.
+
+A browser that was given the plain cookies before your app moved to HTTPS keeps its device and its remembered session. While it holds no cookie under the new name, Keyring reads the plain one. The next time that browser signs in, or "remember me" brings it back, it gets the cookie under the new name and the plain one is deleted. Anything on your domain could have set a plain cookie, so one is only ever used to find a device the account already has, never to start a new one.
 
 ## For Administrators
 

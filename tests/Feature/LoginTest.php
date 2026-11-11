@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Hashing\BcryptHasher;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
@@ -183,6 +185,47 @@ it('lets the app keep its own referer, and keeps it from other sites', function 
     $this->get('/login')->assertHeader('Referrer-Policy', 'same-origin');
 });
 
+// The page an emailed link opens sends no Referer at all, and an Inertia app
+// would go on running in it: every page after would send none either.
+describe('leaving the page an emailed link opened', function () {
+    beforeEach(function () {
+        $this->user = taylor();
+        $this->token = app('auth.password')->broker()->createToken($this->user);
+        $this->page = route('password.reset', ['token' => $this->token, 'email' => 'taylor@example.com']);
+
+        $this->inertia()->get($this->page)->assertOk()->assertHeader('Referrer-Policy', 'no-referrer');
+    });
+
+    it('has an Inertia app load the next page in full, with what was flashed for it', function () {
+        $this->inertia()->post(route('password.update'), ['token' => $this->token, 'email' => 'taylor@example.com', 'password' => 'a-long-new-password', 'password_confirmation' => 'a-long-new-password'])
+            ->assertStatus(409)
+            ->assertHeader('X-Inertia-Location', route('login'))
+            ->assertHeaderMissing('Location')
+            ->assertSessionHas('status', 'password-reset');
+
+        $this->flushHeaders()->get('/login')->assertHeader('Referrer-Policy', 'same-origin');
+    });
+
+    it('sends a form that failed back to the page it is on', function () {
+        $this->inertia()->post(route('password.update'), ['token' => $this->token, 'email' => 'taylor@example.com', 'password' => 'short', 'password_confirmation' => 'short'])
+            ->assertRedirect($this->page)
+            ->assertHeaderMissing('X-Inertia-Location')
+            ->assertSessionHasErrors('password');
+    });
+
+    it('redirects a browser that is not running Inertia as it always did', function () {
+        $this->flushHeaders()->post(route('password.update'), ['token' => $this->token, 'email' => 'taylor@example.com', 'password' => 'a-long-new-password', 'password_confirmation' => 'a-long-new-password'])
+            ->assertRedirect(route('login'))
+            ->assertHeaderMissing('X-Inertia-Location');
+    });
+
+    it('leaves an Inertia redirect from any other form alone', function () {
+        $this->inertia()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard')
+            ->assertHeaderMissing('X-Inertia-Location');
+    });
+});
+
 it('sends a failed form back to its own page, though the browser sends no referer', function () {
     totpFor(taylor());
 
@@ -293,24 +336,24 @@ it('signs in with a recovery code once', function () {
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'AAAA AAAA AAAA AAAA AAAA AAAA'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'AAAA AAAA AAAA AAAA AAAA AAAA AA'])->assertRedirect('/dashboard');
 
     Event::assertDispatched(RecoveryCodeUsed::class, fn ($event) => $event->remaining === 2);
 
     $this->post('/logout');
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertSessionHasErrors('code');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertSessionHasErrors('code');
 });
 
 it('signs in with the last recovery code', function () {
     $user = taylor();
     totpFor($user);
-    Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->for($user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($user, 'authenticatable')->create();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($user);
 });
@@ -398,7 +441,7 @@ it('signs in with just a password under a stricter policy when there is no real 
 })->with([
     'only a password' => [null],
     'a used-up recovery set' => [[]],
-    'only recovery codes' => [['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa']],
+    'only recovery codes' => [['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa']],
 ]);
 
 it('still accepts a recovery code when the policy is out of reach', function () {
@@ -409,7 +452,7 @@ it('still accepts a recovery code when the policy is out of reach', function () 
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $this->get(route('keyring.login.challenge', ['recovery']));
-    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa'])->assertRedirect('/dashboard');
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($user);
 });

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\Request;
@@ -18,6 +20,7 @@ use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Input;
 use Keyring\Support\Throttle;
 
 /**
@@ -65,7 +68,7 @@ class AuthenticatorController
         $enrollment = $this->enrollments->get($factor->key())
             ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
 
-        $request->validate([...$factor->enrollmentRules(), 'sign_out_others' => ['sometimes', 'boolean']]);
+        Input::validate($request, [...$factor->enrollmentRules(), 'sign_out_others' => ['sometimes', 'boolean']]);
 
         $authenticator = $this->confirmed($factor, $enrollment, $request);
 
@@ -107,9 +110,9 @@ class AuthenticatorController
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
         // Only asked for when this is the last second factor.
-        $request->validate(['password' => ['nullable', 'string'], 'sign_out_others' => ['sometimes', 'boolean']]);
+        Input::validate($request, ['password' => ['nullable', 'string'], 'sign_out_others' => ['sometimes', 'boolean']]);
 
-        $this->changes->remove($this->keyring->user(), $authenticator, $request->input('password'));
+        $this->changes->remove($this->keyring->user(), $authenticator, Input::get($request, 'password'));
         $this->signOutOthers($request);
 
         return $this->status('authenticator-removed');

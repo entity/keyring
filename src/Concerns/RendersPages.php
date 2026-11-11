@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Concerns;
 
 use Closure;
@@ -60,9 +62,10 @@ trait RendersPages
 
     /**
      * Note the page being rendered as the one a failed form goes back to.
-     * Keyring's pages send no Referer (their URLs can carry tokens), and
-     * Laravel doesn't note an Inertia visit as the last page seen, so "back"
-     * would otherwise be whichever page was last loaded in full.
+     * The pages emailed links open send no Referer (their URLs carry a
+     * token), and Laravel doesn't note an Inertia visit as the last page
+     * seen, so "back" would otherwise be whichever page was last loaded in
+     * full.
      */
     protected function rememberPage(): void
     {
