@@ -64,9 +64,9 @@ final class PasswordRules
      */
     public static function for((Authenticatable&Model)|null $user = null, ?Closure $adjust = null, array $context = []): array
     {
-        $hasMfa = $user !== null && Keyring::for($user)->hasSecondFactor();
+        $min = self::min($user !== null && Keyring::for($user)->hasSecondFactor());
 
-        $rule = Password::min($min = self::min($hasMfa))->max(config('keyring.passwords.max'));
+        $rule = Password::min($min)->max(config('keyring.passwords.max'));
 
         $breachCheck = config('keyring.passwords.uncompromised') ?? app()->isProduction();
         $strict = $breachCheck && config('keyring.passwords.refuse_unchecked');
