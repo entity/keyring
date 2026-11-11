@@ -81,6 +81,37 @@ it('lets one of two assertions with the same count through, and keeps that count
         ->and($passkey->fresh()->sign_count)->toBe($record->counter + 1);
 });
 
+it('takes one of two answers to the same challenge, though the passkey\'s count never moves', function () {
+    $user = taylor();
+    $ceremonies = app(Ceremonies::class);
+    // A synced passkey: its count stays at zero, so only the challenge
+    // tells a second use of an answer from the first.
+    $key = new VirtualAuthenticator(synced: true, counts: false);
+
+    $creation = $ceremonies->creationOptions($user, Profile::passkeys(), []);
+    $record = $ceremonies->register(json_encode($key->register($ceremonies->toBrowser($creation))), $ceremonies->toJson($creation), Profile::passkeys());
+
+    $passkey = Authenticator::factory()->passkey()->for($user, 'authenticatable')->create([
+        'credential_id' => Base64UrlSafe::encodeUnpadded($record->publicKeyCredentialId),
+        'public_key' => $ceremonies->toJson($record),
+        'sign_count' => $record->counter,
+    ]);
+
+    $options = $ceremonies->requestOptions([], AuthenticatorSelectionCriteria::USER_VERIFICATION_REQUIREMENT_REQUIRED);
+    $answer = (string) json_encode(['options' => $ceremonies->toJson($options), 'credential' => $key->assert($ceremonies->toBrowser($options))]);
+
+    // The same signed answer, twice. One uses the challenge up and goes on
+    // to wait for the key's row. The other is turned away before it.
+    $results = contend($passkey, [
+        ['answer-challenge', $passkey->id, $answer],
+        ['answer-challenge', $passkey->id, $answer],
+    ], waiting: 1);
+
+    expect(outcomes($results, true))->toBe(1)
+        ->and(outcomes($results, false))->toBe(1)
+        ->and($passkey->fresh()->sign_count)->toBe(0);
+});
+
 it('checks one more proof at the last failure the cap allows, however many arrive together', function () {
     $user = taylor();
 

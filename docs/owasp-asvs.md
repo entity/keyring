@@ -45,7 +45,7 @@ That covers Level 1, apart from what your own pages have to do. Nothing in it as
 Start from the default install, then:
 
 1. Keep a server-side session driver (`SESSION_DRIVER=database`, Laravel's default, or `redis` or `file`). The `cookie` driver can't destroy an old session ([7.2.4](#v72-fundamental-session-management-security)).
-2. Keep the rate limiter's cache store (`cache.limiter`, or your default) somewhere that holds its keys between requests and that your deploys don't clear: the limits, the locks and sent codes all live there ([6.3.1](#v63-general-authentication-security)).
+2. Keep the rate limiter's cache store (`cache.limiter`, or your default) somewhere that holds its keys between requests and that your deploys don't clear: the limits, the locks, sent codes and answered WebAuthn challenges all live there ([6.3.1](#v63-general-authentication-security)).
 3. Build your forms so passwords are masked and can be pasted and filled by a password manager ([6.2.6, 6.2.7](#v62-password-security)).
 4. Give users a form that posts to `PUT /user/password` ([6.2.2](#v62-password-security)).
 5. Put a sign-out button on every signed-in page, though ASVS only asks for it from Level 2.
@@ -308,7 +308,7 @@ Whatever level you aim for, these are outside what a package can do:
 - **Your pages.** Keyring ships none: masked password fields, paste and password managers left alone, a visible sign-out button, and telling users the risks of a weaker factor are in your templates.
 - **Headers on your own pages.** Keyring's responses send `Cache-Control: no-store` and `Referrer-Policy: same-origin`. A content security policy and the rest are yours, for every page.
 - **Your mail provider.** Verification links, reset links and security notices are only as private and as prompt as the mail that carries them. Its bounce and delivery reports sit outside the request, where Keyring can't make two answers look alike.
-- **Your session and cache stores.** A server-side session driver, and a rate limiter store that doesn't lose its keys: limits, locks and sent codes are kept there.
+- **Your session and cache stores.** A server-side session driver, and a rate limiter store that doesn't lose its keys: limits, locks, sent codes and answered WebAuthn challenges are kept there.
 - **Your documentation.** ASVS asks for your password word list, your session timeouts and your sign-in pathways in writing.
 - **Your administrators.** Who may end sessions, send reset links or remove a lost authenticator, and what a user must prove first.
 - **Identity providers.** Everything about a federated sign in beyond starting Keyring's session.

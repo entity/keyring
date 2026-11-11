@@ -23,6 +23,7 @@ use Keyring\Support\Duration;
 use Keyring\Support\Input;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
+use Keyring\WebAuthn\SpentChallenges;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\AuthenticatorSelectionCriteria;
 use Webauthn\Exception\CounterException;
@@ -178,14 +179,33 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
      * Take the usernameless challenge out of the session, if it's still
      * good. Only identify() may spend one, and trying spends it even when
      * no key matches.
+     *
+     * It's used up on the server as well, for the copies of the session
+     * that still hold it, and before anyone is looked up: an answer from a
+     * key nobody has does the same work as one from a key someone does.
      */
     protected function pullLoginOptions(Request $request): ?string
     {
         $issued = $request->session()->pull(static::LOGIN_OPTIONS.'.'.$this->key());
 
-        return is_array($issued) && is_string($issued['options'] ?? null) && ($issued['expires_at'] ?? 0) >= now()->getTimestamp()
-            ? $issued['options']
-            : null;
+        if (! is_array($issued) || ! is_string($issued['options'] ?? null) || ! is_int($issued['expires_at'] ?? null) || $issued['expires_at'] < now()->getTimestamp()) {
+            return null;
+        }
+
+        return $this->once($issued['options'], $issued['expires_at']);
+    }
+
+    /**
+     * The options of a challenge that hasn't been answered before, and null
+     * for one that has. Asking is what uses it up, so every answer to a
+     * challenge after the first is refused, whether the first was right.
+     */
+    protected function once(string $options, int $expiresAt): ?string
+    {
+        // Asked for when a challenge is answered, not when the factor is
+        // built: factors are registered while the app boots, before the
+        // rate limiter's cache store may exist.
+        return app(SpentChallenges::class)->spend($options, $expiresAt) ? $options : null;
     }
 
     public function identify(Request $request): ?Authenticator
@@ -222,9 +242,14 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         // This attempt's own challenge, or the one identify() took. Spent here,
-        // so a failure can't be retried.
-        $options = $attempt->state($this->key(), 'options') ?? $request->attributes->get(static::LOGIN_OPTIONS);
+        // so a failure can't be retried: taken out of the attempt, and used
+        // up on the server before the answer is looked at.
+        $options = $attempt->state($this->key(), 'options');
         $attempt->forget($this->key());
+
+        $options = is_string($options)
+            ? $this->once($options, $attempt->expiresAt)
+            : $request->attributes->get(static::LOGIN_OPTIONS);
 
         $credential = $this->credential($request);
 
@@ -300,7 +325,17 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         // A registration challenge is single use too, whether or not this works.
         app(EnrollmentStore::class)->forget($this->key());
 
-        $record = $this->ceremonies()->register($this->credential($request), $enrollment->state('options'), $this->profile);
+        $options = $enrollment->state('options');
+
+        // Answered before, in another copy of the session. With the session
+        // kept on the server the enrollment would be gone, so say the same.
+        if (! is_string($options) || $this->once($options, $enrollment->expiresAt) === null) {
+            throw ValidationException::withMessages([
+                $this->errorKey() => __('keyring::keyring.enrollment_expired'),
+            ]);
+        }
+
+        $record = $this->ceremonies()->register($this->credential($request), $options, $this->profile);
 
         if ($record === null) {
             // "Check it and try again" would send someone round in circles

@@ -21,6 +21,7 @@ use Keyring\Factors\EmailCode;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\KeyringServiceProvider;
@@ -31,6 +32,7 @@ use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Support\EncryptedSession;
 use Keyring\WebAuthn\Ceremonies;
+use Keyring\WebAuthn\SpentChallenges;
 
 it('lets apps register the routes themselves, e.g. under a prefix', function () {
     Route::prefix('account')->group(fn () => Keyring::routes());
@@ -183,4 +185,19 @@ it('registers a factor that sends codes before the cache store its codes are kep
     Keyring::factors([Password::class, EmailCode::asSecondFactor()]);
 
     expect(Keyring::registered()->keys()->all())->toBe(['password', 'email-code']);
+});
+
+it('registers passkeys before the cache store their answered challenges are kept in exists', function () {
+    withALateCacheStoreForRateLimits();
+
+    Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()]);
+
+    // Nothing asks for the store until a challenge is answered.
+    expect(Keyring::registered()->keys()->all())->toBe(['password', 'passkey', 'security-key'])
+        ->and(app(SpentChallenges::class))->toBeInstanceOf(SpentChallenges::class);
+
+    Cache::extend('late', fn () => Cache::repository(new ArrayStore));
+
+    expect(app(SpentChallenges::class)->spend('{"challenge":"once"}', now()->addMinute()->getTimestamp()))->toBeTrue()
+        ->and(app(SpentChallenges::class)->spend('{"challenge":"once"}', now()->addMinute()->getTimestamp()))->toBeFalse();
 });

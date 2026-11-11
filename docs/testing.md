@@ -210,6 +210,7 @@ The constructor options:
 | `bits` | `2048` | How long an `RS256` key is. |
 | `backedUp` | `null` | Whether a `synced` key reports having been backed up yet. `null` means it has. |
 | `synced` | `false` | Whether it reports being a passkey that syncs between devices. |
+| `counts` | `true` | Whether it counts its signatures. Pass `false` for a key whose counter stays at zero, as a synced passkey's usually does, so nothing but the challenge tells its answer from the same answer sent again. |
 
 `VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys. `VirtualAuthenticator::rsa()` makes one that signs with RS256, which Keyring only takes once [`webauthn.algorithms`](passkeys.md#signature-algorithms) lists it; `rsa(1024)` makes a key too short to be accepted.
 
