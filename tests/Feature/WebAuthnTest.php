@@ -81,8 +81,8 @@ it('signs in with a passkey alone, without a username', function (VirtualAuthent
 
     $options = $this->getJson(route('keyring.login.options', 'passkey'))
         ->assertOk()
-        ->assertJsonPath('allowCredentials', [])
-        ->json();
+        ->assertJsonPath('options.allowCredentials', [])
+        ->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
@@ -99,7 +99,7 @@ it('fails a passkey that has no public key to check, like any other wrong proof'
     enroll('passkey', $key);
     Authenticator::query()->update(['public_key' => null]);
 
-    $options = $this->getJson('/login/passkey/options')->assertOk()->json();
+    $options = $this->getJson('/login/passkey/options')->assertOk()->json('options');
 
     $this->postJson('/login/passkey', ['credential' => $key->assert($options)])
         ->assertJsonValidationErrors('credential');
@@ -111,7 +111,7 @@ it('fails a key whose stored record can not be read, and lets the user add anoth
     enroll('passkey', $key);
     Authenticator::query()->update(['public_key' => '{"counter":0}']);
 
-    $options = $this->getJson('/login/passkey/options')->assertOk()->json();
+    $options = $this->getJson('/login/passkey/options')->assertOk()->json('options');
     $this->postJson('/login/passkey', ['credential' => $key->assert($options)])->assertJsonValidationErrors('credential');
     $this->assertGuest();
 
@@ -124,7 +124,7 @@ it('caps a passkey that syncs at aal2, as nist does', function () {
     $key = new VirtualAuthenticator(synced: true);
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
 
     expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
@@ -142,7 +142,7 @@ it('will not sign in with a passkey that belongs to another model with the same 
     expect($this->user->getKey())->toBe($user->getKey())
         ->and(Authenticator::where('factor', 'passkey')->sole()->authenticatable_type)->toBe(Staff::class);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertSessionHasErrors(['credential' => __('auth.failed')]);
@@ -164,14 +164,14 @@ it('leaves the owner check to a guard provider that is not eloquent', function (
         return Mockery::mock(UserProvider::class, ['retrieveById' => $found]);
     });
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertSessionHasErrors(['credential' => __('auth.failed')]);
     $this->assertGuest();
 
     $found = $this->user;
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
     $this->assertAuthenticatedAs($this->user);
@@ -184,7 +184,7 @@ it('signs in a subclass of the guard\'s model with its passkey', function () {
 
     expect(Authenticator::where('factor', 'passkey')->sole()->authenticatable_type)->toBe(AdminUser::class);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
@@ -199,7 +199,7 @@ it('still signs a user in with their own passkey when another model has the same
 
     expect($staff->getKey())->toBe($this->user->getKey());
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
@@ -223,7 +223,7 @@ it('signs in the other model with its passkey when that model is behind keyring\
     $this->user = staff();
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
@@ -312,7 +312,7 @@ it('rejects responses from another origin', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options, origin: 'https://evil.example')])
         ->assertSessionHasErrors('credential');
@@ -324,7 +324,7 @@ it('rejects a replayed challenge', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $credential = $key->assert($options);
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $credential])->assertRedirect('/dashboard');
@@ -338,11 +338,11 @@ it('rejects a cloned key whose counter went backwards', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)]);
     $this->post('/logout');
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->rewindCounter()->assert($options)])
         ->assertSessionHasErrors('credential');
 });
@@ -395,7 +395,7 @@ it('refuses every response, and reports why, when no origin is a full url', func
     Exceptions::fake();
 
     foreach (['https://example.test', 'https://example.test:8443'] as $origin) {
-        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
         $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options, origin: $origin)])
             ->assertSessionHasErrors();
@@ -414,7 +414,7 @@ it('answers from the app\'s own origin by default, port and all', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
 });
@@ -424,7 +424,7 @@ it('does not let a usernameless challenge finish the second factor of a password
     enroll('passkey', $key);
 
     // Autofill on the login page minted this, then the user typed a password.
-    $usernameless = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $usernameless = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
         ->assertRedirect(route('keyring.login.challenge'));
 
@@ -442,7 +442,7 @@ it('does not let a usernameless challenge confirm a step-up', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $usernameless = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $usernameless = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->actingAs($this->user);
     $this->inertia()->get(route('keyring.confirm.challenge', 'password'))->assertJsonPath('props.factor', 'password');
@@ -459,7 +459,7 @@ it('spends a usernameless challenge even when the key that answered is unknown',
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => new VirtualAuthenticator()->assert($options)])
         ->assertSessionHasErrors('credential');
@@ -467,7 +467,7 @@ it('spends a usernameless challenge even when the key that answered is unknown',
         ->assertSessionHasErrors('credential');
     $this->assertGuest();
 
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
 });

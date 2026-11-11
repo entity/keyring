@@ -196,6 +196,8 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 | `factor` | The factor key, `passkey` by default. |
 | `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. The same in Vue and React, for example `remember: () => form.data.remember` in React. |
 
+A starter kit's passkey button can keep `@laravel/passkeys` instead, which [signs in through the same two routes](passkeys.md#laravels-passkeys-client) once you give it their paths. Adding a passkey and the challenge page still need the helpers here.
+
 It returns `supported` (whether the browser has WebAuthn), `processing`, `error` and `signIn()`. In Vue the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`. `processing` is also true while a passkey picked from autofill is being checked. Closing the prompt isn't an error. After an explicit sign in that didn't work, the email field offers passkeys again.
 
 ## Challenge Helpers Without Vue or React
@@ -209,7 +211,7 @@ The Vue and React bindings are thin layers over these helpers, exported from `@e
 | `sendCode(props)` | Asks the server to send a code for the current authenticator. |
 | `keyCredential(props, signal?)` | Runs the browser prompt with `props.challenge.options` and resolves to the credential to post as `credential`. |
 | `keyPrompt()` | Makes a prompt function for a challenge page: `await prompt(props)` resolves to the credential, or `null` when the user closed the prompt or a newer call replaced it. |
-| `passkeyCredential(factor, { autofill?, signal? })` | Fetches the usernameless options and runs the prompt (or autofill). |
+| `passkeyCredential(factor, { autofill?, signal? })` | Fetches the usernameless options, reads them from `options` in the answer, and runs the prompt (or autofill). |
 | `signInWith(factor, credential, remember, { onError, onFinish })` | Posts a credential from `passkeyCredential()` to sign in. `onError` gets the first error message. |
 | `passkeyLogin(options, onChange)` | The state behind `usePasskeyLogin()`: call `start()` once mounted, `signIn()` for the button and `stop()` when unmounting. `onChange` gets `{ processing, error }`. |
 | `isAbort(error)` | Whether the error means the user closed the prompt (or it timed out), or a newer request replaced it. Browsers report those as `NotAllowedError`, which they also throw when WebAuthn isn't allowed at all, such as in a cross-origin iframe without the `publickey-credentials-get` permission. If a prompt never appears, check that first. |

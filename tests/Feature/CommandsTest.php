@@ -452,7 +452,7 @@ describe('keyring:import fortify', function () {
 
         $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
 
-        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
         $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
 
         expect($this->user->keyring->refresh()->of('passkey')->first()->name)->toBe('MacBook');

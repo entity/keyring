@@ -32,6 +32,8 @@ class AuthenticatedSessionController
 
     /**
      * Options for a usernameless sign in, e.g. GET /login/passkey/options.
+     * Under "options", as a challenge and an enrollment send theirs, which is
+     * also where Laravel's passkeys client reads them.
      */
     public function options(Request $request, string $factor): JsonResponse
     {
@@ -39,7 +41,7 @@ class AuthenticatedSessionController
 
         abort_unless($factor instanceof DiscoverableFactor && $factor->startsLogin(), 404);
 
-        return new JsonResponse($factor->loginOptions($request));
+        return new JsonResponse(['options' => $factor->loginOptions($request)]);
     }
 
     /**

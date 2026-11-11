@@ -52,7 +52,7 @@ it('does not let junk passkey requests lock everyone out of passkey sign in', fu
             ->post(route('keyring.login.factor', 'passkey'), ['credential' => '{}']);
     }
 
-    $options = $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])->getJson(route('keyring.login.options', 'passkey'))->json('options');
 
     $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])
         ->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])

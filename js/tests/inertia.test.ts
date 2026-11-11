@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 
 // The browser prompt, the options request and Inertia's router, as stand-ins
 // the tests drive by hand.
-type Prompt = { autofill: boolean, signal?: AbortSignal, resolve: (credential: object) => void, reject: (error: unknown) => void }
+type Prompt = { options: object, autofill: boolean, signal?: AbortSignal, resolve: (credential: object) => void, reject: (error: unknown) => void }
 
 let prompts: Prompt[] = []
 let autofillSupported = true
@@ -10,13 +10,13 @@ let posted: Array<{ url: string, callbacks: { onError: (errors: Record<string, s
 
 mock.module('../src/webauthn', () => ({
   supportsAutofill: async () => autofillSupported,
-  getCredential: (_options: object, { autofill = false, signal }: { autofill?: boolean, signal?: AbortSignal } = {}) => new Promise((resolve, reject) => {
-    prompts.push({ autofill, signal, resolve, reject })
+  getCredential: (options: object, { autofill = false, signal }: { autofill?: boolean, signal?: AbortSignal } = {}) => new Promise((resolve, reject) => {
+    prompts.push({ options, autofill, signal, resolve, reject })
     signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
   }),
 }))
 
-mock.module('../src/http', () => ({ json: async () => ({ challenge: 'abc' }) }))
+mock.module('../src/http', () => ({ json: async () => ({ options: { challenge: 'abc' } }) }))
 
 mock.module('@inertiajs/core', () => ({
   router: { post: (url: string, _data: object, callbacks: any) => posted.push({ url, callbacks }), get: () => {} },
@@ -70,6 +70,16 @@ describe('keyPrompt', () => {
 })
 
 describe('passkeyLogin', () => {
+  test('prompts with the options the server sends under "options"', async () => {
+    const login = passkeyLogin({}, () => {})
+
+    login.signIn()
+    await tick()
+
+    expect(prompts[0].options).toEqual({ challenge: 'abc' })
+    login.stop()
+  })
+
   test('does not start autofill once stopped, even if support is still being checked', async () => {
     const login = passkeyLogin({ autofill: true }, () => {})
 

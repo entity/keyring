@@ -374,7 +374,7 @@ it('leaves passkeys alone when only security keys require attestation', function
         ->attestation->toBeNull();
 
     $this->post('/logout');
-    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $passkey->assert($options)])->assertRedirect('/dashboard');
 
     // And the passkey profile takes attested responses no more than before.

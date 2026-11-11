@@ -182,7 +182,7 @@ $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential
 $this->post('/logout');
 
 // Sign in with it, without a username.
-$options = $this->getJson(route('keyring.login.options', 'passkey'))->json();
+$options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
 $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
     ->assertRedirect('/dashboard');
 ```
