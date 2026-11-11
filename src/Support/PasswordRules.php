@@ -5,6 +5,7 @@ namespace Keyring\Support;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -80,7 +81,7 @@ final class PasswordRules
             $rule = $adjust($rule);
         }
 
-        $site = [config('app.name'), ...config('keyring.passwords.context')];
+        $site = [config('app.name'), ...Arr::wrap(config('keyring.passwords.context'))];
         $personal = [...$context, $user?->getAttribute('name'), $user?->getAttribute(Keyring::username()), $user?->getAttribute(Keyring::email())];
 
         return [

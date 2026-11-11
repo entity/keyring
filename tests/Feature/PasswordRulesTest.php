@@ -145,6 +145,13 @@ it('refuses the words the app lists as its own', function () {
         ->and(passes('a long passphrase for me'))->toBeTrue()
         // And for a user, beside their own names.
         ->and(passes('Falcon-Project forever more', taylor()))->toBeFalse();
+
+    // One word on its own, or a config cached before the option existed.
+    config(['keyring.passwords.context' => 'Roadrunner']);
+    expect(passes('the roadrunner always gets away'))->toBeFalse();
+
+    config(['keyring.passwords.context' => null]);
+    expect(passes('the roadrunner always gets away'))->toBeTrue();
 });
 
 it('refuses the app\'s name as a whole, however the password separates its words', function () {
