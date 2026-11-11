@@ -103,7 +103,7 @@ it('still undoes an email change for a soft deleted user, ready for when they ar
 
     $user->delete();
 
-    $this->post(route('keyring.email.revert.store', [$change->id, 'revert']))->assertSessionHas('status', 'email-change-reverted');
+    $this->post(route('keyring.email.revert.store', $change->id), ['token' => 'revert'])->assertSessionHas('status', 'email-change-reverted');
 
     $user->restore();
 
@@ -121,7 +121,7 @@ it('does not use up the link when there is no account left to put the address ba
     // Removed without the model knowing, so Keyring's records are still there.
     DB::table('users')->where('id', $user->id)->delete();
 
-    $this->post(route('keyring.email.revert.store', [$change->id, 'revert']))->assertSessionHas('status', 'email-change-invalid');
+    $this->post(route('keyring.email.revert.store', $change->id), ['token' => 'revert'])->assertSessionHas('status', 'email-change-invalid');
 
     expect($change->fresh()->reverted_at)->toBeNull();
 });

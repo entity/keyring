@@ -104,8 +104,9 @@ it('does not change anything when an emailed link is only opened', function () {
     $this->inertia()->get(route('keyring.email.confirm', [$change->id, $tokens['confirm']]))
         ->assertOk()
         ->assertJsonPath('component', 'auth/email-change')
-        ->assertHeader('Referrer-Policy', 'same-origin');
-    $this->inertia()->get(route('keyring.email.revert', [$change->id, $tokens['revert']]))->assertOk()->assertJsonPath('props.action', 'revert');
+        ->assertHeader('Referrer-Policy', 'no-referrer');
+    $this->inertia()->get(route('keyring.email.revert', [$change->id, $tokens['revert']]))->assertOk()->assertJsonPath('props.action', 'revert')
+        ->assertHeader('Referrer-Policy', 'no-referrer');
 
     expect($this->user->fresh()->email)->toBe('taylor@example.com')
         ->and($change->fresh()->isPending())->toBeTrue();
@@ -373,7 +374,7 @@ it('keeps the revert link working after signing out everywhere else cancels the 
     expect($change->fresh()->isPending())->toBeFalse()
         ->and(confirmBoth($change->fresh(), $tokens))->toBe(EmailConfirmation::Invalid);
 
-    $this->post(route('keyring.email.revert.store', [$change->id, $tokens['revert']]))
+    $this->post(route('keyring.email.revert.store', $change->id), ['token' => $tokens['revert']])
         ->assertSessionHas('status', 'email-change-reverted');
 
     expect($change->fresh()->reverted_at)->not->toBeNull()
@@ -472,7 +473,7 @@ it('ends a sign in whose address moved while it was being checked', function () 
 it('says a link was invalid when the token is wrong', function () {
     $change = requestChange($this->user, 'new@example.com');
 
-    $this->post(route('keyring.email.confirm.store', [$change->id, 'wrong-token']))
+    $this->post(route('keyring.email.confirm.store', $change->id), ['token' => 'wrong-token'])
         ->assertSessionHas('status', 'email-change-invalid');
 });
 
@@ -648,8 +649,8 @@ describe('applying a change', function () {
         $current = app(Sessions::class)->current(request())->id;
         $other = otherSession($this->user);
 
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]));
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['current']]);
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['confirm']]);
 
         expect($this->user->fresh()->email)->toBe('new@example.com')
             ->and(app(SessionRegistry::class)->find($other)->revokedAt)->not->toBeNull()
@@ -663,11 +664,11 @@ describe('applying a change', function () {
         $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
         $change = PendingChange::sole();
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['current']]);
         $before = session()->getId();
 
         $this->withCookie(config('session.cookie'), $before)
-            ->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]))->assertSessionHas('status', 'email-changed');
+            ->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['confirm']])->assertSessionHas('status', 'email-changed');
 
         expect(session()->getId())->not->toBe($before)
             ->and(session()->getId())->not->toBeEmpty();
@@ -683,8 +684,8 @@ describe('applying a change', function () {
         Auth::forgetGuards();
         $this->withSession([Sessions::KEY => $other]); // left behind, so only the guard says who this is
 
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]));
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['current']]);
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['confirm']]);
 
         expect($this->user->fresh()->email)->toBe('new@example.com')
             ->and(app(SessionRegistry::class)->find($other)->revokedAt)->not->toBeNull();
@@ -701,9 +702,9 @@ describe('applying a change', function () {
         Auth::forgetGuards();
         $this->actingAs($stranger);
 
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['current']]);
         $before = session()->getId();
-        $this->withCookie(config('session.cookie'), $before)->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]));
+        $this->withCookie(config('session.cookie'), $before)->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['confirm']]);
 
         expect($this->user->fresh()->email)->toBe('new@example.com')
             ->and(app(SessionRegistry::class)->find($other)->revokedAt)->not->toBeNull()
@@ -773,8 +774,8 @@ describe('applying a change', function () {
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
 
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['current']]));
-        $this->post(route('keyring.email.confirm.store', [$change->id, $tokens['confirm']]))->assertSessionHas('status', 'email-changed');
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['current']]);
+        $this->post(route('keyring.email.confirm.store', $change->id), ['token' => $tokens['confirm']])->assertSessionHas('status', 'email-changed');
 
         Notification::assertSentTo($this->user, OwnEmailChanged::class);
         Notification::assertSentTo(new AnonymousNotifiable, OwnEmailChanged::class, fn ($notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com');

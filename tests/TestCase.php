@@ -75,6 +75,18 @@ abstract class TestCase extends Orchestra
     }
 
     /**
+     * Send these cookies and none of the ones set for earlier requests.
+     *
+     * @param  array<string, string>  $cookies
+     */
+    public function withOnlyCookies(array $cookies): static
+    {
+        $this->defaultCookies = [];
+
+        return $this->withCookies($cookies);
+    }
+
+    /**
      * Make requests the way an Inertia page visit would, so pages come back as JSON.
      */
     protected function inertia(): static

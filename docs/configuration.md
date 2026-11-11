@@ -87,10 +87,10 @@ Signed-out users are sent to the route named `login`.
 
 'domain' => null,
 
-'middleware' => ['web', PreventCaching::class],
+'middleware' => ['web', AddSecurityHeaders::class],
 ```
 
-Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\PreventCaching` sends `Cache-Control: no-store, private` and `Referrer-Policy: same-origin` on every Keyring response. Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
+Keyring registers its routes inside a group with this prefix, domain and middleware. `Keyring\Http\Middleware\AddSecurityHeaders` sends `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin` on every Keyring response, and `Referrer-Policy: no-referrer` on the pages emailed links open. See [Links and Headers](security.md#links-and-headers). Take it out of the list if your app sets those headers itself, but keep the URLs of emailed links out of `Referer` headers some other way: they carry their token.
 
 If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring::routes()` where you want them, for example inside your own group:
 
@@ -112,13 +112,14 @@ The browser package uses Keyring's default paths. If you change the prefix, tell
     ],
     'origins' => [],
     'timeout' => '60s',
+    'login_options_for' => '5m',
     'attestation_roots' => [],
     'algorithms' => ['ES256', 'EdDSA'],
     'minimum_rsa_bits' => 2048,
 ],
 ```
 
-See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout` is a [duration](#durations).
+See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins). `timeout` and `login_options_for` are [durations](#durations). `login_options_for` is how long the challenge of a [usernameless sign in](passkeys.md#signing-in-without-a-username) can be answered, and is never shorter than `timeout`.
 
 `attestation_roots` lists the root certificates a new key's attestation has to chain to, as PEM text or paths to PEM files. It's only read for a factor set up with [`requireAttestation()`](passkeys.md#requiring-attestation), which refuses every key while the list is empty.
 
@@ -162,7 +163,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 
 ```php
 'devices' => [
-    'cookie' => 'keyring_device',
+    'cookie' => null,
     'cookie_lifetime' => '400d',
     'limit' => 50,
     'trust_for' => '30d',
@@ -173,7 +174,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 ],
 ```
 
-`cookie` is the name of the device cookie and `cookie_lifetime` how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
+`cookie` is the name of the device cookie: `null` is `keyring_device`, with the `__Host-` prefix once your app is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)), and a name you set is used exactly as it is. `cookie_lifetime` is how long the browser keeps it (400 days is the most browsers allow). `limit` is how many devices one account keeps: a sign in from a new browser beyond that forgets the device seen longest ago and signs it out. Set it to `null` for no limit. `trust_for` is how long "don't ask again on this device" lasts; set it to `null` to hide that option. `report_link_for` is how long a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) works. [`keyring:prune`](devices-and-sessions.md#pruning) deletes a device `keep_revoked_for` after it was revoked, or `keep_unseen_for` after it was last seen. `locator` is the class that works out a request's location. See [Devices & Sessions](devices-and-sessions.md).
 
 ## Sessions
 
@@ -191,7 +192,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
     ],
     'end_on_lapse' => false,
     'middleware' => true,
-    'remember_cookie' => 'keyring_remember',
+    'remember_cookie' => null,
     'remember_grace' => '10s',
 ],
 ```
@@ -206,7 +207,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute`, keyed `aal1`, `aal2` or `aal3`. NIST's limits by default: AAL2 1h and 24h, AAL3 15m and 12h. |
 | `end_on_lapse` | Whether a session ends when the level it signed in at runs out, where it would otherwise carry on at a lower one. See [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level). |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
-| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. |
+| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `keyring_remember`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 | `remember_grace` | How long after that cookie is used the same browser's other requests, sent with it, are still let in on the same session. Each cookie works once; after this, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. `0` leaves no room at all, so requests a browser sends together end it too. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).

@@ -159,6 +159,7 @@ Things to know:
 | `Fortify::requestPasswordResetLinkView()` | `forgot-password` |
 | `Fortify::resetPasswordView()` | `reset-password` |
 | `Fortify::verifyEmailView()` | `verify-email` |
+| none: Fortify's verification link verifies when opened | `email-verification`, the page the link opens |
 | `Fortify::twoFactorChallengeView()` | `challenge` |
 | `Fortify::confirmPasswordView()` | `confirm` |
 
@@ -221,6 +222,7 @@ Keyring's other form routes (registration, password resets, email changes, enrol
 - **Password resets don't sign users in.** They go back to the login page, so their second factor still applies.
 - **Password resets sign out every session**, and password changes sign out other sessions unless the request sends `sign_out_others: false`. Signing out also changes the "remember me" token.
 - **Remembered browsers sign in once more.** ["Remember me"](devices-and-sessions.md#remember-me) only brings back a session Keyring registered, so a "remember me" cookie from before the switch is refused the first time it's used.
+- **The email verification link opens a page.** Fortify verifies the address on the link's `GET`. Keyring shows the `email-verification` page, and its button verifies. Add that page, and in tests post the link's `expires` and `signature` to its path. See [Email Verification](protected-changes.md#email-verification).
 - **Adding a factor needs a fresh verification**, with a second factor when the user has one, and a verified email when your user model implements `MustVerifyEmail`.
 - **Recovery codes can't be viewed again.** They're stored hashed. Users generate a new set instead.
 - **Recovery codes come automatically** with a user's first extra factor.
