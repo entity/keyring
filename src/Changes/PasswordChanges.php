@@ -32,6 +32,9 @@ class PasswordChanges
     /**
      * The signed-in user chose a new password, saved by $save. Every other
      * session is signed out, unless they asked to stay signed in elsewhere.
+     * Guesses at the old password say nothing about the new one, so the
+     * account's sign-in limits start over, as after a reset: a password the
+     * cap had got refused elsewhere works again.
      *
      * @param  Closure(): void  $save
      */
@@ -39,6 +42,7 @@ class PasswordChanges
     {
         $this->save($user, $save);
         $this->sessions->distrustDevices($user);
+        $this->throttle->clearAccount($user);
 
         if ($signOutOthers) {
             $this->sessions->signOutEverywhere($user, except: $currentSession);

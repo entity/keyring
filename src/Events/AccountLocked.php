@@ -7,9 +7,10 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Failed attempts locked the account out of a factor that can start a sign
- * in, until a password reset or Keyring::unlock() clears it. Only happens
- * with "limits.lock_after" set.
+ * Failed attempts got a factor that can start a sign in refused for the
+ * account, until a password reset or Keyring::unlock() clears it: it used
+ * up its failures in a row, or "limits.lock_after" held it. Browsers the
+ * account has signed in from may still be let in.
  */
 class AccountLocked
 {

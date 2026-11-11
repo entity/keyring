@@ -60,6 +60,7 @@ trait HasKeyring
             $user->authenticators()->delete();
             $user->devices()->delete();
             Keyring::pendingChangeModel()::query()->ownedBy($user)->delete();
+            Keyring::failureCountModel()::query()->ownedBy($user)->delete();
         });
     }
 

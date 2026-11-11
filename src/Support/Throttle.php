@@ -15,11 +15,14 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Devices\DeviceManager;
+use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Device;
 use Keyring\Pipeline\AccountLimit;
 use Keyring\Pipeline\ConsecutiveLimit;
+use Keyring\Pipeline\Context;
+use Keyring\Pipeline\NameLimit;
 use Keyring\Pipeline\SharedLimit;
 
 /**
@@ -27,6 +30,10 @@ use Keyring\Pipeline\SharedLimit;
  * counting attempts against them, locking out repeated failures, and
  * clearing them again. What counts an attempt and what clears it sit side
  * by side, so the two can't drift apart.
+ *
+ * The per-minute limits and their locks are short-lived and live in the
+ * cache. Failures in a row on an account's authenticator are kept in the
+ * database (FailureCounts), where clearing the cache can't reach them.
  */
 class Throttle
 {
@@ -35,6 +42,7 @@ class Throttle
         protected KeyringManager $keyring,
         protected DeviceManager $devices,
         protected CacheFactory $cache,
+        protected FailureCounts $counts,
     ) {}
 
     /**
@@ -56,13 +64,14 @@ class Throttle
      * wrong password. Otherwise locking an account under one name would show
      * which other names are the same account's, and which have one at all.
      *
-     * Browsers the account has signed in from share a bucket and an in-a-row
-     * count of their own, so someone guessing elsewhere can't lock the owner
-     * out. Per IP they count for that account alone, so others on a shared
-     * address can't hold it up. One count for all of them, not one each: a
-     * device cookie is made at every sign in from a new browser, so whoever
-     * could once sign in may hold any number, and each would buy the
-     * account's whole allowance of guesses again.
+     * Browsers the account has signed in from share a bucket of their own,
+     * and part of the failures in a row is kept for them, so someone
+     * guessing elsewhere can't lock the owner out. Per IP they count for
+     * that account alone, so others on a shared address can't hold it up.
+     * One count for all of them, not one each: a device cookie is made at
+     * every sign in from a new browser, so whoever could once sign in may
+     * hold any number, and each would buy the account's whole allowance of
+     * guesses again.
      *
      * The per-IP limit comes first, so an attempt the address refuses is
      * never counted against the account.
@@ -86,12 +95,46 @@ class Throttle
 
         $known = $this->knownBrowser($request, $user, (int) $this->mark('known-since', $account));
         $since = $this->startsSignIn($factor) ? '|cleared|'.$this->mark('cleared', $account) : '';
+        $consecutive = $this->consecutive($factor, $user, $known);
 
         return [
             SharedLimit::perMinute(config('keyring.limits.per_ip'))->by($factor->key().'|ip|'.$request->ip().($known ? '|account|'.$account : '')),
-            ...($typed === '' ? [] : $this->accountLimits($factor, 'typed:'.$typed.$since, $known)),
-            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== ''), $this->accountLimits($factor, $account.$since, $known)),
+            ...($typed === '' ? [] : [
+                $this->perMinute($factor, 'typed:'.$typed.$since, $known),
+                ...($consecutive === null ? [] : [NameLimit::of($consecutive->share ?? PHP_INT_MAX, $factor->key(), 'typed:'.$typed.$since, $known)]),
+            ]),
+            ...array_map(fn (AccountLimit $limit) => $limit->quietly($typed !== ''), [
+                $this->perMinute($factor, $account.$since, $known),
+                ...($consecutive === null ? [] : [$consecutive]),
+            ]),
         ];
+    }
+
+    /**
+     * Point the count of failures in a row at the authenticator the request
+     * is for, since each has its own. A sign in that names its account by a
+     * typed username hasn't found one yet, and counts against the factor:
+     * the password has no row to name anyway. A challenge aimed at no
+     * authenticator checks no proof, so there's nothing to count.
+     *
+     * @param  list<Limit>  $limits
+     * @return list<Limit>
+     */
+    public function aim(array $limits, Context $context): array
+    {
+        if ($context->identifying) {
+            return $limits;
+        }
+
+        foreach ($limits as $limit) {
+            if ($limit instanceof ConsecutiveLimit && $context->authenticator !== null) {
+                $limit->authenticator = (string) $context->authenticator->id;
+            }
+        }
+
+        return $context->authenticator === null
+            ? array_values(array_filter($limits, fn (Limit $limit) => ! $limit instanceof ConsecutiveLimit))
+            : $limits;
     }
 
     /**
@@ -110,28 +153,55 @@ class Throttle
     /**
      * Count an attempt against the limits before it's verified, so
      * overlapping requests can't all slip under one while they're being
-     * checked. Returns the seconds to wait when a limit refuses it. They're
+     * checked. Returns the limit that refuses it, if one does. They're
      * counted in order, so one refused by a limit never reaches the next.
      *
      * @param  list<Limit>  $limits
      */
-    public function hit(array $limits): ?int
+    public function hit(array $limits): ?Limit
     {
         foreach ($limits as $limit) {
-            $key = $limit instanceof ConsecutiveLimit ? $this->key($limit) : $this->lock($limit);
+            $refused = match (true) {
+                $limit instanceof ConsecutiveLimit => $this->counts->refuses($limit),
+                $limit instanceof NameLimit => $this->limiter->tooManyAttempts($this->key($limit), $limit->maxAttempts)
+                    || $this->limiter->tooManyAttempts($this->lock($limit), 1),
+                default => $this->limiter->tooManyAttempts($this->lock($limit), 1),
+            };
 
-            if ($this->limiter->tooManyAttempts($key, $limit instanceof ConsecutiveLimit ? $limit->maxAttempts : 1)) {
-                return $this->limiter->availableIn($key);
+            if ($refused) {
+                return $limit;
             }
         }
 
         foreach ($limits as $limit) {
-            if (! $limit instanceof ConsecutiveLimit && $this->limiter->hit($this->key($limit), $limit->decaySeconds) > $limit->maxAttempts) {
-                return $this->limiter->availableIn($this->key($limit));
+            $counted = match (true) {
+                $limit instanceof ConsecutiveLimit => $this->counts->reserve($limit),
+                // Counted when it fails, so it's failures in a row: no window
+                // and no lock of its own, just refused at the cap.
+                $limit instanceof NameLimit => true,
+                default => $this->limiter->hit($this->key($limit), $limit->decaySeconds) <= $limit->maxAttempts,
+            };
+
+            if (! $counted) {
+                $this->release($limits);
+
+                return $limit;
             }
         }
 
         return null;
+    }
+
+    /**
+     * How long until a limit that refused an attempt would let one through,
+     * in seconds. Null when waiting won't do it: the authenticator is
+     * refused until its failures in a row are cleared.
+     */
+    public function retryAfter(Limit $limit): ?int
+    {
+        return $limit instanceof ConsecutiveLimit
+            ? null
+            : max($this->limiter->availableIn($this->lock($limit)), $this->limiter->availableIn($this->key($limit)));
     }
 
     /**
@@ -142,24 +212,26 @@ class Throttle
      * A shared limit's lock stops growing at "longest_ip_lock", or everyone
      * on that address would pay for one person's failures for a day.
      *
-     * With "lock_after" set, an account locked that many times in a day on
-     * a factor that can start a sign in is held: the lock stays for as long
-     * as failures are remembered, or until the account's limits are cleared
-     * by a password reset or Keyring::unlock(). Returns whether this
-     * failure did that.
+     * The failure is also one more in a row. With "lock_after" set, an
+     * account locked that many times in a day on a factor that can start a
+     * sign in is held as if it had used its failures in a row up. Returns
+     * whether this failure is the one that got an account's authenticator
+     * refused until its count is cleared.
      *
      * @param  list<Limit>  $limits
      */
     public function failed(array $limits): bool
     {
-        $held = false;
+        $hold = false;
 
         foreach ($limits as $limit) {
             $key = $this->key($limit);
 
-            // Counted here, not up front, so it's failures in a row: no window,
-            // no lock of its own, just refused at the cap until a success.
             if ($limit instanceof ConsecutiveLimit) {
+                continue;
+            }
+
+            if ($limit instanceof NameLimit) {
                 $this->limiter->hit($key, $limit->decaySeconds);
 
                 continue;
@@ -171,15 +243,28 @@ class Throttle
 
             $lockouts = $this->limiter->hit($key.':lockouts', 86400);
             $longest = Duration::seconds(config($limit instanceof SharedLimit ? 'keyring.limits.longest_ip_lock' : 'keyring.limits.longest_lock'));
-            $hold = $limit instanceof AccountLimit && $limit->holdAfter !== null && $lockouts >= $limit->holdAfter;
 
-            $this->limiter->hit($this->lock($limit), $hold ? $this->remembered() : min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
+            $this->limiter->hit($this->lock($limit), min($longest, $limit->decaySeconds * 2 ** ($lockouts - 1)));
             $this->limiter->clear($key);
 
-            $held = $held || $hold;
+            $hold = $hold || ($limit instanceof AccountLimit && $limit->holdAfter !== null && $lockouts >= $limit->holdAfter);
         }
 
-        return $held;
+        $refused = false;
+
+        // After the locks, which decide whether to hold. The typed name is
+        // held in the cache, where it's counted, for as long as that lasts.
+        foreach ($limits as $limit) {
+            if ($limit instanceof NameLimit && $hold) {
+                $this->limiter->hit($this->lock($limit), $limit->decaySeconds);
+            }
+
+            if ($limit instanceof ConsecutiveLimit) {
+                $refused = $this->counts->failed($limit, $hold) || $refused;
+            }
+        }
+
+        return $refused;
     }
 
     /**
@@ -196,6 +281,7 @@ class Throttle
     {
         foreach ($limits as $limit) {
             match (true) {
+                $limit instanceof ConsecutiveLimit => $this->counts->succeeded($limit),
                 ! $limit instanceof SharedLimit => $this->limiter->clear($this->key($limit)),
                 $this->limiter->attempts($this->key($limit)) > 0 => $this->limiter->decrement($this->key($limit), $limit->decaySeconds),
                 default => null,
@@ -204,10 +290,27 @@ class Throttle
     }
 
     /**
+     * The attempt ended without its proof being found right or wrong: the
+     * request didn't validate, say. It isn't a failure in a row, so one
+     * counted going in is given back. The per-minute counts keep it.
+     *
+     * @param  list<Limit>  $limits
+     */
+    public function release(array $limits): void
+    {
+        foreach ($limits as $limit) {
+            if ($limit instanceof ConsecutiveLimit) {
+                $this->counts->release($limit);
+            }
+        }
+    }
+
+    /**
      * Start the user's limits over on the factors that can start a sign in:
-     * the per-minute and in-a-row counts, the locks and how long the next
-     * lock would be, for known browsers and under every name they were typed
-     * with. They're counted under a mark that's replaced here, so the old
+     * the per-minute counts, the locks and how long the next lock would be,
+     * for known browsers and under every name they were typed with, and the
+     * failures in a row with whatever they had got refused. The limits in
+     * the cache are counted under a mark that's replaced here, so the old
      * ones are left behind to run out.
      *
      * The per-IP limits stay, or a reset would be a way around them. A
@@ -220,6 +323,35 @@ class Throttle
         // Never the same twice and never forgotten, so no lock can outlast
         // the mark it was made under and come back with a later one.
         $this->marks()->forever($this->markKey('cleared', $this->accountOf($user)), Str::random(16));
+
+        $this->counts->clear($user, $this->keyring->registered()->filter($this->startsSignIn(...))->keys()->values()->all());
+    }
+
+    /**
+     * Start the user's limits over on one factor, so one refused for too
+     * many failures in a row works again. A factor that can start a sign in
+     * shares its limits with the others that can, so they're all cleared.
+     * Nothing here proves who asked: that's for whoever calls it.
+     */
+    public function clearFactor(Authenticatable&Model $user, Factor $factor): void
+    {
+        if ($this->startsSignIn($factor)) {
+            $this->clearAccount($user);
+
+            return;
+        }
+
+        // A second factor's limits aren't under the mark, and nobody types a
+        // name for one, so its keys can be cleared where they are.
+        foreach ([false, true] as $known) {
+            $limit = $this->perMinute($factor, $this->accountOf($user), $known);
+
+            foreach ([$this->key($limit), $this->key($limit).':lockouts', $this->lock($limit)] as $key) {
+                $this->limiter->clear($key);
+            }
+        }
+
+        $this->counts->clear($user, [$factor->key()]);
     }
 
     /**
@@ -321,21 +453,37 @@ class Throttle
     }
 
     /**
-     * An account's per-minute limit and its failures in a row, or those of
-     * its known browsers.
-     *
-     * @return list<AccountLimit>
+     * An account's per-minute limit on a factor, or that of a name as it
+     * was typed, for browsers the account has signed in from or for
+     * everyone else. With "lock_after", enough of its lockouts in a day
+     * hold a factor that can start a sign in.
      */
-    protected function accountLimits(Factor $factor, string $account, bool $known): array
+    protected function perMinute(Factor $factor, string $account, bool $known): AccountLimit
     {
-        $consecutive = config('keyring.limits.consecutive');
+        return AccountLimit::perMinute(config('keyring.limits.per_account'))
+            ->by($this->bucket($factor->key(), $account, $known))
+            ->holdAfter($this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null);
+    }
 
-        return [
-            AccountLimit::perMinute(config('keyring.limits.per_account'))
-                ->by($this->bucket($factor->key(), $account, $known))
-                ->holdAfter($this->startsSignIn($factor) ? config('keyring.limits.lock_after') : null),
-            ...($consecutive === null ? [] : [ConsecutiveLimit::of($consecutive, $factor->key(), $account, $known)]),
-        ];
+    /**
+     * The failures in a row the user's authenticator allows, and how many
+     * of them may come from the request's kind of browser. Null when
+     * nothing counts them: no cap, and no "lock_after" to hold one either.
+     *
+     * Without devices no browser is known, so nothing is kept back and
+     * everyone shares the whole cap.
+     */
+    protected function consecutive(Factor $factor, (Authenticatable&Model)|null $user, bool $known): ?ConsecutiveLimit
+    {
+        $cap = config('keyring.limits.consecutive');
+
+        if ($cap === null && (! $this->startsSignIn($factor) || config('keyring.limits.lock_after') === null)) {
+            return null;
+        }
+
+        $elsewhere = $known || ! Features::enabled(Features::devices()) ? null : config('keyring.limits.consecutive_elsewhere');
+
+        return ConsecutiveLimit::of($user, $factor->key(), $known, $cap, $elsewhere);
     }
 
     protected function typedUsername(Request $request): string
@@ -372,14 +520,6 @@ class Throttle
     protected function key(Limit $limit): string
     {
         return 'keyring:'.sha1((string) $limit->key);
-    }
-
-    /**
-     * How long failures in a row, and a lock that's held, are kept.
-     */
-    protected function remembered(): int
-    {
-        return Duration::seconds(config('keyring.limits.remember_failures_for'));
     }
 
     protected function lock(Limit $limit): string

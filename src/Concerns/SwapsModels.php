@@ -5,6 +5,7 @@ namespace Keyring\Concerns;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 
@@ -78,6 +79,22 @@ trait SwapsModels
     public function securityEventModel(): string
     {
         return $this->model(SecurityEvent::class);
+    }
+
+    /**
+     * @param  class-string<FailureCount>  $model
+     */
+    public function useFailureCountModel(string $model): static
+    {
+        return $this->useModel(FailureCount::class, $model);
+    }
+
+    /**
+     * @return class-string<FailureCount>
+     */
+    public function failureCountModel(): string
+    {
+        return $this->model(FailureCount::class);
     }
 
     /**

@@ -6,7 +6,9 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Http\Request;
 
 /**
- * Too many attempts were made for a factor.
+ * Too many attempts were made for a factor. $retryAfter is the seconds until
+ * one would be let through, or null when waiting won't do it: the factor is
+ * refused for the account until its failures in a row are cleared.
  */
 class Lockout
 {
@@ -15,6 +17,6 @@ class Lockout
     public function __construct(
         public readonly Request $request,
         public readonly string $factor,
-        public readonly int $retryAfter,
+        public readonly ?int $retryAfter,
     ) {}
 }

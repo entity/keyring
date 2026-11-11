@@ -1,12 +1,14 @@
 <?php
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Timebox;
 use Illuminate\Testing\TestResponse;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AccountLocked;
@@ -20,6 +22,7 @@ use Keyring\Factors\WebAuthn;
 use Keyring\Features;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use Keyring\Models\FailureCount;
 use Keyring\Models\SecurityEvent;
 use Keyring\Pipeline\AccountLimit;
 use Keyring\Pipeline\Context;
@@ -506,7 +509,9 @@ describe('failures in a row, however slowly they come', function () {
         $this->assertGuest();
     });
 
-    it('keeps a count of its own for a browser the account has signed in from', function () {
+    it('keeps part of the allowance for a browser the account has signed in from', function () {
+        config(['keyring.limits.consecutive' => 6, 'keyring.limits.consecutive_elsewhere' => 3]);
+
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
         $device = $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->getCookie('keyring_device')->getValue();
         $this->post('/logout');
@@ -887,11 +892,17 @@ describe('an account locked out again and again', function () {
         Event::assertNotDispatched(AccountLocked::class);
     });
 
-    it('lets the lock go once failures are forgotten', function () {
+    it('keeps it locked however long it waits', function () {
         lockOut(3);
         $this->travel(31)->days();
 
-        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+        // The name's own failures are forgotten by now, so it's the
+        // account's that refuse, as quietly as a wrong password.
+        $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.email.0', __('auth.failed'));
+
+        $this->assertGuest();
     });
 
     it('leaves the owner\'s known browser working', function () {
@@ -961,7 +972,8 @@ describe('the account\'s device cookies in someone else\'s hands', function () {
         Hash::shouldHaveReceived('check')->times(3);
     });
 
-    it('still keeps the known browsers\' count apart from everyone else\'s', function () {
+    it('still keeps part of the allowance for the known browsers', function () {
+        config(['keyring.limits.consecutive_elsewhere' => 2]);
         $cookie = deviceCookieFor('taylor@example.com');
 
         foreach (range(1, 4) as $guess) {
@@ -999,6 +1011,7 @@ describe('the account\'s device cookies in someone else\'s hands', function () {
     });
 
     it('knows a browser again once it signs in after the reset', function () {
+        config(['keyring.limits.consecutive_elsewhere' => 2]);
         $cookie = deviceCookieFor('taylor@example.com');
 
         $this->travel(5)->seconds();
@@ -1085,4 +1098,511 @@ it('holds every refusal for the timebox, whichever limit refused it', function (
     $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertStatus(429);
 
     expect($timebox::$returnedEarly)->toBe([false, false, false]);
+});
+
+describe('the cap on failures in a row', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 100, 'keyring.limits.per_ip' => 1000, 'keyring.limits.consecutive' => 5, 'keyring.limits.consecutive_elsewhere' => 3]);
+
+        $this->user = account('taylor@example.com');
+    });
+
+    /**
+     * The statements a request ran against the counts, by what they do.
+     *
+     * @return list<string>
+     */
+    function countStatements(Closure $request): array
+    {
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $request();
+
+        return collect(DB::getQueryLog())
+            ->pluck('query')
+            ->filter(fn (string $query) => str_contains($query, 'keyring_failure_counts'))
+            ->map(fn (string $query) => strtok($query, ' '))
+            ->values()
+            ->all();
+    }
+
+    it('never looks at more proofs than the cap, known browsers and everyone else together', function () {
+        $cookie = deviceCookieFor('taylor@example.com');
+
+        Hash::spy();
+
+        foreach (range(1, 6) as $guess) {
+            guessWith(null);
+        }
+
+        foreach (range(1, 6) as $guess) {
+            guessWith($cookie);
+        }
+
+        // Three from elsewhere, then the two that leaves the known browser.
+        Hash::shouldHaveReceived('check')->times(5);
+
+        expect(FailureCount::query()->sole())
+            ->factor->toBe('password')
+            ->authenticator->toBe('password')
+            ->failures->toBe(3)
+            ->known_failures->toBe(2);
+    });
+
+    it('leaves the owner\'s browser working once everyone else has used their share', function () {
+        $cookie = deviceCookieFor('taylor@example.com');
+
+        foreach (range(1, 6) as $guess) {
+            guessWith(null);
+        }
+
+        $this->withCookie('keyring_device', 'a browser nobody has seen')
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertSessionHasErrors('email');
+        $this->assertGuest();
+
+        $this->withCookie('keyring_device', $cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+    });
+
+    it('does not hand guesses back to everyone else when the owner signs in', function () {
+        $cookie = deviceCookieFor('taylor@example.com');
+
+        guessWith(null);
+        guessWith(null);
+
+        $this->withCookie('keyring_device', $cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+        $this->post('/logout');
+        $this->flushSession();
+
+        Hash::spy();
+
+        guessWith(null);
+        guessWith(null);
+
+        Hash::shouldHaveReceived('check')->once();
+    });
+
+    it('clears a browser\'s own failures when it signs in', function () {
+        guessWith(null);
+        guessWith(null);
+
+        $this->withCookie('keyring_device', 'a browser nobody has seen')
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+
+        expect(FailureCount::query()->count())->toBe(0);
+    });
+
+    it('shares the whole cap when no browser can be known', function () {
+        withFeatures([]);
+
+        Hash::spy();
+
+        foreach (range(1, 7) as $guess) {
+            guessWith(null);
+        }
+
+        Hash::shouldHaveReceived('check')->times(5);
+    });
+
+    it('keeps counting through a cleared cache', function () {
+        foreach (range(1, 3) as $guess) {
+            guessWith(null);
+        }
+
+        Cache::flush();
+        Cache::store(config('cache.limiter'))->flush();
+
+        $this->withCookie('keyring_device', 'a browser nobody has seen')
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+        $this->assertGuest();
+    });
+
+    it('keeps the password refused however long it waits', function () {
+        foreach (range(1, 3) as $guess) {
+            guessWith(null);
+        }
+
+        $this->travel(2)->years();
+
+        $this->withCookie('keyring_device', 'a browser nobody has seen')
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertSessionHasErrors(['email' => __('auth.failed')]);
+
+        $this->assertGuest();
+    });
+
+    it('lets the password work again after a reset, an unlock or a change of password', function (Closure $clear, string $password) {
+        foreach (range(1, 3) as $guess) {
+            guessWith(null);
+        }
+
+        $clear($this->user);
+
+        $this->flushSession();
+        $this->app['auth']->forgetGuards();
+
+        $this->withCookie('keyring_device', 'a browser nobody has seen')
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => $password])
+            ->assertRedirect('/dashboard');
+
+        expect(FailureCount::query()->count())->toBe(0);
+    })->with([
+        'a reset' => [fn (User $user) => completeReset($user), 'a brand new passphrase'],
+        'an unlock' => [fn (User $user) => Keyring::unlock($user), 'password'],
+        'a change' => [fn (User $user) => test()->actingAs($user)->withAssurance(Assurance::AAL1)->putJson(route('user-password.update'), [
+            'current_password' => 'password',
+            'password' => 'a brand new passphrase',
+            'password_confirmation' => 'a brand new passphrase',
+        ])->assertOk(), 'a brand new passphrase'],
+    ]);
+
+    it('says so once when the cap is reached, and logs it', function () {
+        Event::fake([AccountLocked::class]);
+
+        foreach (range(1, 6) as $guess) {
+            guessWith(null);
+        }
+
+        Event::assertDispatchedTimes(AccountLocked::class, 1);
+        Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->user->is($this->user) && $event->factor === 'password');
+
+        expect(FailureCount::query()->sole()->locked_at)->not->toBeNull();
+    });
+
+    it('reads once and writes nothing for a sign in with no failures behind it', function () {
+        $statements = countStatements(fn () => $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard'));
+
+        expect($statements)->toBe(['select']);
+    });
+
+    it('writes nothing when the owner signs in while failures from elsewhere stand', function () {
+        $cookie = deviceCookieFor('taylor@example.com');
+
+        guessWith(null);
+        guessWith(null);
+
+        $statements = countStatements(fn () => $this->withCookie('keyring_device', $cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard'));
+
+        expect($statements)->toBe(['select'])
+            ->and(FailureCount::query()->sole()->failures)->toBe(2);
+    });
+
+    it('does not count a request that never got as far as its proof', function () {
+        guessWith(null);
+
+        foreach (range(1, 4) as $request) {
+            $this->postJson('/login', ['email' => 'taylor@example.com'])->assertJsonValidationErrors('password');
+        }
+
+        expect(FailureCount::query()->sole()->failures)->toBe(1);
+    });
+
+    it('counts nothing when there is no cap and nothing to hold', function () {
+        config(['keyring.limits.consecutive' => null]);
+
+        $statements = countStatements(fn () => guessWith(null));
+
+        expect($statements)->toBe([]);
+    });
+
+    it('forgets the counts of a user who is deleted', function () {
+        account('other@example.com');
+        guessWith(null);
+        $this->post('/login', ['email' => 'other@example.com', 'password' => 'nope']);
+
+        $this->user->delete();
+
+        expect(FailureCount::query()->sole()->authenticatable_id)->not->toBe($this->user->id);
+    });
+
+    it('costs a name nobody has the statements it costs a real one, whatever has been counted', function () {
+        $statements = fn (string $email) => array_map(
+            fn () => countStatements(fn () => $this->postJson('/login', ['email' => $email, 'password' => 'nope'])),
+            range(1, 4),
+        );
+
+        $real = $statements('taylor@example.com');
+
+        // A first failure, more of them, then the name's own 429.
+        expect(array_map(count(...), $real))->toBe([3, 3, 3, 0])
+            ->and(array_map(count(...), $statements('nobody@example.com')))->toBe(array_map(count(...), $real))
+            ->and(FailureCount::query()->count())->toBe(1);
+    });
+
+    describe('for an account with more than one name', function () {
+        beforeEach(function () {
+            $this->user->update(['name' => 'tay']);
+            account('other@example.com');
+
+            Keyring::findUsersUsing(fn (Request $request) => User::query()
+                ->where('email', $request->input('email'))
+                ->orWhere('name', $request->input('email'))
+                ->first());
+
+            foreach (range(1, 3) as $attempt) {
+                guess('tay');
+            }
+        });
+
+        it('answers each name from its own failures, whoever has it', function () {
+            $this->postJson('/login', ['email' => 'tay', 'password' => 'password'])
+                ->assertStatus(429)
+                ->assertJsonPath('errors.email.0', __('keyring::keyring.locked'));
+
+            $answers = fn (string $name) => array_map(function () use ($name) {
+                $response = $this->postJson('/login', ['email' => $name, 'password' => 'nope']);
+
+                return [$response->status(), $response->json()];
+            }, range(1, 4));
+
+            // The account's other name, another account's and nobody's: each
+            // wrong three times, then told it's locked, in the same words.
+            $nobody = $answers('nobody@example.com');
+
+            expect(array_column($nobody, 0))->toBe([422, 422, 422, 429])
+                ->and($nobody[3][1]['errors']['email'][0])->toBe(__('keyring::keyring.locked'))
+                ->and($answers('taylor@example.com'))->toBe($nobody)
+                ->and($answers('other@example.com'))->toBe($nobody);
+        });
+
+        it('refuses the right password under the other name, as quietly as a wrong one', function () {
+            Event::fake([FactorFailed::class, Lockout::class]);
+            Hash::spy();
+
+            $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+                ->assertStatus(422)
+                ->assertJsonPath('errors.email.0', __('auth.failed'));
+
+            $this->assertGuest();
+
+            // No password looked at, and a hash spent as a check would.
+            Hash::shouldNotHaveReceived('check');
+            Hash::shouldHaveReceived('make')->once();
+            Event::assertNotDispatched(FactorFailed::class);
+            Event::assertDispatched(Lockout::class, fn (Lockout $event) => $event->retryAfter === null);
+        });
+
+        it('lets the owner in under any of them after a reset', function () {
+            completeReset($this->user);
+
+            $this->postJson('/login', ['email' => 'tay', 'password' => 'a brand new passphrase'])->assertOk();
+            $this->assertAuthenticatedAs($this->user);
+        });
+    });
+});
+
+describe('how long the defaults give someone guessing from elsewhere', function () {
+    beforeEach(function () {
+        // Whoever is guessing isn't held to one address.
+        config(['keyring.limits.per_ip' => 100000]);
+
+        $this->user = account('taylor@example.com');
+        $this->cookie = deviceCookieFor('taylor@example.com');
+    });
+
+    /**
+     * Guess until the name says it's locked. Returns the wrong passwords
+     * that were looked at, and the minutes it took.
+     *
+     * @param  Closure(TestResponse): void  $pace
+     * @return array{int, int}
+     */
+    function guessUntilLocked(Closure $pace): array
+    {
+        $started = now();
+        $wrong = 0;
+
+        while (true) {
+            $response = test()->withCookie('keyring_device', 'a browser nobody has seen')->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+
+            if ($response->json('errors.email.0') === __('keyring::keyring.locked')) {
+                return [$wrong, (int) $started->diffInMinutes(now())];
+            }
+
+            $wrong += (int) ($response->status() === 422);
+
+            $pace($response);
+        }
+    }
+
+    it('is twenty minutes at four guesses a minute, which never meets a lock', function () {
+        [$wrong, $minutes] = guessUntilLocked(fn () => $this->travel(15)->seconds());
+
+        expect($wrong)->toBe(80)->and($minutes)->toBe(20);
+    });
+
+    it('is a day and a half for someone who runs into every lock and waits it out', function () {
+        [$wrong, $minutes] = guessUntilLocked(fn (TestResponse $response) => $response->status() === 429
+            ? $this->travel((int) preg_replace('/\D+/', '', (string) $response->json('errors.email.0')) + 1)->seconds()
+            : null);
+
+        expect($wrong)->toBe(80)->and(intdiv($minutes, 60))->toBe(34);
+    });
+
+    it('leaves the owner\'s own browser working either way', function () {
+        guessUntilLocked(fn () => $this->travel(15)->seconds());
+
+        expect(FailureCount::query()->sole()->locked_at)->not->toBeNull();
+
+        $this->withCookie('keyring_device', $this->cookie)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+    });
+});
+
+describe('a second factor at the cap', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 100, 'keyring.limits.per_ip' => 1000, 'keyring.limits.consecutive' => 3]);
+
+        $this->user = account('taylor@example.com');
+        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        guessTotp('000000');
+        guessTotp('000000');
+        guessTotp('000000');
+    });
+
+    /**
+     * Sign in with the password, then a code from this authenticator.
+     */
+    function signInWithCodeFrom(Authenticator $totp, string $password = 'password'): TestResponse
+    {
+        test()->travel(3)->minutes();
+        test()->post('/login', ['email' => 'taylor@example.com', 'password' => $password]);
+
+        return test()->postJson(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret), 'authenticator' => $totp->id]);
+    }
+
+    it('is counted against the authenticator', function () {
+        expect(FailureCount::query()->sole())
+            ->factor->toBe('totp')
+            ->authenticator->toBe($this->totp->id)
+            ->failures->toBe(3)
+            ->locked_at->not->toBeNull();
+    });
+
+    it('stays refused after a month, a cleared cache and a password reset, and says what to do', function () {
+        $this->travel(31)->days();
+        Cache::flush();
+        completeReset($this->user);
+
+        signInWithCodeFrom($this->totp, 'a brand new passphrase')
+            ->assertStatus(429)
+            ->assertJsonPath('errors.code.0', __('keyring::keyring.factor_locked'));
+
+        $this->assertGuest();
+    });
+
+    it('stays refused when the account is unlocked without naming it', function () {
+        Keyring::unlock($this->user);
+
+        signInWithCodeFrom($this->totp)->assertStatus(429);
+        $this->assertGuest();
+    });
+
+    it('tells nobody the account is locked, since a password reset would not help', function () {
+        Event::fake([AccountLocked::class]);
+
+        guessTotp('000000');
+
+        Event::assertNotDispatched(AccountLocked::class);
+    });
+
+    it('works again once it is removed and added back', function () {
+        // Something else to sign in with, so the first can be removed.
+        Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+        app(AuthenticatorChanges::class)->remove($this->user, $this->totp->id);
+
+        expect(FailureCount::query()->count())->toBe(0);
+
+        $added = Authenticator::factory()->totp()->make();
+        app(AuthenticatorChanges::class)->add($this->user, Keyring::factor('totp'), $added);
+
+        signInWithCodeFrom($added)->assertOk();
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('works again once an administrator unlocks it by name', function () {
+        Keyring::unlock($this->user, 'totp');
+
+        signInWithCodeFrom($this->totp)->assertOk();
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('is unlocked with its per-minute lock, so the user can try straight away', function () {
+        config(['keyring.limits.per_account' => 2]);
+
+        Keyring::unlock($this->user, 'totp');
+
+        guessTotp('000000');
+        test()->postJson(route('keyring.login.verify', 'totp'), ['code' => '000000']);
+        test()->postJson(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertStatus(429);
+
+        Keyring::unlock($this->user, 'totp');
+
+        test()->postJson(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertOk();
+    });
+
+    it('leaves the account\'s other authenticators of that kind alone', function () {
+        $second = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        signInWithCodeFrom($second)->assertOk();
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('keeps the user able to sign in another way', function () {
+        Authenticator::factory()->recoveryCodes(['aaaaa-11111'])->for($this->user, 'authenticatable')->create();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->postJson(route('keyring.login.verify', 'recovery'), ['code' => 'aaaaa-11111'])->assertOk();
+
+        $this->assertAuthenticatedAs($this->user);
+    });
+});
+
+describe('a lock that is held', function () {
+    beforeEach(function () {
+        config(['keyring.limits.per_account' => 2, 'keyring.limits.per_ip' => 1000, 'keyring.limits.lock_after' => 3]);
+
+        $this->user = account('taylor@example.com');
+    });
+
+    it('is kept with the failures in a row, and outlasts the cache', function () {
+        lockOut(3);
+
+        expect(FailureCount::query()->sole()->locked_at)->not->toBeNull();
+
+        Cache::flush();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertSessionHasErrors(['email' => __('auth.failed')]);
+        $this->assertGuest();
+
+        Keyring::unlock($this->user);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('holds without a cap on failures in a row', function () {
+        config(['keyring.limits.consecutive' => null]);
+
+        lockOut(3);
+        $this->travel(7)->days();
+
+        $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+            ->assertStatus(429)
+            ->assertJsonPath('errors.email.0', __('keyring::keyring.locked'));
+    });
 });
