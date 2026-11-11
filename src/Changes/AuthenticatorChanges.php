@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Changes;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -178,7 +180,7 @@ class AuthenticatorChanges
 
         $min = PasswordRules::min();
 
-        if (mb_strlen($password) < $min) {
+        if (mb_strlen(PasswordRules::normalize($password)) < $min) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_too_short_alone', ['min' => $min])]);
         }
     }

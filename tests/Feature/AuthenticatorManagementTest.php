@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
 use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Database\Eloquent\Attributes\Table;

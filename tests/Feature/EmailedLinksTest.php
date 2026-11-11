@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Notifications\Keyring\ConfirmEmailChange;
 use App\Notifications\Keyring\EmailChangeNotice;
 use App\Notifications\Keyring\NewDevice;

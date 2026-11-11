@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Keyring\Devices\NullLocator;
 use Keyring\Features;
 use Keyring\Http\Middleware\AddSecurityHeaders;
@@ -92,6 +94,12 @@ return [
     | to chain to, for a factor set up with requireAttestation(): PEM
     | certificates, or paths to PEM files.
     |
+    | "algorithms" are the signatures keys may use, in order of preference:
+    | ES256, EdDSA and RS256. RS256 is all some Windows Hello setups sign
+    | with, and is left out because OWASP ASVS doesn't approve it. With it
+    | on, an RSA key shorter than "minimum_rsa_bits" is refused (2048 at
+    | the least).
+    |
     */
 
     'webauthn' => [
@@ -103,6 +111,8 @@ return [
         'timeout' => '60s',
         'login_options_for' => '5m',
         'attestation_roots' => [],
+        'algorithms' => ['ES256', 'EdDSA'],
+        'minimum_rsa_bits' => 2048,
     ],
 
     /*

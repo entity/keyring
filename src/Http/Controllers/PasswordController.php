@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Http\Request;
@@ -12,6 +14,7 @@ use Keyring\KeyringManager;
 use Keyring\Rules\CurrentPassword;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Input;
+use Keyring\Support\PasswordRules;
 
 class PasswordController
 {
@@ -40,7 +43,7 @@ class PasswordController
 
         $passwords->change(
             $user,
-            fn () => $updater->update($user, Input::all($request)),
+            fn () => $updater->update($user, PasswordRules::normalizeInput(Input::all($request))),
             currentSession: $sessions->current($request)?->id,
             signOutOthers: $request->boolean('sign_out_others', true),
         );
