@@ -2,11 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\AuthenticatorAdded as AuthenticatorAddedNotice;
-use App\Notifications\Keyring\NewDevice as NewDeviceNotice;
-use App\Notifications\Keyring\PasswordChanged;
-use App\Notifications\Keyring\SecondFactorFailed;
-use App\Notifications\Keyring\SuspiciousActivity;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -30,6 +25,11 @@ use Keyring\Features;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
+use Keyring\Notifications\NewDevice as NewDeviceNotice;
+use Keyring\Notifications\PasswordChanged;
+use Keyring\Notifications\SecondFactorFailed;
+use Keyring\Notifications\SuspiciousActivity;
 use Keyring\Risk\Action;
 use Keyring\Risk\Assessment;
 use Keyring\Risk\Checkpoint;
@@ -355,7 +355,8 @@ it('keeps "was this you?" for a browser the account has used before', function (
     expect(app(SecurityLog::class)->pullAlerts($this->user))->toBeEmpty();
 });
 
-it('sends security emails only when asked to', function () {
+it('sends no security email the app turned off', function () {
+    Keyring::notifications(['new_device' => null]);
     signInAs();
     Notification::assertNothingSent();
     $this->post('/logout');
@@ -439,7 +440,7 @@ it('hands the app\'s notification one clean, capped line, whatever was sent', fu
     'several lines' => ["[Not you?](https://evil.example/x)\n\nRobert's key", "[Not you?](https://evil.example/x) Robert's key"],
 ]);
 
-it('shows a name someone typed as plain text in the published email', function () {
+it('shows a name someone typed as plain text in the email', function () {
     $notice = new AuthenticatorAddedNotice(when: 'now', name: "[Not you?](https://evil.example/x) Robert's key");
     $mail = renderedMail($notice->toMail($this->user));
 

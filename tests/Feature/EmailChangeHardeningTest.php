@@ -2,12 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\ConfirmEmailChange;
-use App\Notifications\Keyring\EmailAddressInUse;
-use App\Notifications\Keyring\EmailChanged;
-use App\Notifications\Keyring\EmailChangeNotice;
-use App\Notifications\Keyring\EmailChangeReverted;
-use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Auth;
@@ -34,6 +28,12 @@ use Keyring\Factors\Password as PasswordFactor;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\EmailAddressInUse;
+use Keyring\Notifications\EmailChanged;
+use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Notifications\EmailChangeReverted;
+use Keyring\Notifications\VerificationCode;
 use Keyring\Rules\UnreservedAddress;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
@@ -747,7 +747,8 @@ describe('applying a change', function () {
         Notification::assertSentTo(new AnonymousNotifiable, EmailChanged::class, fn ($notice, $channels, $to) => $to->routes['mail'] === 'taylor@example.com');
     });
 
-    it('sends no notice unless the app opted in', function () {
+    it('sends no notice the app turned off', function () {
+        Keyring::notifications(['email_changed' => null]);
         $change = requestChange($this->user, 'new@example.com');
         $tokens = tokensFor('new@example.com', 'taylor@example.com');
 
@@ -796,7 +797,7 @@ describe('applying a change', function () {
 });
 
 /**
- * An app's own notification, nothing to do with the published one.
+ * An app's own notification, nothing to do with Keyring's.
  */
 class OwnEmailChanged extends Illuminate\Notifications\Notification
 {

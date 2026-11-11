@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\ConfirmEmailChange;
-use App\Notifications\Keyring\EmailChangeNotice;
-use App\Notifications\Keyring\NewDevice;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -20,6 +17,9 @@ use Keyring\Features;
 use Keyring\Http\Middleware\ValidatePostedSignature;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
+use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Notifications\NewDevice;
 use Keyring\Tests\Fixtures\User;
 
 // An emailed link has to carry its token in its URL. The page it opens posts

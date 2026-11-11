@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\ConfirmEmailChange;
-use App\Notifications\Keyring\EmailAddressInUse;
-use App\Notifications\Keyring\EmailChangeNotice;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Notifications\AnonymousNotifiable;
@@ -22,6 +19,9 @@ use Keyring\Events\ProtectionBypassed;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\EmailAddressInUse;
+use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Url;
 use Keyring\Tests\Fixtures\User;

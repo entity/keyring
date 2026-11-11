@@ -80,8 +80,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Where users can reach you about their account: a page's URL or an email
-    | address. The emails in app/Notifications/Keyring then end by saying who
-    | to contact if something wasn't them. Null leaves that line out.
+    | address. Keyring's emails then end by saying who to contact if
+    | something wasn't them. Null leaves that line out.
     |
     */
 

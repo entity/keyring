@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\ConfirmEmailChange;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\UrlGenerator;
 use Illuminate\Support\Facades\Event;
@@ -17,9 +17,11 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\EmailChanges;
+use Keyring\Changes\ProtectedAttributes;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SessionRegistry;
@@ -32,6 +34,7 @@ use Keyring\Exceptions\MissingNotification;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
+use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Password as PasswordFactor;
 use Keyring\KeyringManager;
 use Keyring\KeyringServiceProvider;
@@ -41,6 +44,9 @@ use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\CloneSuspected;
+use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\SecurityNotice;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Outcome;
 use Keyring\Pipeline\Steps;
@@ -134,6 +140,53 @@ it('answers json callers with the status and its message', function () {
 it('answers unknown factors with a 404', function () {
     $this->postJson('/login/sms')->assertNotFound();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->postJson('/user/authenticators/sms')->assertNotFound();
+});
+
+it('sends its own notification for every type but a suspected clone, until the app says otherwise', function () {
+    $keyring = new KeyringManager(new FactorRegistry, app(ProtectedAttributes::class));
+
+    foreach (array_diff(KeyringManager::NOTIFICATIONS, ['clone_suspected']) as $type) {
+        expect($keyring->notification($type, [
+            'when' => 'Monday', 'code' => '12345678', 'minutes' => 10, 'email' => 'n•••@example.com',
+            'url' => 'https://example.com/link', 'expiresAt' => now()->addDay(), 'revertUrl' => 'https://example.com/revert',
+            'loginUrl' => 'https://example.com/login',
+        ]))->toBeInstanceOf('Keyring\\Notifications\\'.Str::studly($type));
+    }
+
+    expect($keyring->hasNotification('clone_suspected'))->toBeFalse()
+        ->and($keyring->notification('clone_suspected', ['when' => 'Monday']))->toBeNull();
+
+    // The app's own class for one, another turned off, and the clone turned on.
+    $keyring->notifications(['confirm_email_change' => CustomConfirmEmailChange::class, 'new_device' => null])
+        ->notifications(['clone_suspected' => CloneSuspected::class]);
+
+    expect($keyring->notification('confirm_email_change', ['url' => 'https://example.com/confirm', 'expiresAt' => now()->addDay()]))->toBeInstanceOf(CustomConfirmEmailChange::class)
+        ->and($keyring->hasNotification('new_device'))->toBeFalse()
+        ->and($keyring->notification('clone_suspected', ['when' => 'Monday']))->toBeInstanceOf(CloneSuspected::class)
+        // The rest are as they were.
+        ->and($keyring->hasNotification('password_changed'))->toBeTrue();
+});
+
+it('lets the app write the email of every security notice in one place', function () {
+    SecurityNotice::toMailUsing(fn (SecurityNotice $notice, object $notifiable) => new MailMessage()
+        ->subject('Acme: '.$notice->subject())
+        ->line($notice->intro())
+        ->line("For {$notifiable->email}, {$notice->when}."));
+
+    try {
+        $mail = Keyring::requiredNotification('password_changed', ['when' => 'Monday'])->toMail($this->user);
+        $device = Keyring::requiredNotification('new_device', ['when' => 'Monday', 'url' => 'https://example.com/report']);
+
+        expect($mail->subject)->toBe('Acme: Your password was changed')
+            ->and(renderedMail($mail)['text'])->toContain('The password for your account was just changed.')->toContain('For taylor@example.com, Monday.')
+            ->and($device->toMail($this->user)->subject)->toBe('Acme: New sign-in to your account')
+            ->and($device->action())->toBe('This wasn\'t me');
+    } finally {
+        SecurityNotice::toMailUsing(null);
+    }
+
+    // Keyring's own again.
+    expect(Keyring::requiredNotification('password_changed', ['when' => 'Monday'])->toMail($this->user)->subject)->toBe('Your password was changed');
 });
 
 it('sends the app\'s own notification for an email a flow needs', function () {
@@ -307,6 +360,7 @@ it('still names a step that is not in the pipeline', function () {
 
 it('lets apps add steps around the mandatory ones and replace the others', function () {
     Log::spy();
+    Notification::fake();
 
     Keyring::pipeline(fn (Steps $steps) => $steps
         ->before(EnsureNotThrottled::class, NotesItRan::class)
@@ -336,6 +390,7 @@ it('keeps refusing a risk locked user when the risk step is swapped out', functi
 
 it('lets an app dangerously remove a mandatory step, and logs a warning', function () {
     Log::spy();
+    Notification::fake();
     config(['keyring.limits.per_account' => 3, 'keyring.limits.per_ip' => 100]);
 
     Keyring::pipeline(fn (Steps $steps) => $steps->dangerouslyRemove(EnsureNotThrottled::class));
@@ -353,6 +408,7 @@ it('lets an app dangerously remove a mandatory step, and logs a warning', functi
 
 it('lets an app dangerously replace a mandatory step, and logs a warning', function () {
     Log::spy();
+    Notification::fake();
 
     Keyring::pipeline(fn (Steps $steps) => $steps->dangerouslyReplace(EnsureNotThrottled::class, NotesItRan::class));
 
@@ -437,7 +493,7 @@ class SymbolsRequired implements UpdatesUserPasswords
     }
 }
 
-it('publishes a notification for every type, that builds from what keyring passes and renders', function (string $type) {
+it('has a notification for every type, that builds from what keyring passes and renders', function (string $type) {
     sendNotifications();
 
     $notification = Keyring::requiredNotification($type, [
@@ -490,9 +546,9 @@ class ChecksForBots
 // recipient says the event wasn't theirs.
 describe('a support contact', function () {
     /**
-     * The published notification of a type, as Keyring would build it.
+     * Keyring's own notification of a type, as it would build it.
      */
-    function publishedNotification(string $type): Illuminate\Notifications\Notification
+    function ownNotification(string $type): Illuminate\Notifications\Notification
     {
         sendNotifications();
 
@@ -505,7 +561,7 @@ describe('a support contact', function () {
     it('is in every notice about the account once the app sets one', function (string $type) {
         config(['keyring.support_contact' => 'https://example.com/support?from=email']);
 
-        $mail = renderedMail(publishedNotification($type)->toMail($this->user));
+        $mail = renderedMail(ownNotification($type)->toMail($this->user));
 
         expect($mail['text'])->toContain('contact us')->toContain('https://example.com/support?from=email')
             ->and($mail['html'])->toContain('href="https://example.com/support?from=email"');
@@ -514,7 +570,7 @@ describe('a support contact', function () {
     it('links an email address as one', function () {
         config(['keyring.support_contact' => 'help@example.com']);
 
-        $mail = renderedMail(publishedNotification('password_changed')->toMail($this->user));
+        $mail = renderedMail(ownNotification('password_changed')->toMail($this->user));
 
         expect($mail['html'])->toContain('href="mailto:help@example.com"')->toContain('>help@example.com</a>')
             ->and($mail['text'])->toContain('contact us: [help@example.com](mailto:help@example.com)');
@@ -523,14 +579,14 @@ describe('a support contact', function () {
     it('leaves anything that isn\'t a page or an address as plain text', function () {
         config(['keyring.support_contact' => 'Call 020 7946 0000 [or](https://evil.example) visit reception']);
 
-        $mail = renderedMail(publishedNotification('password_changed')->toMail($this->user));
+        $mail = renderedMail(ownNotification('password_changed')->toMail($this->user));
 
         expect($mail['html'])->toContain('contact us: Call 020 7946 0000 [or](https://evil.example) visit reception')->not->toContain('href="https://evil.example"')
             ->and($mail['text'])->toContain('contact us: Call 020 7946 0000 [or](https://evil.example) visit reception');
     });
 
     it('is left out until then', function (string $type) {
-        $notification = publishedNotification($type);
+        $notification = ownNotification($type);
 
         expect($notification->contact)->toBeNull()
             ->and(renderedMail($notification->toMail($this->user))['text'])->not->toContain('contact us');

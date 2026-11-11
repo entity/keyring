@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace App\Notifications\Keyring;
+namespace Keyring\Notifications;
 
 class AuthenticatorRemoved extends SecurityNotice
 {
-    protected function subject(): string
+    public function subject(): string
     {
         return __('A sign-in method was removed');
     }
 
-    protected function intro(): string
+    public function intro(): string
     {
         return __('":name" was removed from your account.', ['name' => $this->name]);
     }

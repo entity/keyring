@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
@@ -22,6 +21,7 @@ use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
+use Keyring\Notifications\VerificationCode;
 use Keyring\Risk\Action;
 use Keyring\Risk\Signals\NewDevice;
 use Keyring\Sessions\SessionAssurance;

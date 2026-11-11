@@ -160,29 +160,33 @@ A template is a Vue file. Whatever changes per email is a Blade variable inside 
 </template>
 ```
 
-`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. The published `SecurityNotice` then returns them, and every notice uses the one template:
+`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. Tell `SecurityNotice` to return them, and every notice uses the one template:
 
 ```php
-// app/Notifications/Keyring/SecurityNotice.php
-public function toMail(object $notifiable): MailMessage
-{
-    $details = array_filter([__('When') => $this->when, __('Device') => $this->device, __('IP address') => $this->ip]);
+// app/Providers/KeyringServiceProvider.php
+use Illuminate\Notifications\Messages\MailMessage;
+use Keyring\Notifications\SecurityNotice;
 
-    return (new MailMessage)->subject($this->subject())->view(
+SecurityNotice::toMailUsing(function (SecurityNotice $notice, object $notifiable) {
+    $details = array_filter([__('When') => $notice->when, __('Device') => $notice->device, __('IP address') => $notice->ip]);
+
+    return (new MailMessage)->subject($notice->subject())->view(
         ['html' => 'emails.keyring.notice', 'text' => 'emails.keyring.text.notice'],
         [
-            'subject' => $this->subject(),
-            'intro' => $this->intro(),
+            'subject' => $notice->subject(),
+            'intro' => $notice->intro(),
             'details' => array_map(fn (string $label, string $value) => ['label' => $label, 'value' => $value], array_keys($details), $details),
-            'actionText' => $this->action(),
-            'actionUrl' => $this->action() === null ? null : $this->url,
-            'contact' => $this->contact,
+            'actionText' => $notice->action(),
+            'actionUrl' => $notice->action() === null ? null : $notice->url,
+            'contact' => $notice->contact,
         ],
     );
-}
+});
 ```
 
-`$this->contact` is your [support contact](security-log-and-emails.md#a-support-contact), `null` until you set one. A template of your own has to show it itself: the published one does so in the `toMail()` this replaces.
+`$notice->contact` is your [support contact](security-log-and-emails.md#a-support-contact), `null` until you set one. A template of your own has to show it itself: Keyring's does so in the `toMail()` this replaces.
+
+The [emails a flow needs](security-log-and-emails.md#emails-a-flow-needs), like the emailed code, each have their own shape. Give those a template by extending Keyring's class and registering yours, as [Your Own Templates](security-log-and-emails.md#your-own-templates) shows.
 
 Two things that catch people out:
 

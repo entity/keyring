@@ -17,8 +17,8 @@ use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 
 /**
- * Sends the app's notification for each security notice it has registered
- * with Keyring::notifications(). One with none registered isn't sent.
+ * Sends the notification for each security notice: Keyring's own, or the
+ * app's from Keyring::notifications(). One the app turned off isn't sent.
  */
 class SendSecurityNotifications
 {

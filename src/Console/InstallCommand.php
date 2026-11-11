@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Keyring\Console;
 
-use Closure;
 use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -26,8 +25,6 @@ use function Laravel\Prompts\multiselect;
 #[Signature('keyring:install
         {--factor=* : A sign-in method to add besides the password: totp, passkeys, security-keys or email-codes}
         {--feature=* : A feature to turn on, replacing the defaults (registration, reset-passwords, email-verification, update-passwords and security-log): registration, reset-passwords, email-verification, update-passwords, manage-authenticators, devices, email-changes or security-log}
-        {--emails : Register the emails that tell users their password, sign-in methods or email address changed (the default)}
-        {--no-emails : Register no security emails, only the ones a flow needs}
         {--require-second-factor : Make every user set up a second factor (the default with an authenticator app, passkeys or security keys)}
         {--optional-second-factor : Leave setting up a second factor to each user}
         {--force : Overwrite files that already exist}')]
@@ -60,27 +57,6 @@ class InstallCommand extends Command
      * to set up. An emailed code doesn't: the inbox also resets the password.
      */
     protected const array SECOND_FACTORS = ['totp', 'passkeys', 'security-keys'];
-
-    /**
-     * The security notices registered unless the answer is no, and how the
-     * question names each. One is only offered once its notification is
-     * among the published ones, so a notice can be listed here before the
-     * release that brings its class. One with nothing to announce in this
-     * app yet (announces) is listed commented out.
-     */
-    protected const array NOTICES = [
-        'password_changed' => 'password changed',
-        'authenticator_added' => 'sign-in method added',
-        'authenticator_removed' => 'sign-in method removed',
-        'recovery_code_used' => 'recovery code used',
-        'recovery_codes_generated' => 'new recovery codes made',
-        'email_changed' => 'email address changed',
-        'account_locked' => 'account locked',
-        'new_device' => 'signed in on a new device',
-        'second_factor_failed' => 'second factor failed after the right password',
-        'suspicious_activity' => 'suspicious sign in or session',
-        'email_change_reverted' => 'email change undone',
-    ];
 
     /**
      * The risk signals the provider starts with, and the feature each reads
@@ -133,8 +109,8 @@ class InstallCommand extends Command
             return self::FAILURE;
         }
 
-        // The provider, actions and notifications are your code from here on.
-        // Every one is published, so turning a feature on later just works.
+        // The provider and actions are your code from here on. Every action
+        // is published, so turning a feature on later just works.
         $provider = app_path('Providers/KeyringServiceProvider.php');
         $writesProvider = ! $files->exists($provider) || $this->option('force');
 
@@ -154,15 +130,13 @@ class InstallCommand extends Command
 
         if ($writesProvider) {
             $files->ensureDirectoryExists(dirname($provider));
-            $files->put($provider, $this->provider($files, $factors, $this->emails($files, $features, $factors), $enrolled, $features));
+            $files->put($provider, $this->provider($files, $factors, $enrolled, $features));
         } else {
             $this->components->warn("Skipped {$provider}, it already exists.");
         }
 
-        foreach (['Actions/Keyring', 'Notifications/Keyring'] as $directory) {
-            foreach ($files->files(self::STUBS.'/app/'.$directory) as $file) {
-                $this->write($files, app_path($directory.'/'.$file->getFilename()), $file->getContents());
-            }
+        foreach ($files->files(self::STUBS.'/app/Actions/Keyring') as $file) {
+            $this->write($files, app_path('Actions/Keyring/'.$file->getFilename()), $file->getContents());
         }
 
         ServiceProvider::addProviderToBootstrapFile('App\\Providers\\KeyringServiceProvider');
@@ -181,7 +155,7 @@ class InstallCommand extends Command
                 default => null,
             },
             $writesProvider && in_array('email-codes', $factors, true) ? 'Email codes are an extra step at sign in, not a second factor: a password and an emailed code is still AAL1. See "Email Codes" in the "Factors" docs' : null,
-            'Add features later in <comment>config/keyring.php</comment>, and sign-in methods and emails in your KeyringServiceProvider',
+            'Add features later in <comment>config/keyring.php</comment>, and sign-in methods in your KeyringServiceProvider',
         ]));
 
         // What whoever runs the app will want to know before it's live.
@@ -213,59 +187,6 @@ class InstallCommand extends Command
                 default: true,
                 hint: 'Users sign in with their password, then must set one up at '.self::ENROLLMENT_URL.' before going further.',
             ),
-            default => true,
-        };
-    }
-
-    /**
-     * @param  list<string>  $features
-     * @param  list<string>  $factors
-     */
-    protected function emails(Filesystem $files, array $features, array $factors): bool
-    {
-        return match (true) {
-            $this->option('emails') => true,
-            $this->option('no-emails') => false,
-            $this->input->isInteractive() => confirm(
-                label: 'Email users when their password, sign-in methods or email address change?',
-                default: true,
-                hint: Str::ucfirst(implode(', ', array_map(
-                    fn (string $type) => self::NOTICES[$type],
-                    array_filter($this->notices($files), fn (string $type) => $this->announces($type, $features, $factors)),
-                ))).'.',
-            ),
-            default => true,
-        };
-    }
-
-    /**
-     * The security notices on offer: those whose notification is published.
-     *
-     * @return list<string>
-     */
-    protected function notices(Filesystem $files): array
-    {
-        return array_values(array_filter(
-            array_keys(self::NOTICES),
-            fn (string $type) => $files->exists(self::STUBS.'/app/Notifications/Keyring/'.Str::studly($type).'.php'),
-        ));
-    }
-
-    /**
-     * Whether a notice has anything to announce in this app: a new device
-     * takes devices, an undone email change takes email changes, and a
-     * failed second factor takes a sign-in method to ask for after the
-     * password.
-     *
-     * @param  list<string>  $features
-     * @param  list<string>  $factors
-     */
-    protected function announces(string $type, array $features, array $factors): bool
-    {
-        return match ($type) {
-            'new_device' => in_array(Features::devices(), $features, true),
-            'email_change_reverted' => in_array(Features::emailChanges(), $features, true),
-            'second_factor_failed' => $factors !== [],
             default => true,
         };
     }
@@ -366,14 +287,13 @@ class InstallCommand extends Command
 
     /**
      * The provider with only the chosen sign-in methods, the middleware that
-     * makes everyone set up a second factor when that was asked for, the
-     * risk signals the features can feed, and the security notices left
-     * commented when they weren't wanted.
+     * makes everyone set up a second factor when that was asked for, and the
+     * risk signals the features can feed.
      *
      * @param  list<string>  $factors
      * @param  list<string>  $features
      */
-    protected function provider(Filesystem $files, array $factors, bool $emails, bool $enrolled, array $features = self::FEATURES): string
+    protected function provider(Filesystem $files, array $factors, bool $enrolled, array $features = self::FEATURES): string
     {
         $remove = $factors === [] ? ['RecoveryCodes::class,'] : [];
 
@@ -392,11 +312,7 @@ class InstallCommand extends Command
             },
         );
 
-        return $this->withNotices(
-            $files,
-            $this->withSignals($this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $features),
-            fn (string $type) => $emails && $this->announces($type, $features, $factors),
-        );
+        return $this->withSignals($this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $features);
     }
 
     /**
@@ -412,41 +328,6 @@ class InstallCommand extends Command
         return $off === []
             ? $provider
             : (string) preg_replace('/^( +)(Signals\\\\(?:'.implode('|', $off).')::class,)$/m', '$1// $2', $provider);
-    }
-
-    /**
-     * List each security notice on offer in the provider, after the one
-     * before it when the stub doesn't have it yet, and commented out when
-     * it isn't registered: the notices weren't wanted, or this one has
-     * nothing to announce yet. One that isn't on offer is taken out.
-     *
-     * @param  Closure(string): bool  $registers
-     */
-    protected function withNotices(Filesystem $files, string $provider, Closure $registers): string
-    {
-        $offered = $this->notices($files);
-        $after = "'already_registered' => ";
-
-        foreach (array_keys(self::NOTICES) as $type) {
-            $entry = "'{$type}' => Notifications\\".Str::studly($type).'::class,';
-            $listed = '/^( +)(?:\/\/ )?'.preg_quote($entry, '/').'\n/m';
-
-            if (! in_array($type, $offered, true)) {
-                $provider = (string) preg_replace($listed, '', $provider);
-
-                continue;
-            }
-
-            $line = fn (array $match) => $match[1].($registers($type) ? '' : '// ').$entry."\n";
-
-            $provider = (string) (preg_match($listed, $provider) === 1
-                ? preg_replace_callback($listed, $line, $provider)
-                : preg_replace_callback('/^( +)(?:\/\/ )?'.preg_quote($after, '/').'.*\n/m', fn (array $match) => $match[0].$line($match), $provider));
-
-            $after = "'{$type}' => ";
-        }
-
-        return $provider;
     }
 
     /**

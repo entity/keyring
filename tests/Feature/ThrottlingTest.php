@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\AccountLocked as AccountLockedNotice;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +27,7 @@ use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\FailureCount;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\AccountLocked as AccountLockedNotice;
 use Keyring\Pipeline\AccountLimit;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
@@ -868,14 +868,15 @@ describe('an account locked out again and again', function () {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'a brand new passphrase'])->assertRedirect('/dashboard');
     });
 
-    it('tells the owner it is locked and how to unlock it, once the app registers the notice', function () {
+    it('tells the owner it is locked and how to unlock it, unless the app turned the notice off', function () {
         Notification::fake();
+        Keyring::notifications(['account_locked' => null]);
 
         lockOut(3);
         Notification::assertNothingSent();
         completeReset($this->user);
 
-        sendNotifications(['account_locked']);
+        Keyring::notifications(['account_locked' => AccountLockedNotice::class]);
         $this->travel(2)->days();
         lockOut(3, password: 'not this either');
 

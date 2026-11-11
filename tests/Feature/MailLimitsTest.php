@@ -2,12 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Notifications\Keyring\AccountLocked;
-use App\Notifications\Keyring\ConfirmEmailChange;
-use App\Notifications\Keyring\EmailChangeNotice;
-use App\Notifications\Keyring\NewDevice;
-use App\Notifications\Keyring\PasswordChanged;
-use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Testing\TestResponse;
@@ -18,6 +12,12 @@ use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
+use Keyring\Notifications\AccountLocked;
+use Keyring\Notifications\ConfirmEmailChange;
+use Keyring\Notifications\EmailChangeNotice;
+use Keyring\Notifications\NewDevice;
+use Keyring\Notifications\PasswordChanged;
+use Keyring\Notifications\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Keyring\Tests\Fixtures\User;
 
 // None of this mail is a guess at anything, so the limits on guessing never
