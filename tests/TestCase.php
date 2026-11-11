@@ -65,7 +65,7 @@ abstract class TestCase extends Orchestra
         // provider registers and testbench leaves out.
         Event::listen(Registered::class, SendEmailVerificationNotification::class);
 
-        // And the emails it registers: the ones a flow needs, and the four
+        // And the emails it registers: the ones a flow needs, and four of the
         // security notices keyring:install turns on.
         sendNotifications([
             'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use', 'already_registered',

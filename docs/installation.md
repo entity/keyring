@@ -40,7 +40,7 @@ The command asks four things:
 1. **Which sign-in methods besides the password?** None by default. Recovery codes come with any of them.
 2. **Require a second factor for everyone?** Asked when you picked an authenticator app, passkeys or security keys, and yes by default. Users still sign in with what they have, then every page sends them to `/settings/security` until they've set one up (see [Requiring a Second Factor](policies.md#requiring-a-second-factor)). It isn't asked with the password alone or with only email codes, where nobody could meet it: then nothing requires a second factor.
 3. **Which features?** Registration, password resets, email verification and changing the password by default, plus managing sign-in methods when you picked one. Registration always brings email verification, because by default [new users sign in once they've verified their address](sign-in-flow.md#without-revealing-who-has-an-account).
-4. **Email users when their password, sign-in methods or email address change?** Yes by default: password changed, sign-in method added or removed, recovery code used and email address changed.
+4. **Email users when their password, sign-in methods or email address change?** Yes by default: password changed, sign-in method added or removed, recovery code used, new recovery codes made, email address changed and account locked.
 
 Without prompts (`--no-interaction`, or in CI) you get the same defaults. You can also answer with options:
 

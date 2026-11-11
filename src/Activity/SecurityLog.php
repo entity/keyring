@@ -97,14 +97,23 @@ class SecurityLog
     }
 
     /**
-     * How many events of a type the user had recently.
+     * How many events of a type the user had recently. Given another type
+     * as $since, only those after the user's last event of that one: the
+     * failures since they last signed in, say.
      */
-    public function count(Authenticatable&Model $user, string $type, int $withinSeconds): int
+    public function count(Authenticatable&Model $user, string $type, int $withinSeconds, ?string $since = null): int
     {
-        return $this->safely(fn () => $this->query($user)
-            ->where('type', $type)
-            ->where('created_at', '>=', now()->subSeconds($withinSeconds))
-            ->count(), 0);
+        return $this->safely(function () use ($user, $type, $withinSeconds, $since) {
+            // IDs are ULIDs, so a later entry has a greater one, also when
+            // both were written within the same second.
+            $last = $since === null ? null : $this->query($user)->where('type', $since)->max('id');
+
+            return $this->query($user)
+                ->where('type', $type)
+                ->where('created_at', '>=', now()->subSeconds($withinSeconds))
+                ->when($last !== null, fn (Builder $query) => $query->where('id', '>', $last))
+                ->count();
+        }, 0);
     }
 
     /**

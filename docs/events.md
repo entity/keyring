@@ -48,9 +48,10 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)` (valid for `devices.report_link_for` unless you pass days) for a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
 | `SessionsRevoked` | Sessions were signed out, such as "sign out everywhere else". | `user`, `count` |
-| `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `risk` or `not_allowed` |
+| `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
+| `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), so two browsers held the same ones, and the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended: its device, IP address and user agent are those of whoever used the cookie first) |
 
-A user signing out on purpose is `LoggedOut`, not `SessionEnded`. See [Devices & Sessions](devices-and-sessions.md#events).
+A user signing out on purpose is `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`; `RememberMeReused` fires once, and only when there was still a session to end. See [Devices & Sessions](devices-and-sessions.md#events).
 
 ## Authenticators
 

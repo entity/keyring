@@ -23,6 +23,8 @@ return new class extends Migration
             $table->unsignedInteger('last_activity_at');
             $table->unsignedInteger('expires_at')->index();
             $table->unsignedInteger('revoked_at')->nullable();
+            $table->string('replaced_by', 64)->nullable();
+            $table->unsignedInteger('replaced_at')->nullable();
         });
     }
 

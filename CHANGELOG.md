@@ -12,7 +12,7 @@ The first release. Nothing is tagged yet.
 - Policies built from assurance levels, with `ifEnrolled()` and `noDowngrade()`.
 - Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`.
 - Devices and sessions: trusted devices, new-device emails with a "this wasn't me" link, and signing out everywhere else, on any session driver.
-- "Remember me" tied to the session it was ticked for: it carries that session on and can't outlast its timeouts, a revocation or a risk response.
+- "Remember me" tied to the session it was ticked for: it carries that session on and can't outlast its timeouts, a revocation or a risk response. Its cookie works once and is replaced each time. A used one sent again ends the session for everyone holding it, with a `RememberMeReused` event and a `remember_me_reused` log entry.
 - Protected `email` and `password` attributes, with email changes confirmed from both addresses and revertable from the old one.
 - Risk signals with an action for each level.
 - A security log, "was this you?" alerts and security emails, each a notification published into your app.

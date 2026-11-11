@@ -72,14 +72,16 @@ describe('keyring:install', function () {
             ->toContain("            'authenticator_added' => Notifications\AuthenticatorAdded::class,")
             ->toContain("            'authenticator_removed' => Notifications\AuthenticatorRemoved::class,")
             ->toContain("            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,")
+            ->toContain("            'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,")
             ->toContain("            'email_changed' => Notifications\EmailChanged::class,")
+            ->toContain("            'account_locked' => Notifications\AccountLocked::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
             // Every notification there is, whichever are registered.
             ->and(array_map(basename(...), glob($this->sandbox.'/app/Notifications/Keyring/*.php')))
             ->toEqualCanonicalizing(array_map(basename(...), glob(__DIR__.'/../../stubs/app/Notifications/Keyring/*.php')))
             ->toContain('AlreadyRegistered.php')
             ->and($provider)->toContain('Password::class,')
-            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes')->not->toContain('Keyring::require(')
+            ->not->toContain('Totp')->not->toContain('WebAuthn')->not->toContain('RecoveryCodes::class')->not->toContain('Keyring::require(')
             // Nothing a user could set up, so nothing makes them.
             ->not->toContain('keyring.enrolled')->not->toContain('Kernel')
             // Every action, so turning a feature on later works.
@@ -245,47 +247,45 @@ describe('keyring:install', function () {
     });
 })->skip(fn () => getenv('TEST_TOKEN') !== false, 'Publishes into the testbench app every parallel worker shares.');
 
-it('lists a security notice in the provider once its notification is published, in whichever order the two arrive', function (bool $emails) {
-    // As if the two notices this release doesn't have yet had been published.
-    $files = new class extends Filesystem
-    {
-        public function exists($path)
-        {
-            return Str::endsWith($path, ['/RecoveryCodesGenerated.php', '/AccountLocked.php']) || parent::exists($path);
-        }
-    };
-
-    $provider = (fn () => $this->provider($files, [], $emails, false))->call(new InstallCommand);
+it('lists a security notice in the provider only while its notification is published, whatever the provider stub lists', function (bool $emails) {
+    $command = new InstallCommand;
+    $stub = file_get_contents(__DIR__.'/../../stubs/app/Providers/KeyringServiceProvider.php');
     $prefix = $emails ? '' : '// ';
 
-    expect($provider)->toContain(<<<PHP
-                {$prefix}'password_changed' => Notifications\PasswordChanged::class,
-                {$prefix}'authenticator_added' => Notifications\AuthenticatorAdded::class,
-                {$prefix}'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
-                {$prefix}'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
-                {$prefix}'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
-                {$prefix}'email_changed' => Notifications\EmailChanged::class,
-                {$prefix}'account_locked' => Notifications\AccountLocked::class,
-
-    PHP);
-
-    // And the same once the provider stub lists them itself.
-    $files = new class($provider) extends Filesystem
+    // A release where two of the notifications don't exist, or do, with a
+    // provider stub that lists both of them or neither.
+    $release = fn (bool $published, bool $listed) => new class($published, $listed ? $stub : preg_replace('/^.*(?:RecoveryCodesGenerated|AccountLocked).*\n/m', '', $stub)) extends Filesystem
     {
-        public function __construct(protected string $provider) {}
+        public function __construct(protected bool $published, protected string $stub) {}
 
         public function exists($path)
         {
-            return Str::endsWith($path, ['/RecoveryCodesGenerated.php', '/AccountLocked.php']) || parent::exists($path);
+            return Str::endsWith($path, ['/RecoveryCodesGenerated.php', '/AccountLocked.php']) ? $this->published : parent::exists($path);
         }
 
         public function get($path, $lock = false)
         {
-            return Str::endsWith($path, '/Providers/KeyringServiceProvider.php') ? $this->provider : parent::get($path, $lock);
+            return Str::endsWith($path, '/Providers/KeyringServiceProvider.php') ? $this->stub : parent::get($path, $lock);
         }
     };
 
-    expect((fn () => $this->provider($files, [], $emails, false))->call(new InstallCommand))->toBe($provider);
+    $provider = fn (bool $published, bool $listed) => (fn () => $this->provider($release($published, $listed), [], $emails, false))->call($command);
+
+    expect($provider(published: true, listed: true))->toContain(<<<PHP
+                {$prefix}'password_changed' => Notifications\\PasswordChanged::class,
+                {$prefix}'authenticator_added' => Notifications\\AuthenticatorAdded::class,
+                {$prefix}'authenticator_removed' => Notifications\\AuthenticatorRemoved::class,
+                {$prefix}'recovery_code_used' => Notifications\\RecoveryCodeUsed::class,
+                {$prefix}'recovery_codes_generated' => Notifications\\RecoveryCodesGenerated::class,
+                {$prefix}'email_changed' => Notifications\\EmailChanged::class,
+                {$prefix}'account_locked' => Notifications\\AccountLocked::class,
+
+    PHP)
+        ->toBe($provider(published: true, listed: false))
+        ->and($provider(published: false, listed: true))
+        ->not->toContain('RecoveryCodesGenerated')->not->toContain('AccountLocked')
+        ->toContain("{$prefix}'recovery_code_used' => Notifications\\RecoveryCodeUsed::class,\n            {$prefix}'email_changed' => Notifications\\EmailChanged::class,\n")
+        ->toBe($provider(published: false, listed: false));
 })->with(['with the emails' => true, 'without them' => false]);
 
 function passkeysTable(): void
@@ -334,7 +334,7 @@ describe('keyring:import fortify', function () {
 
         DB::table('users')->update([
             'two_factor_secret' => encrypt($secret),
-            'two_factor_recovery_codes' => encrypt(json_encode(['abcde-12345', 'fghij-67890'])),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2', 'ZyXwVuTsR9-qPoNmLkJi8'])),
             'two_factor_confirmed_at' => now(),
         ]);
 
@@ -351,7 +351,41 @@ describe('keyring:import fortify', function () {
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
         $this->get(route('keyring.login.challenge', ['recovery']));
-        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcde-12345'])->assertRedirect('/dashboard');
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aBcDeFgHi1-JkLmNoPqR2'])->assertRedirect('/dashboard');
+    });
+
+    it('keeps the case of fortify\'s recovery codes, which is what makes them long enough to store hashed', function () {
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2'])),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'abcdefghi1-jklmnopqr2'])->assertSessionHasErrors('code');
+        $this->assertGuest();
+
+        $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aBcDeFgHi1 JkLmNoPqR2'])->assertRedirect('/dashboard');
+    });
+
+    it('leaves behind recovery codes too short to store hashed, and says so', function () {
+        $secret = app(Google2FA::class)->generateSecretKey();
+
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt($secret),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2', 'abcde-12345'])),
+            'two_factor_confirmed_at' => now(),
+        ]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("Skipped the recovery codes of user {$this->user->id}: they aren't the 20 letters and digits Fortify makes")
+            ->assertSuccessful();
+
+        $keyring = $this->user->keyring->refresh();
+        expect($keyring->of('totp')->sole()->secret)->toBe($secret)
+            ->and($keyring->of('recovery'))->toBeEmpty();
     });
 
     it('imports unconfirmed secrets only when asked', function () {
@@ -371,7 +405,7 @@ describe('keyring:import fortify', function () {
     it('never brings back what a user removed, or adds to what they set up in keyring', function () {
         DB::table('users')->update([
             'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
-            'two_factor_recovery_codes' => encrypt(json_encode(['abcde-12345'])),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2'])),
             'two_factor_confirmed_at' => now(),
         ]);
         $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();

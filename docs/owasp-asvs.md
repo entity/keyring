@@ -35,7 +35,7 @@ Each level includes the ones below it. The other ASVS chapters (TLS, input valid
 - the password as the only sign-in method, with [Keyring's password rules](protected-changes.md#password-rules),
 - `Features::registration()`, `resetPasswords()`, `emailVerification()` and `updatePasswords()`,
 - [registration that doesn't reveal who has an account](sign-in-flow.md#without-revealing-who-has-an-account),
-- the emails that tell users their password, sign-in methods or email address changed, or that a recovery code was used,
+- the emails that tell users their password, sign-in methods, recovery codes or email address changed, that a recovery code was used, or that their account was locked,
 - rate limits, the timebox, the session registry and a 30 day limit on every session.
 
 That covers Level 1, apart from what your own pages have to do. Nothing in it asks for a second factor, because there isn't one to set up: pick one when installing and the installer's next question, "Require a second factor for everyone?", defaults to yes.
@@ -45,12 +45,12 @@ That covers Level 1, apart from what your own pages have to do. Nothing in it as
 Start from the default install, then:
 
 1. Keep a server-side session driver (`SESSION_DRIVER=database`, Laravel's default, or `redis` or `file`). The `cookie` driver can't destroy an old session ([7.2.4](#v72-fundamental-session-management-security)).
-2. Leave `passwords.uncompromised` alone, or set it to `true`. `null` checks new passwords against breach lists in production, which is what makes up for the short bundled list ([6.2.4](#v62-password-security)).
+2. Keep the rate limiter's cache store (`cache.limiter`, or your default) somewhere that holds its keys between requests and that your deploys don't clear: the limits, the locks and sent codes all live there ([6.3.1](#v63-general-authentication-security)).
 3. Build your forms so passwords are masked and can be pasted and filled by a password manager ([6.2.6, 6.2.7](#v62-password-security)).
 4. Give users a form that posts to `PUT /user/password` ([6.2.2](#v62-password-security)).
 5. Put a sign-out button on every signed-in page, though ASVS only asks for it from Level 2.
 
-Don't turn on `registration.reveal_taken`, add composition rules to the password, lower the password minimums below 8, or remove a [mandatory pipeline step](sign-in-flow.md#mandatory-steps).
+Don't turn on `registration.reveal_taken`, add composition rules to the password, or remove a [mandatory pipeline step](sign-in-flow.md#mandatory-steps).
 
 ## Level 2
 
@@ -86,7 +86,7 @@ Everything in Level 1, and:
     'enrollment_url' => '/settings/security',
     ```
 
-2. **Hash with argon2id**, so a 64 character password in any script is accepted ([6.2.9](#v62-password-security)):
+2. **Hash with argon2id**, so a 64 character password in any script is accepted ([6.2.9](#v62-password-security)). The [conformance suite](testing.md#the-conformance-suite) fails on bcrypt until you do, or say you're keeping it:
 
     ```ini
     HASH_DRIVER=argon2id
@@ -107,7 +107,7 @@ Everything in Level 1, and:
     ```
 
 5. **Turn on `Features::devices()`**, so users can see where they're signed in and sign out elsewhere ([7.4.3, 7.5.2](#v75-defenses-against-session-abuse)), and offer "sign out everywhere else" after a sign-in method is added or removed.
-6. **Write down** your list of words passwords must not contain and pass it to the password rules ([6.1.2, 6.2.11](#v62-password-security)), your session timeouts and why you chose them ([7.1.1](#v71-session-management-documentation)), and that an account may have any number of sessions ([7.1.2](#v71-session-management-documentation)).
+6. **Write down** your list of words passwords must not contain and put it in `passwords.context` ([6.1.2, 6.2.11](#v62-password-security)), your session timeouts and why you chose them ([7.1.1](#v71-session-management-documentation)), and that an account may have any number of sessions ([7.1.2](#v71-session-management-documentation)).
 7. **Give administrators a way to end a user's sessions** ([7.4.5](#v74-session-termination)), and a process for someone who has lost their second factor and their recovery codes ([6.4.4](#v64-authentication-factor-lifecycle-and-recovery)).
 
 Email codes meet Keyring's `aal2` at sign in but not NIST's, and Level 3 rules them out. Leave `EmailCode::asSecondFactor()` out unless you need it.
@@ -140,7 +140,7 @@ Everything in Level 2, and:
     With `ifEnrolled()` a new user signs in with their password, and `keyring.enrolled:aal3` keeps them on your enrollment page until they've added a key; from then on they need it every time. Drop `ifEnrolled()` if you hand out keys before an account first signs in. See [Requiring Attestation](passkeys.md#requiring-attestation). Without attestation, "hardware" is only what the key says about itself.
 
 2. **No email codes, and no SMS** ([6.3.6](#v63-general-authentication-security), [6.6.1](#v66-out-of-band-authentication-mechanisms)). Don't register `EmailCode::asSecondFactor()` or an SMS factor of your own. Recovery codes can't meet `aal3` either, so a lost key goes to your support process.
-3. **Tell users about suspicious sign ins** ([6.3.5](#v63-general-authentication-security)). Register the notices the installer leaves commented out, pick [risk signals](risk.md), and turn on the security log:
+3. **Tell users about suspicious sign ins** ([6.3.5](#v63-general-authentication-security)). Register the notices the installer leaves commented out, turn on the security log, and pick [risk signals](risk.md) with a response that notifies, as [Telling the User](risk.md#telling-the-user) shows for a sign in after a long quiet period or after several failures:
 
     ```php
     Keyring::notifications([
@@ -166,37 +166,37 @@ Everything in Level 2, and:
 | | Level | | What to do |
 |---|---|---|---|
 | 6.1.1 Rate limiting and lockout are documented | 1 | Met | Keyring's are in [Rate Limiting](security.md#rate-limiting), with how they avoid locking the owner out. Your own security documentation can point there; write down any limit you change. |
-| 6.1.2 A documented list of context-specific words | 2 | Yours | Write the list: your organisation, product and system names and their obvious variants. Keyring documents the words it refuses by itself (6.2.11). |
+| 6.1.2 A documented list of context-specific words | 2 | Yours | Write the list: the names of your organisation, products, systems, projects and teams. It goes in `passwords.context`, and [Context-Specific Words](protected-changes.md#context-specific-words) documents what Keyring adds to it. |
 | 6.1.3 Every authentication pathway is documented | 2 | Met | Keyring's are in [The Sign In Flow](sign-in-flow.md). Add your own: a social login, or anywhere you call `Auth::login()`. |
 
 #### V6.2 Password Security
 
 | | Level | | What to do |
 |---|---|---|---|
-| 6.2.1 At least 8 characters | 1 | Met by default | 15 without a second factor, 8 with one. Keep `passwords.min_with_mfa` and `passwords.min_without_mfa` at 8 or more, and keep `PasswordRules::for()` in your published actions. |
+| 6.2.1 At least 8 characters | 1 | Met by default | 15 without a second factor, 8 with one, and Keyring throws on a configured minimum under 8. Keep `PasswordRules::for()` in your published actions. |
 | 6.2.2 Users can change their password | 1 | Met by default | `Features::updatePasswords()` is on in a default install. Build the form that posts to [`PUT /user/password`](protected-changes.md#changing-the-password). |
-| 6.2.3 A change needs the current and the new password | 1 | Met by default | The published `UpdateUserPassword` action requires `current_password`. Keep that rule if you edit it. |
-| 6.2.4 Checked against at least the top 3,000 passwords | 1 | Partly | The bundled list always runs but holds 2,087 passwords of 8 characters or more. The breach check covers the rest and runs in production by default, so leave `passwords.uncompromised` at `null` or `true`. Laravel lets a password through when Have I Been Pwned can't be reached. |
-| 6.2.5 No composition rules | 1 | Met by default | Don't add `mixedCase()`, `numbers()` or `symbols()` through the rules' `$adjust` callback. |
+| 6.2.3 A change needs the current and the new password | 1 | Met | Keyring checks `current_password` itself, whatever your action does. A user with no password, who signs in with a passkey alone, sets one with a fresh verification. |
+| 6.2.4 Checked against at least the top 3,000 passwords | 1 | Met by default | The bundled list holds the 10,000 most common passwords of 8 characters or more and the 3,000 most common of 15 or more, and runs in every environment. Keep `PasswordRules::for()` in your published actions. |
+| 6.2.5 No composition rules | 1 | Met by default | Don't add `mixedCase()`, `numbers()` or `symbols()` through the rules' `$adjust` callback. A longer minimum is fine. |
 | 6.2.6 Password fields are masked | 1 | Yours | Use `type="password"` on your forms. A "show" toggle is allowed. |
 | 6.2.7 Paste and password managers are permitted | 1 | Yours | Don't block paste, and set `autocomplete="current-password"` or `"new-password"`. Keyring's browser package touches neither. |
 | 6.2.8 The password is verified exactly as typed | 1 | Met | |
-| 6.2.9 Passwords of at least 64 characters are permitted | 2 | Needs setup | Set `HASH_DRIVER=argon2id`. With bcrypt, Laravel's default, Keyring refuses anything over 72 bytes rather than cut it short, which turns away 64 characters of accented or non-Latin text. |
+| 6.2.9 Passwords of at least 64 characters are permitted | 2 | Needs setup | Set `HASH_DRIVER=argon2id`. With bcrypt, Laravel's default, Keyring refuses anything over 72 bytes rather than cut it short, which turns away 64 characters of accented or non-Latin text. The conformance suite flags bcrypt. |
 | 6.2.10 No periodic rotation | 2 | Met | Keyring has no password expiry. Don't add one. |
-| 6.2.11 The context word list is enforced | 2 | Partly | Keyring refuses the app's name, the user's name and the name part of their email address, for words of four characters or more. Pass your own list (6.1.2) as `context` in the published `PasswordValidationRules` trait. Lookalike spellings such as `k3yr1ng` aren't caught. |
-| 6.2.12 Checked against breached passwords | 2 | Met by default | In production, through Have I Been Pwned. `passwords.uncompromised => false` turns it off, and `true` runs it everywhere. |
+| 6.2.11 The context word list is enforced | 2 | Needs setup | Put your list (6.1.2) in `passwords.context`. Keyring refuses a password containing a listed word, the app's name, the user's name, the name part of their email address or their organisation's part of its domain, look-alike spellings such as `k3yr1ng` included. |
+| 6.2.12 Checked against breached passwords | 2 | Met by default | In production, through Have I Been Pwned. `passwords.uncompromised => false` turns it off, and `true` runs it everywhere. Laravel's check lets a password through when the service can't be reached: set `passwords.refuse_unchecked` to refuse it instead. |
 
 #### V6.3 General Authentication Security
 
 | | Level | | What to do |
 |---|---|---|---|
-| 6.3.1 Credential stuffing and brute force controls | 1 | Met by default | Per account, per typed username, per IP address and in a row, all inside the timebox. Keep the `limits` options near their defaults, and keep the limiter's cache store somewhere your deploys don't clear. See [Rate Limiting](security.md#rate-limiting). |
+| 6.3.1 Credential stuffing and brute force controls | 1 | Met by default | Per account, per typed username, per IP address and in a row, all inside the timebox. Keep the `limits` options near their defaults, and keep the limiter's cache store somewhere that holds its keys and that your deploys don't clear. See [Rate Limiting](security.md#rate-limiting). |
 | 6.3.2 No default accounts | 1 | Met | Keyring creates no users. Don't seed any in production. |
 | 6.3.3 Multi-factor authentication is required; a hardware factor at Level 3 | 2 | Needs setup | Level 2: a second factor registered and `keyring.enrolled`, which the installer sets up when you answer yes to requiring one. Level 3: `Requirement::aal3()`, `keyring.enrolled:aal3` and `requireAttestation()`. See [Level 2](#level-2) and [Level 3](#level-3). Until a user enrolls they are signed in, and held at your enrollment page. |
 | 6.3.4 No undocumented pathways, and consistent strength across them | 2 | Met | Every sign in runs one pipeline. Start a social login with [`Keyring::attempt()`](sign-in-flow.md#starting-a-sign-in-yourself) rather than `Auth::login()`, which registers a session at no assurance level. |
-| 6.3.5 Users are notified of suspicious authentication attempts | 3 | Needs setup | Register the `new_device`, `second_factor_failed`, `suspicious_activity` and `clone_suspected` notices, turn on `Features::devices()` and `Features::securityLog()`, and pick [risk signals](risk.md). A lockout emails nobody: listen for `Lockout` and `AccountLocked` to tell the user. Keyring has no signal for a sign in after a long quiet period, or for a success after several failures; write one if your analysis calls for it. |
+| 6.3.5 Users are notified of suspicious authentication attempts | 3 | Needs setup | Register the `new_device`, `second_factor_failed`, `suspicious_activity` and `clone_suspected` notices, turn on `Features::devices()` and `Features::securityLog()`, and pick [risk signals](risk.md), among them `InactiveAccount` and `SuccessAfterFailures`, with a response that notifies ([Telling the User](risk.md#telling-the-user)). `account_locked`, which a default install registers, is only sent with `limits.lock_after`; an ordinary lockout that lifts by itself emails nobody, so listen for `Lockout` if you want to. |
 | 6.3.6 Email isn't an authentication factor | 3 | Met by default | Don't register `EmailCode::asSecondFactor()`. |
-| 6.3.7 Users are notified when authentication details change | 3 | Partly | A default install mails a changed or reset password, a sign-in method added or removed, a recovery code used and a changed email address. Also register `email_change_reverted`. New recovery codes have no notice: listen for `RecoveryCodesGenerated`. Each kind is capped at five an hour per account. |
+| 6.3.7 Users are notified when authentication details change | 3 | Met by default | A default install mails a changed or reset password, a sign-in method added or removed, new recovery codes, a recovery code used and a changed email address. Also register `email_change_reverted`. Renaming a sign-in method or changing the default one sends nothing. Each kind is capped at five an hour per account, with every event still in the security log. Installing with `--no-emails` turns them off. |
 | 6.3.8 Valid users can't be deduced from sign in, registration or forgot password | 3 | Met by default | All three answer the same for every address, in the same time. Keep `registration.reveal_taken` off. A username of your own that must be unique will still say when it's taken. See [Registration](sign-in-flow.md#without-revealing-who-has-an-account). |
 
 #### V6.4 Authentication Factor Lifecycle and Recovery
@@ -214,11 +214,11 @@ Everything in Level 2, and:
 
 | | Level | | What to do |
 |---|---|---|---|
-| 6.5.1 Codes work once | 2 | Met by default | With a server-side session driver. An emailed code's state lives in the session, so with `SESSION_DRIVER=cookie` the browser that received one could replay an older cookie and use it again within its ten minutes. |
-| 6.5.2 Lookup secrets under 112 bits are stored salted and hashed | 2 | Partly | Recovery codes Keyring makes carry 120 bits and are stored as a keyed hash, which the requirement allows at that length. Codes brought in with `keyring:import` are stored the same way however short they are, so have those users generate a new set. |
+| 6.5.1 Codes work once | 2 | Met | On any session driver. A sent code's state is kept in the rate limiter's cache store, which has to hold its keys between requests. |
+| 6.5.2 Lookup secrets under 112 bits are stored salted and hashed | 2 | Met | Recovery codes are stored as a keyed hash, which the requirement allows from 112 bits. Keyring's own carry 120, those imported from Fortify 119, and nothing shorter is stored or accepted. |
 | 6.5.3 Secrets come from a secure random generator | 2 | Met | |
-| 6.5.4 Codes have at least 20 bits of entropy | 2 | Met by default | Emailed codes are eight digits. Don't pass a `length` under 6 to `EmailCode::asSecondFactor()` or a code factor of your own. |
-| 6.5.5 Out-of-band codes last 10 minutes at most, authenticator app codes 30 seconds | 2 | Needs setup | Emailed codes last 10 minutes; don't raise `expireAfter`. Authenticator app codes are accepted for up to 90 seconds by default, so register `Totp` with `window` set to `0` ([Level 2](#level-2)). |
+| 6.5.4 Codes have at least 20 bits of entropy | 2 | Met | Emailed codes are eight digits, and a code factor set to fewer than six is refused. |
+| 6.5.5 Out-of-band codes last 10 minutes at most, authenticator app codes 30 seconds | 2 | Needs setup | Sent codes last 10 minutes, and a longer life is refused. Authenticator app codes are accepted for up to about 90 seconds by default, which [doesn't meet the requirement](factors.md#authenticator-apps-totp): register `Totp` with `window` set to `0` ([Level 2](#level-2)). |
 | 6.5.6 Any factor can be revoked | 3 | Needs setup | `Features::manageAuthenticators()` lets users remove a sign-in method, and `Features::devices()` a device. |
 | 6.5.7 Biometrics only as a secondary factor | 3 | Met | A key's user verification only counts together with possession of the key. |
 | 6.5.8 Authenticator app codes use the server's time | 3 | Met | |
@@ -307,7 +307,7 @@ Whatever level you aim for, these are outside what a package can do:
 - **Your pages.** Keyring ships none: masked password fields, paste and password managers left alone, a visible sign-out button, and telling users the risks of a weaker factor are in your templates.
 - **Headers on your own pages.** Keyring's responses send `Cache-Control: no-store` and `Referrer-Policy: same-origin`. A content security policy and the rest are yours, for every page.
 - **Your mail provider.** Verification links, reset links and security notices are only as private and as prompt as the mail that carries them. Its bounce and delivery reports sit outside the request, where Keyring can't make two answers look alike.
-- **Your session and cache stores.** A server-side session driver, and a rate limiter store that doesn't lose its keys.
+- **Your session and cache stores.** A server-side session driver, and a rate limiter store that doesn't lose its keys: limits, locks and sent codes are kept there.
 - **Your documentation.** ASVS asks for your password word list, your session timeouts and your sign-in pathways in writing.
 - **Your administrators.** Who may end sessions, send reset links or remove a lost authenticator, and what a user must prove first.
 - **Identity providers.** Everything about a federated sign in beyond starting Keyring's session.

@@ -159,7 +159,7 @@ A template is a Vue file. Whatever changes per email is a Blade variable inside 
 </template>
 ```
 
-`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. The published `SecurityNotice` then returns them, and all ten notices use the one template:
+`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. The published `SecurityNotice` then returns them, and every notice uses the one template:
 
 ```php
 // app/Notifications/Keyring/SecurityNotice.php

@@ -25,13 +25,13 @@ Turn it on with `Features::securityLog()`. Its options:
 ```php
 'security_log' => [
     'keep_for' => '180d',
-    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
+    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
 ],
 ```
 
-Without the feature, nothing is logged. "Was this you?" alerts and the `RepeatedFactorFailures` risk signal read from the log, so they need it too.
+Without the feature, nothing is logged. "Was this you?" alerts and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals read from the log, so they need it too.
 
-The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report()` and carries on, so the sign in, refusal or email goes ahead without it. If the log can't be read, there are no alerts and `RepeatedFactorFailures` finds nothing.
+The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report()` and carries on, so the sign in, refusal or email goes ahead without it. If the log can't be read, there are no alerts and those two signals find nothing.
 
 The one exception is `protection_bypassed`. If that entry can't be written, [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection) throws before it runs your callback, so a bypass never happens unlogged.
 
@@ -53,7 +53,8 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `device_revoked` | A device was signed out. | `device` |
 | `device_reported` | A device was signed out from the "this wasn't me" link. | `device` |
 | `sessions_revoked` | "Sign out everywhere else". | `count` |
-| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `risk` or `not_allowed` |
+| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
+| `remember_me_reused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent are the request that brought the used one; `device_id` is the device the ended session was on. | `device` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |
 | `password_changed` | | |
 | `password_reset` | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |
@@ -114,7 +115,7 @@ After a successful sign in, Keyring flashes `keyring.alerts` to the session: a l
 ]
 ```
 
-The types that become alerts are listed in `security_log.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted` and `clone_suspected`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
+The types that become alerts are listed in `security_log.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted`, `clone_suspected` and `remember_me_reused`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
 
 To read them yourself, call `Keyring\Activity\SecurityLog::pullAlerts($user)`. It returns the unseen alert entries, newest first, and marks them seen, so each comes back once.
 
@@ -148,14 +149,20 @@ Keyring::notifications([
     'authenticator_added' => Notifications\AuthenticatorAdded::class,
     'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
     'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
+    'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
     'email_changed' => Notifications\EmailChanged::class,
+    'account_locked' => Notifications\AccountLocked::class,
     // 'new_device' => Notifications\NewDevice::class,
     // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
     // ...
 ]);
 ```
 
-A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and OWASP ASVS 6.3.7 for a notice whenever how someone signs in changes, their email address included. `keyring:install` registers those and `email_changed` unless you answer no (or pass `--no-emails`), whichever sign-in methods you picked; the rest are there commented out. Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
+A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` registers those four with `recovery_codes_generated`, `email_changed` and `account_locked` unless you answer no (or pass `--no-emails`), whichever sign-in methods you picked. Every notice's class is published either way, so turning another on or off is one line in that list.
+
+OWASP ASVS 5.0.0 asks for more. Requirement 6.3.7 is a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated` and `email_changed`, which the installer has registered. Requirement 6.3.5 is a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` with the [risk signals](risk.md#built-in-signals) you pick. Register the ones that are still commented out to meet it. [OWASP ASVS](owasp-asvs.md) has the whole list for each level.
+
+Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
 An account is sent each kind of notice five times an hour at most (`limits.notices` every `limits.notices_per`), so nobody can make your app mail one person without end, by signing in from a new browser over and over, say. The [security log](#the-security-log) records every event either way. A `MustVerifyEmail` user gets none until their address is verified, because until then it's only what someone typed when registering.
 
@@ -173,12 +180,16 @@ The security notices, each sent to the user:
 | `authenticator_removed` | A sign-in method was removed. | `name` |
 | `second_factor_failed` | Someone got the password right but failed the next factor. | |
 | `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
+| `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. Sent for the set that comes with a user's first extra sign-in method too. | |
+| `account_locked` | Failed attempts locked the account until its password is reset (only with [`limits.lock_after`](security.md#locking-until-a-reset)). | `url`, the password reset form (the `password.request` route), when the app has one. `device` and `ip` are those of the attempt that locked it. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. | `reasons` |
 | `clone_suspected` | A passkey or security key looked cloned. | `name` |
 | `email_changed` | An email change applied. Sent to both the old and the new address. | |
 | `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. | |
 
 Every notice is also passed `when` (the time as text, in the app's timezone), `at` (the same moment as a date, to format for the user's own timezone or language), and the `device` and `ip` of the request that caused it. The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
+
+Renaming a sign-in method, or choosing another as the default, sends nothing: neither changes what can sign in to the account.
 
 `name`, `device` and `reasons` can hold what a user or browser sent: a key's name is whatever was typed. Keyring cuts each to one line of at most 500 characters, and it's still text to escape for wherever you show it. The published classes pass it through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown and a name could otherwise add a link to a genuine security email.
 
@@ -228,7 +239,7 @@ class PasswordChanged extends SecurityNotice
 }
 ```
 
-Blade's `{{ }}` escapes those values for HTML. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through it, and the [example app](https://github.com/entity/keyring-example#emails) builds every email this way: Maizzle templates compiled to Blade views, one shared by all ten notices, with a local page to preview them. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
+Blade's `{{ }}` escapes those values for HTML. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through it, and the [example app](https://github.com/entity/keyring-example#emails) builds every email this way: Maizzle templates compiled to Blade views, one shared by every notice, with a local page to preview them. To change every notice at once, edit `toMail()` in your `SecurityNotice`. A notification doesn't have to extend it either: any class whose constructor takes the arguments it wants will do, and `toMail()` may return a `Mailable`.
 
 ### Slack, SMS and Other Channels
 

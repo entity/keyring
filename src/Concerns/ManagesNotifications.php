@@ -17,8 +17,8 @@ trait ManagesNotifications
      */
     public const array NOTIFICATIONS = [
         'new_device', 'password_changed', 'authenticator_added', 'authenticator_removed',
-        'second_factor_failed', 'recovery_code_used', 'suspicious_activity', 'clone_suspected',
-        'email_changed', 'email_change_reverted',
+        'second_factor_failed', 'recovery_code_used', 'recovery_codes_generated', 'suspicious_activity',
+        'clone_suspected', 'account_locked', 'email_changed', 'email_change_reverted',
         'verification_code', 'confirm_email_change', 'email_change_notice', 'email_address_in_use',
         'already_registered',
     ];
