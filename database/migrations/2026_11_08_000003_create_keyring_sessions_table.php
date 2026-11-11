@@ -25,6 +25,7 @@ return new class extends Migration
             $table->unsignedInteger('revoked_at')->nullable();
             $table->string('replaced_by', 64)->nullable();
             $table->unsignedInteger('replaced_at')->nullable();
+            $table->boolean('remembered')->default(false);
         });
     }
 

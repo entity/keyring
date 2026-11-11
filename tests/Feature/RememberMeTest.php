@@ -229,7 +229,7 @@ it('refuses kept "remember me" cookies after the absolute limit ended their sess
 })->with('session registries');
 
 it('refuses kept "remember me" cookies after the idle limit ended their session', function (string $driver) {
-    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_idle' => '10m']);
     $cookies = rememberedSignIn();
 
     $this->travel(11)->minutes();
@@ -241,7 +241,7 @@ it('refuses kept "remember me" cookies after the idle limit ended their session'
 })->with('session registries');
 
 it('refuses "remember me" cookies whose session passed a limit while the browser was away', function (string $driver, string $limit, int $minutes, array $reasons) {
-    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.absolute' => '2h', ...$limit === 'idle' ? ['keyring.sessions.idle' => '10m'] : []]);
+    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.absolute' => '2h', ...$limit === 'idle' ? ['keyring.sessions.remember_idle' => '10m'] : []]);
     $cookies = rememberedSignIn();
 
     // No request ever saw the session end, so its record was never revoked.
@@ -348,7 +348,7 @@ it('gives an app\'s own sign in without "remember me" no cookie naming its sessi
 });
 
 it('leaves other browsers remembered when one browser\'s session times out', function (string $driver) {
-    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+    config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_idle' => '10m']);
 
     $firefox = rememberedSignIn(FIREFOX);
     $firefoxSession = session()->all();
@@ -380,6 +380,100 @@ it('leaves other browsers remembered when one browser\'s session times out', fun
 
     expectKeptCookiesRefused($firefox, FIREFOX, sessionsLeft: 1);
 })->with('session registries');
+
+describe('how long a remembered browser may stay away', function () {
+    it('is longer than a session nobody asked to be remembered may sit unused', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+
+        $cookies = rememberedSignIn();
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeTrue();
+
+        // Days past the idle limit, and long after Laravel's session went.
+        $this->travel(13)->days();
+        comeBack($cookies)->assertOk();
+
+        // It's still the remembered session, with nothing proved.
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeTrue()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::None)
+            ->and(sessionEndedReasons())->toBe([]);
+    })->with('session registries');
+
+    it('is two weeks unless the app says otherwise', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        $cookies = rememberedSignIn();
+
+        $this->travel(14)->days();
+        $this->travel(1)->minutes();
+        comeBack($cookies)->assertRedirect('/login')->assertCookieExpired('keyring_remember');
+
+        expect(sessionEndedReasons())->toBe(['idle']);
+        expectKeptCookiesRefused($cookies);
+    })->with('session registries');
+
+    it('counts from when the browser was last here, not from when it signed in', function () {
+        $cookies = rememberedSignIn();
+
+        $this->travel(10)->days();
+        $cookies = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];
+
+        $this->travel(10)->days();
+        comeBack($cookies)->assertOk();
+    });
+
+    it('has no limit of its own when the app takes it off', function () {
+        config(['keyring.sessions.remember_idle' => null]);
+
+        $cookies = rememberedSignIn();
+
+        $this->travel(29)->days();
+        comeBack($cookies)->assertOk();
+    });
+
+    it('applies while the remembered session is still open, in place of the idle limit', function () {
+        $cookies = rememberedSignIn();
+        $session = session()->all();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+
+        // Past the idle limit it stays signed in, with nothing proved any more.
+        $this->travel(3)->hours();
+        carryOn($session, $cookies)->assertOk();
+        $session = session()->all();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::None);
+
+        $this->travel(14)->days();
+        $this->travel(1)->minutes();
+        carryOn($session, $cookies)->assertRedirect('/login');
+
+        expect(sessionEndedReasons())->toBe(['idle']);
+    });
+
+    it('is not given to a session that did not tick "remember me"', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $session = session()->all();
+
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeFalse();
+
+        $this->travel(3)->hours();
+        carryOn($session, [])->assertRedirect('/login');
+
+        expect(sessionEndedReasons())->toBe(['idle']);
+    })->with('session registries');
+
+    it('stays with a session that is given a new record', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Keyring::risk()->signals([SessionFingerprintChanged::class]);
+
+        $cookies = rememberedSignIn();
+        browser($cookies, CHROME)->get('/home')->assertOk();
+
+        expect(app(SessionRegistry::class)->find(session(Sessions::KEY))->remembered)->toBeTrue();
+    })->with('session registries');
+});
 
 it('moves "remember me" to the new record when a session is given one', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);
@@ -815,7 +909,7 @@ describe('a "remember me" cookie that has been used', function () {
     })->with('session registries');
 
     it('keeps the limits of the session through every record', function (string $driver) {
-        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.idle' => '10m']);
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.remember_idle' => '10m']);
 
         $cookies = rememberedSignIn();
         $resumed = [...$cookies, ...keptCookies(comeBack($cookies)->assertOk())];

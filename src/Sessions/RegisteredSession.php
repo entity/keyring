@@ -12,6 +12,9 @@ use Keyring\Enums\Assurance;
  * A session that moves to a new record leaves the old one behind, naming
  * the new one (replacedBy). It's no longer a session, but its ID can be
  * told from one never issued, and followed to the session it became.
+ *
+ * A remembered session is one "remember me" may bring back once Laravel's
+ * own session has gone, so it's allowed to sit unused for longer.
  */
 final readonly class RegisteredSession
 {
@@ -29,6 +32,7 @@ final readonly class RegisteredSession
         public ?int $revokedAt = null,
         public ?string $replacedBy = null,
         public ?int $replacedAt = null,
+        public bool $remembered = false,
     ) {}
 
     public function isActive(int $now): bool
@@ -64,6 +68,7 @@ final readonly class RegisteredSession
             'revoked_at' => $this->revokedAt,
             'replaced_by' => $this->replacedBy,
             'replaced_at' => $this->replacedAt,
+            'remembered' => $this->remembered,
         ];
     }
 
@@ -99,6 +104,7 @@ final readonly class RegisteredSession
             revokedAt: $data['revoked_at'] === null ? null : (int) $data['revoked_at'],
             replacedBy: $data['replaced_by'] ?? null,
             replacedAt: isset($data['replaced_at']) ? (int) $data['replaced_at'] : null,
+            remembered: (bool) ($data['remembered'] ?? false),
         );
     }
 }

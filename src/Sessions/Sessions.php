@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Session\CookieSessionHandler;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use Keyring\Changes\PendingEmailChanges;
@@ -56,6 +57,7 @@ class Sessions
             authenticatedAt: $now,
             lastActivityAt: $now,
             expiresAt: $now + $this->absolute(),
+            remembered: $remembered,
         );
 
         $this->registry->save($session);
@@ -155,6 +157,22 @@ class Sessions
 
         $request->session()->put(self::REMEMBERED, true);
         $this->queueRememberCookie($session);
+    }
+
+    /**
+     * The user's sessions that can still be carried on, most recently active
+     * first. One that has idled out is over, though its record only says so
+     * once something comes across it.
+     *
+     * @return Collection<int, RegisteredSession>
+     */
+    public function active(Authenticatable $user): Collection
+    {
+        $now = now()->getTimestamp();
+
+        return $this->registry->forUser($user)
+            ->reject(fn (RegisteredSession $session) => $this->idledOut($session, $now))
+            ->values();
     }
 
     public function current(Request $request): ?RegisteredSession
@@ -305,15 +323,28 @@ class Sessions
     }
 
     /**
-     * Seconds of inactivity allowed before the session ends, or with a level,
-     * before that level lapses. Null for no limit (Laravel's own session
-     * lifetime still applies).
+     * Seconds of inactivity allowed before a session nobody asked to be
+     * remembered ends, or with a level, before that level lapses. Null for
+     * no limit (Laravel's own session lifetime still applies).
      */
     public function idle(?Assurance $level = null): ?int
     {
         $idle = $this->timeout($level, 'idle');
 
         return $idle === null ? null : Duration::seconds($idle);
+    }
+
+    /**
+     * Whether the session has gone unused for too long to carry on. A
+     * remembered one has a limit of its own ("sessions.remember_idle"):
+     * held to the same one as the rest, "remember me" would bring nobody
+     * back who had been away for longer than Laravel's session lasts anyway.
+     */
+    public function idledOut(RegisteredSession $session, ?int $now = null): bool
+    {
+        $idle = $session->remembered ? config('keyring.sessions.remember_idle') : config('keyring.sessions.idle');
+
+        return $idle !== null && ($now ?? now()->getTimestamp()) - $session->lastActivityAt > Duration::seconds($idle);
     }
 
     /**

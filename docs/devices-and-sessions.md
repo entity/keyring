@@ -17,6 +17,7 @@
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
 - [Timeouts](#timeouts)
+    - [Inactivity and "Remember Me"](#inactivity-and-remember-me)
 - [Pruning](#pruning)
 - [Events](#events)
 
@@ -203,7 +204,7 @@ Laravel keeps one "remember me" token per user, so changing it signs out every r
 
 ## The Session Registry
 
-Every signed-in session gets a record in Keyring's registry, with its own random ID, the user, the device, the assurance level, the IP address, the user agent, and its timestamps. Laravel's session ID is never stored. The registry ID lives inside the session.
+Every signed-in session gets a record in Keyring's registry, with its own random ID, the user, the device, the assurance level, the IP address, the user agent, whether "remember me" was ticked, and its timestamps. Laravel's session ID is never stored. The registry ID lives inside the session.
 
 A session can move to a new record: when ["remember me"](#remember-me) carries it on, after a mid-session [step-up](risk.md#actions), and with `rotate()` on the `cookie` session driver. The old record then names the new one (`replacedBy`, `replacedAt`) and stops being a session: it isn't listed, counted or revoked with the user's sessions.
 
@@ -282,7 +283,7 @@ Laravel's "remember me" cookie holds a token that is the same in every browser t
 
 So a remembered sign in also sets a Keyring cookie (`keyring_remember`, named in `sessions.remember_cookie`) holding that session's registry ID. It's httpOnly, `SameSite=Lax`, secure when `session.secure` is on, and lasts as long as the record does. When Laravel's cookie signs a browser back in, the middleware looks up the record that cookie names:
 
-- If the record is the user's, hasn't been revoked, and is inside its `absolute` limit and its `idle` limit (when you set one), the new session carries it on, under a new record and a new cookie. The new record is a copy of the old one with the same start and the same expiry, so coming back never starts the `absolute` limit again. Its device, IP address and browser are those of the request that came back, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
+- If the record is the user's, hasn't been revoked, is inside its `absolute` limit, and was last used within `remember_idle`, the new session carries it on, under a new record and a new cookie. The new record is a copy of the old one with the same start and the same expiry, so coming back never starts the `absolute` limit again. Its device, IP address and browser are those of the request that came back, and its level starts from nothing: routes that need a level ask the user to verify. It's recorded like a sign in, so a browser the account hasn't used before is announced as a [new device](#new-device-sign-ins).
 - Otherwise the request is signed out like any other ended session, with both cookies cleared: there was no Keyring cookie, its record is gone or was never issued (`expired`), or the record was revoked, timed out or belongs to someone else. A client that kept the cookies after a timeout or a risk response gets nowhere with them.
 
 It's also refused while the account is [risk locked](risk.md#actions).
@@ -291,7 +292,7 @@ Your own `Auth::login($user, remember: true)` gets the Keyring cookie too, on th
 
 If Laravel's cookie first reaches a route without the middleware, Laravel signs it in there and Keyring notes that in the session. The next request the middleware sees is checked the same way.
 
-With an `idle` limit set, a remembered browser that stays away for longer than it has to sign in again, because its session idled out. Leave `idle` as `null` if "remember me" should last the whole `absolute` limit.
+A remembered browser may stay away for longer than `idle`, up to `remember_idle` (14 days by default). [Timeouts](#timeouts) says why, and what it comes back to.
 
 ### A Cookie Used Twice
 
@@ -325,7 +326,8 @@ A shorter time leaves less room for a copy to slip in next to the owner, and mor
 
 ```php
 'sessions' => [
-    'idle' => null,
+    'idle' => '2h',
+    'remember_idle' => '14d',
     'absolute' => '30d',
     'levels' => [
         'aal2' => ['idle' => '1h', 'absolute' => '24h'],
@@ -334,9 +336,20 @@ A shorter time leaves less room for a copy to slip in next to the owner, and mor
 ],
 ```
 
-- **`idle`** ends a session after this much inactivity. `null` leaves it to Laravel's session lifetime.
+- **`idle`** ends a session after this much inactivity: two hours by default, the lifetime of Laravel's own session in a new app. Keyring counts it on the registry record, so it holds whatever your session driver and `session.lifetime` are, and a session that idled out can't be picked up again. `null` leaves inactivity to Laravel's session lifetime alone.
+- **`remember_idle`** is the same limit for a browser that ticked ["remember me"](#remember-me): 14 days by default. `null` lets it stay away for the whole `absolute` limit.
 - **`absolute`** ends a session this long after sign in, however active it is. A browser that comes back on ["remember me"](#remember-me) carries the same session on, under a new record with the same expiry, so that doesn't start the limit again. The browser is asked to keep Laravel's "remember me" cookie no longer either, unless you set your guard's `remember` (in minutes) yourself. That only changes how long the browser holds it: it still stops working when its session ends.
 - **`levels`** are how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2` or `aal3`). The defaults are NIST SP 800-63B's reauthentication limits.
+
+#### Inactivity and "Remember Me"
+
+Ticking "remember me" asks to stay signed in on that browser between visits, so the two-hour limit can't apply to it: every remembered browser would be asked to sign in again after an afternoon away, and the box would do nothing. Keyring decides it this way instead:
+
+- A remembered session isn't ended by `idle`. It's ended by `remember_idle`, 14 days without a request, and by `absolute`, 30 days after the sign in, which coming back never restarts.
+- Once it has been unused for `idle`, it keeps nothing it proved. A browser that comes back on its cookies starts with no level at all, and one whose Laravel session outlived the two hours has every level lapsed. Either way, routes behind [`keyring:aal2`](step-up.md#raising-assurance) or [`keyring.fresh`](step-up.md#fresh-verification) ask the user to verify again, and so do Keyring's own routes for changing how someone signs in.
+- So a remembered browser left unattended still opens whatever sits behind `auth` alone. Put anything that shouldn't be reachable that way behind a level or a fresh verification, or don't offer "remember me": leave the `remember` field off your login form, or set `remember_idle` to the same as `idle`.
+
+Set `remember_idle` no shorter than `idle`, or ticking the box would sign people out sooner.
 
 A level lapses on its own clock without ending the session: after its `idle` without a request, or its `absolute` after the verifications that reached it, however active the session is. The user stays signed in at whatever level is left, and routes that need the lapsed level ([`keyring:aal2`](step-up.md#raising-assurance)) ask them to verify again. Once inactivity has lapsed a level, every factor for it is asked for again, not just the missing one: nothing verified before the lapse counts toward it, wherever the user verifies next. Verifying again restarts the idle clock.
 

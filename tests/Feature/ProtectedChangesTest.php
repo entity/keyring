@@ -175,6 +175,8 @@ describe('changing email', function () {
 
     it('lets the old address revert the change and signs everyone out', function () {
         Event::fake([EmailChangeReverted::class]);
+        // The session that made the change is still open days later.
+        config(['keyring.sessions.idle' => null]);
         signInWithTotp($this->user);
 
         $this->postJson(route('keyring.email.store'), ['email' => 'attacker@example.com']);
@@ -192,6 +194,7 @@ describe('changing email', function () {
     });
 
     it('stops allowing reverts after the window', function () {
+        config(['keyring.sessions.idle' => null]);
         signInWithTotp($this->user);
 
         $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com']);

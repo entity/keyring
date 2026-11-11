@@ -292,7 +292,7 @@ it('enforces the absolute timeout', function () {
 });
 
 it('leaves other remembered browsers signed in when a session times out', function () {
-    config(['keyring.sessions.idle' => '10m']);
+    config(['keyring.sessions.remember_idle' => '10m']);
     test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true]);
     $token = $this->user->fresh()->remember_token;
 
@@ -323,6 +323,44 @@ it('enforces the idle timeout', function () {
 
     expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'idle']);
 });
+
+it('ends a session left unused for two hours, without being told to', function (string $driver) {
+    config(['keyring.sessions.driver' => $driver]);
+    login();
+
+    $this->travel(119)->minutes();
+    $this->get('/home')->assertOk();
+
+    $this->travel(121)->minutes();
+    $this->get('/home')->assertRedirect('/login');
+
+    expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'idle']);
+})->with('registries');
+
+it('leaves inactivity to laravel\'s session lifetime when there is no idle limit', function () {
+    config(['keyring.sessions.idle' => null]);
+    login();
+
+    $this->travel(29)->days();
+    $this->get('/home')->assertOk();
+});
+
+it('does not list a session that has idled out, or count it on its device', function (string $driver) {
+    config(['keyring.sessions.driver' => $driver]);
+
+    // A browser that was closed without signing out.
+    $token = deviceCookie(login());
+    $this->travel(3)->hours();
+    $this->flushSession();
+    Auth::forgetGuards();
+
+    login(['keyring_device' => $token]);
+
+    expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(2)
+        ->and(app(Sessions::class)->active($this->user)->map->id->all())->toBe([session(Sessions::KEY)]);
+
+    $this->getJson(route('keyring.devices.index'))->assertJsonPath('devices.0.sessions', 1);
+})->with('registries');
 
 it('registers a session the app signs in itself on the response that signs it in', function () {
     Route::middleware('web')->post('/oauth/callback', fn () => tap('welcome', fn () => Auth::login($this->user)));

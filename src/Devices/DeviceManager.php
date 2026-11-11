@@ -169,7 +169,7 @@ class DeviceManager
     public function list(Request $request, Authenticatable&Model $user): Collection
     {
         $current = $this->find($request, $user)?->id;
-        $sessions = $this->sessions->registry()->forUser($user)->groupBy(fn (RegisteredSession $session) => $session->deviceId ?? '');
+        $sessions = $this->sessions->active($user)->groupBy(fn (RegisteredSession $session) => $session->deviceId ?? '');
 
         return $this->query($user)
             ->active()

@@ -118,14 +118,12 @@ class AuthenticateSession
      */
     protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
-        $idle = $this->sessions->idle();
-
         return match (true) {
             $session->revokedAt !== null => 'revoked',
             $session->expiresAt <= $now => 'expired',
             $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
             $session->replacedBy !== null => 'replaced',
-            $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
+            $this->sessions->idledOut($session, $now) => 'idle',
             default => null,
         };
     }
