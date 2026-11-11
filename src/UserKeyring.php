@@ -105,7 +105,7 @@ class UserKeyring
      */
     public function hasSecondFactor(): bool
     {
-        return $this->withoutFallbacks()->canMeet(Requirement::aal2()->including(Category::Possession));
+        return $this->withoutFallbacks()->canMeet(Requirement::aal2());
     }
 
     /**

@@ -191,6 +191,8 @@ Every verification proves one or more **categories**, from `Keyring\Enums\Catego
 
 Policies count distinct categories, not verifications, so a password and a PIN together are still one factor. See [Policies](policies.md).
 
+AAL2 and AAL3 need `Possession` among what was proved, as NIST SP 800-63B-4 does (Sec. 2.2.1): a biometric is only taken together with the authenticator it unlocks. So if you write a factor that checks something the user is, report `Inherence` only when the check was made by a device they hold, and report `Possession` with it. A factor that reports `Inherence` alone can be asked for as a second step, and the session stays at AAL1.
+
 A factor declares the categories it expects in `categories()`, which Keyring uses to plan what to offer. The categories that count are the ones in the `Verification` returned by `verify()`. That's how a security key only counts as inherence when it actually verified the user that time.
 
 ## Writing a Code Factor
