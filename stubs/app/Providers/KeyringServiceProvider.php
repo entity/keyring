@@ -76,7 +76,8 @@ class KeyringServiceProvider extends ServiceProvider
 
         // The emails Keyring sends, in app/Notifications/Keyring. They're
         // yours to restyle or send another way, and a security notice that
-        // isn't listed here isn't sent. See "Security Log & Emails".
+        // isn't listed here isn't sent. One that's commented out has nothing
+        // to announce until its feature is on. See "Security Log & Emails".
         Keyring::notifications([
             'verification_code' => Notifications\VerificationCode::class,
             'confirm_email_change' => Notifications\ConfirmEmailChange::class,
@@ -90,11 +91,11 @@ class KeyringServiceProvider extends ServiceProvider
             'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
             'email_changed' => Notifications\EmailChanged::class,
             'account_locked' => Notifications\AccountLocked::class,
-            // 'new_device' => Notifications\NewDevice::class,
-            // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
-            // 'suspicious_activity' => Notifications\SuspiciousActivity::class,
+            'new_device' => Notifications\NewDevice::class,
+            'second_factor_failed' => Notifications\SecondFactorFailed::class,
+            'suspicious_activity' => Notifications\SuspiciousActivity::class,
+            'email_change_reverted' => Notifications\EmailChangeReverted::class,
             // 'clone_suspected' => Notifications\CloneSuspected::class,
-            // 'email_change_reverted' => Notifications\EmailChangeReverted::class,
         ]);
     }
 }

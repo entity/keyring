@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Actions\Keyring\ResetUserPassword;
 use App\Actions\Keyring\UpdateUserPassword;
 use App\Actions\Keyring\ValidateEmailChange;
+use App\Notifications\Keyring\SuspiciousActivity;
 use App\Providers\KeyringServiceProvider;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
@@ -91,7 +92,12 @@ describe('keyring:install', function () {
             ->toContain("            'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,")
             ->toContain("            'email_changed' => Notifications\EmailChanged::class,")
             ->toContain("            'account_locked' => Notifications\AccountLocked::class,")
+            // What the risk signals find is announced. The notices with
+            // nothing to announce yet are there to turn on.
+            ->toContain("            'suspicious_activity' => Notifications\SuspiciousActivity::class,")
             ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
+            ->toContain("            // 'second_factor_failed' => Notifications\SecondFactorFailed::class,")
+            ->toContain("            // 'email_change_reverted' => Notifications\EmailChangeReverted::class,")
             // The risk signals the default features can feed, and the rest
             // there to turn on.
             ->toContain("            Signals\SessionFingerprintChanged::class,\n")
@@ -142,7 +148,13 @@ describe('keyring:install', function () {
 
         expect($config['features'])->toBe([Features::updatePasswords(), Features::manageAuthenticators(), Features::devices()])
             ->and($provider)->toContain("            'recovery_code_used' => Notifications\RecoveryCodeUsed::class,")
-            ->toContain("            // 'new_device' => Notifications\NewDevice::class,")
+            // Devices are on and there's a second factor to fail, so both are announced.
+            ->toContain("            'new_device' => Notifications\NewDevice::class,")
+            ->toContain("            'second_factor_failed' => Notifications\SecondFactorFailed::class,")
+            ->toContain("            'suspicious_activity' => Notifications\SuspiciousActivity::class,")
+            ->toContain("            // 'email_change_reverted' => Notifications\EmailChangeReverted::class,")
+            ->toContain("            // 'clone_suspected' => Notifications\CloneSuspected::class,")
+            ->toContain("            Signals\NewDevice::class,\n")
             ->toContain('Totp::class,')->toContain('RecoveryCodes::class,')->toContain('WebAuthn::passkeys(),')->toContain('Keyring::require(')
             ->not->toContain('securityKeys')->not->toContain('EmailCode');
 
@@ -219,6 +231,8 @@ describe('keyring:install', function () {
 
         expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
             ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")
+            ->toContain("            // 'second_factor_failed' => Notifications\SecondFactorFailed::class,")
+            ->toContain("            // 'suspicious_activity' => Notifications\SuspiciousActivity::class,")
             ->toContain("            // 'authenticator_added' => Notifications\AuthenticatorAdded::class,")
             ->toContain("            // 'email_changed' => Notifications\EmailChanged::class,")
             ->toContain("            'email_change_notice' => Notifications\EmailChangeNotice::class,")
@@ -301,6 +315,11 @@ it('lists a security notice in the provider only while its notification is publi
                 {$prefix}'recovery_codes_generated' => Notifications\\RecoveryCodesGenerated::class,
                 {$prefix}'email_changed' => Notifications\\EmailChanged::class,
                 {$prefix}'account_locked' => Notifications\\AccountLocked::class,
+                // 'new_device' => Notifications\\NewDevice::class,
+                // 'second_factor_failed' => Notifications\\SecondFactorFailed::class,
+                {$prefix}'suspicious_activity' => Notifications\\SuspiciousActivity::class,
+                // 'email_change_reverted' => Notifications\\EmailChangeReverted::class,
+                // 'clone_suspected' => Notifications\\CloneSuspected::class,
 
     PHP)
         ->toBe($provider(published: true, listed: false))
@@ -309,6 +328,49 @@ it('lists a security notice in the provider only while its notification is publi
         ->toContain("{$prefix}'recovery_code_used' => Notifications\\RecoveryCodeUsed::class,\n            {$prefix}'email_changed' => Notifications\\EmailChanged::class,\n")
         ->toBe($provider(published: false, listed: false));
 })->with(['with the emails' => true, 'without them' => false]);
+
+it('registers a notice only once the app has something for it to announce', function (array $features, array $factors, array $registered, array $commented) {
+    $provider = (fn () => $this->provider(new Filesystem, $factors, true, false, $features))->call(new InstallCommand);
+
+    foreach ($registered as $type) {
+        expect($provider)->toContain("            '{$type}' => Notifications\\".Str::studly($type)."::class,\n");
+    }
+
+    foreach ($commented as $type) {
+        expect($provider)->toContain("            // '{$type}' => Notifications\\".Str::studly($type)."::class,\n");
+    }
+})->with([
+    'the default features and the password alone' => [
+        ['registration', 'reset-passwords', 'email-verification', 'update-passwords', 'security-log'], [],
+        ['password_changed', 'account_locked', 'suspicious_activity'],
+        ['new_device', 'second_factor_failed', 'email_change_reverted', 'clone_suspected'],
+    ],
+    'devices' => [
+        ['devices'], [],
+        ['new_device', 'suspicious_activity'],
+        ['second_factor_failed', 'email_change_reverted'],
+    ],
+    'email changes' => [
+        ['email-changes'], [],
+        ['email_changed', 'email_change_reverted'],
+        ['new_device', 'second_factor_failed'],
+    ],
+    'a second sign-in method' => [
+        ['manage-authenticators'], ['totp'],
+        ['second_factor_failed'],
+        ['new_device', 'email_change_reverted'],
+    ],
+    'an emailed code, which is asked for after the password too' => [
+        ['manage-authenticators'], ['email-codes'],
+        ['second_factor_failed'],
+        ['new_device', 'email_change_reverted'],
+    ],
+    'everything' => [
+        Features::all(), ['totp', 'passkeys'],
+        ['new_device', 'second_factor_failed', 'suspicious_activity', 'email_change_reverted'],
+        ['clone_suspected'],
+    ],
+]);
 
 describe('the risk signals a new provider starts with', function () {
     /**
@@ -420,7 +482,8 @@ describe('the risk signals a new provider starts with', function () {
             ->and($assessed->action->deny)->toBeFalse()
             ->and($assessed->action->lockSeconds)->toBeNull();
 
-        // Nothing they could reach before is closed to them.
+        // They're told, and nothing they could reach before is closed to them.
+        Notification::assertSentTo($user, SuspiciousActivity::class);
         $this->get('/user/sessions')->assertOk();
     });
 });

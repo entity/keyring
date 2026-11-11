@@ -250,19 +250,30 @@ Keyring::notifications([
     'recovery_codes_generated' => Notifications\RecoveryCodesGenerated::class,
     'email_changed' => Notifications\EmailChanged::class,
     'account_locked' => Notifications\AccountLocked::class,
-    // 'new_device' => Notifications\NewDevice::class,
-    // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
-    // ...
+    'new_device' => Notifications\NewDevice::class,
+    'second_factor_failed' => Notifications\SecondFactorFailed::class,
+    'suspicious_activity' => Notifications\SuspiciousActivity::class,
+    'email_change_reverted' => Notifications\EmailChangeReverted::class,
+    // 'clone_suspected' => Notifications\CloneSuspected::class,
 ]);
 ```
 
-A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` registers those four with `recovery_codes_generated`, `email_changed` and `account_locked` unless you answer no (or pass `--no-emails`), whichever sign-in methods you picked. Every notice's class is published either way, so turning another on or off is one line in that list.
+A security notice that isn't listed isn't sent, so that list is how you turn one on or off. Unless you answer no (or pass `--no-emails`), `keyring:install` registers:
 
-OWASP ASVS 5.0.0 asks for more. Requirement 6.3.7 is a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated` and `email_changed`, which the installer has registered. Requirement 6.3.5 is a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` with the [risk signals](risk.md#built-in-signals) you pick. Register the ones that are still commented out to meet it. [OWASP ASVS](owasp-asvs.md) has the whole list for each level.
+- `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_code_used`, `recovery_codes_generated`, `email_changed`, `account_locked` and `suspicious_activity`, whichever sign-in methods and features you picked,
+- `new_device` when `Features::devices()` is on,
+- `second_factor_failed` when you picked a sign-in method besides the password,
+- `email_change_reverted` when `Features::emailChanges()` is on.
+
+One of the last three that has nothing to announce yet is written commented out, with `clone_suspected`, so turning it on later is one line. Every notice's class is published either way. Nothing warns about a notice that isn't registered: with `--no-emails`, or in an app that doesn't use the published provider, no security notice is sent until you list some.
+
+NIST SP 800-63B-4 requires a notice when an authenticator is bound to an account (Sec. 4.1.2.1: `authenticator_added`, and `password_changed` for a new password), when an account is recovered (Sec. 4.2.3: `password_changed` after a reset, and `recovery_code_used`) and when recovery codes are replaced (Sec. 4.2.1.1: `recovery_codes_generated`). It recommends one when an authenticator is removed (Sec. 4.5: `authenticator_removed`).
+
+OWASP ASVS 5.0.0 asks for two kinds. Requirement 6.3.7 is a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated`, `email_changed` and `email_change_reverted`. Requirement 6.3.5 is a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` for what the [risk signals](risk.md#built-in-signals) find. The installer's defaults cover both as far as your features go, with one thing left to you for 6.3.5: a sign in after a long quiet period, or after several failures, is only announced once [your risk response notifies for it](risk.md#telling-the-user). [OWASP ASVS](owasp-asvs.md) has the whole list for each level.
 
 Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
-An account is sent each kind of notice five times an hour at most (`limits.notices` every `limits.notices_per`), so nobody can make your app mail one person without end, by signing in from a new browser over and over, say. The [security log](#the-security-log) records every event either way. A `MustVerifyEmail` user gets none until their address is verified, because until then it's only what someone typed when registering.
+An account is sent each kind of notice five times an hour at most (`limits.notices` every `limits.notices_per`), so nobody can make your app mail one person without end, by signing in from a new browser over and over, say. The [security log](#the-security-log) records every event either way. A `MustVerifyEmail` user gets none until their address is verified, because until then it's only what someone typed when registering. The one exception is `password_changed` after a password reset: the reset link went to that address, so whoever finished the reset reads its mailbox.
 
 The classes are ordinary Laravel notifications and they're yours: change the wording, the channels or the whole template, or register a different class altogether. Keyring builds each one through the container and passes what it has to say as named constructor arguments, so a class takes only the ones it wants.
 

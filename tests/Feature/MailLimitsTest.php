@@ -9,6 +9,7 @@ use App\Notifications\Keyring\NewDevice;
 use App\Notifications\Keyring\PasswordChanged;
 use App\Notifications\Keyring\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Testing\TestResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Events\AccountLocked as AccountLockedEvent;
@@ -86,6 +87,21 @@ describe('security notices', function () {
         Notification::assertNothingSentTo($this->user);
         expect(SecurityEvent::query()->where('type', 'new_device')->count())->toBe(1);
     });
+
+    // The reset link went to the address, so whoever finished the reset
+    // reads its mailbox: the notice goes there whoever typed it at first.
+    it('tells an address nobody had verified that its password was reset', function (bool $hidden) {
+        $hidden || revealTakenAddresses();
+        $this->user->forceFill(['email_verified_at' => null])->save();
+        $token = Password::broker()->createToken($this->user);
+
+        $this->post(route('password.update'), ['token' => $token, 'email' => 'taylor@example.com', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1'])
+            ->assertSessionHasNoErrors();
+
+        Notification::assertSentToTimes($this->user, PasswordChanged::class, 1);
+        // Where registration hides who has an account, the reset verifies the address too.
+        expect($this->user->fresh()->hasVerifiedEmail())->toBe($hidden);
+    })->with(['where registration hides who has an account' => true, 'where it says when an address is taken' => false]);
 
     it('holds the newer notices to the same budget, with every event still logged', function () {
         $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Keyring\Console;
 
+use Closure;
 use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -60,7 +61,8 @@ class InstallCommand extends Command
      * The security notices registered unless the answer is no, and how the
      * question names each. One is only offered once its notification is
      * among the published ones, so a notice can be listed here before the
-     * release that brings its class.
+     * release that brings its class. One with nothing to announce in this
+     * app yet (announces) is listed commented out.
      */
     protected const array NOTICES = [
         'password_changed' => 'password changed',
@@ -70,6 +72,10 @@ class InstallCommand extends Command
         'recovery_codes_generated' => 'new recovery codes made',
         'email_changed' => 'email address changed',
         'account_locked' => 'account locked',
+        'new_device' => 'signed in on a new device',
+        'second_factor_failed' => 'second factor failed after the right password',
+        'suspicious_activity' => 'suspicious sign in or session',
+        'email_change_reverted' => 'email change undone',
     ];
 
     /**
@@ -145,7 +151,7 @@ class InstallCommand extends Command
 
         if ($writesProvider) {
             $files->ensureDirectoryExists(dirname($provider));
-            $files->put($provider, $this->provider($files, $factors, $this->emails($files), $enrolled, $features));
+            $files->put($provider, $this->provider($files, $factors, $this->emails($files, $features, $factors), $enrolled, $features));
         } else {
             $this->components->warn("Skipped {$provider}, it already exists.");
         }
@@ -197,7 +203,11 @@ class InstallCommand extends Command
         };
     }
 
-    protected function emails(Filesystem $files): bool
+    /**
+     * @param  list<string>  $features
+     * @param  list<string>  $factors
+     */
+    protected function emails(Filesystem $files, array $features, array $factors): bool
     {
         return match (true) {
             $this->option('emails') => true,
@@ -205,7 +215,10 @@ class InstallCommand extends Command
             $this->input->isInteractive() => confirm(
                 label: 'Email users when their password, sign-in methods or email address change?',
                 default: true,
-                hint: Str::ucfirst(implode(', ', array_map(fn (string $type) => self::NOTICES[$type], $this->notices($files)))).'.',
+                hint: Str::ucfirst(implode(', ', array_map(
+                    fn (string $type) => self::NOTICES[$type],
+                    array_filter($this->notices($files), fn (string $type) => $this->announces($type, $features, $factors)),
+                ))).'.',
             ),
             default => true,
         };
@@ -222,6 +235,25 @@ class InstallCommand extends Command
             array_keys(self::NOTICES),
             fn (string $type) => $files->exists(self::STUBS.'/app/Notifications/Keyring/'.Str::studly($type).'.php'),
         ));
+    }
+
+    /**
+     * Whether a notice has anything to announce in this app: a new device
+     * takes devices, an undone email change takes email changes, and a
+     * failed second factor takes a sign-in method to ask for after the
+     * password.
+     *
+     * @param  list<string>  $features
+     * @param  list<string>  $factors
+     */
+    protected function announces(string $type, array $features, array $factors): bool
+    {
+        return match ($type) {
+            'new_device' => in_array(Features::devices(), $features, true),
+            'email_change_reverted' => in_array(Features::emailChanges(), $features, true),
+            'second_factor_failed' => $factors !== [],
+            default => true,
+        };
     }
 
     protected function userModelHasKeyring(): bool
@@ -346,7 +378,11 @@ class InstallCommand extends Command
             },
         );
 
-        return $this->withNotices($files, $this->withSignals($this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $features), $emails);
+        return $this->withNotices(
+            $files,
+            $this->withSignals($this->withoutUnusedImports($this->withoutOrphanedComments(implode("\n", $lines))), $features),
+            fn (string $type) => $emails && $this->announces($type, $features, $factors),
+        );
     }
 
     /**
@@ -367,9 +403,12 @@ class InstallCommand extends Command
     /**
      * List each security notice on offer in the provider, after the one
      * before it when the stub doesn't have it yet, and commented out when
-     * the notices weren't wanted. One that isn't on offer is taken out.
+     * it isn't registered: the notices weren't wanted, or this one has
+     * nothing to announce yet. One that isn't on offer is taken out.
+     *
+     * @param  Closure(string): bool  $registers
      */
-    protected function withNotices(Filesystem $files, string $provider, bool $emails): string
+    protected function withNotices(Filesystem $files, string $provider, Closure $registers): string
     {
         $offered = $this->notices($files);
         $after = "'already_registered' => ";
@@ -384,7 +423,7 @@ class InstallCommand extends Command
                 continue;
             }
 
-            $line = fn (array $match) => $match[1].($emails ? '' : '// ').$entry."\n";
+            $line = fn (array $match) => $match[1].($registers($type) ? '' : '// ').$entry."\n";
 
             $provider = (string) (preg_match($listed, $provider) === 1
                 ? preg_replace_callback($listed, $line, $provider)
