@@ -225,7 +225,7 @@ class Ceremonies
     {
         $existing = $this->keyring->authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
 
-        return $this->record($existing)->userHandle ?? KeyedHash::make('keyring|'.$user->getAuthIdentifier());
+        return $this->record($existing)->userHandle ?? KeyedHash::make(KeyedHash::USER_HANDLES, (string) $user->getAuthIdentifier());
     }
 
     /**

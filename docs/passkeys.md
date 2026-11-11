@@ -363,6 +363,6 @@ Each key is a row in `keyring_authenticators` with:
 | `meta.user_verified` | Whether the key verified the user when registered. |
 | `meta.backup_eligible` | Whether the key said it can be synced. |
 
-The user handle given to authenticators is an HMAC of the user's ID keyed with `APP_KEY`, never their real ID or email. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` doesn't make password managers list the account twice.
+The user handle given to authenticators is an HMAC of the user's ID, under a key derived from `APP_KEY` for that purpose alone, never their real ID or email. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` doesn't make password managers list the account twice.
 
 To test passkeys without a browser, see [VirtualAuthenticator](testing.md#virtual-authenticators).

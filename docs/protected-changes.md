@@ -146,7 +146,7 @@ While a change can still be reverted, nobody else can take the address it replac
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
 ```
 
-With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`, even inside `Keyring::withoutProtection()`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. To check an address yourself, use `app(Keyring\Changes\ReservedAddresses::class)->has($address)`. The address is looked up by a keyed hash (`APP_KEY` and `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
+With the `HasKeyring` trait, saving a user with a reserved address any other way throws `Keyring\Exceptions\ReservedAddressException`, even inside `Keyring::withoutProtection()`. Like [protected attributes](#protected-attributes), the check runs on Eloquent events, so query builder inserts aren't caught. To check an address yourself, use `app(Keyring\Changes\ReservedAddresses::class)->has($address)`. The address is looked up by a keyed hash (under a key derived from `APP_KEY`, and from each of `APP_PREVIOUS_KEYS`), since the change stores it encrypted.
 
 ### Checking and Cancelling
 

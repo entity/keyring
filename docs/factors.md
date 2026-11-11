@@ -137,7 +137,7 @@ A user has at most one set. Generating a new set replaces the old one. Users get
 
 The factor's key is available as `RecoveryCodes::KEY` (`recovery`), for code that looks the set up.
 
-The hashes are keyed with `APP_KEY`. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
+The hashes are keyed with a key derived from `APP_KEY` for recovery codes alone. When you rotate it, put the old key in `APP_PREVIOUS_KEYS` and existing codes keep working.
 
 Once every code is used, the set no longer counts as a factor, so policies and step-up stop asking for it.
 

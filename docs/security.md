@@ -147,7 +147,8 @@ Work it out from something the server knows. The request's `Host` header is what
 ### Storage
 
 - TOTP secrets are encrypted with `APP_KEY`.
-- Recovery codes and email codes are stored as keyed hashes.
+- Recovery codes and email codes are stored as keyed hashes (HMAC-SHA-256).
+- Keyed hashes never use `APP_KEY` itself. Each kind (recovery codes, one-time codes, reserved addresses, WebAuthn user handles) has a key of its own, derived from `APP_KEY` with HKDF, so a hash made for one can't pass as another and none is made with the key Laravel encrypts and signs with.
 - Email change tokens are stored as SHA-256 hashes, and the addresses in a pending change are encrypted.
 - Device tokens are stored as SHA-256 hashes.
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.

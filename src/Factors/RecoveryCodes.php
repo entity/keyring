@@ -54,7 +54,7 @@ class RecoveryCodes extends Factor implements Enrollable
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
-        $candidates = KeyedHash::candidates($this->normalizeCode((string) $request->input('code')));
+        $candidates = KeyedHash::candidates(KeyedHash::RECOVERY_CODES, $this->normalizeCode((string) $request->input('code')));
 
         $used = $this->consume($authenticator, function (Authenticator $locked) use ($candidates) {
             $hashes = $this->hashes($locked);
@@ -176,7 +176,7 @@ class RecoveryCodes extends Factor implements Enrollable
 
     protected function hash(#[\SensitiveParameter] string $code): string
     {
-        return KeyedHash::make($this->normalizeCode($code));
+        return KeyedHash::make(KeyedHash::RECOVERY_CODES, $this->normalizeCode($code));
     }
 
     /**
