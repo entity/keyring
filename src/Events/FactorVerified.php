@@ -11,7 +11,9 @@ use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 
 /**
- * A factor was verified successfully.
+ * A factor's proof was right, at sign in or step-up. When the policy asks
+ * for more than one, each fires this: Authenticated or Confirmed says the
+ * whole attempt is done.
  */
 class FactorVerified
 {

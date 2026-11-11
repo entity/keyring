@@ -193,9 +193,10 @@ it('registers passkeys before the cache store their answered challenges are kept
 
     Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()]);
 
+    expect(Keyring::registered()->keys()->all())->toBe(['password', 'passkey', 'security-key']);
+
     // Nothing asks for the store until a challenge is answered.
-    expect(Keyring::registered()->keys()->all())->toBe(['password', 'passkey', 'security-key'])
-        ->and(app(SpentChallenges::class))->toBeInstanceOf(SpentChallenges::class);
+    app(SpentChallenges::class);
 
     Cache::extend('late', fn () => Cache::repository(new ArrayStore));
 

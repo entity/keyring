@@ -1,4 +1,145 @@
 {
+    "defaults": {
+        "guard": "web",
+        "username": "email",
+        "email": "email",
+        "features": [
+            "registration",
+            "reset-passwords",
+            "email-verification",
+            "update-passwords",
+            "security-log"
+        ],
+        "registration": {
+            "reveal_taken": false
+        },
+        "home": "/dashboard",
+        "routes": true,
+        "prefix": "",
+        "domain": null,
+        "middleware": [
+            "web",
+            "Keyring\\Http\\Middleware\\AddSecurityHeaders"
+        ],
+        "webauthn": {
+            "relying_party": {
+                "id": null,
+                "name": null
+            },
+            "origins": [],
+            "timeout": "60s",
+            "login_options_for": "5m",
+            "attestation_roots": [],
+            "algorithms": [
+                "ES256",
+                "EdDSA"
+            ],
+            "minimum_rsa_bits": 2048
+        },
+        "changes_middleware": [
+            "keyring.fresh:15m"
+        ],
+        "enrollment_url": null,
+        "enrollment_except": [],
+        "password_change_url": null,
+        "support_contact": null,
+        "devices": {
+            "cookie": null,
+            "cookie_lifetime": "400d",
+            "limit": 50,
+            "trust_for": "30d",
+            "report_link_for": "7d",
+            "keep_revoked_for": "30d",
+            "keep_unseen_for": "365d",
+            "locator": "Keyring\\Devices\\NullLocator"
+        },
+        "sessions": {
+            "driver": "database",
+            "connection": null,
+            "table": "keyring_sessions",
+            "store": null,
+            "max": 100,
+            "idle": "2h",
+            "remember_idle": "14d",
+            "absolute": "30d",
+            "levels": {
+                "aal2": {
+                    "idle": "1h",
+                    "absolute": "24h"
+                },
+                "aal3": {
+                    "idle": "15m",
+                    "absolute": "12h"
+                }
+            },
+            "end_on_lapse": false,
+            "middleware": true,
+            "remember_cookie": null,
+            "remember_grace": "10s"
+        },
+        "protected": [],
+        "email_changes": {
+            "confirmable_for": "24h",
+            "revertable_for": "7d",
+            "established_after": "7d",
+            "sign_out_others": true,
+            "keep_ended_for": "30d"
+        },
+        "passwords": {
+            "min_with_mfa": 8,
+            "min_without_mfa": 15,
+            "max": 128,
+            "uncompromised": null,
+            "refuse_unchecked": false,
+            "context": [],
+            "broker": null
+        },
+        "risk": {
+            "levels": {
+                "medium": 30,
+                "high": 60,
+                "critical": 90
+            },
+            "recent_change": "7d",
+            "store": null
+        },
+        "security_log": {
+            "keep_for": "180d",
+            "channel": null,
+            "context_key": "trace_id",
+            "refusals": 20,
+            "refusals_per": "1h",
+            "alerts": [
+                "second_factor_failed",
+                "device_reported",
+                "email_change_reverted",
+                "clone_suspected",
+                "remember_me_reused"
+            ]
+        },
+        "prune_at": "03:00",
+        "pending_logins": {
+            "keep_for": "10m"
+        },
+        "enrollments": {
+            "keep_for": "15m"
+        },
+        "timebox": "250ms",
+        "limits": {
+            "per_account": 5,
+            "per_ip": 20,
+            "consecutive": 100,
+            "consecutive_elsewhere": 80,
+            "remember_names_for": "30d",
+            "longest_lock": "24h",
+            "longest_ip_lock": "15m",
+            "lock_after": null,
+            "codes": 3,
+            "codes_per": "10m",
+            "notices": 5,
+            "notices_per": "1h"
+        }
+    },
     "routes": {
         "keyring.authenticators.confirm": "POST /user/authenticators/{factor}/confirm",
         "keyring.authenticators.destroy": "DELETE /user/authenticators/{authenticator}",

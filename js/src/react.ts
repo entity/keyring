@@ -47,7 +47,6 @@ export function useChallenge(props: ChallengeProps, factors: Record<string, Fact
     form,
     props,
     Component: factors[props.factor] as FactorComponent | undefined,
-    alternatives: props.alternatives,
     submit,
     verifyKey,
     switchTo: (option: AuthenticatorSummary) => switchTo(props, option),

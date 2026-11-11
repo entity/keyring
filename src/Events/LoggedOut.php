@@ -9,7 +9,8 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * The user signed out.
+ * The user signed out on purpose. A session Keyring ends on its own is
+ * SessionEnded.
  */
 class LoggedOut
 {

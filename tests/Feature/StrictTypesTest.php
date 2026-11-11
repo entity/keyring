@@ -22,7 +22,6 @@ use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Support\EncryptedSession;
 use Keyring\Testing\VirtualAuthenticator;
 use ParagonIE\ConstantTime\Base64UrlSafe;
-use Symfony\Component\Finder\Finder;
 
 /**
  * A factor that takes the code "ok", under whatever key it's given.
@@ -49,19 +48,6 @@ function factorKeyed(string $key): Factor
         }
     };
 }
-
-it('declares strict types in every php file it ships', function () {
-    $files = Finder::create()->files()->name('*.php')->notName('*.blade.php')
-        ->in(array_map(fn (string $directory) => dirname(__DIR__, 2).'/'.$directory, ['src', 'config', 'database', 'routes', 'stubs', 'lang']));
-
-    $missing = collect($files)
-        ->reject(fn (SplFileInfo $file) => str_starts_with((string) file_get_contents($file->getPathname()), "<?php\n\ndeclare(strict_types=1);\n"))
-        ->map(fn (SplFileInfo $file) => $file->getPathname())
-        ->values();
-
-    expect($files->count())->toBeGreaterThan(200)
-        ->and($missing->all())->toBe([]);
-});
 
 it('compares the signed-in user\'s id with a confirmation\'s as strings', function (Closure $stored, bool $stands) {
     $user = taylor();

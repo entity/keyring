@@ -22,7 +22,6 @@ describe('vue useChallenge', () => {
       const challenge = useChallenge(props, { totp: Code, recovery: Recovery })
 
       expect(challenge.component).toBe(Code)
-      expect(challenge.alternatives).toHaveLength(1)
       expect(challenge.props.authenticator.name).toBe('Phone')
       expect(challenge.form.code).toBe('')
 
