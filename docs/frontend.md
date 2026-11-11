@@ -284,10 +284,10 @@ await removeAuthenticator(added.authenticator.id)
 | Function | Does |
 |---|---|
 | `beginEnrollment(factor, data?)` | `POST /user/authenticators/{factor}`. Resolves to `{ factor, enrollment }`. |
-| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first; if the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes? }`. |
+| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first; if the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes? }`, where `authenticator` is typed `Authenticator`: `factor`, `id`, `name`, `createdAt` and `lastUsedAt`, with a factor's own extras. |
 | `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
-| `renameAuthenticator(id, name)` | `PATCH` with `name`. |
-| `makeDefault(id)` | `PATCH` with `default: true`. |
+| `renameAuthenticator(id, name)` | `PATCH` with `name`. Resolves to `{ authenticator }`. |
+| `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. |
 | `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too; when adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 

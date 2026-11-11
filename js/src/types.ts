@@ -1,5 +1,8 @@
 import type { Purpose } from './routes.js'
 
+/**
+ * A sign-in method as the challenge page offers it.
+ */
 export interface AuthenticatorSummary {
   factor: string
   id: string | null
@@ -7,6 +10,16 @@ export interface AuthenticatorSummary {
   hint?: string
   remaining?: number
   replace?: boolean
+}
+
+/**
+ * A sign-in method as a factor presents it everywhere else: in the answer to
+ * adding or renaming one, and on your settings page. The dates are ISO 8601.
+ * `lastUsedAt` is null until it's first used.
+ */
+export interface Authenticator extends AuthenticatorSummary {
+  createdAt: string | null
+  lastUsedAt: string | null
 }
 
 /**

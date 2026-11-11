@@ -330,7 +330,7 @@ The contract's methods:
 | `rules()` | `code` required, up to 64 characters | Validation for a verification request. Keyring checks them against the request's body, not the query string of a `POST`, so a field you require can't arrive in the URL. |
 | `limits($request, $attempt)` | per account and per IP, from config | Rate limits. See [Rate Limiting](security.md#rate-limiting). |
 | `errorKey()` | `code` | The form field failures are reported on. |
-| `present($authenticator)` | `factor`, `id`, `name` | How the authenticator appears on the challenge page and in "try another way". |
+| `present($authenticator)` | `factor`, `id`, `name`, `createdAt`, `lastUsedAt` | How the authenticator appears on a settings page and in the answers to adding or renaming one. The challenge page and "try another way" get the same without `createdAt` and `lastUsedAt`. |
 
 Helpers on `Keyring\Factors\Factor`:
 

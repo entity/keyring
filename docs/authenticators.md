@@ -101,15 +101,17 @@ Authenticator apps and email codes take an optional `name` when beginning or con
 
 A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment, or one that was already confirmed, with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
 
-On success, the response contains the new authenticator, presented the same way as on the challenge page:
+On success, the response contains the new authenticator, as its factor's `present()` gives it:
 
 ```json
 {
   "status": "authenticator-added",
-  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
+  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app", "createdAt": "2026-11-08T14:05:00+00:00", "lastUsedAt": null },
   "recoveryCodes": ["jbsw-y3dp-ehpk-3pxp-jbsw-y3dp-eh", "..."]
 }
 ```
+
+`createdAt` and `lastUsedAt` are when it was added and last used to sign in or confirm, as ISO 8601 dates, for the list on your settings page: OWASP's Passkey Security Cheat Sheet has a page that manages credentials show both. The [challenge page](sign-in-flow.md#page-props) gets the same shape without them.
 
 `recoveryCodes` is only there when Keyring generated recovery codes along with this authenticator (see below).
 

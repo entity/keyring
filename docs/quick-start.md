@@ -100,7 +100,6 @@ class SecurityController
                 ->map(fn (Authenticator $authenticator) => [
                     ...$authenticator->factor()->present($authenticator),
                     'isDefault' => $authenticator->is_default,
-                    'lastUsedAt' => $authenticator->last_used_at?->toIso8601String(),
                 ])
                 ->values(),
             'enrollable' => Keyring::registered()
@@ -120,7 +119,7 @@ class SecurityController
 
 | Prop | What it holds |
 |---|---|
-| `authenticators` | What the user has set up. `present()` gives each one's `factor`, `id` and `name`, plus `hint` (a masked address) for email codes, and `remaining` and `replace` for recovery codes. The password is a virtual authenticator with no row of its own, so it's left out. |
+| `authenticators` | What the user has set up. `present()` gives each one's `factor`, `id`, `name`, and `createdAt` and `lastUsedAt` (when it was added and last used, as ISO 8601 dates), plus `hint` (a masked address) for email codes, and `remaining` and `replace` for recovery codes. The password is a virtual authenticator with no row of its own, so it's left out. |
 | `enrollable` | The keys of the factors a user can add, such as `totp` and `passkey`, for your "add" buttons. It includes `recovery`, which only works once the user has another second factor, so show it as "generate recovery codes" next to those rather than as a way to sign in. |
 | `devices` | Where the user is signed in, with `Features::devices()`. The same list as [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
 | `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, with `Features::securityLog()`. |

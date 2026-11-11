@@ -25,6 +25,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
@@ -564,5 +565,66 @@ describe('replacing recovery codes once one is used', function () {
         $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb']);
 
         expect(Keyring::for($this->user)->shouldReplaceRecoveryCodes())->toBeTrue();
+    });
+});
+
+// OWASP's Passkey Security Cheat Sheet has a page that manages credentials
+// show when each was created and last used.
+describe('what a sign-in method shows of itself', function () {
+    it('says when it was added and when it was last used, as a settings page needs', function (Closure $make) {
+        Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, WebAuthn::passkeys(), WebAuthn::securityKeys()]);
+        $this->travelTo('2026-11-08 09:30:00');
+        $authenticator = $make($this->user);
+
+        expect($authenticator->factor()->present($authenticator))
+            ->toMatchArray(['createdAt' => '2026-11-08T09:30:00+00:00', 'lastUsedAt' => null]);
+
+        $this->travelTo('2026-11-10 17:45:10');
+        $authenticator->markAsUsed();
+
+        expect($authenticator->factor()->present($authenticator))
+            ->toMatchArray(['id' => $authenticator->id, 'createdAt' => '2026-11-08T09:30:00+00:00', 'lastUsedAt' => '2026-11-10T17:45:10+00:00']);
+    })->with([
+        'a passkey' => [fn (User $user) => Authenticator::factory()->passkey()->for($user, 'authenticatable')->create()],
+        'a security key' => [fn (User $user) => Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create()],
+        'an authenticator app' => [fn (User $user) => Authenticator::factory()->totp()->for($user, 'authenticatable')->create()],
+        'recovery codes' => [fn (User $user) => Authenticator::factory()->recoveryCodes()->for($user, 'authenticatable')->create()],
+    ]);
+
+    it('has neither for the password, which has no record of its own', function () {
+        $password = $this->user->keyring->of('password')->sole();
+
+        expect($password->factor()->present($password))->toMatchArray(['id' => null, 'createdAt' => null, 'lastUsedAt' => null]);
+    });
+
+    it('says so in the answer to adding or renaming one', function () {
+        $this->travelTo('2026-11-08 09:30:00');
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $added = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
+            ->assertOk()
+            ->assertJsonPath('authenticator.createdAt', '2026-11-08T09:30:00+00:00');
+
+        $this->withAssurance(Assurance::AAL2)->patchJson(route('keyring.authenticators.update', $added->json('authenticator.id')), ['name' => 'Phone'])
+            ->assertOk()
+            ->assertJsonPath('authenticator.name', 'Phone')
+            ->assertJsonPath('authenticator.createdAt', '2026-11-08T09:30:00+00:00');
+    });
+
+    // Only a password has been proved there, and whoever has it has no
+    // call to learn when its owner last signed in.
+    it('keeps both off the challenge page', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['last_used_at' => now()]);
+        Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create(['last_used_at' => now()]);
+
+        $this->post('/logout');
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+        $props = $this->inertia()->get(route('keyring.login.challenge'))->assertOk()->json('props');
+
+        expect($props['authenticator'])->toBe(['factor' => 'totp', 'id' => $totp->id, 'name' => $totp->name])
+            ->and($props['alternatives'])->toHaveCount(1)
+            ->and($props['alternatives'][0])->toHaveKeys(['factor', 'id', 'name', 'remaining', 'replace'])->not->toHaveKeys(['createdAt', 'lastUsedAt']);
     });
 });

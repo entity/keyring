@@ -1,6 +1,6 @@
 import { json } from './http.js'
 import { routes } from './routes.js'
-import type { Enrollment } from './types.js'
+import type { Authenticator, Enrollment } from './types.js'
 import { createCredential } from './webauthn.js'
 
 /**
@@ -27,7 +27,7 @@ export async function confirmEnrollment(factor: string, enrollment: Record<strin
     ? { ...data, credential: await createCredential(enrollment.options) }
     : data
 
-  return json<{ authenticator: Record<string, any>, recoveryCodes?: string[] }>('POST', routes.confirmEnrollment(factor), payload)
+  return json<{ authenticator: Authenticator, recoveryCodes?: string[] }>('POST', routes.confirmEnrollment(factor), payload)
 }
 
 /**
@@ -41,11 +41,11 @@ export async function enroll(factor: string, data: Record<string, unknown> = {})
 }
 
 export function renameAuthenticator(id: string, name: string) {
-  return json('PATCH', routes.authenticator(id), { name })
+  return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { name })
 }
 
 export function makeDefault(id: string) {
-  return json('PATCH', routes.authenticator(id), { default: true })
+  return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { default: true })
 }
 
 /**
