@@ -67,6 +67,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `factor_failed` | warning | A factor failed. | |
 | `second_factor_failed` | warning | A factor failed during a login after a correct password. | |
 | `locked_out` | warning | A rate limit started refusing an IP address for a factor, whether the answer said so or was that of a wrong password. [Logged once](#refusals-that-repeat), not for each request it refuses. Not linked to a user. | `retry_after` |
+| `rate_limited` | warning | The [form limiter](configuration.md#pending-logins-timebox-and-rate-limits) started refusing requests to one of Keyring's other routes: registration, a reset, a change, an emailed link, or passkey options. [Logged once](#refusals-that-repeat) for each wait, per route. Linked to the signed-in user when there is one. | `limiter` (`keyring` or `keyring-login-options`), `route` (its name), `retry_after` |
 | `account_locked` | warning | Failed attempts got the password or a passkey refused until a password reset: the cap on failures in a row, or `limits.lock_after`. | |
 | `signed_out` | info | The user signed out. | |
 | `authenticator_added`, `authenticator_removed` | notice | | `name` |
@@ -145,8 +146,8 @@ Set `security_log.context_key` to the key you use, hidden or not. Then your own 
 
 Whoever is refused can ask again as often as they like, and entries are kept for months, so a refusal isn't allowed to fill the table a request at a time:
 
-- **A lock is logged when it starts.** `locked_out` is written once per factor and IP address, and not again until the wait that lock gave is over. Every request it refuses in between still dispatches the `Lockout` event (and Laravel's), so listeners of yours see each one.
-- **Refusals are counted.** `locked_out`, `access_refused`, `enrollment_refused`, `authenticator_removal_refused`, `link_refused`, `verification_refused`, and `factor_failed` for a name nobody has, are each written at most `security_log.refusals` times every `refusals_per` (20 an hour). They're counted about the account the entry is linked to, or per IP address when it's linked to nobody.
+- **A lock is logged when it starts.** `locked_out` is written once per factor and IP address, and not again until the wait that lock gave is over. Every request it refuses in between still dispatches the `Lockout` event (and Laravel's), so listeners of yours see each one. `rate_limited` is the same for the form limiter: once per route for the account or IP address it's refusing, until that limiter has room again, with `RateLimited` dispatched for every refused request.
+- **Refusals are counted.** `locked_out`, `rate_limited`, `access_refused`, `enrollment_refused`, `authenticator_removal_refused`, `link_refused`, `verification_refused`, and `factor_failed` for a name nobody has, are each written at most `security_log.refusals` times every `refusals_per` (20 an hour). They're counted about the account the entry is linked to, or per IP address when it's linked to nobody.
 - **The log says where it stopped.** The first entry left out is replaced by one `refusals_limited` entry naming its type, so a gap in the log is never silent.
 
 A failed factor for a real account isn't counted this way: the account's own [rate limits](security.md#rate-limiting) already bound how often it can fail, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals count those entries. Set `refusals` to `null` to write every refusal. The counts live in the rate limiter's cache store, like the limits themselves.

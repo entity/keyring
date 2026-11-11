@@ -367,11 +367,16 @@ Keyring's form routes (registration, password reset, enrollment confirmation, em
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Keyring\Support\TooManyAttempts;
 
-RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)->by($request->user()?->id ?: $request->ip()));
+RateLimiter::for('keyring', fn (Request $request) => Limit::perMinute(10)
+    ->by($request->user()?->id ?: $request->ip())
+    ->response(new TooManyAttempts('keyring')));
 ```
 
 `GET /login/{factor}/options` uses its own limiter, `keyring-login-options`, which allows 60 requests a minute per IP address. Login pages fetch the options on every load for passkey autofill, and when the limit is hit autofill stops offering passkeys until the next minute. Define the same limiter to change it.
+
+`TooManyAttempts` is what Keyring's own two limiters answer with: Laravel's usual `429`, after dispatching `Keyring\Events\RateLimited`, which the security log records as [`rate_limited`](security-log-and-emails.md#entry-types). Laravel has no event of its own for a refused request, so a limiter you define without that `response()` still limits and writes nothing to the log.
 
 ## Messages and Translations
 

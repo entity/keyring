@@ -33,7 +33,7 @@ enum Severity: string
             'password_changed', 'password_reset', 'risk_step_up', 'risk_reauthenticate', 'risk_notified',
             'risk_password_change' => self::Notice,
 
-            'factor_failed', 'second_factor_failed', 'locked_out', 'account_locked', 'device_reported',
+            'factor_failed', 'second_factor_failed', 'locked_out', 'rate_limited', 'account_locked', 'device_reported',
             'remember_me_reused', 'email_change_reverted', 'protection_bypassed', 'access_refused',
             'enrollment_refused', 'authenticator_removal_refused', 'link_refused', 'refusals_limited',
             'risk_denied', 'risk_locked', 'risk_revoked_sessions' => self::Warning,

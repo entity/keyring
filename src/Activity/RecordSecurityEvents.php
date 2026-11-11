@@ -32,6 +32,7 @@ class RecordSecurityEvents
             Events\Confirmed::class => 'confirmed',
             Events\FactorFailed::class => 'factorFailed',
             Events\Lockout::class => 'lockout',
+            Events\RateLimited::class => 'rateLimited',
             Events\AccountLocked::class => 'accountLocked',
             Events\LoggedOut::class => 'loggedOut',
             Events\AuthenticatorAdded::class => 'authenticatorAdded',
@@ -108,6 +109,20 @@ class RecordSecurityEvents
     public function lockout(Events\Lockout $event): void
     {
         $this->log->recordRefusal('locked_out', factor: $event->factor, meta: ['retry_after' => $event->retryAfter], once: $event->factor, for: $event->retryAfter ?? Duration::seconds(config('keyring.limits.longest_lock')));
+    }
+
+    /**
+     * Like a lock, a full limiter refuses every request until it has room
+     * again, and is logged once for that wait: per limiter and route, for
+     * the account that's signed in or the IP address that asked.
+     */
+    public function rateLimited(Events\RateLimited $event): void
+    {
+        $this->log->recordRefusal('rate_limited', $event->user, meta: [
+            'limiter' => $event->limiter,
+            'route' => $event->route,
+            'retry_after' => $event->retryAfter,
+        ], once: $event->limiter.'|'.$event->route, for: $event->retryAfter);
     }
 
     public function accountLocked(Events\AccountLocked $event): void

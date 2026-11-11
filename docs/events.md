@@ -93,6 +93,7 @@ An assessment that ends in `Action::allow()` dispatches nothing. See [Risk](risk
 | Event | When | Properties |
 |---|---|---|
 | `AccessRefused` | A signed-in user asked for an authenticator, device or session that isn't theirs, or that doesn't exist (both get the same 404, so the event doesn't tell them apart), or opened an email verification link made for another account. | `user`, `resource` (`authenticator`, `device`, `session` or `email_verification`), `id` (what was asked for, as it was sent; for a session, its handle) |
+| `RateLimited` | The form limiter refused a request to one of Keyring's routes outside the sign-in limits: registration, a reset, a change, an emailed link, or passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring` or `keyring-login-options`), `route` (its name), `retryAfter` (seconds) |
 | `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account may not add one yet) |
 | `AuthenticatorRemovalRefused` | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `user`, `authenticator` |
 | `LinkRefused` | An emailed link was refused: a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
