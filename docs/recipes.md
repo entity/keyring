@@ -176,10 +176,13 @@ public function toMail(object $notifiable): MailMessage
             'details' => array_map(fn (string $label, string $value) => ['label' => $label, 'value' => $value], array_keys($details), $details),
             'actionText' => $this->action(),
             'actionUrl' => $this->action() === null ? null : $this->url,
+            'contact' => $this->contact,
         ],
     );
 }
 ```
+
+`$this->contact` is your [support contact](security-log-and-emails.md#a-support-contact), `null` until you set one. A template of your own has to show it itself: the published one does so in the `toMail()` this replaces.
 
 Two things that catch people out:
 
