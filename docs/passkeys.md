@@ -382,6 +382,6 @@ Each key is a row in `keyring_authenticators` with:
 | `meta.backup_eligible` | Whether the key said it can be synced. |
 | `meta.backed_up` | Whether the key said it has been backed up, which a key that can sync may not have been yet. Read again on every sign in, like `backup_eligible`. Keyring only records it: assurance goes by whether the key can sync at all. |
 
-The user handle given to authenticators is an HMAC of the user's ID, under a key derived from `APP_KEY` for that purpose alone, never their real ID or email. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` doesn't make password managers list the account twice.
+The user handle given to authenticators is an HMAC of the user's model (its morph class) and ID, under a key derived from `APP_KEY` for that purpose alone, never their real ID or email. The model is part of it because an authenticator keeps one passkey per handle for a site: with two user models, a `User` 7 and a `Staff` 7 would otherwise share a handle, and a new passkey for one would replace the other's. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` (or adding a morph map later) doesn't make password managers list the account twice. A passkey imported from `laravel/passkeys` keeps the handle that package gave it.
 
 To test passkeys without a browser, see [VirtualAuthenticator](testing.md#virtual-authenticators).

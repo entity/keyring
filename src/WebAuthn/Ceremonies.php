@@ -223,12 +223,16 @@ class Ceremonies
      * An opaque, stable handle for the user. Never their real ID or email.
      * Taken from a key they already have, so one added after APP_KEY was
      * rotated doesn't show up as another account in their password manager.
+     *
+     * Made from the model as well as the ID. An authenticator keeps one
+     * passkey per handle for a site, so two kinds of account with the same
+     * ID would otherwise replace each other's there.
      */
     public function userHandle(Authenticatable&Model $user): string
     {
         $existing = $this->keyring->authenticatorModel()::query()->ownedBy($user)->whereNotNull('public_key')->oldest()->value('public_key');
 
-        return $this->record($existing)->userHandle ?? KeyedHash::make(KeyedHash::USER_HANDLES, (string) $user->getAuthIdentifier());
+        return $this->record($existing)->userHandle ?? KeyedHash::make(KeyedHash::USER_HANDLES, $user->getMorphClass().':'.$user->getAuthIdentifier());
     }
 
     /**

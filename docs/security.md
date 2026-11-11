@@ -230,7 +230,7 @@ A URL ends up in places a request's body doesn't: access logs, proxies, the brow
 - Email change tokens are stored as SHA-256 hashes, and the addresses in a pending change are encrypted.
 - Device tokens are stored as SHA-256 hashes.
 - WebAuthn credential IDs longer than 512 characters are refused rather than cut short.
-- WebAuthn user handles are an HMAC of the user ID, never the ID or email.
+- WebAuthn user handles are an HMAC of the user's model and ID, never the ID or email, so two user models with the same ID don't share one.
 - The security log never holds passwords, codes, tokens or session IDs.
 
 ### Logging
@@ -383,7 +383,7 @@ All of it comes from the operating system's generator, through PHP's `random_byt
 | Pending login IDs, enrollment IDs and the reference a sent code is kept under | `Str::random(40)` | About 238 bits |
 | Email change tokens | `Str::random(48)` | About 285 bits |
 | Laravel's "remember me" token, when Keyring replaces it | `Str::random(60)` | About 357 bits |
-| WebAuthn user handles | HMAC-SHA-256 of the user's ID under a purpose key, not random | 256 bits, and not guessable without `APP_KEY` |
+| WebAuthn user handles | HMAC-SHA-256 of the user's model and ID under a purpose key, not random | 256 bits, and not guessable without `APP_KEY` |
 | Emailed codes | `random_int()` | Eight digits, about 27 bits. Short on purpose: they last 10 minutes and five guesses. |
 | The password an unknown account's hash is spent on | `Str::random(32)` | Thrown away. |
 

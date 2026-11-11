@@ -21,6 +21,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Support\KeyedHash;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\Staff;
@@ -88,6 +89,47 @@ it('keeps the user handle a user\'s keys already have when app_key changes', fun
     $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect(Base64UrlSafe::decodeNoPadding($options['user']['id']))->toBe($handle);
+});
+
+it('gives two kinds of account that share an id their own user handles', function () {
+    provedEveryKey();
+    $forUser = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.user.id');
+
+    // Staff accounts are made by admins, not registered, so needn't verify an email.
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
+    $staff = staff();
+    $this->actingAs($staff)->withAssurance(Assurance::AAL2);
+    $forStaff = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.user.id');
+
+    // An authenticator keeps one passkey per handle, so a shared one would
+    // let either account's new passkey replace the other's.
+    expect($staff->getKey())->toBe($this->user->getKey())
+        ->and($forStaff)->not->toBe($forUser)
+        ->and(Base64UrlSafe::decodeNoPadding($forUser))->toBe(KeyedHash::make(KeyedHash::USER_HANDLES, $this->user->getMorphClass().':'.$this->user->getKey()))
+        ->and(Base64UrlSafe::decodeNoPadding($forStaff))->toBe(KeyedHash::make(KeyedHash::USER_HANDLES, $staff->getMorphClass().':'.$staff->getKey()));
+});
+
+it('keeps each kind of account\'s handle its own once both have a key', function () {
+    $ceremonies = app(Ceremonies::class);
+    $userKey = new VirtualAuthenticator;
+    enroll('passkey', $userKey);
+    $user = $this->user;
+
+    config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
+    $this->user = staff();
+    enroll('passkey', new VirtualAuthenticator);
+
+    // Each reads its handle back from its own key, never the other model's.
+    $stored = fn ($owner) => $ceremonies->record(Authenticator::query()->ownedBy($owner)->where('factor', 'passkey')->sole()->public_key)->userHandle;
+
+    expect($stored($user))->toBe($ceremonies->userHandle($user))
+        ->and($stored($this->user))->toBe($ceremonies->userHandle($this->user))
+        ->and($ceremonies->userHandle($user))->not->toBe($ceremonies->userHandle($this->user));
+
+    // And the user's key, answering with its own handle, still signs them in.
+    $options = $this->getJson(route('keyring.login.options', 'passkey'))->json('options');
+    $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $userKey->assert($options)])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($user);
 });
 
 it('signs in with a passkey alone, without a username', function (VirtualAuthenticator $key) {
