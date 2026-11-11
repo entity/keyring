@@ -282,7 +282,7 @@ Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SmsCode::c
 
 Don't queue the notification, so the code arrives while the user waits. Confirming the enrollment proves the number receives codes, and a code only verifies the phone it was sent to.
 
-SMS is a weak second factor: numbers get moved to a new SIM by someone who talks the carrier into it. Offer it next to an authenticator app or passkey, not in their place. Each account can be sent [three codes every ten minutes](configuration.md#pending-logins-timebox-and-rate-limits) by default, which also caps what a stranger can make you spend.
+SMS is a weak second factor: numbers get moved to a new SIM by someone who talks the carrier into it. Unlike email, NIST SP 800-63B-4 still accepts it as an authenticator, so the factor keeps `CodeFactor`'s possession category and a password with a texted code is an AAL2 session. It's the one authenticator NIST calls restricted (Sec. 3.1.3.3 and 3.2.9), which puts conditions on your app that Keyring can't meet for you: every user has to be offered another second factor that isn't restricted, be told what the risk of text messages is, and you have to plan for the day they're no longer accepted. Codes may last ten minutes at most. So register it next to an authenticator app or passkeys, never in their place, and say so on the page where users choose. Each account can be sent [three codes every ten minutes](configuration.md#pending-logins-timebox-and-rate-limits) by default, which also caps what a stranger can make you spend.
 
 For another provider, only `deliver()` changes: call its SDK there, or route the notification to its channel.
 

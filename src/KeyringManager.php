@@ -26,13 +26,11 @@ use Keyring\Concerns\SwapsModels;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Devices\UserAgent;
-use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\MissingTrait;
 use Keyring\Factors\FactorRegistry;
 use Keyring\Factors\Password;
-use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
@@ -173,19 +171,9 @@ class KeyringManager
             $requirement = $requirement->withoutDowngrades();
         }
 
-        if ($requirement->onlyIfEnrolled && ! $attempt->keyring()->canMeet($requirement)) {
-            // Recovery codes alone aren't a second factor: asking for them
-            // here would spend one on every login.
-            $keyring = $attempt->keyring()->without(...$attempt->keyring()->of(RecoveryCodes::KEY)->all());
-
-            return $requirement->limitedTo(
-                array_values(array_filter(Category::cases(), $keyring->has(...))),
-                $keyring->canMeet(Requirement::aal1()->phishingResistant()),
-                $keyring->canMeet(Requirement::aal1()->deviceBound()),
-            );
-        }
-
-        return $requirement;
+        return $requirement->onlyIfEnrolled
+            ? $attempt->keyring()->reachable($requirement)
+            : $requirement;
     }
 
     /**

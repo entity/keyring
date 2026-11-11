@@ -28,6 +28,10 @@ interface Factor
      * which factors to offer. The categories actually counted come from the
      * Verification returned by verify().
      *
+     * A factor that isn't an authenticator NIST SP 800-63B-4 accepts, like
+     * a code sent by email, says so by returning Category::Address: it can
+     * be a step at sign in, and never counts toward an assurance level.
+     *
      * @return list<Category>
      */
     public function categories(Authenticator $authenticator): array;

@@ -25,7 +25,7 @@ Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 
 ## Requirements
 
-A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possession, inherence), not verifications. A password plus a PIN is still one factor, and so is a TOTP code plus an email code.
+A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possession, inherence), not verifications. A password plus a PIN is still one factor, and so is a TOTP code plus a recovery code. Those three are the authentication factors. An [email code](factors.md#email-codes) belongs to a fourth category, `Category::Address`, which isn't one: it never counts as a factor, only as a step where steps are asked for.
 
 | | Means |
 |---|---|
@@ -33,6 +33,7 @@ A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possess
 | `Requirement::aal2()` | Two categories. |
 | `Requirement::aal3()` | Two categories, including possession, and a phishing-resistant key that can't leave its device. |
 | `Requirement::factors(3)` | That many categories (at least 1). |
+| `Requirement::steps(2)` | That many categories of any kind, one of them a factor: a password and an email code will do. |
 | `Requirement::for(Assurance::AAL2)` | The requirement for an assurance level. |
 | `->including(Category::Possession)` | That category must be among those verified. |
 | `->phishingResistant()` | At least one verification must be phishing resistant (a passkey or security key). |
@@ -54,7 +55,7 @@ Keyring works out an assurance level from what a user has proved in their sessio
 |---|---|
 | A password | AAL1 |
 | A password and a TOTP or recovery code | AAL2 |
-| A password and an email code, with [`EmailCode::asSecondFactor()`](factors.md#email-codes) | AAL2 (below NIST's bar) |
+| A password and an email code, with [`EmailCode::asSecondFactor()`](factors.md#email-codes) | AAL1: NIST doesn't accept email as an authenticator |
 | A passkey that syncs (iCloud Keychain, Google Password Manager...) | AAL2 |
 | A password and a security key, without user verification | AAL3 |
 | A passkey that stays on its device (always user verified) | AAL3 |
@@ -72,7 +73,9 @@ With `Requirement::aal2()->ifEnrolled()`, a user with only a password signs in w
 
 With `Requirement::aal2()->phishingResistant()->ifEnrolled()`, a user with a password and an authenticator app has no key to meet it, so they still need both. Recovery codes don't count as that second factor: a user with nothing else beyond a password signs in with the password rather than spending a code every time.
 
-Without `ifEnrolled()`, users who can't meet the requirement can't sign in at all. They see an error (`keyring::keyring.unavailable`) on the login page asking them to contact support. Use this only when every account is set up with the factors it needs before it signs in.
+A user whose only other sign-in method is an [email code](factors.md#email-codes) can't give a second factor either, so they're asked for the step they do have: the password and the emailed code. That session is AAL1. Once they add a real second factor, the emailed code stops being asked for or offered.
+
+Without `ifEnrolled()`, users who can't meet the requirement can't sign in at all. That includes a user with a password and an email code under `Requirement::aal2()`: say `Requirement::steps(2)` if a password and an emailed code should be enough to sign in. They see an error (`keyring::keyring.unavailable`) on the login page asking them to contact support. Use this only when every account is set up with the factors it needs before it signs in.
 
 ## Requiring a Second Factor
 
@@ -94,7 +97,7 @@ It lets guests through, leaving them to `auth`, so it can sit in the `web` group
 
 Users still sign in with what they have, then every request under the middleware sends them to `enrollment_url` with the `enroll-first` status until they've set up enough to reach AAL2. JSON requests get a `403` with that status and the URL to send them to. Without an `enrollment_url`, they get a plain `403`.
 
-Recovery codes and email codes don't count, the same as for the [shorter password](configuration.md#passwords). `keyring.enrolled:aal3` asks for a passkey or security key that stays on its device instead.
+Recovery codes don't count, and nor do email codes, which aren't a factor: a user who signs in with a password and an emailed code is sent to add a real one. It's the same rule as for the [shorter password](configuration.md#passwords). `keyring.enrolled:aal3` asks for a passkey or security key that stays on its device instead.
 
 The enrollment page is always let through, and so are the routes users need to get there and back out: Keyring's own (adding authenticators and confirming), `logout`, email verification and changing the password. Keep anything else the enrollment page calls outside the middleware.
 

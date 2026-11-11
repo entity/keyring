@@ -8,7 +8,6 @@ use Illuminate\Support\Collection;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
-use Keyring\Factors\EmailCode;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
@@ -99,7 +98,8 @@ class UserKeyring
 
     /**
      * Whether the user has a real second factor. A password used with one
-     * may be shorter.
+     * may be shorter. Recovery codes aren't one to rely on, and an emailed
+     * code isn't a factor at all (Category::Address).
      */
     public function hasSecondFactor(): bool
     {
@@ -108,11 +108,14 @@ class UserKeyring
 
     /**
      * Whether the user has a factor recovery codes can stand in for: anything
-     * stored besides the codes themselves.
+     * stored that is one, besides the codes themselves. An emailed code
+     * isn't: the inbox it goes to is how the account is recovered anyway.
      */
     public function hasFactorToRecover(): bool
     {
-        return $this->all()->contains(fn (Authenticator $authenticator) => ! $authenticator->isVirtual() && $authenticator->factor !== RecoveryCodes::KEY);
+        return $this->all()->contains(fn (Authenticator $authenticator) => ! $authenticator->isVirtual()
+            && $authenticator->factor !== RecoveryCodes::KEY
+            && array_any($authenticator->factor()->categories($authenticator), fn (Category $category) => $category->authenticates()));
     }
 
     /**
@@ -124,12 +127,12 @@ class UserKeyring
     }
 
     /**
-     * The keyring without recovery codes (a way back in, not a factor to
-     * rely on) or email codes (below AAL2).
+     * The keyring without recovery codes: a way back in, not a factor to
+     * rely on.
      */
     public function withoutFallbacks(): static
     {
-        return $this->without(...$this->of(RecoveryCodes::KEY)->all(), ...$this->of(EmailCode::KEY)->all());
+        return $this->without(...$this->of(RecoveryCodes::KEY)->all());
     }
 
     /**
@@ -137,7 +140,30 @@ class UserKeyring
      */
     public function canMeet(Requirement $requirement): bool
     {
-        return $requirement->isMetBy(array_values($this->all()->map(fn (Authenticator $authenticator) => Verification::of($authenticator))->all()));
+        return $requirement->isMetBy($this->provable());
+    }
+
+    /**
+     * The requirement as far as the user's authenticators can meet it: all
+     * of it when they can, else the strongest version they can give.
+     * Recovery codes aren't counted on, or a user with nothing else beyond
+     * one factor would spend a code every time.
+     */
+    public function reachable(Requirement $requirement): Requirement
+    {
+        $provable = $this->withoutFallbacks()->provable();
+
+        return $requirement->isMetBy($provable) ? $requirement : $requirement->limitedTo($provable);
+    }
+
+    /**
+     * What each authenticator would prove, if the user verified them all.
+     *
+     * @return list<Verification>
+     */
+    protected function provable(): array
+    {
+        return array_values($this->all()->map(fn (Authenticator $authenticator) => Verification::of($authenticator))->all());
     }
 
     /**

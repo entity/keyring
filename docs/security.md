@@ -91,7 +91,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 
 - Policies count distinct categories, so two factors of the same kind are never treated as multi-factor.
 - Assurance levels follow NIST SP 800-63B: a passkey that syncs reaches AAL2, and AAL3 needs a phishing-resistant key that can't leave its device, read from the flag the key reports on every sign in.
-- Email codes are opt-in (`EmailCode::asSecondFactor()`), since NIST rules out email for authentication codes and the inbox can also reset the password.
+- Email codes are opt-in (`EmailCode::asSecondFactor()`), since NIST doesn't accept email as an authenticator and the inbox can also reset the password. A code is a step at sign in and never a factor: a password and an emailed code is an AAL1 session, doesn't pass `keyring:aal2` or `keyring.enrolled`, doesn't earn a trusted device, and can't stand in for a possession factor the account has.
 - A passkey or security key only counts as inherence when it actually verified the user that time.
 - With `noDowngrade()`, users with a passkey or security key can't be offered a weaker way in. Recovery codes stay on offer as the way back in, unless you pass `except: []`.
 - With `ifEnrolled()`, a policy the user can't fully meet still asks for the strongest version they can give, so a user with a second factor never signs in with one factor.
@@ -165,7 +165,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | A cap of 100 failures in a row on an account's factor | NIST SP 800-63B, rate limiting |
 | Proving the account's factors again before adding a sign-in method | NIST SP 800-63B, binding an authenticator |
 | Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
-| Email codes being opt-in, and below AAL2 | NIST SP 800-63B, which rules out email for authentication codes |
+| Email codes being opt-in, and counting toward no level: a password and an emailed code is AAL1 | NIST SP 800-63B-4, Sec. 3.1.3.1, which doesn't accept email as an authenticator |
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
 | Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |
 | Refusing the most common passwords, and ones containing the app's or user's name | OWASP ASVS |

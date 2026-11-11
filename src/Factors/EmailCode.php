@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Notification;
 use InvalidArgumentException;
+use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Support\Duration;
@@ -13,9 +14,14 @@ use Keyring\Support\MailText;
 
 /**
  * A code emailed to the user's current address. Opt-in only: whoever controls
- * the inbox can reset the password too, so for a user whose only second
- * factor it is, the inbox is the whole account. Register
+ * the inbox can reset the password too, so for a user with nothing else
+ * beside their password, the inbox is the whole account. Register
  * EmailCode::asSecondFactor() to accept that.
+ *
+ * NIST SP 800-63B-4 doesn't take email as an authenticator at any level
+ * (Sec. 3.1.3.1), so a code is a step at sign in and never a factor: it
+ * doesn't raise the session's assurance level, and an account whose only
+ * other step it is hasn't got a second factor.
  */
 class EmailCode extends CodeFactor
 {
@@ -25,8 +31,8 @@ class EmailCode extends CodeFactor
     {
         if (! $acceptRisk) {
             throw new InvalidArgumentException(
-                'Email codes are a weak second factor: whoever controls the inbox can also reset the password. '
-                .'Register EmailCode::asSecondFactor() to accept them anyway.',
+                'Email codes are not a second factor: whoever controls the inbox can also reset the password. '
+                .'Register EmailCode::asSecondFactor() to ask for them at sign in anyway.',
             );
         }
 
@@ -36,7 +42,8 @@ class EmailCode extends CodeFactor
     }
 
     /**
-     * Accept email codes as a second factor, knowing they fall short of AAL2.
+     * Accept email codes as a second step at sign in, knowing a password and
+     * a code is still AAL1.
      * Eight digits, good for ten minutes and five wrong guesses, unless you
      * say otherwise: EmailCode::asSecondFactor(length: 6, expireAfter: '5m').
      */
@@ -48,6 +55,14 @@ class EmailCode extends CodeFactor
     public function key(): string
     {
         return self::KEY;
+    }
+
+    /**
+     * Proof that the inbox can be read, not of something the user has.
+     */
+    public function categories(Authenticator $authenticator): array
+    {
+        return [Category::Address];
     }
 
     public function present(Authenticator $authenticator): array

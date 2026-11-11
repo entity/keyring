@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
+use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
@@ -35,6 +36,8 @@ class AuthenticatorChanges
      * replaces the old one, the first sign-in method becomes the default, and
      * the first extra factor comes with recovery codes (as does one added
      * once they've run out), whose plain codes are returned to show once.
+     * An emailed code isn't a factor, so it comes with none: there would be
+     * nothing for them to recover.
      *
      * @return list<string>|null
      */
@@ -42,7 +45,8 @@ class AuthenticatorChanges
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
-        $recovery = ! $isRecovery && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
+        $recoverable = array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
+        $recovery = ! $isRecovery && $recoverable && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
         $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
             if (! $factor->multiple()) {

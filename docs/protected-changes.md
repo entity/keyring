@@ -198,7 +198,7 @@ Keyring runs your action as one of its own flows, so it may change the protected
 
 `Keyring\Support\PasswordRules::for($user)` returns validation rules that follow OWASP's guidance:
 
-- at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (below NIST AAL2). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)),
+- at least `min_with_mfa` characters (8) when the user has a second factor, and `min_without_mfa` (15) when they don't, where "a second factor" means their authenticators could meet AAL2 including possession without recovery codes (a fallback) or email codes (not a factor). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own (see [Removing Authenticators](authenticators.md#removing-authenticators)),
 - at most `max` characters (128),
 - no composition rules by default (no "one uppercase, one symbol"),
 - breached passwords rejected, in production by default (Laravel lets them through when Have I Been Pwned can't be reached),

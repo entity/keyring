@@ -37,9 +37,10 @@ class DetermineRequirement
         if ($context->purpose === Purpose::Login || $attempt->requirement === null) {
             $requirement = $this->keyring->requirementFor($attempt->user(), $attempt);
 
-            // Risk asked for more: add a second factor when the user has one.
-            if ($attempt->stepUp && $attempt->keyring()->canMeet(Requirement::aal2())) {
-                $requirement = $requirement->atLeast(Requirement::aal2());
+            // Risk asked for more: a second factor when the user has one,
+            // or the step they have in its place (an emailed code).
+            if ($attempt->stepUp) {
+                $requirement = $requirement->atLeast($attempt->keyring()->reachable(Requirement::aal2()));
             }
 
             $attempt->requirement = $requirement;

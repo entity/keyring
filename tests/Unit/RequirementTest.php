@@ -34,11 +34,76 @@ it('lets a user verified passkey finish aal2 on its own, and aal3 only when it c
 
 it('requires specific categories', function () {
     $password = verified('password', [Category::Knowledge]);
-    $email = verified('email-code', [Category::Possession]);
+    $sms = verified('sms', [Category::Possession]);
     $requirement = Requirement::aal2()->including(Category::Possession);
 
     expect($requirement->isMetBy([$password]))->toBeFalse()
-        ->and($requirement->isMetBy([$password, $email]))->toBeTrue();
+        ->and($requirement->isMetBy([$password, $sms]))->toBeTrue();
+});
+
+it('doesn\'t count a code sent to an address as a factor', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $email = verified('email-code', [Category::Address]);
+    $totp = verified('totp', [Category::Possession]);
+
+    expect(Category::Address->authenticates())->toBeFalse()
+        ->and(Requirement::aal2()->isMetBy([$password, $email]))->toBeFalse()
+        ->and(Requirement::aal2()->including(Category::Possession)->isMetBy([$password, $email]))->toBeFalse()
+        ->and(Requirement::aal1()->isMetBy([$email]))->toBeFalse()
+        ->and(Requirement::aal2()->wouldProgress([$password], $email))->toBeFalse()
+        ->and(Assurance::of([$password, $email]))->toBe(Assurance::AAL1)
+        ->and(Assurance::of([$email]))->toBe(Assurance::None)
+        ->and(Assurance::of([$password, $email, $totp]))->toBe(Assurance::AAL2);
+});
+
+it('counts a code sent to an address as a step where steps are asked for', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $pin = verified('pin', [Category::Knowledge]);
+    $email = verified('email-code', [Category::Address]);
+    $totp = verified('totp', [Category::Possession]);
+    $steps = Requirement::steps(2);
+
+    expect($steps->isMetBy([$password]))->toBeFalse()
+        ->and($steps->isMetBy([$password, $pin]))->toBeFalse()
+        ->and($steps->isMetBy([$password, $email]))->toBeTrue()
+        ->and($steps->isMetBy([$password, $totp]))->toBeTrue()
+        ->and($steps->isMetBy([$email]))->toBeFalse()
+        ->and($steps->wouldProgress([$password], $email))->toBeTrue()
+        ->and($steps->wouldProgress([$password], $totp))->toBeTrue()
+        ->and($steps->wouldProgress([$password], $pin))->toBeFalse()
+        ->and($steps->wouldProgress([$password, $email], $totp))->toBeFalse()
+        ->and(Requirement::fromArray($steps->toArray()))->toEqual($steps);
+});
+
+it('asks for the step a user has when they can\'t give a second factor', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $email = verified('email-code', [Category::Address]);
+    $totp = verified('totp', [Category::Possession]);
+
+    expect(Requirement::aal2()->limitedTo([$password, $email]))
+        ->factors->toBe(1)
+        ->steps->toBe(2)
+        ->and(Requirement::aal2()->limitedTo([$password, $email])->isMetBy([$password]))->toBeFalse()
+        ->and(Requirement::aal2()->limitedTo([$password, $email])->isMetBy([$password, $email]))->toBeTrue()
+        ->and(Requirement::aal2()->phishingResistant()->limitedTo([$password, $totp, $email]))
+        ->factors->toBe(2)
+        ->steps->toBe(0)
+        ->and(Requirement::aal2()->limitedTo([$password])->steps)->toBe(0);
+});
+
+it('keeps the most steps when two requirements are combined', function () {
+    $password = verified('password', [Category::Knowledge]);
+    $email = verified('email-code', [Category::Address]);
+    $totp = verified('totp', [Category::Possession]);
+
+    // One factor, and a second step of any kind.
+    $either = Requirement::aal1()->atLeast(Requirement::steps(2));
+
+    expect($either->isMetBy([$password, $email]))->toBeTrue()
+        ->and($either->isMetBy([$password]))->toBeFalse()
+        ->and(Requirement::steps(2)->atLeast(Requirement::aal2())->isMetBy([$password, $email]))->toBeFalse()
+        ->and(Requirement::steps(2)->atLeast(Requirement::aal2())->isMetBy([$password, $totp]))->toBeTrue()
+        ->and(Requirement::steps(2)->atLeast(Requirement::aal2())->wouldProgress([$password], $email))->toBeFalse();
 });
 
 it('requires a phishing resistant verification', function () {
@@ -61,17 +126,19 @@ it('knows whether another verification would help', function () {
 });
 
 it('limits itself to what a user can prove', function () {
-    $can = [Category::Knowledge, Category::Possession];
+    $password = verified('password', [Category::Knowledge]);
+    $totp = verified('totp', [Category::Possession]);
+    $key = verified('webauthn', [Category::Possession], phishingResistant: true);
 
-    expect(Requirement::aal3()->limitedTo($can, false))
+    expect(Requirement::aal3()->limitedTo([$password, $totp]))
         ->factors->toBe(2)
         ->categories->toBe([Category::Possession])
         ->requiresPhishingResistance->toBeFalse()
-        ->and(Requirement::factors(3)->phishingResistant()->limitedTo($can, true))
+        ->and(Requirement::factors(3)->phishingResistant()->limitedTo([$password, $key]))
         ->factors->toBe(2)
         ->requiresPhishingResistance->toBeTrue()
-        ->and(Requirement::aal1()->phishingResistant()->limitedTo($can, false)->factors)->toBe(2)
-        ->and(Requirement::aal2()->including(Category::Possession)->limitedTo([Category::Knowledge], false))
+        ->and(Requirement::aal1()->phishingResistant()->limitedTo([$password, $totp])->factors)->toBe(2)
+        ->and(Requirement::aal2()->including(Category::Possession)->limitedTo([$password]))
         ->factors->toBe(1)
         ->categories->toBe([]);
 });

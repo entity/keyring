@@ -10,7 +10,9 @@ use Keyring\Factors\RecoveryCodes;
  * What a user must prove before an attempt is complete.
  *
  * "Factors" counts distinct categories, so a password plus a PIN is still one
- * factor: two of the same kind aren't multi-factor.
+ * factor: two of the same kind aren't multi-factor. Only authentication
+ * factors count. "Steps" counts every category, so an emailed code, which
+ * isn't one, can still be asked for without being taken for a factor.
  */
 final readonly class Requirement
 {
@@ -29,6 +31,7 @@ final readonly class Requirement
         public array $downgradeExceptions = [],
         public array $phishingResistanceExceptions = [],
         public bool $acceptsRecoveryCodes = true,
+        public int $steps = 0,
     ) {}
 
     public static function aal1(): self
@@ -53,6 +56,16 @@ final readonly class Requirement
     public static function factors(int $count): self
     {
         return new self(factors: max(1, $count));
+    }
+
+    /**
+     * That many categories of any kind, one of them an authentication
+     * factor. A step that isn't one, like an emailed code, counts here and
+     * nowhere else, so the session it starts can still be AAL1.
+     */
+    public static function steps(int $count): self
+    {
+        return new self(steps: max(1, $count));
     }
 
     public static function for(Assurance $assurance): self
@@ -148,20 +161,30 @@ final readonly class Requirement
     /**
      * What's left of this requirement for a user who can't meet all of it:
      * the categories and phishing resistance they can give, and as many
-     * factors as they can, never one while they have a second.
+     * factors as they can, never one while they have a second. Short of two
+     * factors, a step that isn't one (an emailed code) is asked for beside
+     * the one they have: the app chose to offer it, and it's all there is.
      *
      * @internal
      *
-     * @param  list<Category>  $categories  the categories the user can prove
+     * @param  list<Verification>  $provable  everything the user could prove
      */
     #[\NoDiscard]
-    public function limitedTo(array $categories, bool $phishingResistant, bool $deviceBound = false): static
+    public function limitedTo(array $provable): static
     {
-        return clone ($this, [
-            'factors' => max(1, min(max($this->factors, 2), count($categories))),
+        $limited = clone ($this, [
+            'requiresPhishingResistance' => $this->requiresPhishingResistance && array_any($provable, fn (Verification $verification) => $verification->phishingResistant),
+            'requiresDeviceBound' => $this->requiresDeviceBound && array_any($provable, fn (Verification $verification) => $verification->phishingResistant && $verification->deviceBound),
+        ]);
+
+        $categories = $limited->categoriesIn($provable);
+        $factors = max(1, min(max($this->factors, 2), count($this->authenticating($categories))));
+        $steps = min(max($this->steps, $this->factors, 2), count($categories));
+
+        return clone ($limited, [
+            'factors' => $factors,
+            'steps' => $steps > $factors ? $steps : 0,
             'categories' => array_values(array_filter($this->categories, fn (Category $category) => in_array($category, $categories, true))),
-            'requiresPhishingResistance' => $this->requiresPhishingResistance && $phishingResistant,
-            'requiresDeviceBound' => $this->requiresDeviceBound && $deviceBound,
         ]);
     }
 
@@ -172,7 +195,8 @@ final readonly class Requirement
     {
         $verified = $this->categoriesIn($verifications);
 
-        return count($verified) >= $this->factors
+        return count($this->authenticating($verified)) >= $this->factors
+            && count($verified) >= $this->steps
             && array_all($this->categories, fn (Category $category) => in_array($category, $verified, true))
             && (! $this->requiresPhishingResistance || $this->hasPhishingResistant($verifications))
             && (! $this->requiresDeviceBound || $this->hasDeviceBoundKey($verifications));
@@ -187,7 +211,7 @@ final readonly class Requirement
     public function wouldProgress(array $verifications, Verification $next): bool
     {
         $verified = $this->categoriesIn($verifications);
-        $new = array_filter($next->categories, fn (Category $category) => ! in_array($category, $verified, true));
+        $new = array_values(array_filter($next->categories, fn (Category $category) => ! in_array($category, $verified, true)));
 
         if ($this->requiresDeviceBound && ! $this->hasDeviceBoundKey($verifications)) {
             return $this->hasDeviceBoundKey([$next]);
@@ -205,13 +229,19 @@ final readonly class Requirement
             return true;
         }
 
-        // Only offer it if the requirement can still be met afterwards: the
-        // categories still missing must fit in the slots that remain.
-        $after = array_unique([...$verified, ...$new], SORT_REGULAR);
-        $missing = array_filter($this->categories, fn (Category $category) => ! in_array($category, $after, true));
+        // Only offer a factor if the requirement can still be met afterwards:
+        // the categories still missing must fit in the slots that remain.
+        $factors = $this->authenticating($verified);
+        $after = [...$factors, ...$this->authenticating($new)];
+        $missing = array_filter($this->categories, fn (Category $category) => $category->authenticates() && ! in_array($category, $after, true));
 
-        return count($verified) < $this->factors
-            && count($missing) <= max(0, $this->factors - count($after));
+        if (count($after) > count($factors) && count($factors) < $this->factors && count($missing) <= max(0, $this->factors - count($after))) {
+            return true;
+        }
+
+        // A step of any kind helps once the factors still to come won't
+        // cover the steps asked for.
+        return count($verified) + max(0, $this->factors - count($factors)) < $this->steps;
     }
 
     /**
@@ -222,6 +252,7 @@ final readonly class Requirement
     {
         return clone ($this, [
             'factors' => max($this->factors, $other->factors),
+            'steps' => max($this->steps, $other->steps),
             'categories' => array_values(array_unique([...$this->categories, ...$other->categories], SORT_REGULAR)),
             'requiresPhishingResistance' => $this->requiresPhishingResistance || $other->requiresPhishingResistance,
             'requiresDeviceBound' => $this->requiresDeviceBound || $other->requiresDeviceBound,
@@ -241,12 +272,13 @@ final readonly class Requirement
     }
 
     /**
-     * @return array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool}
+     * @return array{factors: int, steps: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool}
      */
     public function toArray(): array
     {
         return [
             'factors' => $this->factors,
+            'steps' => $this->steps,
             'categories' => array_map(fn (Category $category) => $category->value, $this->categories),
             'phishing_resistant' => $this->requiresPhishingResistance,
             'device_bound' => $this->requiresDeviceBound,
@@ -259,7 +291,7 @@ final readonly class Requirement
     }
 
     /**
-     * @param  array{factors: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool}  $data
+     * @param  array{factors: int, steps?: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -273,6 +305,7 @@ final readonly class Requirement
             downgradeExceptions: $data['downgrade_exceptions'] ?? [],
             phishingResistanceExceptions: $data['phishing_resistance_exceptions'] ?? [],
             acceptsRecoveryCodes: $data['accepts_recovery_codes'] ?? true,
+            steps: $data['steps'] ?? 0,
         );
     }
 
@@ -291,6 +324,18 @@ final readonly class Requirement
         }
 
         return array_values($categories);
+    }
+
+    /**
+     * The categories that are authentication factors, which are the ones
+     * "factors" counts.
+     *
+     * @param  list<Category>  $categories
+     * @return list<Category>
+     */
+    private function authenticating(array $categories): array
+    {
+        return array_values(array_filter($categories, fn (Category $category) => $category->authenticates()));
     }
 
     /**
