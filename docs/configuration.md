@@ -173,6 +173,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
     'connection' => null,
     'table' => 'keyring_sessions',
     'store' => null,
+    'max' => 100,
     'idle' => '2h',
     'remember_idle' => '14d',
     'absolute' => '30d',
@@ -191,6 +192,7 @@ How long a user has to finish adding a sign-in method once they've started. See 
 | `driver` | `database`, `cache`, or the name of a driver you've added. |
 | `connection`, `table` | Used by the `database` driver. |
 | `store` | The cache store used by the `cache` driver. `null` is your default store. |
+| `max` | How many sessions one account can have at once. A sign in beyond that ends the one unused longest. `null` for no limit. See [How Many Sessions](devices-and-sessions.md#how-many-sessions). |
 | `idle` | Inactivity allowed before a session ends. `null` leaves it to Laravel's session lifetime. |
 | `remember_idle` | The same, for a browser that ticked "remember me": how long it may stay away and still be signed back in, with nothing proved. `null` lets it stay away for the whole `absolute` limit. See [Inactivity and "Remember Me"](devices-and-sessions.md#inactivity-and-remember-me). |
 | `absolute` | The longest a session can last, however active it is. |

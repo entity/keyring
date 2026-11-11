@@ -167,6 +167,149 @@ describe('an account that keeps signing in from new browsers', function () {
     });
 });
 
+describe('an account signed in more times than it may be', function () {
+    /**
+     * Sign in from another browser, a minute after the last, and return its
+     * session's registry ID. It stays signed in.
+     */
+    function anotherSession(bool $remember = false): string
+    {
+        test()->travel(1)->minutes();
+        test()->flushSession();
+        Auth::forgetGuards();
+
+        test()->withHeader('User-Agent', FIREFOX)
+            ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => $remember])
+            ->assertRedirect('/dashboard');
+
+        return session(Sessions::KEY);
+    }
+
+    function activeSessions(): array
+    {
+        return app(SessionRegistry::class)->forUser(test()->user)->map->id->all();
+    }
+
+    it('may be signed in a hundred times at once, unless the app says otherwise', function () {
+        expect(config('keyring.sessions.max'))->toBe(100);
+    });
+
+    it('ends whichever session has gone unused longest', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => 3]);
+        $registry = app(SessionRegistry::class);
+
+        [$first, $second, $third] = [anotherSession(), anotherSession(), anotherSession()];
+
+        // The first one is used again, so the second is now the stalest.
+        $this->travel(1)->minutes();
+        $registry->update($first, ['lastActivityAt' => now()->getTimestamp()]);
+
+        $fourth = anotherSession();
+
+        expect($registry->find($second)->revokedAt)->not->toBeNull()
+            ->and(activeSessions())->toEqualCanonicalizing([$first, $third, $fourth]);
+    })->with('registries');
+
+    it('signs the session it ended out on its next request', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => 1]);
+
+        anotherSession();
+        $session = session()->all();
+        $latest = anotherSession();
+
+        session()->flush();
+        session()->replace($session);
+        Auth::forgetGuards();
+        $this->get('/home')->assertRedirect('/login');
+
+        expect(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta)->toBe(['reason' => 'revoked'])
+            ->and(activeSessions())->toBe([$latest]);
+    })->with('registries');
+
+    it('ends one that has idled out before one that can still be carried on', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => 2]);
+        $registry = app(SessionRegistry::class);
+
+        // A remembered browser, then one closed without signing out and not
+        // used for three hours: used more recently, but over.
+        $remembered = anotherSession(remember: true);
+        $closed = anotherSession();
+        $this->travel(3)->hours();
+
+        $latest = anotherSession();
+
+        expect($registry->find($closed)->revokedAt)->not->toBeNull()
+            ->and(activeSessions())->toEqualCanonicalizing([$remembered, $latest]);
+    })->with('registries');
+
+    it('does not count a session that was signed out, or a record its session moved on from', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => 2]);
+        $registry = app(SessionRegistry::class);
+
+        $signedOut = anotherSession();
+        $this->post('/logout');
+
+        $moved = anotherSession();
+        $registry->replace($moved, $successor = $registry->find($moved)->with(['id' => str_repeat('s', 40)]));
+
+        $latest = anotherSession();
+
+        expect($registry->find($signedOut)->revokedAt)->not->toBeNull()
+            ->and($registry->find($successor->id)->revokedAt)->toBeNull()
+            ->and(activeSessions())->toEqualCanonicalizing([$successor->id, $latest]);
+    })->with('registries');
+
+    it('counts a session the app signed in itself', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => 1]);
+        Route::middleware('web')->post('/oauth/callback', fn () => tap('welcome', fn () => Auth::login($this->user)));
+
+        $first = anotherSession();
+
+        $this->travel(1)->minutes();
+        $this->flushSession();
+        Auth::forgetGuards();
+        $this->post('/oauth/callback')->assertOk();
+
+        expect(app(SessionRegistry::class)->find($first)->revokedAt)->not->toBeNull()
+            ->and(activeSessions())->toBe([session(Sessions::KEY)]);
+    })->with('registries');
+
+    it('leaves another account\'s sessions out of it', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => 1]);
+        $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+
+        $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+        $theirs = session(Sessions::KEY);
+
+        anotherSession();
+        anotherSession();
+
+        expect(app(SessionRegistry::class)->find($theirs)->revokedAt)->toBeNull()
+            ->and(app(SessionRegistry::class)->forUser($other))->toHaveCount(1);
+    })->with('registries');
+
+    it('ends none when there is no limit', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver, 'keyring.sessions.max' => null]);
+
+        foreach (range(1, 5) as $browser) {
+            anotherSession();
+        }
+
+        expect(activeSessions())->toHaveCount(5);
+    })->with('registries');
+
+    it('ends every one past a limit that was lowered', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+
+        [$first, $second, $third] = [anotherSession(), anotherSession(), anotherSession()];
+
+        config(['keyring.sessions.max' => 2]);
+        $fourth = anotherSession();
+
+        expect(activeSessions())->toEqualCanonicalizing([$third, $fourth]);
+    })->with('registries');
+});
+
 it('gives new device events a working "this wasn\'t me" link', function () {
     Event::fake([NewDeviceSignedIn::class, DeviceRevoked::class]);
     login();

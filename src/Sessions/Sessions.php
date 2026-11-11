@@ -20,6 +20,7 @@ use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Support\Duration;
+use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
 
 /**
@@ -60,10 +61,44 @@ class Sessions
             remembered: $remembered,
         );
 
-        $this->registry->save($session);
+        $this->register($user, $session);
         $this->bind($request, $session, $remembered);
 
         return $session;
+    }
+
+    /**
+     * Store a new session, and keep the account to "sessions.max" of them:
+     * past that, whichever has gone unused longest ends. Refusing the sign
+     * in instead would let whoever holds an account's sessions keep its
+     * owner out. One sign in at a time per user, so two at once can't each
+     * count the sessions without the other's.
+     */
+    protected function register(Authenticatable $user, RegisteredSession $session): void
+    {
+        if (($max = config('keyring.sessions.max')) === null) {
+            $this->registry->save($session);
+
+            return;
+        }
+
+        $register = function () use ($user, $session, $max) {
+            $this->registry->save($session);
+
+            $now = now()->getTimestamp();
+
+            $this->registry->forUser($user)
+                ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
+                ->sortBy([
+                    // One that has idled out is over already, so it goes first.
+                    fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
+                    fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
+                ])
+                ->skip(max(0, (int) $max - 1))
+                ->each(fn (RegisteredSession $other) => $this->registry->revoke($other->id));
+        };
+
+        $user instanceof Model ? RowLock::hold($user, $register) : $register();
     }
 
     /**

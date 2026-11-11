@@ -104,6 +104,7 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 
 - Every signed-in Keyring route checks Keyring's guard (`auth:{guard}`), and the step-up middleware reads the user from it, so another guard's user can't stand in.
 - Every signed-in session is in Keyring's registry and is checked on every `web` request (and any other group you add `keyring.session` to), so revoking one takes effect on its next request with any session driver.
+- An account can have 100 sessions at once (`sessions.max`). A sign in beyond that ends the session unused longest and is never refused, so holding an account's sessions can't keep its owner out. See [How Many Sessions](devices-and-sessions.md#how-many-sessions).
 - A session ends after two hours unused (`sessions.idle`) and 30 days after sign in (`sessions.absolute`), counted on its registry record, so neither depends on your session driver or `session.lifetime`. Each assurance level lapses on NIST SP 800-63B's clock (AAL2: 1 hour idle or 24 hours; AAL3: 15 minutes or 12 hours) until the user verifies again.
 - A browser that ticked "remember me" is the one exception to the two hours, on purpose: it may stay away for 14 days (`sessions.remember_idle`) and be signed back in, inside the same 30 days. After two hours unused it holds no level, so anything behind `keyring:aal2` or `keyring.fresh` asks it to verify again. See [Inactivity and "Remember Me"](devices-and-sessions.md#inactivity-and-remember-me).
 - "Remember me" can't outlast the session it was ticked for. Laravel's cookie alone signs nobody in: the browser also holds a Keyring cookie naming that session's registry record, and coming back carries the session on with the limits it started with and nothing proved. Once the record has timed out, been revoked or been ended by a risk response, both cookies are refused, even from a client that kept them after being told to delete them.
@@ -180,6 +181,7 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
+| A stated number of sessions per account, and what happens at it | OWASP ASVS 7.1.2 |
 | An idle and an absolute timeout on every session, kept on the server, with a longer idle one for "remember me" as a stated decision | OWASP ASVS 7.3.1 and 7.3.2, and OWASP's Session Management Cheat Sheet |
 | A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 

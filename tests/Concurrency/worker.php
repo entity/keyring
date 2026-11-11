@@ -11,6 +11,7 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
@@ -53,6 +54,14 @@ try {
 
             // Read while the row is held, as a request that found the cookie unused.
             return app(Sessions::class)->resume($request, app(SessionRegistry::class)->find($id))?->id;
+        })(),
+        'start-session' => (function () use ($id, $value) {
+            config(['keyring.sessions.max' => (int) $value]);
+
+            $request = Request::create('/');
+            $request->setLaravelSession(app('session.store'));
+
+            return app(Sessions::class)->start($request, User::findOrFail($id), null, Assurance::AAL1)->id;
         })(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),

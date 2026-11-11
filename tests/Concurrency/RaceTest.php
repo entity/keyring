@@ -153,3 +153,23 @@ it('lets one of two requests use a "remember me" cookie, and starts one session 
         ->and($registry->forUser($user)->map->id->all())->toBe([$resumed])
         ->and(DB::table('keyring_sessions')->count())->toBe(2);
 });
+
+it('keeps an account to its session limit when two sign ins land at once', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+
+    foreach (['older' => 120, 'newer' => 60] as $id => $ago) {
+        $registry->save(new RegisteredSession($id, (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now - $ago, $now - $ago, $now + 3600));
+    }
+
+    // Each waits for the user's row, so the second counts the first's session.
+    $started = contend($user, [
+        ['start-session', $user->id, 2],
+        ['start-session', $user->id, 2],
+    ]);
+
+    expect($registry->forUser($user)->map->id->all())->toEqualCanonicalizing($started)
+        ->and($registry->find('older')->revokedAt)->not->toBeNull()
+        ->and($registry->find('newer')->revokedAt)->not->toBeNull();
+});

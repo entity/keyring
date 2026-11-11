@@ -13,6 +13,7 @@
 - [The Session Registry](#the-session-registry)
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
+    - [How Many Sessions](#how-many-sessions)
     - [The Session Middleware](#the-session-middleware)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
@@ -250,6 +251,22 @@ Then set `sessions.driver` to `custom`. The contract's methods:
 | `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many, not counting replaced records. `Sessions::signOutEverywhere()` calls it, then also changes the remember token, stops trusting the other devices and cancels a pending email change, so call that one from your own code. |
 | `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A replaced record is kept until it expires, revoked or not: it's how a used "remember me" cookie is told from one that was never issued. A store that expires records itself can return `0`. |
+
+### How Many Sessions
+
+An account can be signed in 100 times at once (`sessions.max`). A sign in beyond that still succeeds, and ends whichever of the account's sessions has gone unused longest: its record is revoked, so that browser is signed out on its next request, with `revoked` as the reason. A session that has already [idled out](#timeouts) goes before one that can still be carried on.
+
+```php
+'sessions' => [
+    'max' => 100,
+],
+```
+
+Keyring ends the oldest session and never refuses the new sign in. Refusing would let whoever holds an account's sessions keep its owner out, and the owner couldn't even sign in to end them.
+
+The number is a ceiling, not a rule about how many devices someone may use. It's twice [`devices.limit`](#devices), so each of the 50 devices an account keeps can have a session and one more it left behind by closing the browser, before anything still in use is ended. Without devices it's the only thing that stops one account filling the registry by signing in over and over. Lower it to allow fewer sessions at once (`1` for a single session, each sign in ending the last), or set it to `null` for no limit.
+
+Only sessions count: not a record that was revoked, has expired, or that its session [moved on from](#the-session-registry). Sign ins for one account are counted one at a time, so two at the same moment can't both slip under the limit. A session your app starts with its own `Auth::login()` counts like any other.
 
 ### The Session Middleware
 

@@ -164,6 +164,10 @@ return [
     | listed and revoked on any session driver. Drivers: "database" (the
     | keyring_sessions table) or "cache" (any persistent cache store).
     |
+    | An account can be signed in "max" times at once. A sign in beyond that
+    | ends whichever of its sessions has gone unused longest (null for no
+    | limit).
+    |
     | Timeouts accept "30m", "12h", "30d"... "idle" and "absolute" end the
     | session: after that long unused, and that long after sign in. A browser
     | that ticked "remember me" is signed back in with nothing proved for as
@@ -184,6 +188,7 @@ return [
         'connection' => null,
         'table' => 'keyring_sessions',
         'store' => null,
+        'max' => 100,
         'idle' => '2h',
         'remember_idle' => '14d',
         'absolute' => '30d',
