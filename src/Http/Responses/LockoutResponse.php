@@ -19,12 +19,22 @@ class LockoutResponse implements LockoutResponseContract
 
     public function toResponse($request)
     {
-        // A wait longer than any lock that lifts by itself is the in-a-row
-        // cap or a lock that's held. Counting it down in seconds helps
-        // nobody, and for a factor that can start a sign in a password
-        // reset ends it.
-        throw $this->context->factor instanceof PrimaryFactor && $this->context->retryAfter > Duration::seconds(config('keyring.limits.longest_lock'))
-            ? ValidationException::withMessages([$this->context->errorKey() => __('keyring::keyring.locked')])->status(429)
-            : Throttle::exception($this->context->errorKey(), $this->context->retryAfter);
+        // No lock that lifts by itself outlasts "longest_lock". Past that
+        // it's the cap on failures in a row, or a lock that's held, and
+        // counting it down helps nobody: say what ends it instead.
+        throw $this->context->retryAfter !== null && $this->context->retryAfter <= Duration::seconds(config('keyring.limits.longest_lock'))
+            ? Throttle::exception($this->context->errorKey(), $this->context->retryAfter)
+            : ValidationException::withMessages([$this->context->errorKey() => $this->locked()])->status(429);
+    }
+
+    /**
+     * A password reset clears a factor that can start a sign in. Any other
+     * is set up again, once its user has signed in another way.
+     */
+    protected function locked(): string
+    {
+        $factor = $this->context->factor;
+
+        return __($factor instanceof PrimaryFactor && $factor->startsLogin() ? 'keyring::keyring.locked' : 'keyring::keyring.factor_locked');
     }
 }

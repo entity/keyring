@@ -169,6 +169,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Password Change Page
+    |--------------------------------------------------------------------------
+    |
+    | Where a user who has to choose a new password is sent from every other
+    | page until they have: after Keyring::requirePasswordChange($user), or a
+    | risk response with requirePasswordChange(). Null answers 403.
+    |
+    */
+
+    'password_change_url' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Devices
     |--------------------------------------------------------------------------
     |
@@ -202,16 +215,25 @@ return [
     | listed and revoked on any session driver. Drivers: "database" (the
     | keyring_sessions table) or "cache" (any persistent cache store).
     |
+    | An account can be signed in "max" times at once. A sign in beyond that
+    | ends whichever of its sessions has gone unused longest (null for no
+    | limit).
+    |
     | Timeouts accept "30m", "12h", "30d"... "idle" and "absolute" end the
-    | session ("idle" null leaves inactivity to Laravel's session lifetime).
+    | session: after that long unused, and that long after sign in. A browser
+    | that ticked "remember me" is signed back in with nothing proved for as
+    | long as it comes back within "remember_idle", which is the whole point
+    | of ticking it. Null for either leaves that inactivity unlimited.
     | "levels" are how long each assurance level keeps counting: past them the
     | user stays signed in, and routes that need the level ask them to verify
-    | again. "remember_cookie" names the cookie that ties "remember me" to
-    | the session it was ticked for: null is keyring_remember, prefixed over
-    | HTTPS like the device cookie. Each one works once and is replaced.
-    | For "remember_grace" a browser's other requests, sent with the one
-    | that used it, are still let in on the same session. Used after that,
-    | the session ends for everyone holding it.
+    | again. With "end_on_lapse" a session ends instead when the level it
+    | signed in at runs out, as NIST SP 800-63B words it, and "remember me"
+    | brings nothing back. "remember_cookie" names the cookie that ties
+    | "remember me" to the session it was ticked for: null is
+    | keyring_remember, prefixed over HTTPS like the device cookie. Each one
+    | works once and is replaced. For "remember_grace" a browser's other
+    | requests, sent with the one that used it, are still let in on the same
+    | session. Used after that, the session ends for everyone holding it.
     |
     */
 
@@ -220,12 +242,15 @@ return [
         'connection' => null,
         'table' => 'keyring_sessions',
         'store' => null,
-        'idle' => null,
+        'max' => 100,
+        'idle' => '2h',
+        'remember_idle' => '14d',
         'absolute' => '30d',
         'levels' => [
             'aal2' => ['idle' => '1h', 'absolute' => '24h'],
             'aal3' => ['idle' => '15m', 'absolute' => '12h'],
         ],
+        'end_on_lapse' => false,
         'middleware' => true,
         'remember_cookie' => null,
         'remember_grace' => '10s',
@@ -406,19 +431,25 @@ return [
     |--------------------------------------------------------------------------
     |
     | Default attempts per minute, per account and per IP address, and the
-    | failures in a row an account's factor allows however slowly they come
-    | (null for no cap). At that cap the factor is refused until the count is
-    | forgotten ("remember_failures_for"), or for a password until a reset.
-    | Factors may declare their own limits.
+    | failures in a row one of an account's authenticators allows however
+    | slowly they come (100 is the most NIST SP 800-63B allows, null is no
+    | cap). They're counted in the database, and at the cap the authenticator
+    | is refused until a password reset or Keyring::unlock() clears it, or a
+    | second factor is removed and added again. "consecutive_elsewhere" is
+    | how many of them browsers the account hasn't signed in from may make,
+    | which keeps the rest for the owner's own. Factors may declare their own
+    | limits.
     |
     | Each lockout lasts twice as long as the one before, up to "longest_lock",
     | or "longest_ip_lock" for a whole IP address. With "lock_after" set, an
-    | account locked out of signing in that many times in a day stays locked
-    | for "remember_failures_for", or until its password is reset or you call
-    | Keyring::unlock(). "codes" is how many codes an account can be sent for
-    | one factor every "codes_per", and "notices" how many security notices
-    | of one kind, or email change requests, an account or an address can be
-    | sent every "notices_per". Registration mails an address that often too.
+    | account locked out of signing in that many times in a day is refused
+    | as it would be at the cap. A typed username nobody has can't be counted
+    | in the database, so every name's own failures in a row are counted in
+    | the cache as well, for "remember_names_for". "codes" is how many codes
+    | an account can be sent for one factor every "codes_per", and "notices"
+    | how many security notices of one kind, or email change requests, an
+    | account or an address can be sent every "notices_per". Registration
+    | mails an address that often too.
     |
     */
 
@@ -426,7 +457,8 @@ return [
         'per_account' => 5,
         'per_ip' => 20,
         'consecutive' => 100,
-        'remember_failures_for' => '30d',
+        'consecutive_elsewhere' => 80,
+        'remember_names_for' => '30d',
         'longest_lock' => '24h',
         'longest_ip_lock' => '15m',
         'lock_after' => null,

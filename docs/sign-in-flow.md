@@ -184,7 +184,7 @@ The page (`challenge` for logins, `confirm` for step-up) receives:
 |---|---|
 | `purpose` | `login` or `confirm`. |
 | `factor` | The key of the factor to verify now. |
-| `authenticator` | How the factor presents this authenticator. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`. |
+| `authenticator` | How the factor presents this authenticator. Always `factor`, `id` and `name`. `id` is `null` for the password. Email codes add `hint`, a masked address like `t•••@example.com`. Recovery codes add `remaining`, and `replace`: whether a code has been used, so the user should [make a new set](authenticators.md#recovery-codes). |
 | `challenge` | Factor-specific props. See below. |
 | `alternatives` | The user's other authenticators that would help, for "try another way". Same shape as `authenticator`. |
 | `canTrustDevice` | Whether to show "don't ask again on this device". `true` for logins with `Features::devices()` on and `devices.trust_for` not `null`. |
@@ -429,13 +429,14 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `AuthenticatedResponse` | The login or confirmation is complete. | Redirect to the intended URL or `home`. JSON: `{"status": "authenticated", "redirect": "..."}`. |
 | `ChallengeResponse` | Another factor is needed. | Redirect to the challenge page. JSON: `202` with `{"status": "challenge", "redirect": "..."}`. |
 | `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login, otherwise `keyring::keyring.invalid` on the factor's field. |
-| `LockoutResponse` | Too many attempts. An account's own limit refusing a typed username answers with `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message, or `keyring::keyring.locked` when a password reset is the way back in. |
+| `LockoutResponse` | Too many attempts. An account's own limit refusing a typed username answers with `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message, or `keyring::keyring.locked` when a password reset is the way back in, or `keyring::keyring.factor_locked` for a second factor that has to be set up again. |
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
 | `RegisterResponse` | A new user registered and was signed in, with [`registration.reveal_taken`](#saying-when-an-address-is-taken). | The same as `AuthenticatedResponse`. |
 | `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
 | `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, coming back afterwards. JSON: `401`. Both send `Clear-Site-Data`. |
 | `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, coming back afterwards. JSON: `423` with `redirect`. |
 | `EnrollmentRequiredResponse` | A route needs a sign-in method the user hasn't set up. | Redirect to `enrollment_url` with the `enroll-first` status, or `403` without one. JSON: `403`. |
+| `PasswordChangeRequiredResponse` | The user has to [choose a new password](protected-changes.md#requiring-a-password-change) before going on. | Redirect to `password_change_url` with the `change-password` status, or `403` without one. JSON: `403`. |
 | `VerifiedResponse` | The user's email address is verified. Built with `justNow`, true when the link they followed did it. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. |
 
 "JSON" here means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits.
@@ -503,7 +504,7 @@ Other requests are redirected (back, or to `redirect`) with the slug flashed as 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
 
 Swap it like the others. Your class receives the same named arguments:
 
@@ -562,9 +563,9 @@ All in `Keyring\Events`:
 | `FactorChallenged` | The challenge page shows a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (nullable), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit. Dispatched for each request it refuses. | `request`, `factor`, `retryAfter` |
+| `Lockout` | A rate limit was hit. Dispatched for each request it refuses. | `request`, `factor`, `retryAfter` (`null` when waiting won't help) |
 | `VerificationRefused` | The final gate refused because a [mandatory step](#mandatory-steps) hadn't run. | `attempt`, `factor`, `skipped` |
-| `AccountLocked` | The account is locked until a password reset (only with `limits.lock_after`). | `user`, `factor` |
+| `AccountLocked` | A factor that can start a sign in is refused for the account until a password reset: it reached the cap on failures in a row, or `limits.lock_after` held it. | `user`, `factor` |
 | `Authenticated` | A login completed. | `user`, `attempt`, `device` |
 | `Confirmed` | A step-up completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |

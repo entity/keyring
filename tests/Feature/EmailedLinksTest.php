@@ -336,7 +336,7 @@ it('changes nothing on a GET, on any of its routes', function () {
         'RegisteredUserController@create', 'PasswordResetController@create', 'PasswordResetController@edit',
         'AuthenticatedSessionController@create', 'AuthenticatedSessionController@options',
         'ChallengeController@show', 'ChallengeController@show',
-        'DeviceController@index', 'DeviceController@page',
+        'DeviceController@index', 'DeviceController@page', 'SessionController@index',
         'EmailChangeController@show', 'EmailChangeController@page', 'EmailChangeController@page',
         'EmailVerificationController@notice', 'EmailVerificationController@page',
     ]);

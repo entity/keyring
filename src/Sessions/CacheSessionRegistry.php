@@ -18,6 +18,9 @@ use Keyring\Contracts\SessionRegistry;
  * Revocations live in their own key that saves never write, so a request
  * saving a stale copy of its session can't undo a revocation. What replaced
  * a record is kept the same way.
+ *
+ * The cache can't list every user's records, so signing everyone out is one
+ * more key: the moment up to which every session counts as revoked.
  */
 class CacheSessionRegistry implements SessionRegistry
 {
@@ -43,16 +46,20 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function find(string $id): ?RegisteredSession
     {
-        $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id)]);
+        $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id), $this->everyoneKey()]);
         $data = $found[$this->key($id)] ?? null;
 
         if (! is_array($data)) {
             return null;
         }
 
+        // A record carries the time its session signed in from one record to
+        // the next, so everyone who was signed out stays signed out.
+        $everyone = $found[$this->everyoneKey()] ?? null;
+
         return RegisteredSession::fromArray([
             ...$data,
-            'revoked_at' => $found[$this->revokedKey($id)] ?? null,
+            'revoked_at' => $found[$this->revokedKey($id)] ?? ($everyone !== null && $data['authenticated_at'] <= $everyone ? $everyone : null),
             'replaced_by' => $found[$this->replacedKey($id)]['by'] ?? null,
             'replaced_at' => $found[$this->replacedKey($id)]['at'] ?? null,
         ]);
@@ -139,6 +146,11 @@ class CacheSessionRegistry implements SessionRegistry
         return $this->revokeWhere($user, fn (RegisteredSession $session) => $session->deviceId === $deviceId);
     }
 
+    public function revokeEveryone(): void
+    {
+        $this->cache->forever($this->everyoneKey(), now()->getTimestamp());
+    }
+
     /**
      * @param  Closure(RegisteredSession): bool  $callback
      */
@@ -197,5 +209,14 @@ class CacheSessionRegistry implements SessionRegistry
     protected function replacedKey(string $id): string
     {
         return $this->key($id).':replaced';
+    }
+
+    /**
+     * When everyone was last signed out (revokeEveryone). No session's ID
+     * has a colon in it, so this is never mistaken for a record.
+     */
+    protected function everyoneKey(): string
+    {
+        return $this->prefix.'everyone:revoked';
     }
 }

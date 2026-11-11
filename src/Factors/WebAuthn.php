@@ -114,6 +114,17 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
         return $authenticator->meta('backup_eligible') === false;
     }
 
+    /**
+     * A key added while this factor asked for attestation, whose maker's
+     * certificate chained to a root the app trusts. Without that, "can't
+     * leave its device" is only the key's word for it. A key added before
+     * the factor asked, or one the factor has stopped asking about, isn't.
+     */
+    public function attested(Authenticator $authenticator): bool
+    {
+        return $this->profile->attestation && filled($authenticator->attestation);
+    }
+
     public function priority(): int
     {
         return $this->profile->priority;

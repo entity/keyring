@@ -66,7 +66,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `factor_failed` | warning | A factor failed. | |
 | `second_factor_failed` | warning | A factor failed during a login after a correct password. | |
 | `locked_out` | warning | A rate limit started refusing an IP address for a factor, whether the answer said so or was that of a wrong password. [Logged once](#refusals-that-repeat), not for each request it refuses. Not linked to a user. | `retry_after` |
-| `account_locked` | warning | Failed attempts locked the account until a password reset (only with `limits.lock_after`). | |
+| `account_locked` | warning | Failed attempts got the password or a passkey refused until a password reset: the cap on failures in a row, or `limits.lock_after`. | |
 | `signed_out` | info | The user signed out. | |
 | `authenticator_added`, `authenticator_removed` | notice | | `name` |
 | `recovery_codes_generated` | info | | |
@@ -74,7 +74,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `new_device` | notice | A sign in from a new device. | `device` |
 | `device_revoked` | info | A device was signed out. | `device` |
 | `device_reported` | warning | A device was signed out from the "this wasn't me" link. | `device` |
-| `sessions_revoked` | info | "Sign out everywhere else". | `count` |
+| `sessions_revoked` | info | "Sign out everywhere else", one session ended from the sessions list, or an administrator's `keyring:sign-out` for the user. | `count` |
 | `session_ended` | info | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `remember_me_reused` | warning | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent are the request that brought the used one; `device_id` is the device the ended session was on. | `device` |
 | `email_change_requested` | info | | |
@@ -86,7 +86,7 @@ How long those lines are kept, and who can read them, is then up to that channel
 | `clone_suspected` | critical | A passkey or security key's counter went backwards. | `name` |
 | `risk_step_up`, `risk_reauthenticate`, `risk_notified` | notice | A risk action did something. | `checkpoint`, `score`, `reasons` |
 | `risk_denied`, `risk_locked`, `risk_revoked_sessions` | warning | A risk action refused, locked or signed out. | `checkpoint`, `score`, `reasons` |
-| `access_refused` | warning | A signed-in user asked for an authenticator or device that isn't theirs, or that doesn't exist (a 404 either way), or opened an email verification link made for another account (a 403). | `resource` (`authenticator`, `device` or `email_verification`), `id` (what was asked for, cut to 64 characters) |
+| `access_refused` | warning | A signed-in user asked for an authenticator, device or session that isn't theirs, or that doesn't exist (a 404 either way), or opened an email verification link made for another account (a 403). | `resource` (`authenticator`, `device`, `session` or `email_verification`), `id` (what was asked for, cut to 64 characters; for a session, its [handle](devices-and-sessions.md#listing-and-ending-sessions), never its registry ID) |
 | `enrollment_refused` | warning | A sign-in method wasn't added. | `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account [may not add one yet](authenticators.md#who-may-enroll)) |
 | `authenticator_removal_refused` | warning | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `name` |
 | `link_refused` | warning | An emailed link was refused. Linked to the user whose email change it was, when there is one. | `link` and `reason`, [below](#refused-links) |
@@ -279,7 +279,7 @@ The security notices, each sent to the user:
 | `second_factor_failed` | Someone got the password right but failed the next factor. | |
 | `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
 | `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. Sent for the set that comes with a user's first extra sign-in method too. | |
-| `account_locked` | Failed attempts locked the account until its password is reset (only with [`limits.lock_after`](security.md#locking-until-a-reset)). | `url`, the password reset form (the `password.request` route), when the app has one. `device` and `ip` are those of the attempt that locked it. |
+| `account_locked` | Failed attempts got the password or a passkey refused until the password is reset: it reached [the cap on failures in a row](security.md#at-the-cap), or [`limits.lock_after`](security.md#locking-until-a-reset) held it. Browsers the account has signed in from may still get in. | `url`, the password reset form (the `password.request` route), when the app has one. `device` and `ip` are those of the attempt that locked it. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. | `reasons` |
 | `clone_suspected` | A passkey or security key looked cloned. | `name` |
 | `email_changed` | An email change applied. Sent to both the old and the new address. | |

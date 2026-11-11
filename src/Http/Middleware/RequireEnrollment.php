@@ -8,7 +8,6 @@ use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Uri;
-use Keyring\Enums\Assurance;
 use Keyring\KeyringManager;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
@@ -17,8 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Users must have set up what a level needs before going further, e.g.
  * keyring.enrolled (AAL2) on the whole app: they sign in with what they have,
- * then add a second factor. Recovery codes and email codes
- * don't count. Users who haven't are sent to keyring.enrollment_url. Guests
+ * then add a second factor. Recovery codes don't count, and an emailed code
+ * isn't a factor. Users who haven't are sent to keyring.enrollment_url. Guests
  * are let through, so it can sit in the web group and leave them to auth.
  */
 class RequireEnrollment
@@ -36,9 +35,9 @@ class RequireEnrollment
         protected StepUp $stepUp,
     ) {}
 
-    public function handle(Request $request, Closure $next, string $level = 'aal2'): Response
+    public function handle(Request $request, Closure $next, string $level = 'aal2', string ...$also): Response
     {
-        $requirement = Requirement::for(Assurance::fromName($level));
+        $requirement = Requirement::named($level, ...$also);
         $url = config('keyring.enrollment_url');
 
         $user = $this->keyring->guard()->user();

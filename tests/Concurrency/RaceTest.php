@@ -7,6 +7,7 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
+use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
@@ -78,6 +79,27 @@ it('lets one of two assertions with the same count through, and keeps that count
     expect(outcomes($results, true))->toBe(1)
         ->and(outcomes($results, false))->toBe(1)
         ->and($passkey->fresh()->sign_count)->toBe($record->counter + 1);
+});
+
+it('checks one more proof at the last failure the cap allows, however many arrive together', function () {
+    $user = taylor();
+
+    // One short of the 80 failures in a row browsers the account hasn't
+    // signed in from may make.
+    $count = new FailureCount(['factor' => 'password', 'authenticator' => 'password', 'failures' => 79]);
+    $count->authenticatable()->associate($user)->save();
+
+    $results = contend($count, [
+        ['guess-password', $user->id],
+        ['guess-password', $user->id],
+        ['guess-password', $user->id],
+    ]);
+
+    expect(outcomes($results, 'checked'))->toBe(1)
+        ->and(outcomes($results, 'refused'))->toBe(2)
+        ->and($count->fresh())
+        ->failures->toBe(80)
+        ->locked_at->not->toBeNull();
 });
 
 it('ends with the old address whichever of confirm and revert wins', function () {
@@ -154,4 +176,60 @@ it('lets one of two requests use a "remember me" cookie, and starts one session 
         ->and(outcomes($results, $resumed))->toBe(1)
         ->and($registry->forUser($user)->map->id->all())->toBe([$resumed])
         ->and(DB::table('keyring_sessions')->count())->toBe(2);
+});
+
+it('keeps an account to its session limit when two sign ins land at once', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+
+    foreach (['older' => 120, 'newer' => 60] as $id => $ago) {
+        $registry->save(new RegisteredSession($id, (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now - $ago, $now - $ago, $now + 3600));
+    }
+
+    // Each waits for the user's row, so the second counts the first's session.
+    $started = contend($user, [
+        ['start-session', $user->id, 2],
+        ['start-session', $user->id, 2],
+    ]);
+
+    expect($registry->forUser($user)->map->id->all())->toEqualCanonicalizing($started)
+        ->and($registry->find('older')->revokedAt)->not->toBeNull()
+        ->and($registry->find('newer')->revokedAt)->not->toBeNull();
+});
+
+it('leaves nothing signed in when a sign-out everywhere meets a "remember me" cookie coming back', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+
+    // Both wait for the user's row. Whichever goes first, the session ends:
+    // signed out and then refused, or carried on and then signed out.
+    [$resumed, $revoked] = contend($user, [
+        ['resume-session', 'remembered'],
+        ['sign-out', $user->id],
+    ]);
+
+    expect($revoked)->toBe(1)
+        ->and($registry->forUser($user))->toBeEmpty()
+        ->and($registry->find($resumed ?? 'remembered')->revokedAt)->not->toBeNull();
+});
+
+it('signs out a session that moved to a new record while everyone was being signed out', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save($session = new RegisteredSession('remembered', (string) $user->id, 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600, remembered: true));
+
+    // The sign-out comes to the record while "remember me" is carrying its
+    // session on, and waits. By the time it gets the record, the session is
+    // on another one it hasn't seen.
+    contend(sessionRow('remembered'), [['sign-out-everyone', 'everyone']], function () use ($registry, $session) {
+        expect($registry->replace('remembered', $session->with(['id' => 'resumed'])))->toBeTrue();
+    });
+
+    expect($registry->find('resumed')->revokedAt)->not->toBeNull()
+        ->and($registry->find('remembered')->revokedAt)->not->toBeNull()
+        ->and($registry->forUser($user))->toBeEmpty();
 });

@@ -91,7 +91,8 @@ it('passes factors without real proofs', function () {
     $this->get(route('keyring.login.challenge'));
     $this->post(route('keyring.login.verify', 'security-key'))->assertRedirect('/dashboard');
 
-    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+    // A key nothing vouches for is a second factor, and no more.
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
 });
 
 it('fails factors on demand', function () {

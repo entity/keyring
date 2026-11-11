@@ -40,9 +40,21 @@ beforeEach(function () {
     $this->user = taylor();
 });
 
+/**
+ * A session that just proved the password and every key the account has,
+ * which is what adding another one takes.
+ */
+function provedEveryKey(): void
+{
+    $keys = Keyring::for(test()->user)->all()->reject->isVirtual()->all();
+
+    test()->actingAs(test()->user);
+    $keys === [] ? test()->withAssurance(Assurance::AAL2) : test()->verifiedWith(...$keys);
+}
+
 function enroll(string $factor, VirtualAuthenticator $key, string $name = 'My key'): void
 {
-    test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
+    provedEveryKey();
 
     $options = test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
 
@@ -72,7 +84,7 @@ it('keeps the user handle a user\'s keys already have when app_key changes', fun
 
     config(['app.key' => 'base64:'.base64_encode(random_bytes(32)), 'app.previous_keys' => [config('app.key')]]);
 
-    test()->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    provedEveryKey();
     $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect(Base64UrlSafe::decodeNoPadding($options['user']['id']))->toBe($handle);
@@ -89,8 +101,11 @@ it('signs in with a passkey alone, without a username', function (VirtualAuthent
     $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
         ->assertRedirect('/dashboard');
 
+    // It stays on its device, by its own account: without attestation
+    // that's a second factor, not AAL3.
     $this->assertAuthenticatedAs($this->user);
-    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+        ->and(Requirement::aal2()->deviceBound()->isMetBy(app(SessionAssurance::class)->all()))->toBeTrue();
 })->with([
     'P-256' => fn () => new VirtualAuthenticator,
     'Ed25519' => fn () => VirtualAuthenticator::eddsa(),
@@ -117,9 +132,8 @@ it('fails a key whose stored record can not be read, and lets the user add anoth
     $this->postJson('/login/passkey', ['credential' => $key->assert($options)])->assertJsonValidationErrors('credential');
     $this->assertGuest();
 
-    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
-        ->postJson(route('keyring.authenticators.store', 'passkey'))
-        ->assertOk();
+    provedEveryKey();
+    $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk();
 });
 
 it('caps a passkey that syncs at aal2, as nist does', function () {
@@ -298,7 +312,9 @@ it('uses a security key as a second factor', function () {
         ->assertRedirect('/dashboard');
 
     $this->assertAuthenticatedAs($this->user);
-    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
+    expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+        ->and($this->user->keyring->refresh()->canMeet(Requirement::aal3()))->toBeFalse()
+        ->and($this->user->keyring->canMeet(Requirement::aal2()->deviceBound()))->toBeTrue();
 });
 
 it('does not let a security key sign in without a password', function () {
@@ -385,7 +401,7 @@ it('will not register the same key twice', function () {
     $key = new VirtualAuthenticator;
     enroll('passkey', $key);
 
-    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    provedEveryKey();
     $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect($options['excludeCredentials'])->toHaveCount(1);

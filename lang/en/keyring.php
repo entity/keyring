@@ -7,6 +7,7 @@ return [
     'key_not_accepted' => 'This key couldn\'t be added. Only certain security keys are accepted here, and this doesn\'t appear to be one of them.',
     'expired' => 'Your sign in timed out. Please start again.',
     'locked' => 'Too many failed attempts. Reset your password to sign in again.',
+    'factor_locked' => 'Too many failed attempts. Sign in another way, then remove this sign-in method and add it again.',
     'too_many_codes' => 'Too many wrong codes. Please start again.',
     'confirm' => 'Please confirm it\'s you to continue.',
     'last_factor' => 'You need to keep at least one way to sign in that meets your account\'s security requirements.',

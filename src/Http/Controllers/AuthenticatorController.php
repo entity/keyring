@@ -18,7 +18,9 @@ use Keyring\Events\EnrollmentRefused;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
+use Keyring\Sessions\Sessions;
 use Keyring\Support\Input;
 use Keyring\Support\Throttle;
 
@@ -35,6 +37,8 @@ class AuthenticatorController
         protected EnrollmentStore $enrollments,
         protected AuthenticatorChanges $changes,
         protected Throttle $throttle,
+        protected SignIn $signIn,
+        protected Sessions $sessions,
     ) {}
 
     /**
@@ -66,7 +70,7 @@ class AuthenticatorController
         $enrollment = $this->enrollments->get($factor->key())
             ?? throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
 
-        Input::validate($request, $factor->enrollmentRules());
+        Input::validate($request, [...$factor->enrollmentRules(), 'sign_out_others' => ['sometimes', 'boolean']]);
 
         $authenticator = $this->confirmed($factor, $enrollment, $request);
 
@@ -79,6 +83,13 @@ class AuthenticatorController
         $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
 
         $this->enrollments->forget($factor->key());
+        $this->signOutOthers($request);
+
+        // New recovery codes prove nothing: confirming only says they were
+        // saved. Anything else was just proved to work.
+        if ($factor->key() !== RecoveryCodes::KEY) {
+            $this->signIn->enrolled($request, $authenticator);
+        }
 
         return $this->status('authenticator-added', array_filter([
             'authenticator' => $authenticator->factor()->present($authenticator),
@@ -107,11 +118,26 @@ class AuthenticatorController
     public function destroy(Request $request, string $authenticator): StatusResponse
     {
         // Only asked for when this is the last second factor.
-        Input::validate($request, ['password' => ['nullable', 'string']]);
+        Input::validate($request, ['password' => ['nullable', 'string'], 'sign_out_others' => ['sometimes', 'boolean']]);
 
         $this->changes->remove($this->keyring->user(), $authenticator, Input::get($request, 'password'));
+        $this->signOutOthers($request);
 
         return $this->status('authenticator-removed');
+    }
+
+    /**
+     * Someone else being signed in is often why a user changes how they
+     * sign in, so the change can take the other sessions out with it
+     * ("sign_out_others"), keeping this one. Unlike a password change it has
+     * to be asked for: a new passkey takes nothing away from a session that
+     * signed in without it.
+     */
+    protected function signOutOthers(Request $request): void
+    {
+        if ($request->boolean('sign_out_others')) {
+            $this->sessions->signOutOthers($request, $this->keyring->user());
+        }
     }
 
     /**

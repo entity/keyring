@@ -101,6 +101,12 @@ class AuthenticateSession
         // Before anything checks the level, so inactivity lapses it first.
         $this->assurance->touch();
 
+        // With sessions.end_on_lapse, a session ends with the level it
+        // signed in at, where it would otherwise carry on at a lower one.
+        if (($lapse = $this->assurance->lapse()) !== null) {
+            return $this->signOut($request, $lapse);
+        }
+
         if ($this->risk->signalsFor(Checkpoint::Request) !== [] && ($response = $this->assessRisk($request, $user, $session)) !== null) {
             return $response;
         }
@@ -120,14 +126,12 @@ class AuthenticateSession
      */
     protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
-        $idle = $this->sessions->idle();
-
         return match (true) {
             $session->revokedAt !== null => 'revoked',
             $session->expiresAt <= $now => 'expired',
             $session->userId !== (string) $user->getAuthIdentifier() => 'other_user',
             $session->replacedBy !== null => 'replaced',
-            $idle !== null && $now - $session->lastActivityAt > $idle => 'idle',
+            $this->sessions->idledOut($session, $now) => 'idle',
             default => null,
         };
     }
@@ -202,6 +206,14 @@ class AuthenticateSession
             return $this->signOut($request, $ended);
         }
 
+        // The cookie proves nothing, so it can't carry a session on where a
+        // session ends with the level it signed in at.
+        if (config('keyring.sessions.end_on_lapse')) {
+            $this->sessions->registry()->revoke($session->id);
+
+            return $this->signOut($request, 'expired');
+        }
+
         // Whatever this session held, the cookie proved none of it.
         $this->assurance->flush();
 
@@ -212,7 +224,7 @@ class AuthenticateSession
             return null;
         }
 
-        $current = $this->sessions->resume($request, $session);
+        $current = $this->sessions->resume($request, $user, $session);
 
         // A request sent alongside this one used the cookie first, or the
         // session was revoked a moment ago. Looking again says which.

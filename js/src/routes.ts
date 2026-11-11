@@ -22,6 +22,8 @@ export const routes = {
   enroll: (factor: string) => `${prefix}/user/authenticators/${factor}`,
   confirmEnrollment: (factor: string) => `${prefix}/user/authenticators/${factor}/confirm`,
   authenticator: (id: string) => `${prefix}/user/authenticators/${id}`,
+  sessions: () => `${prefix}/user/sessions`,
+  session: (id: string) => `${prefix}/user/sessions/${id}`,
 }
 
 export type Purpose = 'login' | 'confirm'

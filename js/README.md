@@ -14,7 +14,7 @@ const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop
 
 | Import | Contains |
 |---|---|
-| `@entity/keyring` | WebAuthn helpers, enrollment helpers, `json()`, routes and types. No framework code. |
+| `@entity/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes and types. No framework code. |
 | `@entity/keyring/inertia` | The challenge helpers, for Inertia with any framework. |
 | `@entity/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@entity/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |

@@ -92,7 +92,11 @@ it('answers a second factor with the key that signed, not one whose id only look
     $other = $keyWithId('1000');
 
     foreach ([$shown, $other] as $key) {
-        $this->actingAs($user)->withAssurance(Assurance::AAL2);
+        // Adding a key takes proving the ones the account already has.
+        $keys = Keyring::for($user)->all()->reject->isVirtual()->all();
+
+        $this->actingAs($user);
+        $keys === [] ? $this->withAssurance(Assurance::AAL2) : $this->verifiedWith(...$keys);
         $options = $this->postJson(route('keyring.authenticators.store', 'security-key'))->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $key->register($options)])->assertOk();
         $this->post('/logout');

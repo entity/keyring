@@ -13,12 +13,14 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Throttle;
 use Keyring\Tests\Fixtures\User;
 use Keyring\Tests\TestCase;
 
@@ -49,13 +51,39 @@ try {
 
             return Keyring::factor('passkey')->verify($attempt, $authenticator, Request::create('/', 'POST', ['credential' => $credential])) !== null;
         })(),
+        'guess-password' => (function () use ($id) {
+            $throttle = app(Throttle::class);
+            $limits = Keyring::factor('password')->limits(Request::create('/login', 'POST', ['email' => User::findOrFail($id)->email]), null);
+
+            // As the pipeline does around a wrong password: counted going
+            // in, unless a limit refuses it, and failed coming out.
+            if ($throttle->hit($limits) !== null) {
+                return 'refused';
+            }
+
+            $throttle->failed($limits);
+
+            return 'checked';
+        })(),
         'resume-session' => (function () use ($id) {
             $request = Request::create('/');
             $request->setLaravelSession(app('session.store'));
 
             // Read while the row is held, as a request that found the cookie unused.
-            return app(Sessions::class)->resume($request, app(SessionRegistry::class)->find($id))?->id;
+            $session = app(SessionRegistry::class)->find($id);
+
+            return app(Sessions::class)->resume($request, User::findOrFail($session->userId), $session)?->id;
         })(),
+        'start-session' => (function () use ($id, $value) {
+            config(['keyring.sessions.max' => (int) $value]);
+
+            $request = Request::create('/');
+            $request->setLaravelSession(app('session.store'));
+
+            return app(Sessions::class)->start($request, User::findOrFail($id), null, Assurance::AAL1)->id;
+        })(),
+        'sign-out' => app(Sessions::class)->signOutEverywhere(User::findOrFail($id)),
+        'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),
     };

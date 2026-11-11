@@ -52,7 +52,7 @@ use Keyring\KeyringManager;
  * @method static string|null describeDevice(string|null $userAgent)
  * @method static \Keyring\KeyringManager recordIpsUsing(\Closure $callback)
  * @method static string|null recordedIp(\Illuminate\Http\Request $request)
- * @method static void unlock(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
+ * @method static void unlock(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user, string|null $factor = null)
  * @method static bool allowsSignIn(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static bool hidesRegisteredAddresses()
  * @method static bool allowsEnrollment(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
@@ -72,6 +72,8 @@ use Keyring\KeyringManager;
  * @method static class-string<\Keyring\Models\PendingChange> pendingChangeModel()
  * @method static \Keyring\KeyringManager useSecurityEventModel(string $model)
  * @method static class-string<\Keyring\Models\SecurityEvent> securityEventModel()
+ * @method static \Keyring\KeyringManager useFailureCountModel(string $model)
+ * @method static class-string<\Keyring\Models\FailureCount> failureCountModel()
  *
  * @see KeyringManager
  */
