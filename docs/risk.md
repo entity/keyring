@@ -2,6 +2,7 @@
 
 - [Introduction](#introduction)
 - [Built-in Signals](#built-in-signals)
+    - [Telling the User](#telling-the-user)
 - [Levels](#levels)
 - [Responding to Risk](#responding-to-risk)
 - [Actions](#actions)
@@ -25,7 +26,7 @@ use Keyring\Risk\Signals\SessionFingerprintChanged;
 Keyring::risk()->signals([NewDevice::class, SessionFingerprintChanged::class]);
 ```
 
-Once signals are picked, Keyring responds to them as shown below unless you set your own responses. Without a [locator](devices-and-sessions.md#locations), the location signals never fire. The device signals need [`Features::devices()`](devices-and-sessions.md), and `RepeatedFactorFailures` needs [`Features::securityLog()`](security-log-and-emails.md).
+Once signals are picked, Keyring responds to them as shown below unless you set your own responses. Without a [locator](devices-and-sessions.md#locations), the location signals never fire. The device signals and `InactiveAccount` need [`Features::devices()`](devices-and-sessions.md), and `RepeatedFactorFailures` and `SuccessAfterFailures` need [`Features::securityLog()`](security-log-and-emails.md).
 
 ## Built-in Signals
 
@@ -38,12 +39,44 @@ In `Keyring\Risk\Signals`:
 | `ImpossibleTravel` | The last located sign in was 500 km or more away, and getting here since would mean travelling faster than 900 km/h. Needs a locator with coordinates. | 60 | login |
 | `RepeatedFactorFailures` | Five or more second factors failed after a correct password in the last 15 minutes (the `within` option). Ten or more doubles the score. | 25 | login |
 | `RecentlyChangedRecovery` | The email address changed (or was changed back) within `risk.recent_change` (7 days). | 25 | login |
+| `InactiveAccount` | The account last signed in 90 days ago or more (the `after` option), and none of its sessions has been used since. | 30 | login |
+| `SuccessAfterFailures` | The first factor was right after five or more failed attempts on the account (the `threshold` option) in the last hour (`within`), counted since it last signed in. | 30 | login |
 | `SessionFingerprintChanged` | A signed-in session now comes from a different browser or platform than the one it was last seen in. IP changes alone don't count. | 60 | every request |
 | `BreachedPassword` | The password just used appears in a public breach list. Not on by default: it makes a network call at sign in. | 40 | login |
 
 `SessionFingerprintChanged` compares with the browser the session was last seen in, and acts on each change once. A cookie used by two browsers at once flips back and forth, so with the default response the owner is asked to verify again, and emailed, on every switch. To end such a session instead, have [your responder](#actions) answer `Action::reauthenticate()` at `Checkpoint::Request`.
 
 `RepeatedFactorFailures` only counts failures after a correct password. Anyone can type a wrong password for a known email, so counting those would let a stranger raise the owner's risk. It reads the [security log](security-log-and-emails.md), so it does nothing when the log is off or can't be read.
+
+`InactiveAccount` goes by when the account's devices last signed in. It says nothing about an account Keyring has no sign in on record for, so turning it on doesn't flag every existing user's next sign in. Devices that go unseen for `devices.keep_unseen_for` (a year) are pruned: past that, a returning user's browser is a new device again, which `NewDevice` and the `new_device` email cover.
+
+`SuccessAfterFailures` counts every failed attempt on the account, wrong passwords included, which is what tells a guessed password from a known one. Anyone who knows a username can cause those failures, so the signal can't say whose sign in this is, only that someone has been trying: its score asks for a second factor and no more. A run of failures is followed once, since the count starts over at each sign in.
+
+### Telling the User
+
+OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own each of these two reaches `Level::Medium`, where Keyring asks for a second factor but sends nothing. Together they reach `Level::High`, which notifies. To email the user whenever either is found, without refusing anyone, answer for them in [your responder](#responding-to-risk) and register the `suspicious_activity` [notice](security-log-and-emails.md#email-types):
+
+```php
+use Keyring\Risk\Action;
+use Keyring\Risk\Checkpoint;
+use Keyring\Risk\Level;
+use Keyring\Risk\Risk;
+use Keyring\Risk\Signals\InactiveAccount;
+use Keyring\Risk\Signals\SuccessAfterFailures;
+
+Keyring::risk()
+    ->push(InactiveAccount::class, SuccessAfterFailures::class)
+    ->respond(fn (Risk $risk, Checkpoint $at) => match ($risk->level) {
+        Level::Low => Action::allow(),
+        Level::Medium => $risk->has('inactive_account') || $risk->has('success_after_failures')
+            ? Action::stepUp()->notify()
+            : Action::stepUp(),
+        Level::High => Action::stepUp()->notify(),
+        Level::Critical => Action::deny()->revokeAllSessions()->notify(),
+    });
+```
+
+The email lists what was found, such as "The first sign in for 120 days."
 
 ## Levels
 
@@ -143,9 +176,19 @@ Keyring::risk()->signals([
 ]);
 ```
 
-Use `app()->make()` for signals with dependencies (`RepeatedFactorFailures`, `RecentlyChangedRecovery`, `BreachedPassword`).
+Use `app()->make()` for signals with dependencies (`RepeatedFactorFailures`, `SuccessAfterFailures`, `InactiveAccount`, `RecentlyChangedRecovery`, `BreachedPassword`).
 
-The constructor options are: `score` on every signal, `maxKph` and `minKm` on `ImpossibleTravel`, and `threshold` and `within` (a [duration](configuration.md#durations), `15m` by default) on `RepeatedFactorFailures`.
+The constructor options are: `score` on every signal, `maxKph` and `minKm` on `ImpossibleTravel`, `threshold` and `within` (a [duration](configuration.md#durations), `15m` by default) on `RepeatedFactorFailures`, the same two on `SuccessAfterFailures` (`5` and `1h`), and `after` (a duration, `90d` by default) on `InactiveAccount`:
+
+```php
+use Keyring\Risk\Signals\InactiveAccount;
+use Keyring\Risk\Signals\SuccessAfterFailures;
+
+Keyring::risk()->push(
+    app()->make(InactiveAccount::class, ['after' => '180d']),
+    app()->make(SuccessAfterFailures::class, ['threshold' => 3, 'within' => '24h']),
+);
+```
 
 ## Writing a Signal
 

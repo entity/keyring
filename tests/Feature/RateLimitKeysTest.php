@@ -1,12 +1,18 @@
 <?php
 
 use App\Notifications\Keyring\NewDevice;
+use App\Notifications\Keyring\VerificationCode;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\RateLimiter as Limiter;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
+use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\Password;
+use Keyring\Models\Authenticator;
 use Keyring\Support\Throttle;
 
 // Octane's "octane" cache store is a Swoole table, and a key there holds 63
@@ -76,4 +82,21 @@ it('locks an account out and clears its limits under keys a Swoole table can hol
     app(Throttle::class)->forgetBrowsers($this->user);
 
     $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertOk();
+});
+
+it('keeps a sent code, its guesses and an enrollment\'s confirmation under keys a Swoole table can hold', function () {
+    Notification::fake();
+    Keyring::factors([Password::class, EmailCode::asSecondFactor()]);
+    Authenticator::factory()->emailCode()->for($this->user, 'authenticatable')->create();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.send', 'email-code'))->assertSessionHasNoErrors();
+    $this->post(route('keyring.login.verify', 'email-code'), ['code' => '00000000'])->assertSessionHasErrors('code');
+
+    $code = Notification::sent($this->user, VerificationCode::class)->sole()->code;
+    $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code])->assertRedirect('/dashboard');
+
+    $this->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $code = Notification::sent($this->user, VerificationCode::class)->last()->code;
+    $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk();
 });

@@ -96,6 +96,20 @@ function sendNotifications(?array $types = null): void
 }
 
 /**
+ * Send back an earlier copy of the session (from session()->all()), as a
+ * browser can when the session is kept in its cookie: Laravel's "cookie"
+ * session driver has nothing on the server to say the copy is out of date.
+ *
+ * @param  array<string, mixed>  $earlier
+ */
+function sendBackSession(array $earlier): void
+{
+    test()->flushSession();
+    app('auth')->forgetGuards();
+    test()->withSession($earlier);
+}
+
+/**
  * Turn on only these features and register Keyring's routes again, since
  * they're read once at boot.
  *

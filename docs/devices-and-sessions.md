@@ -33,7 +33,7 @@ Keyring tracks two things:
 ],
 ```
 
-With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry` and `ImpossibleTravel` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
+With devices on, Keyring sets its cookie on sign in, offers "don't ask again on this device", lists where the user is signed in, and adds "this wasn't me" links. Without it, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry`, `ImpossibleTravel` and `InactiveAccount` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking them out there.
 
 ## Routes
 
