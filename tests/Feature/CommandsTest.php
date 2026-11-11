@@ -81,6 +81,8 @@ describe('keyring:install', function () {
             ->toBe((require __DIR__.'/../../config/keyring.php')['features'])
             ->and($config['registration'])->toBe(['reveal_taken' => false])
             ->and($config['enrollment_url'])->toBeNull()
+            // There to fill in: nobody but the app knows where its support is.
+            ->and($config)->toHaveKey('support_contact', null)
             ->and(file_get_contents(config_path('keyring.php')))->toContain('// Features::devices(),')
             // The emails a flow needs are registered, and the notices about changes.
             ->and($provider)->toContain("            'verification_code' => Notifications\VerificationCode::class,")
@@ -227,7 +229,10 @@ describe('keyring:install', function () {
     });
 
     it('can leave out the security emails', function () {
-        $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-emails' => true, '--no-interaction' => true])->assertSuccessful();
+        $this->artisan('keyring:install', ['--factor' => ['totp'], '--no-emails' => true, '--no-interaction' => true])
+            // The emails say who to contact once the app says where that is.
+            ->expectsOutputToContain('Set support_contact in config/keyring.php')
+            ->assertSuccessful();
 
         expect(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))
             ->toContain("            // 'password_changed' => Notifications\PasswordChanged::class,")

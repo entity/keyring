@@ -170,6 +170,7 @@ class InstallCommand extends Command
             in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
             $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
             'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
+            $writesConfig ? 'Set <comment>support_contact</comment> in <comment>config/keyring.php</comment> to a page or an address users can reach you at: the emails then say who to contact if something wasn\'t them' : null,
             match (true) {
                 $enrolled && config('keyring.enrollment_url') === null && ! $writesConfig => 'Set <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> to your page for adding a sign-in method: users are sent there until they have a second factor',
                 $enrolled => 'Build your page for adding a sign-in method at <comment>'.self::ENROLLMENT_URL.'</comment>, or point <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> at yours: users are sent there until they have a second factor',

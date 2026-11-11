@@ -450,3 +450,69 @@ it('publishes a notification for every type, that builds from what keyring passe
     expect($notification->via($this->user))->toBe(['mail'])
         ->and(renderedMail($notification->toMail($this->user))['text'])->not->toBeEmpty()->not->toContain(':name')->not->toContain(':remaining')->not->toContain(':reasons');
 })->with(KeyringManager::NOTIFICATIONS);
+
+// NIST SP 800-63B-4, Sec. 4.6: a notice says who to contact when the
+// recipient says the event wasn't theirs.
+describe('a support contact', function () {
+    /**
+     * The published notification of a type, as Keyring would build it.
+     */
+    function publishedNotification(string $type): Illuminate\Notifications\Notification
+    {
+        sendNotifications();
+
+        return Keyring::requiredNotification($type, [
+            'when' => 'Monday', 'code' => '12345678', 'minutes' => 10,
+            'email' => 'n•••@example.com', 'revertUrl' => 'https://example.com/revert',
+        ]);
+    }
+
+    it('is in every notice about the account once the app sets one', function (string $type) {
+        config(['keyring.support_contact' => 'https://example.com/support?from=email']);
+
+        $mail = renderedMail(publishedNotification($type)->toMail($this->user));
+
+        expect($mail['text'])->toContain('contact us')->toContain('https://example.com/support?from=email')
+            ->and($mail['html'])->toContain('href="https://example.com/support?from=email"');
+    })->with([...array_slice(KeyringManager::NOTIFICATIONS, 0, 12), 'verification_code', 'email_change_notice']);
+
+    it('links an email address as one', function () {
+        config(['keyring.support_contact' => 'help@example.com']);
+
+        $mail = renderedMail(publishedNotification('password_changed')->toMail($this->user));
+
+        expect($mail['html'])->toContain('href="mailto:help@example.com"')->toContain('>help@example.com</a>')
+            ->and($mail['text'])->toContain('contact us: [help@example.com](mailto:help@example.com)');
+    });
+
+    it('leaves anything that isn\'t a page or an address as plain text', function () {
+        config(['keyring.support_contact' => 'Call 020 7946 0000 [or](https://evil.example) visit reception']);
+
+        $mail = renderedMail(publishedNotification('password_changed')->toMail($this->user));
+
+        expect($mail['html'])->toContain('contact us: Call 020 7946 0000 [or](https://evil.example) visit reception')->not->toContain('href="https://evil.example"')
+            ->and($mail['text'])->toContain('contact us: Call 020 7946 0000 [or](https://evil.example) visit reception');
+    });
+
+    it('is left out until then', function (string $type) {
+        $notification = publishedNotification($type);
+
+        expect($notification->contact)->toBeNull()
+            ->and(renderedMail($notification->toMail($this->user))['text'])->not->toContain('contact us');
+    })->with(['password_changed', 'verification_code', 'email_change_notice']);
+
+    it('is handed to a notification of the app\'s own that asks for it, and to no other', function () {
+        config(['keyring.support_contact' => 'help@example.com']);
+        Keyring::notifications(['password_changed' => WantsTheContact::class, 'new_device' => WantsNothing::class]);
+
+        expect(Keyring::notification('password_changed', ['when' => 'Monday'])->contact)->toBe('help@example.com')
+            ->and(Keyring::notification('new_device', ['when' => 'Monday']))->toBeInstanceOf(WantsNothing::class);
+    });
+});
+
+class WantsTheContact extends Illuminate\Notifications\Notification
+{
+    public function __construct(public ?string $contact = null) {}
+}
+
+class WantsNothing extends Illuminate\Notifications\Notification {}

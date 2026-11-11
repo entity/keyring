@@ -13,6 +13,7 @@
 - ["Was This You?" Alerts](#was-this-you-alerts)
 - [Security Emails](#security-emails)
     - [Email Types](#email-types)
+    - [A Support Contact](#a-support-contact)
     - [Emails a Flow Needs](#emails-a-flow-needs)
     - [Your Own Templates](#your-own-templates)
     - [Slack, SMS and Other Channels](#slack-sms-and-other-channels)
@@ -296,13 +297,36 @@ The security notices, each sent to the user:
 | `email_changed` | An email change applied. Sent to both the old and the new address. | |
 | `email_change_reverted` | An email change was undone. Sent to the current address, and to the new one when the change had applied. | |
 
-Every notice is also passed `when` (the time as text, in the app's timezone), `at` (the same moment as a date, to format for the user's own timezone or language), and the `device` and `ip` of the request that caused it. The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
+Every notice is also passed `when` (the time as text, in the app's timezone), `at` (the same moment as a date, to format for the user's own timezone or language), the `device` and `ip` of the request that caused it, and `contact`, [your support contact](#a-support-contact). The copy of `email_change_reverted` sent to the new address leaves those two out, since that address may be whoever took the account.
 
 Renaming a sign-in method, or choosing another as the default, sends nothing: neither changes what can sign in to the account.
 
 `name`, `device` and `reasons` can hold what a user or browser sent: a key's name is whatever was typed. Keyring cuts each to one line of at most 500 characters, and it's still text to escape for wherever you show it. The published classes pass it through `Keyring\Support\MailText::plain()`, because Laravel reads mail lines as Markdown and a name could otherwise add a link to a genuine security email.
 
 The published notices share an abstract `SecurityNotice` in the same folder, which holds the constructor, `via()` and `toMail()`. Each notice only says its subject and intro. They're queued once any open database transaction commits, so a change that's rolled back is never announced.
+
+### A Support Contact
+
+NIST SP 800-63B-4 (Sec. 4.6) has a notice give clear instructions, including contact information, for a recipient who says the event wasn't theirs. Keyring can't know where your support is, so tell it:
+
+```php
+// config/keyring.php
+'support_contact' => 'https://example.com/support',   // or 'support@example.com'
+```
+
+Every notification Keyring builds is then handed it as `contact`, a security notice or an email a flow needs alike. The published security notices, `VerificationCode` and `EmailChangeNotice` end with "If this wasn't you and you need help, contact us" and the contact, as a link when it's a URL or an email address (`Keyring\Support\MailText::contact()` writes the line). The three emails that say nothing happened and can be ignored (`ConfirmEmailChange`, `EmailAddressInUse` and `AlreadyRegistered`) don't show it. Left at `null`, the default, no email has the line: set it before you say your notices follow NIST.
+
+The same section has notices go to every address an account has, and asks for at least two. Keyring knows one, the `email` attribute, and mails your user model as Laravel does. To send every notice to more than one address, return them from the model:
+
+```php
+// app/Models/User.php
+public function routeNotificationForMail(): array
+{
+    return array_filter([$this->email, $this->backup_email]);
+}
+```
+
+That also changes where Laravel's own mail notifications go, which is usually what you want. Keeping the second address, and verifying it before it's used, is your app's to build: see [Known Limitations](security.md#known-limitations). A notice's `via()` is yours too, so one can also go to another channel, like SMS or a push message.
 
 ### Emails a Flow Needs
 

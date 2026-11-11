@@ -26,7 +26,7 @@ Keyring is configured in two places:
 - `config/keyring.php` holds values: your features, timeouts, limits, route options.
 - `app/Providers/KeyringServiceProvider.php` holds behaviour: which factors exist, the policy, risk responses, swapped responses and pages. These calls go in the provider's `boot()` method.
 
-`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `registration` and `enrollment_url`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
+`keyring:install` publishes a short config with the options most apps change: `guard`, `username`, `home`, `features`, `registration`, `enrollment_url` and `support_contact`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you can copy just the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced whole. `php artisan vendor:publish --tag=keyring-config` gives you the full file instead.
 
 ## Durations
 
@@ -163,6 +163,12 @@ More routes those users can still reach meanwhile, by route name, with `*` as a 
 ```
 
 Where a user who has to choose a new password is sent from every other page until they have. Null answers `403`. See [Requiring a Password Change](protected-changes.md#requiring-a-password-change).
+
+```php
+'support_contact' => null,
+```
+
+Where users can reach you about their account: a page's URL (`'https://example.com/support'`) or an email address (`'support@example.com'`). Every notification is handed it as `$contact`, and the published security notices, the emailed code and the email change notice end with "If this wasn't you and you need help, contact us" and a link to it. `null` leaves the line out. See [Security Emails](security-log-and-emails.md#a-support-contact).
 
 ```php
 'enrollments' => [

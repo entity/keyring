@@ -27,7 +27,8 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
      * Keyring fills in whichever of these the notice has. Some hold what
      * users and browsers sent (a key's name, a user agent), cut to one line,
      * so escape them for wherever you show them. $when is $at as text in
-     * the app's timezone: format $at yourself for the user's own.
+     * the app's timezone: format $at yourself for the user's own. $contact
+     * is "support_contact" from config/keyring.php: a URL or an address.
      */
     public function __construct(
         public string $when,
@@ -38,6 +39,7 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
         public ?int $remaining = null,
         public ?string $reasons = null,
         public ?string $url = null,
+        public ?string $contact = null,
     ) {}
 
     abstract protected function subject(): string;
@@ -81,6 +83,10 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
             $message->action($this->action(), $this->url);
         }
 
-        return $message->line(__('If this wasn\'t you, change your password and check your sign-in methods straight away.'));
+        $message->line(__('If this wasn\'t you, change your password and check your sign-in methods straight away.'));
+
+        return $this->contact === null
+            ? $message
+            : $message->line(MailText::contact(__('If this wasn\'t you and you need help, contact us:'), $this->contact));
     }
 }
