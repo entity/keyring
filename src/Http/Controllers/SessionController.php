@@ -2,11 +2,13 @@
 
 namespace Keyring\Http\Controllers;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Events\AccessRefused;
 use Keyring\Events\LoggedOut;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
@@ -38,7 +40,7 @@ class SessionController
     public function destroy(Request $request, SignIn $signIn, string $session): Responsable
     {
         $user = $this->keyring->user();
-        $session = $this->sessions->find($user, $session) ?? abort(404);
+        $session = $this->sessions->find($user, $session) ?? $this->refuse($user, $session);
 
         if ($session->id === $this->sessions->current($request)?->id) {
             $signIn->out($request);
@@ -53,6 +55,18 @@ class SessionController
         SessionsRevoked::dispatch($user, 1);
 
         return $this->status('session-revoked');
+    }
+
+    /**
+     * A handle that isn't one of the user's own sessions: someone else's, or
+     * one that has ended. Either way it's the 404 a missing one gets, and
+     * the attempt goes on record.
+     */
+    protected function refuse(Authenticatable $user, string $handle): never
+    {
+        AccessRefused::dispatch($user, 'session', $handle);
+
+        abort(404);
     }
 
     /**

@@ -72,7 +72,9 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
 
         // Sessions are kept whatever the features, so ending them is always there.
         Route::delete('/user/sessions', [SessionController::class, 'destroyOthers'])->name('keyring.sessions.destroy-others');
-        Route::delete('/user/sessions/{session}', [SessionController::class, 'destroy'])->name('keyring.sessions.destroy');
+        // Only something shaped like a handle gets as far as being looked for
+        // or logged. A registry ID isn't.
+        Route::delete('/user/sessions/{session}', [SessionController::class, 'destroy'])->where('session', '[0-9a-f]{64}')->name('keyring.sessions.destroy');
 
         if (Features::enabled(Features::devices())) {
             Route::delete('/user/devices', [DeviceController::class, 'destroyOthers'])->name('keyring.devices.destroy-others');

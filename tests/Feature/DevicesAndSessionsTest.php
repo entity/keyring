@@ -1219,10 +1219,12 @@ describe('the sessions a user can see and end', function () {
                 ->and(app(SessionRegistry::class)->find($handle))->toBeNull();
         }
 
-        // The route that ends a session doesn't take the ID in the handle's place.
-        $this->deleteJson(route('keyring.sessions.destroy', str_repeat('e', 40)))->assertNotFound();
+        // The route that ends a session doesn't take the ID in the handle's
+        // place, and it never reaches the log.
+        $this->deleteJson('/user/sessions/'.str_repeat('e', 40))->assertNotFound();
 
-        expect(app(SessionRegistry::class)->find(str_repeat('e', 40))->revokedAt)->toBeNull();
+        expect(app(SessionRegistry::class)->find(str_repeat('e', 40))->revokedAt)->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'access_refused')->exists())->toBeFalse();
 
         // And sent as the cookie that brings a remembered session back, a handle brings nothing.
         $user = $this->user->fresh();
@@ -1274,10 +1276,13 @@ describe('the sessions a user can see and end', function () {
 
         $this->getJson(route('keyring.sessions.index'))->assertJsonCount(1, 'sessions');
 
-        $this->deleteJson(route('keyring.sessions.destroy', ($this->handle)('theirs')))->assertNotFound();
-        $this->deleteJson(route('keyring.sessions.destroy', 'theirs'))->assertNotFound();
+        $this->deleteJson(route('keyring.sessions.destroy', $handle = ($this->handle)('theirs')))->assertNotFound();
 
-        expect(app(SessionRegistry::class)->find('theirs')->revokedAt)->toBeNull();
+        // Asked for by its registry ID, it isn't even looked for.
+        $this->deleteJson('/user/sessions/theirs')->assertNotFound();
+
+        expect(app(SessionRegistry::class)->find('theirs')->revokedAt)->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'access_refused')->sole()->meta)->toBe(['resource' => 'session', 'id' => $handle]);
     })->with('registries');
 
     it('signs out when the session it ends is this one', function (string $driver) {
