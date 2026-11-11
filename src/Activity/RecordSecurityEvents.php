@@ -4,6 +4,7 @@ namespace Keyring\Activity;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Events\Dispatcher;
+use Illuminate\Support\Str;
 use Keyring\Events;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
@@ -47,6 +48,9 @@ class RecordSecurityEvents
             Events\ProtectionBypassed::class => 'protectionBypassed',
             Events\CloneSuspected::class => 'cloneSuspected',
             Events\RiskAssessed::class => 'riskAssessed',
+            Events\AccessRefused::class => 'accessRefused',
+            Events\EnrollmentRefused::class => 'enrollmentRefused',
+            Events\AuthenticatorRemovalRefused::class => 'authenticatorRemovalRefused',
         ];
     }
 
@@ -209,5 +213,20 @@ class RecordSecurityEvents
             'score' => $event->risk->score,
             'reasons' => $event->risk->reasons(),
         ]);
+    }
+
+    public function accessRefused(Events\AccessRefused $event): void
+    {
+        $this->log->recordRefusal('access_refused', $event->user, meta: ['resource' => $event->resource, 'id' => Str::limit($event->id, 64, '')]);
+    }
+
+    public function enrollmentRefused(Events\EnrollmentRefused $event): void
+    {
+        $this->log->recordRefusal('enrollment_refused', $event->user, $event->factor, meta: ['reason' => $event->reason]);
+    }
+
+    public function authenticatorRemovalRefused(Events\AuthenticatorRemovalRefused $event): void
+    {
+        $this->log->recordRefusal('authenticator_removal_refused', $event->user, $event->authenticator->factor, meta: ['name' => $event->authenticator->name]);
     }
 }

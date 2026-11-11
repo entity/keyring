@@ -35,7 +35,8 @@ class DeviceController
      */
     public function destroy(Request $request, SignIn $signIn, string $device): StatusResponse
     {
-        $device = $this->keyring->deviceModel()::query()->ownedBy($this->keyring->user())->active()->findOrFail($device);
+        $device = $this->keyring->deviceModel()::query()->ownedBy($this->keyring->user())->active()->find($device)
+            ?? $this->keyring->deviceModel()::refuse($this->keyring->user(), $device);
         $current = $this->devices->find($request, $this->keyring->user())?->is($device);
 
         $this->devices->revoke($device);
