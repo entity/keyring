@@ -14,6 +14,7 @@ use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Login\SignIn;
 use Keyring\Support\Throttle;
 
 /**
@@ -29,6 +30,7 @@ class AuthenticatorController
         protected EnrollmentStore $enrollments,
         protected AuthenticatorChanges $changes,
         protected Throttle $throttle,
+        protected SignIn $signIn,
     ) {}
 
     /**
@@ -68,6 +70,12 @@ class AuthenticatorController
         $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator);
 
         $this->enrollments->forget($factor->key());
+
+        // New recovery codes prove nothing: confirming only says they were
+        // saved. Anything else was just proved to work.
+        if ($factor->key() !== RecoveryCodes::KEY) {
+            $this->signIn->enrolled($request, $authenticator);
+        }
 
         return $this->status('authenticator-added', array_filter([
             'authenticator' => $authenticator->factor()->present($authenticator),

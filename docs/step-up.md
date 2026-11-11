@@ -72,7 +72,7 @@ NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new authenticator bound at the highest le
 - A policy the user can't fully meet yet (one that asks for a passkey they haven't added) counts as far as they can, so they can still add it.
 - A policy that asks for more than that is heard. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about one nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification and doesn't slide with activity. Using the app doesn't keep it fresh.
-- Signing in counts as a verification, so a fresh login is fresh for step-up too.
+- Signing in counts as a verification, so a fresh login is fresh for step-up too. So does [adding a sign-in method](authenticators.md#confirming), for the one that was added.
 
 Keyring uses `keyring.fresh:15m` on its own sensitive routes, through the `changes_middleware` config option (applied on top of `auth:{guard}`): managing authenticators and devices, changing the password, and starting an email change.
 

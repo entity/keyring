@@ -316,7 +316,7 @@ Implement these as well when they apply:
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment()`, `enrollmentRules()`, `confirmEnrollment()` and `multiple()`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |
 
-An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
+An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, built with `Enrollment::make()`: its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state and returns an unsaved authenticator, or `null`. Keyring saves it, and counts it as verified in the session, so only return one when the proof really shows the new authenticator works. Return `false` from `multiple()` if confirming a new one should replace the old one, as recovery codes and email codes do.
 
 `enrollmentRules()` validates the confirm request. On `Keyring\Factors\Factor` it defaults to the factor's `rules()` plus an optional `name`, so a name can be given when confirming as well as when beginning.
 

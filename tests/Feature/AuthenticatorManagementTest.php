@@ -5,9 +5,12 @@ use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Keyring\Concerns\HasKeyring;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\RecoveryCodesGenerated;
@@ -16,7 +19,9 @@ use Keyring\Factors\Password;
 use Keyring\Factors\Totp;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\PasswordRules;
+use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -327,3 +332,76 @@ class UnnotifiableAccount extends Authenticatable
 {
     use HasKeyring;
 }
+
+// NIST SP 800-63B-4, Sec. 3.1.2.1: recovery codes handed over in an online
+// session need that session to be authenticated at AAL2.
+describe('counting a new sign-in method as proved', function () {
+    beforeEach(function () {
+        Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
+        Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
+
+        $this->post('/logout');
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    });
+
+    it('hands the first recovery codes to a session that has proved two factors', function () {
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        $before = session()->getId();
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        expect($response->json('recoveryCodes'))->toHaveCount(8)
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+            ->and(app(SessionRegistry::class)->forUser($this->user)->sole()->assurance)->toBe(Assurance::AAL2)
+            ->and(session()->getId())->not->toBe($before);
+
+        $proved = collect(app(SessionAssurance::class)->all())->firstWhere('factor', 'totp');
+
+        expect($proved->authenticator)->toBe($this->user->keyring->refresh()->of('totp')->sole()->id);
+        $this->get('/billing')->assertOk();
+    });
+
+    it('counts nothing when the proof is wrong', function () {
+        $this->postJson(route('keyring.authenticators.store', 'totp'));
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000'])->assertUnprocessable();
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
+            ->and(app(SessionAssurance::class)->all())->toHaveCount(1);
+    });
+
+    it('counts nothing for new recovery codes, which are only shown', function () {
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        expect(collect(app(SessionAssurance::class)->all())->pluck('factor')->all())->toBe(['password', 'totp']);
+    });
+
+    it('doesn\'t make the password any fresher', function () {
+        $this->travel(10)->minutes();
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+        $this->get('/account')->assertOk();
+
+        // The password was proved 16 minutes ago, the app's code six.
+        $this->travel(6)->minutes();
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('counts a new passkey for what it proved, and no more', function () {
+        $key = new VirtualAuthenticator;
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+
+        $proved = collect(app(SessionAssurance::class)->all())->firstWhere('factor', 'passkey');
+
+        expect($proved)
+            ->categories->toBe([Category::Possession, Category::Inherence])
+            ->phishingResistant->toBeTrue()
+            ->attested->toBeFalse()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+    });
+});

@@ -113,6 +113,8 @@ On success, the response contains the new authenticator, presented the same way 
 
 The user's first saved authenticator becomes their default (never recovery codes). A passkey or security key that's already registered, to anyone, can't be registered again. Confirming a factor that allows only one per user (`email-code`, `recovery`) replaces the one they had.
 
+Confirming takes proving the new authenticator, so the session then counts it as verified, like one used to sign in: a user who signed in with a password and adds an authenticator app is at [AAL2](policies.md#assurance-levels) from that response on, and the session ID changes as it does for any proof. That's also why the first recovery codes can be shown there: NIST SP 800-63B-4 (Sec. 3.1.2.1) wants codes delivered online to go to a session that has proved two factors. New recovery codes prove nothing and count for nothing, and nothing proved earlier gets any fresher.
+
 ## Recovery Codes
 
 The first time a user adds an extra factor and has no recovery codes, or has used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) isn't a factor, so adding one comes with no codes.
