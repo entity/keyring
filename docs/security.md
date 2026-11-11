@@ -109,7 +109,9 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - Every signed-in Keyring route checks Keyring's guard (`auth:{guard}`), and the step-up middleware reads the user from it, so another guard's user can't stand in.
 - Every signed-in session is in Keyring's registry and is checked on every `web` request (and any other group you add `keyring.session` to), so revoking one takes effect on its next request with any session driver.
 - Sessions have idle and absolute timeouts, and each assurance level lapses on NIST SP 800-63B's clock (AAL2: 1 hour idle or 24 hours; AAL3: 15 minutes or 12 hours) until the user verifies again.
-- "Remember me" can't outlast the session it was ticked for. Laravel's cookie alone signs nobody in: the browser also holds a Keyring cookie naming that session's registry record, and coming back carries the same record on, with the limits it started with and nothing proved. Once the record has timed out, been revoked or been ended by a risk response, both cookies are refused, even from a client that kept them after being told to delete them.
+- "Remember me" can't outlast the session it was ticked for. Laravel's cookie alone signs nobody in: the browser also holds a Keyring cookie naming that session's registry record, and coming back carries the session on with the limits it started with and nothing proved. Once the record has timed out, been revoked or been ended by a risk response, both cookies are refused, even from a client that kept them after being told to delete them.
+- A "remember me" cookie works once. Coming back moves the session to a new record and gives the browser a new cookie, so a copy of the pair brings back nothing the browser it was taken from hasn't already had. If a used cookie is sent again, or a browser is still signed in on the record it named, two browsers held the same pair: the session ends for both, with a `RememberMeReused` event and a `remember_me_reused` log entry. The one exception is the same browser's other requests in the few seconds after (`sessions.remember_grace`), which join the session the first one resumed. They can't start another, and sending the cookie again doesn't make those seconds any longer.
+- A resumed session's device, IP address and browser are those of the request that resumed it, on a record of its own. A browser still on the record from before is never compared with them.
 - A session whose registry record has gone missing is signed out rather than started over.
 - A revocation can't be undone by a request saving a stale copy of its session.
 - Laravel's session ID is never stored by Keyring or written to the security log.
@@ -129,8 +131,12 @@ Mail that isn't a guess at anything has a count of its own, since a sign in that
 - Reverting an email change signs out every session, ends any sign in still waiting for its second factor, closes later changes and removes sign-in methods that weren't established when it was asked for. Cancelling a change doesn't stop its revert link working.
 - While an email change can be reverted, nobody else can take the address it replaced, so the revert always has somewhere to put it back.
 - Password resets give the same answer for every address, sign out every session, cancel pending email changes, and lift risk locks and sign-in lockouts.
+- A password change takes the current password as well as a fresh verification, checked by Keyring itself rather than by your action. A user with no password yet sets one with the fresh verification alone.
 - Password changes cancel pending email changes, so someone who knew the old password can't finish one.
-- New passwords follow OWASP's length rules, are checked against the most common passwords and, in production, against breach lists, and are refused rather than silently cut short by bcrypt.
+- New passwords need at least 8 characters with a second factor and 15 without, and neither minimum can be configured below 8. Any characters are accepted, with no composition rules.
+- New passwords are checked against the 10,000 most common of 8 characters or more and the 3,000 most common of 15 or more, in every environment, and against your app's name, the words you list in `passwords.context` and the user's own name and email address, with look-alike characters read as letters.
+- In production, new passwords are also checked against breach lists (Have I Been Pwned). That check lets a password through when the service can't be reached, unless you set `passwords.refuse_unchecked`.
+- New passwords are refused rather than silently cut short by bcrypt. With bcrypt that limit is 72 bytes, so hash with argon2id to accept every password up to `passwords.max`.
 
 ### Links and Headers
 
@@ -171,23 +177,29 @@ Keyring's code and config say what each thing does. This is where the choices co
 | Passkeys and security keys as a phishing-resistant option | NIST SP 800-63B |
 | Email codes being opt-in, and below AAL2 | NIST SP 800-63B, which rules out email for authentication codes |
 | The four emails `keyring:install` offers: password changed, sign-in method added or removed, recovery code used | NIST SP 800-63B, and OWASP's Authentication Cheat Sheet |
-| A notice after each change to how someone signs in, once registered: the password, a sign-in method added or removed, new recovery codes, the email address | OWASP ASVS 5.0.0, requirement 6.3.7 |
-| A notice of a suspicious attempt, once registered: a new device, a failed second factor, a locked account, and what the risk signals find, such as a sign in after a long quiet period or after several failures | OWASP ASVS 5.0.0, requirement 6.3.5 |
-| Password lengths (8 with a second factor, 15 without), no composition rules, breached passwords refused, nothing silently cut short | NIST SP 800-63B and OWASP's Authentication Cheat Sheet |
-| Refusing the most common passwords, and ones containing the app's or user's name | OWASP ASVS |
+| A notice after each change to how someone signs in, once registered: the password, a sign-in method added or removed, new recovery codes, the email address | OWASP ASVS 5.0.0, 6.3.7 |
+| A notice of a suspicious attempt, once registered: a new device, a failed second factor, a locked account, and what the risk signals find, such as a sign in after a long quiet period or after several failures | OWASP ASVS 5.0.0, 6.3.5 |
+| Password lengths: 8 with a second factor, 15 without, and no setting below 8 | OWASP ASVS 5.0.0, 6.2.1, and NIST SP 800-63B (15 for a password used alone, 8 as part of multi-factor) |
+| A password change taking the current password as well as the new one | OWASP ASVS 5.0.0, 6.2.3 |
+| Refusing the most common passwords: the top 10,000 of 8 characters or more and the top 3,000 of 15 or more | OWASP ASVS 5.0.0, 6.2.4 (at least the top 3,000 that fit the policy) |
+| No composition rules, and any characters accepted | OWASP ASVS 5.0.0, 6.2.5, and NIST SP 800-63B |
+| Passwords of at least 64 characters allowed, never silently cut short: up to `passwords.max` with argon2id, 72 bytes with bcrypt | OWASP ASVS 5.0.0, 6.2.9, and NIST SP 800-63B. Met with `HASH_DRIVER=argon2id`, not with bcrypt |
+| Refusing passwords containing the app's name, the words in `passwords.context`, or the user's name and email address | OWASP ASVS 5.0.0, 6.2.11, with 6.1.2 for the list, which is yours to fill in |
+| Refusing breached passwords, in production by default | OWASP ASVS 5.0.0, 6.2.12, and NIST SP 800-63B |
 | Two factors of the same kind not counting as two, and no weaker fallback for a user with a phishing-resistant factor | OWASP's Multifactor Authentication Cheat Sheet |
 | Making everyone add a second factor with `keyring.enrolled` | OWASP ASVS 6.3.3 |
 | Locks that double each time, and a count of its own for the browsers the account has signed in from | OWASP's Authentication Cheat Sheet and its "device cookies" guidance |
 | Single-use codes: random, short-lived, limited guesses, stored hashed, a resend replacing the last | OWASP's Authentication Cheat Sheet |
-| TOTP codes, recovery codes and sent codes that work once, whatever the session driver | OWASP ASVS 5.0.0, requirement 6.5.1 |
-| Recovery codes with at least 112 random bits, which is what lets them be kept as keyed hashes rather than salted password hashes | OWASP ASVS 5.0.0, requirement 6.5.2 |
-| Sent codes of at least six digits | OWASP ASVS 5.0.0, requirement 6.5.4 |
-| Sent codes that last ten minutes at most | OWASP ASVS 5.0.0, requirement 6.5.5 |
-| TOTP codes accepted one time step either side of now, and no further | RFC 6238, section 5.2. This default deviates from OWASP ASVS 5.0.0, requirement 6.5.5 (a 30 second maximum), which a window of zero meets: see [Known Limitations](#known-limitations) |
+| TOTP codes, recovery codes and sent codes that work once, whatever the session driver | OWASP ASVS 5.0.0, 6.5.1 |
+| Recovery codes with at least 112 random bits, which is what lets them be kept as keyed hashes rather than salted password hashes | OWASP ASVS 5.0.0, 6.5.2 |
+| Sent codes of at least six digits | OWASP ASVS 5.0.0, 6.5.4 |
+| Sent codes that last ten minutes at most | OWASP ASVS 5.0.0, 6.5.5 |
+| TOTP codes accepted one time step either side of now, and no further | RFC 6238, section 5.2. This default deviates from OWASP ASVS 5.0.0, 6.5.5 (a 30 second maximum), which a window of zero meets: see [Known Limitations](#known-limitations) |
 | Password resets: the same answer for every address, links built from `APP_URL`, no automatic sign in, every session signed out | OWASP's Forgot Password Cheat Sheet |
 | Email changes confirmed from both addresses, and not trusting an address that just changed | OWASP's Authentication and Multifactor Authentication Cheat Sheets |
 | A recent verification before changing how someone signs in | OWASP's Authentication Cheat Sheet |
 | Never caching auth pages and responses | OWASP's Session Management Cheat Sheet |
+| A "remember me" cookie that works once, with a used one ending the session | OWASP's Session Management Cheat Sheet, and refresh token rotation with reuse detection (RFC 9700) |
 
 ## Known Limitations
 
@@ -198,9 +210,13 @@ Keyring's code and config say what each thing does. This is where the choices co
 - **Protection only covers Eloquent saves.** Query builder updates and `saveQuietly()` skip the protected attribute check.
 - **Changing `APP_KEY` invalidates short-lived data.** Pending email codes stop working, and a user's first passkey after the change gets a different user handle (later ones reuse the handle their keys already have). Recovery codes and reserved email addresses keep working when the old key is in `APP_PREVIOUS_KEYS`, as encrypted values such as TOTP secrets do.
 - **Signing out ends "remember me" in every browser.** Laravel has one remember token per user, so signing out, revoking any device or signing out other sessions ends every remembered browser. A session that times out, or that Keyring ends for another reason, only ends its own.
+- **A copied "remember me" pair is only caught when both holders use it.** Whoever comes back first gets the session, and it ends when the other one turns up: with the used cookie, or still signed in on the old record. A copy made of a browser that never comes back is not noticed, and lasts until the session's `absolute` limit. Inside `sessions.remember_grace` a copy sent from what looks like the same browser joins the session instead, and is caught the next time either of them comes back. A browser that never received the response carrying its new cookie looks like a copy the next time, and has to sign in again.
+- **"Remember me" expects one session store per browser.** Two apps that share the cookies and the registry but keep separate Laravel sessions would each see the other's return as a used cookie.
 - **Laravel's `cookie` session driver can't destroy an old session.** The session lives in the cookie, so a copied one keeps working after the ID changes, until the session is revoked or expires. Signing out everywhere else, a password change and an applied email change revoke the session's registry record and carry on under a new one, so a copy is signed out then. After a step-up it keeps working, without what the step-up proved. Use a server-side session driver if that matters.
 - **The `cookie` session driver lets a browser send back what its session held.** With that driver the session lives in the browser, so it can send an earlier copy of its own cookie, and a pending login or enrollment is kept in the session. Nothing that must happen only once depends on it. TOTP steps and recovery codes are used up in your database. A sent code, its wrong guesses, the code that replaced it and each enrollment's one confirmation are kept in your cache, with the limits on attempts per account and per IP address, failures in a row and codes sent. Two things an earlier copy still brings back. It returns a pending sign in or step-up to an earlier point, which only means proving a factor again. And it still holds a WebAuthn challenge that was already answered, so whoever has both that copy and the signed answer the key gave could send the answer again. A key that counts its signatures refuses it, because the count hasn't moved on. A synced passkey, whose count stays at zero, is accepted a second time, for as long as that copy of the session lasts. A server-side session driver closes both.
 - **A request overlapping a session ID change can undo or lose it.** Laravel saves the session when each request ends, so a request still running when the ID changes can save the old session again, and a copied cookie would then keep working. A request sent with the old ID just after the change finds no session, and that browser has to sign in again.
+- **The breach check fails open by default.** Laravel's check lets a new password through when Have I Been Pwned can't be reached, leaving the bundled list of common passwords. Set `passwords.refuse_unchecked` to refuse the password instead, at the cost of no new passwords while the service is unreachable. Outside production the check doesn't run at all unless `passwords.uncompromised` is `true`.
+- **Bcrypt stops passwords at 72 bytes.** It's Laravel's default hasher, and it ignores everything after the first 72 bytes, so with it Keyring refuses a longer password: 72 plain characters, but as few as 18 emoji, whatever `passwords.max` says. OWASP ASVS 6.2.9 asks for at least 64 characters, of any kind, to be allowed. Set `HASH_DRIVER=argon2id` for that. Keyring doesn't pre-hash passwords to fit, which would leave hashes Laravel's own hasher can't check. See [Passwords](configuration.md#passwords).
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
 - **Work in progress.** Keyring hasn't been tagged or used in production yet.

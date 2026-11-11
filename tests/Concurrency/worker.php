@@ -10,11 +10,13 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Purpose;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 use Keyring\Tests\TestCase;
 
@@ -44,6 +46,13 @@ try {
             $attempt->put('passkey', 'options', $options);
 
             return Keyring::factor('passkey')->verify($attempt, $authenticator, Request::create('/', 'POST', ['credential' => $credential])) !== null;
+        })(),
+        'resume-session' => (function () use ($id) {
+            $request = Request::create('/');
+            $request->setLaravelSession(app('session.store'));
+
+            // Read while the row is held, as a request that found the cookie unused.
+            return app(Sessions::class)->resume($request, app(SessionRegistry::class)->find($id))?->id;
         })(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),

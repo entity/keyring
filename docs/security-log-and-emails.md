@@ -25,7 +25,7 @@ Turn it on with `Features::securityLog()`. Its options:
 ```php
 'security_log' => [
     'keep_for' => '180d',
-    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected'],
+    'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
 ],
 ```
 
@@ -53,7 +53,8 @@ The one exception is `protection_bypassed`. If that entry can't be written, [`Ke
 | `device_revoked` | A device was signed out. | `device` |
 | `device_reported` | A device was signed out from the "this wasn't me" link. | `device` |
 | `sessions_revoked` | "Sign out everywhere else". | `count` |
-| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `risk` or `not_allowed` |
+| `session_ended` | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
+| `remember_me_reused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent are the request that brought the used one; `device_id` is the device the ended session was on. | `device` |
 | `email_change_requested`, `email_changed`, `email_change_reverted` | | |
 | `password_changed` | | |
 | `password_reset` | A reset completed and cleared the account's [sign-in lockouts](security.md#rate-limiting). | `sign_in_locks_cleared` |
@@ -114,7 +115,7 @@ After a successful sign in, Keyring flashes `keyring.alerts` to the session: a l
 ]
 ```
 
-The types that become alerts are listed in `security_log.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted` and `clone_suspected`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
+The types that become alerts are listed in `security_log.alerts`: by default `second_factor_failed`, `device_reported`, `email_change_reverted`, `clone_suspected` and `remember_me_reused`. Any [entry type](#entry-types) can go there. A `second_factor_failed` alert is the classic sign that someone else knows the password.
 
 To read them yourself, call `Keyring\Activity\SecurityLog::pullAlerts($user)`. It returns the unseen alert entries, newest first, and marks them seen, so each comes back once.
 

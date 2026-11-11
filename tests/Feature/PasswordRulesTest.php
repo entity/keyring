@@ -2,11 +2,17 @@
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Hashing\HashManager;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 use Keyring\Enums\Assurance;
+use Keyring\KeyringServiceProvider;
 use Keyring\Models\Authenticator;
 use Keyring\Rules\CurrentPassword;
 use Keyring\Support\PasswordRules;
@@ -17,6 +23,35 @@ function passes(string $password, mixed ...$arguments): bool
     return Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for(...$arguments)])->passes();
 }
 
+it('refuses a configured minimum under eight characters, at boot and wherever it\'s read', function (string $option, mixed $min) {
+    config(["keyring.passwords.{$option}" => $min]);
+    $user = taylor();
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    $message = "[keyring.passwords.{$option}] option is ".json_encode($min).'. A password needs at least 8 characters';
+
+    expect(fn () => new KeyringServiceProvider(app())->boot())->toThrow(LogicException::class, $message)
+        ->and(fn () => PasswordRules::for($option === 'min_with_mfa' ? $user : null))->toThrow(LogicException::class, $message);
+})->with([
+    ['min_with_mfa', 4],
+    ['min_with_mfa', 7],
+    ['min_without_mfa', 4],
+    ['min_without_mfa', 0],
+    ['min_without_mfa', null],
+    ['min_without_mfa', 'twelve'],
+]);
+
+it('takes a configured minimum of eight or more, as a number or a string from the environment', function () {
+    config(['keyring.passwords.min_with_mfa' => 8, 'keyring.passwords.min_without_mfa' => '10']);
+
+    new KeyringServiceProvider(app())->boot();
+
+    expect(PasswordRules::min(withMfa: true))->toBe(8)
+        ->and(PasswordRules::min())->toBe(10)
+        ->and(passes('qz7vbn3k9x'))->toBeTrue()
+        ->and(passes('qz7vbn3k9'))->toBeFalse();
+});
+
 it('refuses the most common passwords even when the breach check doesn\'t run', function () {
     // With a second factor the minimum is 8, where most common passwords are.
     $user = taylor();
@@ -25,6 +60,62 @@ it('refuses the most common passwords even when the breach check doesn\'t run', 
     expect(passes('qz7vbn3k', $user))->toBeTrue()
         ->and(passes('sunshine', $user))->toBeFalse()
         ->and(passes('SunShine', $user))->toBeFalse();
+});
+
+it('refuses common passwords long enough to stand without a second factor', function () {
+    expect(passes('a long passphrase for me'))->toBeTrue()
+        ->and(passes('1qaz2wsx3edc4rfv'))->toBeFalse()
+        ->and(passes('123456789qwerty'))->toBeFalse()
+        ->and(passes('Qazwsxedcrfvtgb'))->toBeFalse();
+});
+
+it('refuses a common password whatever its case, and with spaces around it', function () {
+    $user = taylor();
+    Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    // "Password1" in the source list, kept lowercased.
+    expect(passes('password1', $user))->toBeFalse()
+        ->and(passes('Password1', $user))->toBeFalse()
+        ->and(passes('PASSWORD1', $user))->toBeFalse()
+        ->and(passes(' password1 ', $user))->toBeFalse()
+        ->and(passes("\tPassword1\n", $user))->toBeFalse()
+        ->and(passes('      1qaz2wsx3edc4rfv      '))->toBeFalse();
+});
+
+it('keeps a common password list of the size and shape the rules rely on', function () {
+    $lines = explode("\n", file_get_contents(__DIR__.'/../../resources/passwords/common.txt'));
+
+    // One entry per line and a newline after the last.
+    expect(array_pop($lines))->toBe('');
+
+    $sorted = $lines;
+    sort($sorted, SORT_STRING);
+
+    // OWASP ASVS 6.2.4 asks for the top 3,000 that fit the policy, which
+    // has two minimum lengths. Rebuilding the list changes these on purpose.
+    expect($lines)->toHaveCount(13052)
+        ->and(array_filter($lines, fn (string $line) => mb_strlen($line) >= 15))->toHaveCount(3001)
+        ->and(array_filter($lines, fn (string $line) => mb_strlen($line) < PasswordRules::SHORTEST))->toBeEmpty()
+        // Looked up trimmed and lowercased, so stored that way, in plain ASCII.
+        ->and(array_filter($lines, fn (string $line) => preg_match('/^[\x21-\x7e]([\x20-\x7e]*[\x21-\x7e])?$/', $line) !== 1 || $line !== strtolower($line)))->toBeEmpty()
+        ->and(array_unique($lines))->toHaveCount(count($lines))
+        ->and($lines)->toBe($sorted);
+});
+
+it('refuses every password in its common list', function () {
+    $lines = file(__DIR__.'/../../resources/passwords/common.txt', FILE_IGNORE_NEW_LINES);
+    $rule = collect(PasswordRules::for())->first(fn (mixed $rule) => $rule instanceof Closure);
+
+    $missed = array_filter($lines, function (string $line) use ($rule) {
+        $refused = false;
+        $rule('password', strtoupper($line), function () use (&$refused) {
+            $refused = true;
+        });
+
+        return ! $refused;
+    });
+
+    expect($missed)->toBeEmpty();
 });
 
 it('refuses passwords containing the user\'s name, their email username or the site\'s name', function () {
@@ -42,6 +133,116 @@ it('checks the words it\'s given before there\'s a user, ignoring short ones', f
         ->and(passes('a long passphrase with jr in it', context: ['Jo', 'jr@example.com']))->toBeTrue();
 });
 
+it('refuses the words the app lists as its own', function () {
+    expect(passes('the falcon lands at midnight'))->toBeTrue()
+        ->and(passes('acme pays for my long lunch'))->toBeTrue();
+
+    // Keyed or not, and whatever else ends up in the list.
+    config(['keyring.passwords.context' => ['project' => 'Falcon Project', 'ACME', 42, null]]);
+
+    expect(passes('the falcon lands at midnight'))->toBeFalse()
+        ->and(passes('acme pays for my long lunch'))->toBeFalse()
+        ->and(passes('a long passphrase for me'))->toBeTrue()
+        // And for a user, beside their own names.
+        ->and(passes('Falcon-Project forever more', taylor()))->toBeFalse();
+
+    // One word on its own, or a config cached before the option existed.
+    config(['keyring.passwords.context' => 'Roadrunner']);
+    expect(passes('the roadrunner always gets away'))->toBeFalse();
+
+    config(['keyring.passwords.context' => null]);
+    expect(passes('the roadrunner always gets away'))->toBeTrue();
+});
+
+it('refuses the app\'s name as a whole, however the password separates its words', function () {
+    config(['app.name' => 'My App']);
+
+    expect(passes('myapp is where i work'))->toBeFalse()
+        ->and(passes('MyApp2026 is the best'))->toBeFalse()
+        ->and(passes('my-app is where i work'))->toBeFalse()
+        ->and(passes('i work at My App now'))->toBeFalse()
+        // Neither word counts on its own: each is under four characters.
+        ->and(passes('my long passphrase for the app'))->toBeTrue();
+});
+
+it('counts a short name from three characters when it\'s a whole name, and not below', function () {
+    config(['app.name' => 'IBM', 'keyring.passwords.context' => ['HP', 'Box Drive']]);
+    $amy = taylor(['name' => 'Amy Lee', 'email' => 'amy@abc.example']);
+
+    expect(passes('ibm makes big mainframes'))->toBeFalse()
+        ->and(passes('I.B.M. makes big mainframes'))->toBeTrue()
+        ->and(passes('hp makes laser printers'))->toBeTrue()
+        // "Box" is one word of a longer name, and the user's are never whole names.
+        ->and(passes('a box of long passphrases'))->toBeTrue()
+        ->and(passes('amy lee likes long walks, abc', $amy))->toBeTrue();
+});
+
+it('only joins words up for the app\'s own names', function () {
+    config(['app.name' => 'Keyring']);
+
+    // "thor" runs across "correct horse", and "bulb maker" reads as "buIBMaker".
+    expect(passes('correct horse battery staple', taylor(['name' => 'Thor'])))->toBeTrue();
+
+    config(['app.name' => 'IBM']);
+
+    expect(passes('bulb maker extraordinaire'))->toBeTrue();
+});
+
+it('refuses the organisation in the user\'s email address, unless anyone can have one there', function (string $email, string $password, bool $passes) {
+    expect(passes($password, taylor(['email' => $email])))->toBe($passes)
+        ->and(passes($password, context: ['Taylor', $email]))->toBe($passes);
+})->with([
+    'the company\'s domain' => ['taylor@megacorp.example', 'megacorp pays my bills', false],
+    'in any case' => ['taylor@MegaCorp.example', 'MEGACORP pays my bills', false],
+    'its first label only' => ['taylor@mail.megacorp.example', 'megacorp pays my bills', true],
+    'a hyphenated one, word by word' => ['taylor@mega-widgets.example', 'widgets pay my bills', false],
+    'the rest of the domain' => ['taylor@megacorp.example', 'an example of a long one', true],
+    'a public provider' => ['taylor@gmail.com', 'gmail is where mail goes', true],
+    'a public provider elsewhere' => ['taylor@yahoo.co.uk', 'yahoo is where mail goes', true],
+    'a short label' => ['taylor@abc.example', 'abc is as easy as it gets', true],
+]);
+
+it('reads look-alike characters as the letters they stand for', function (string $password) {
+    config(['app.name' => 'Keyring Example', 'keyring.passwords.context' => ['Cash Desk']]);
+    $user = taylor(['name' => 'Taylor Otwell', 'email' => 'tayotw@megacorp.example']);
+
+    expect(passes($password, $user))->toBeFalse();
+})->with([
+    'k3yr1ng was here for ages',
+    'K3YRLNG was here for ages',
+    'a long 3x4mpl3 of a phrase',
+    '0tw3ll is my long passphrase',
+    '7@yl0r is my long passphrase',
+    'my long passphrase 7ay07w',
+    'm3g4c0rp pays my bills',
+    'the ca$h is in the drawer',
+    'c4$hd35k is where i work',
+]);
+
+it('still takes a password that only looks a little like a name', function () {
+    config(['app.name' => 'Keyring Example']);
+    $user = taylor(['name' => 'Taylor Otwell']);
+
+    expect(passes('k3y-r1ng was here for ages', $user))->toBeTrue()
+        ->and(passes('a tailor made long passphrase', $user))->toBeTrue()
+        ->and(passes('4 l0ng p455phr453 f0r m3', $user))->toBeTrue();
+});
+
+it('takes passwords of any composition, and lets an app ask for more length instead', function () {
+    expect(passes('  . , ; : ! ? - _  '))->toBeTrue()
+        ->and(passes('!?.,;:-_()[]{}<>'))->toBeTrue()
+        ->and(passes('alllowercaselettersonly'))->toBeTrue()
+        ->and(passes('1357924680135792468'))->toBeTrue()
+        ->and(passes('пароль из многих слов'))->toBeTrue()
+        ->and(passes('🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑🔑'))->toBeTrue();
+
+    // The example in the docs: a longer minimum for some users.
+    $longer = fn (Password $rule) => $rule->rules(['min:20']);
+
+    expect(passes('a long passphrase', adjust: $longer))->toBeFalse()
+        ->and(passes('a long passphrase for me', adjust: $longer))->toBeTrue();
+});
+
 it('checks the breach list in production only, unless told otherwise', function () {
     $breachCheck = fn () => collect(PasswordRules::for())->contains(fn (mixed $rule) => $rule instanceof Password && (fn () => $this->uncompromised)->call($rule));
 
@@ -55,6 +256,127 @@ it('checks the breach list in production only, unless told otherwise', function 
 
     config(['keyring.passwords.uncompromised' => false]);
     expect($breachCheck())->toBeFalse();
+});
+
+describe('when the breach check can\'t be reached', function () {
+    beforeEach(function () {
+        config(['keyring.passwords.uncompromised' => true]);
+
+        $this->password = 'a long passphrase for me';
+        $this->hash = strtoupper(sha1($this->password));
+
+        $this->errors = fn (?string $password = null) => Validator::make(
+            ['password' => $password ?? $this->password, 'password_confirmation' => $password ?? $this->password],
+            ['password' => PasswordRules::for()],
+        )->errors()->all();
+
+        // A range as Have I Been Pwned sends it: other hashes, and padding that counts zero.
+        $this->range = fn (string ...$lines) => Http::response(implode("\r\n", [
+            '0018A45C4D1DEF81644B54AB7F969B88D65:21',
+            '00D4F6E8FA6EECAD2A3AA415EEC418D38EC:2',
+            '011053FD0102E94D6AE2F8B83D76FAF94F6:0',
+            ...$lines,
+        ]));
+    });
+
+    dataset('no answer', [
+        'the service is down' => [fn () => Http::response('', 503)],
+        'it limits the app' => [fn () => Http::response('Rate limit is exceeded.', 429)],
+        'the connection fails' => [fn () => throw new ConnectionException('Could not resolve host.')],
+        'something else answers' => [fn () => Http::response('<html>Sign in to the wifi</html>')],
+        'nothing comes back' => [fn () => Http::response('')],
+    ]);
+
+    it('lets the password through by default, as laravel does', function (Closure $answer) {
+        Http::fake(['api.pwnedpasswords.com/*' => $answer]);
+        Exceptions::fake();
+
+        expect(($this->errors)())->toBe([]);
+    })->with('no answer');
+
+    it('refuses the password instead when told to, and says why', function (Closure $answer) {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake(['api.pwnedpasswords.com/*' => $answer]);
+        Exceptions::fake();
+
+        expect(($this->errors)())->toBe([__('keyring::keyring.password_unchecked')]);
+    })->with('no answer');
+
+    it('still tells a breached password from a clean one', function (?string $count, bool $breached) {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        $listed = $count === null ? [] : [substr($this->hash, 5).':'.$count];
+
+        Http::fake(['api.pwnedpasswords.com/*' => ($this->range)(...$listed)]);
+        expect(($this->errors)())->toBe($breached ? [__('validation.password.uncompromised', ['attribute' => 'password'])] : []);
+
+        // However the service writes its hashes.
+        Http::swap(new Factory);
+        Http::fake(['api.pwnedpasswords.com/*' => ($this->range)(...array_map(strtolower(...), $listed))]);
+        expect(($this->errors)())->toBe($breached ? [__('validation.password.uncompromised', ['attribute' => 'password'])] : []);
+    })->with([
+        'not listed' => [null, false],
+        // Padding can't name a real hash, but a zero is never a breach.
+        'listed as padding' => ['0', false],
+        'seen once' => ['1', true],
+        'seen often' => ['3861493', true],
+        'seen ten times' => ['10', true],
+    ]);
+
+    it('only sends the first five characters of the hash', function () {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake(['api.pwnedpasswords.com/*' => ($this->range)()]);
+
+        ($this->errors)();
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn (Request $request) => $request->url() === 'https://api.pwnedpasswords.com/range/'.substr($this->hash, 0, 5)
+            && $request->hasHeader('Add-Padding', 'true')
+            && ! str_contains($request->url().$request->body(), substr($this->hash, 5)));
+    });
+
+    it('asks nothing about a password too short to be taken, or with the breach check off', function () {
+        config(['keyring.passwords.refuse_unchecked' => true]);
+        Http::fake(['api.pwnedpasswords.com/*' => Http::response('', 503)]);
+
+        expect(($this->errors)('too short'))->toHaveCount(1)->not->toContain(__('keyring::keyring.password_unchecked'));
+
+        config(['keyring.passwords.uncompromised' => false]);
+        expect(($this->errors)())->toBe([]);
+
+        // Null is production only.
+        config(['keyring.passwords.uncompromised' => null]);
+        expect(($this->errors)())->toBe([]);
+
+        Http::assertNothingSent();
+    });
+});
+
+describe('how long a password can be', function () {
+    dataset('64 characters', [
+        'plain' => [str_repeat('k9$Tq2!x', 8)],
+        'accented' => [str_repeat('é', 64)],
+        'cyrillic' => [str_repeat('жщюя', 16)],
+        'japanese' => [str_repeat('鍵を守る', 16)],
+        'emoji' => [str_repeat('🔑', 64)],
+    ]);
+
+    it('takes 64 characters of any script with argon2id, and everything up to the maximum', function (string $password) {
+        config(['hashing.driver' => 'argon2id']);
+
+        expect(mb_strlen($password))->toBe(64)
+            ->and(passes($password))->toBeTrue()
+            ->and(passes(str_repeat($password, 2)))->toBeTrue()
+            ->and(passes(str_repeat($password, 2).'!'))->toBeFalse();
+    })->with('64 characters');
+
+    it('stops at 72 bytes with bcrypt, and says so', function (string $password) {
+        $errors = Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for()])->errors();
+
+        strlen($password) <= 72
+            ? expect($errors->all())->toBe([])
+            : expect($errors->all())->toBe([__('keyring::keyring.password_too_long', ['attribute' => 'password'])])
+                ->and($errors->first())->toContain('72 bytes')->toContain('fewer with accented letters, other alphabets or emoji');
+    })->with('64 characters');
 });
 
 /**

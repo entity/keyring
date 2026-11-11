@@ -12,9 +12,10 @@ use Illuminate\Database\Eloquent\Model;
 interface UpdatesUserPasswords
 {
     /**
-     * Validate and save a new password the signed-in user chose.
-     * Keyring then signs out their other sessions (unless they asked
-     * not to) and cancels pending email changes.
+     * Validate and save a new password the signed-in user chose. Keyring
+     * has already checked their current password, when they have one, and
+     * afterwards signs out their other sessions (unless they asked not to)
+     * and cancels pending email changes.
      *
      * @param  array<string, mixed>  $input
      */
