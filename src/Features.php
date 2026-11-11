@@ -10,6 +10,7 @@ namespace Keyring;
  *         Features::registration(),
  *         Features::resetPasswords(),
  *         Features::emailVerification(),
+ *         Features::updatePasswords(),
  *     ],
  */
 final class Features

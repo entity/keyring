@@ -42,7 +42,7 @@ return [
         Features::registration(),
         Features::resetPasswords(),
         Features::emailVerification(),
-        // Features::updatePasswords(),
+        Features::updatePasswords(),
         // Features::manageAuthenticators(),
         // Features::devices(),
         // Features::emailChanges(),

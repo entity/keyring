@@ -25,7 +25,7 @@ php artisan migrate
 > composer require entity/keyring:dev-main
 > ```
 
-`keyring:install` asks which sign-in methods you want besides the password, which features to turn on, and whether to email users when their password or sign-in methods change. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. With `--no-interaction` you get the password, registration, password resets and email verification. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
+`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), which features to turn on, and whether to email users when their password, sign-in methods or email address change. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes and those emails. You can add the rest later: every action is published, so a feature works as soon as it's in the list.
 
 Add the trait to your user model, and keep Laravel's `hashed` cast on the password. Registration leaves a new user signed out until they've verified their address, so nobody can use the form to find out who has an account. That needs `MustVerifyEmail` (the installer turns on email verification for you):
 
@@ -167,6 +167,7 @@ use Keyring\Features;
     Features::registration(),
     Features::resetPasswords(),
     Features::emailVerification(),
+    Features::updatePasswords(),
     Features::manageAuthenticators(),
 ],
 ```
@@ -186,7 +187,7 @@ A few more things are opt-in, but aren't in the features list:
 
 - [Security emails](security-log-and-emails.md#security-emails): the `Keyring::notifications([...])` list in your `KeyringServiceProvider`, and the classes in `app/Notifications/Keyring`.
 - [Risk signals](risk.md): `Keyring::risk()->signals([...])` in your `KeyringServiceProvider`.
-- [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. Step-up sends users there too when they don't have what a route needs.
+- [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. `keyring:install` sets both up when you answer yes to requiring one. Step-up sends users there too when they don't have what a route needs.
 
 ## Adding Sign-In Methods
 

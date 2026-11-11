@@ -87,6 +87,15 @@ Without `ifEnrolled()`, users who can't meet the requirement can't sign in at al
 
 It lets guests through, leaving them to `auth`, so it can sit in the `web` group. It also works on a single route or group after `auth`.
 
+`keyring:install` asks "Require a second factor for everyone?" when you pick an authenticator app, passkeys or security keys, and the answer is yes unless you say otherwise. It then adds the middleware to the `web` group from your `KeyringServiceProvider`, which does the same as the lines above, and sets `enrollment_url` to `/settings/security`:
+
+```php
+// app/Providers/KeyringServiceProvider.php
+$this->app->make(Kernel::class)->appendMiddlewareToGroup('web', 'keyring.enrolled');
+```
+
+It doesn't ask when the password is the only sign-in method, or the only other one is an emailed code: nobody could set up what the middleware asks for, and every page would send them to one that can't help.
+
 ```php
 // config/keyring.php
 'enrollment_url' => '/settings/security',

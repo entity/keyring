@@ -2,8 +2,10 @@
 
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
+use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\KeyringServiceProvider;
@@ -69,6 +71,20 @@ it('does not say whether an address already has an account when someone register
     ])->assertRedirect(route('login'))->assertSessionHasNoErrors();
 
     expect(User::count())->toBe(1);
+});
+
+it('lets a user change their password', function () {
+    $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'an old long passphrase', 'email_verified_at' => now()]);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'an old long passphrase']);
+
+    $this->put('/user/password', [
+        'current_password' => 'an old long passphrase',
+        'password' => 'a brand new long passphrase',
+        'password_confirmation' => 'a brand new long passphrase',
+    ])->assertSessionHasNoErrors()->assertSessionHas('status', 'password-updated');
+
+    expect(Hash::check('a brand new long passphrase', $user->fresh()->password))->toBeTrue()
+        ->and(fn () => $user->fresh()->forceFill(['password' => 'changed some other way'])->save())->toThrow(ProtectedAttributeException::class);
 });
 
 it('resets a forgotten password', function () {

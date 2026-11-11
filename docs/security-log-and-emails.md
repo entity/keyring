@@ -148,13 +148,14 @@ Keyring::notifications([
     'authenticator_added' => Notifications\AuthenticatorAdded::class,
     'authenticator_removed' => Notifications\AuthenticatorRemoved::class,
     'recovery_code_used' => Notifications\RecoveryCodeUsed::class,
+    'email_changed' => Notifications\EmailChanged::class,
     // 'new_device' => Notifications\NewDevice::class,
     // 'second_factor_failed' => Notifications\SecondFactorFailed::class,
     // ...
 ]);
 ```
 
-A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and `keyring:install` offers to turn those four on; the rest are there commented out. Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
+A security notice that isn't listed isn't sent, so that list is how you turn one on or off. NIST SP 800-63B asks for `authenticator_added`, `authenticator_removed`, `password_changed` and `recovery_code_used`, and OWASP ASVS 6.3.7 for a notice whenever how someone signs in changes, their email address included. `keyring:install` registers those and `email_changed` unless you answer no (or pass `--no-emails`), whichever sign-in methods you picked; the rest are there commented out. Calling `Keyring::notifications()` again adds to the list, `null` takes a type out, and an unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly turn an email off.
 
 An account is sent each kind of notice five times an hour at most (`limits.notices` every `limits.notices_per`), so nobody can make your app mail one person without end, by signing in from a new browser over and over, say. The [security log](#the-security-log) records every event either way. A `MustVerifyEmail` user gets none until their address is verified, because until then it's only what someone typed when registering.
 

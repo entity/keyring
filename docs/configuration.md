@@ -57,7 +57,7 @@ use Keyring\Features;
     Features::registration(),
     Features::resetPasswords(),
     Features::emailVerification(),
-    // Features::updatePasswords(),
+    Features::updatePasswords(),
     // Features::manageAuthenticators(),
     // Features::devices(),
     // Features::emailChanges(),
@@ -65,7 +65,7 @@ use Keyring\Features;
 ],
 ```
 
-Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration, password resets and email verification. What each feature adds is in [Adding Features](quick-start.md#adding-features).
+Signing in and out, challenges and step-up are always on. Everything else is a feature: each one adds its routes, and anything else it needs, only once it's in the list. Without a config file, Keyring turns on registration, password resets, email verification and password changes, which is also what `keyring:install` picks unless you choose otherwise. What each feature adds is in [Adding Features](quick-start.md#adding-features).
 
 Check for a feature in your own code with `Features::enabled(Features::devices())`. `Features::all()` lists them all, which is handy in tests.
 
@@ -145,7 +145,7 @@ Extra middleware for adding, renaming and removing authenticators, revoking devi
 'enrollment_url' => null,
 ```
 
-Where the `keyring.enrolled` middleware sends users who still need a second factor. Null answers `403`. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
+Where the `keyring.enrolled` middleware sends users who still need a second factor. Null answers `403`. `keyring:install` sets it to `/settings/security` when you have it require a second factor for everyone. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
 
 ```php
 'enrollment_except' => [],
