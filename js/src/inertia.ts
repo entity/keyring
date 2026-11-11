@@ -28,19 +28,50 @@ export function keyCredential(props: ChallengeProps, signal?: AbortSignal): Prom
 }
 
 /**
+ * Browsers allow one WebAuthn request at a time, and take a moment to let go
+ * of one that was aborted: until then a new one is refused ("A request is
+ * already pending"). So a request made while another is still open waits for
+ * it to settle first, and gives up if a newer one replaced it meanwhile. With
+ * none open it's made straight away, still inside the click that asked.
+ */
+function oneAtATime(): <T>(signal: AbortSignal, request: () => Promise<T>) => Promise<T> {
+  let open: Promise<void> | null = null
+
+  return (signal, request) => {
+    const start = async () => {
+      signal.throwIfAborted()
+
+      return request()
+    }
+
+    const next = open === null ? start() : open.then(start)
+    const settled: Promise<void> = next.then(() => {}, () => {}).then(() => {
+      if (open === settled) {
+        open = null
+      }
+    })
+
+    open = settled
+
+    return next
+  }
+}
+
+/**
  * Make a key prompt for a challenge page. Browsers allow one prompt at a
  * time, so a newer call aborts the one still open and takes over. Resolves to
  * the credential, or null when the prompt was cancelled or replaced.
  */
 export function keyPrompt(): (props: ChallengeProps) => Promise<Record<string, any> | null> {
   let current: AbortController | null = null
+  const queue = oneAtATime()
 
   return async (props) => {
     current?.abort()
     const controller = (current = new AbortController())
 
     try {
-      return await keyCredential(props, controller.signal)
+      return await queue(controller.signal, () => keyCredential(props, controller.signal))
     } catch (error) {
       if (current !== controller || isAbort(error)) {
         return null
@@ -54,6 +85,9 @@ export function keyPrompt(): (props: ChallengeProps) => Promise<Record<string, a
 /** Fetch usernameless options and run the browser prompt (or autofill). */
 export async function passkeyCredential(factor: string, options: { autofill?: boolean, signal?: AbortSignal } = {}): Promise<Record<string, any>> {
   const login = await json<{ options: Record<string, any> }>('GET', routes.loginOptions(factor))
+
+  // Replaced while the options were on their way: nothing to ask the browser.
+  options.signal?.throwIfAborted()
 
   return getCredential(login.options, options)
 }
@@ -106,6 +140,7 @@ export function passkeyLogin(
   let current: AbortController | null = null
   let canAutofill = false
   let stopped = false
+  const queue = oneAtATime()
 
   function set(changes: Partial<PasskeyLoginState>): void {
     if (!stopped) {
@@ -129,7 +164,7 @@ export function passkeyLogin(
     }
 
     try {
-      const credential = await passkeyCredential(factor, { autofill: conditional, signal: controller.signal })
+      const credential = await queue(controller.signal, () => passkeyCredential(factor, { autofill: conditional, signal: controller.signal }))
 
       // The browser can still hand over a passkey just as a newer request
       // takes over; that one owns the state now.
