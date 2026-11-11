@@ -10,7 +10,7 @@ return [
     'last_factor' => 'You need to keep at least one way to sign in that meets your account\'s security requirements.',
     'recovery_needs_second_factor' => 'Recovery codes back up another second factor. Add one first, like an authenticator app or a passkey.',
     'password_common' => 'That password is too common. Choose another.',
-    'password_context' => 'Your password can\'t contain your name, part of your email address, or a name to do with this site.',
+    'password_context' => 'Your password can\'t be made up of your name, your email address or the name of this site. Add some words of your own.',
     'password_unchecked' => 'We couldn\'t check that password against known data breaches just now. Please try again in a moment.',
     'password_to_remove_last_factor' => 'Enter your password to remove your last second factor.',
     'password_too_short_alone' => 'Without a second factor your password needs at least :min characters. Change it first, then remove this.',
