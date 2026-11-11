@@ -30,6 +30,7 @@ use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireEnrollment;
 use Keyring\Http\Middleware\RequireFreshVerification;
+use Keyring\Http\Middleware\ValidateSignature;
 use Keyring\Http\Responses as DefaultResponses;
 use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskLocks;
@@ -123,6 +124,7 @@ class KeyringServiceProvider extends ServiceProvider
         $router->aliasMiddleware('keyring.fresh', RequireFreshVerification::class);
         $router->aliasMiddleware('keyring.session', AuthenticateSession::class);
         $router->aliasMiddleware('keyring.enrolled', RequireEnrollment::class);
+        $router->aliasMiddleware('keyring.signed', ValidateSignature::class);
 
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);

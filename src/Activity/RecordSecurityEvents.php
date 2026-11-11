@@ -51,6 +51,8 @@ class RecordSecurityEvents
             Events\AccessRefused::class => 'accessRefused',
             Events\EnrollmentRefused::class => 'enrollmentRefused',
             Events\AuthenticatorRemovalRefused::class => 'authenticatorRemovalRefused',
+            Events\LinkRefused::class => 'linkRefused',
+            Events\VerificationRefused::class => 'verificationRefused',
         ];
     }
 
@@ -228,5 +230,20 @@ class RecordSecurityEvents
     public function authenticatorRemovalRefused(Events\AuthenticatorRemovalRefused $event): void
     {
         $this->log->recordRefusal('authenticator_removal_refused', $event->user, $event->authenticator->factor, meta: ['name' => $event->authenticator->name]);
+    }
+
+    /**
+     * Which link and why, never the token or signature that came with it.
+     */
+    public function linkRefused(Events\LinkRefused $event): void
+    {
+        $this->log->recordRefusal('link_refused', $event->user, meta: ['link' => $event->link, 'reason' => $event->reason]);
+    }
+
+    public function verificationRefused(Events\VerificationRefused $event): void
+    {
+        $this->log->recordRefusal('verification_refused', $event->attempt->user(), $event->factor, meta: [
+            'skipped' => array_map(class_basename(...), $event->skipped),
+        ]);
     }
 }
