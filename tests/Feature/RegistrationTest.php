@@ -13,6 +13,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
@@ -612,6 +613,38 @@ describe('hiding who has an account', function () {
             ->assertSessionHasErrors(['email' => __('auth.failed')]);
 
         $this->assertGuest();
+    });
+
+    // The link is kept under a session ID only the browser that followed it
+    // holds, whatever ID that browser came with.
+    it('keeps a followed link under a new session id, so a browser holding the old one can\'t sign in with it', function () {
+        $this->post('/register', registrationForm());
+        $user = User::sole();
+        $cookie = config('session.cookie');
+
+        // A browser that sends only this session ID, and nothing else of this one.
+        $as = function (string $id) use ($cookie) {
+            session()->flush();
+            Auth::forgetGuards();
+
+            return $this->withCredentials()->withOnlyCookies([$cookie => $id]);
+        };
+
+        $this->flushSession();
+        $shared = $this->get('/login')->getCookie($cookie)->getValue();
+        $followed = $as($shared)->get(verificationLinkSentTo($user))->assertRedirect(route('login'))->getCookie($cookie)->getValue();
+
+        expect($followed)->not->toBe($shared);
+
+        $as($shared)->post('/login', ['email' => 'taylor@example.com', 'password' => 'correct horse battery staple'])
+            ->assertSessionHasErrors(['email' => __('auth.failed')]);
+        $this->assertGuest();
+        expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
+
+        $as($followed)->post('/login', ['email' => 'taylor@example.com', 'password' => 'correct horse battery staple'])
+            ->assertSessionHasNoErrors();
+        $this->assertAuthenticatedAs($user);
+        expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     });
 
     it('stops accepting a followed link once it has expired, or the address has changed', function (Closure $change) {

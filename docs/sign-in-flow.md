@@ -288,7 +288,7 @@ A new user can't sign in until their address is verified. If they could, anyone 
 
 Verifying takes the emailed link and the password together:
 
-1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session and sends them to the login page with the `sign-in-to-verify` status. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
+1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session, under a new session ID, and sends them to the login page with the `sign-in-to-verify` status. The new ID means only the browser that followed the link holds it, whoever else had the one it came with. It comes with a new CSRF token, so a login page already open in another tab of that browser needs reloading before it can post. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
 2. They sign in. From the browser that followed the link, their account may sign in, and doing so verifies the address (Laravel's `Verified` event fires). They're sent back to the link, which has nothing left to do and sends them on to `home`.
 
 From then on they sign in anywhere, like anyone else. A link works until it expires (`auth.verification.expire`, 60 minutes), and registering again with the same address sends a new one. A finished [password reset](protected-changes.md#resetting-the-password) verifies the address too, since its link went to the same inbox. That's the way in for the owner of an address someone else registered first: they can't verify an account whose password they don't know, and whoever registered it never sees the link.
