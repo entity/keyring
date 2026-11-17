@@ -17,6 +17,7 @@ use Keyring\Factors\WebAuthn;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
@@ -262,6 +263,53 @@ it('finishes a step-up with the last recovery code and the password', function (
 
     $this->get('/account')->assertOk();
     expect(Keyring::factor('recovery')->present($recovery->fresh())['remaining'])->toBe(0);
+});
+
+it('asks for the password when recovery codes are all an account has beside it', function () {
+    Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+    signIn();
+    $this->travel(16)->minutes();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->inertia()->get(route('keyring.confirm.challenge'))
+        ->assertJsonPath('props.factor', 'password')
+        ->assertJsonPath('props.alternatives', []);
+    $this->flushHeaders();
+
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa']);
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertStatus(423);
+    expect(app(SessionAssurance::class)->all())->each(fn ($verification) => $verification->factor->not->toBe(RecoveryCodes::KEY));
+
+    $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])->assertRedirect('/account');
+    $this->get('/account')->assertOk();
+});
+
+it('does not count a recovery code the session proved toward a step-up that refuses them', function () {
+    $codes = Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+
+    // However the session came to hold a recent proof of the codes alone.
+    Route::middleware(['web', 'auth'])->post('/proved-codes', function () use ($codes) {
+        app(SessionAssurance::class)->record([Verification::of($codes)]);
+
+        return 'ok';
+    });
+
+    signIn();
+    $this->travel(16)->minutes();
+    $this->post('/proved-codes')->assertOk();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+});
+
+it('counts a sign in with the password and a recovery code as fresh beside an authenticator app', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+
+    signIn();
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->assertRedirect();
+
+    $this->get('/account')->assertOk();
 });
 
 it('does not spend a recovery code on a step-up it could never finish', function () {

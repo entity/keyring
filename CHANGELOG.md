@@ -22,7 +22,7 @@ The first release. Nothing is tagged yet.
 
 - Policies built from assurance levels that follow NIST SP 800-63B-4: AAL2 needs a factor the user has, and AAL3 an attested key that can't leave its device. `ifEnrolled()` and `noDowngrade()` say how a policy treats users who can't meet it yet, or who have a passkey.
 - `keyring.enrolled` to make everyone set up a second factor, which the installer adds when you pick one.
-- Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`, with a shared confirm flow. Changing how an account signs in takes the strongest proof the account can give.
+- Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`, with a shared confirm flow. Changing how an account signs in takes the strongest proof the account can give, and a recovery code only counts there beside another factor.
 
 ### Sessions and Devices
 

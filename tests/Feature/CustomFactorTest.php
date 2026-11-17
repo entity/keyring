@@ -12,6 +12,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Factor;
 use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
@@ -204,6 +205,23 @@ describe('a factor that is nothing the user holds', function () {
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
         $this->get('/billing')->assertOk();
         $this->get('/app')->assertOk();
+    });
+
+    it('takes a recovery code in its place at a step-up, beside the password', function () {
+        Keyring::factors([Password::class, VoicePrint::class, RecoveryCodes::class]);
+        Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+        Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->post(route('keyring.login.verify', 'voice'), ['code' => 'my voice is my passport']);
+        $this->travel(16)->minutes();
+
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa']);
+        $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+        $this->get('/account')->assertOk();
     });
 });
 

@@ -299,6 +299,113 @@ it('removes sign-in methods added earlier in the session that asked for the chan
         ->and(Authenticator::find($before->id))->not->toBeNull();
 });
 
+it('removes recovery codes with the last factor an undo removes', function () {
+    Event::fake([AuthenticatorRemoved::class]);
+    $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonths(2)]);
+    $this->travel(1)->month();
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subDays(3)]);
+    $change = requestChange($this->user, 'new@example.com', Assurance::AAL2);
+    $tokens = tokensFor('new@example.com', 'taylor@example.com');
+
+    confirmBoth($change, $tokens);
+    app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+    expect(Authenticator::find($totp->id))->toBeNull()
+        ->and(Authenticator::find($codes->id))->toBeNull();
+    Event::assertDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->authenticator->is($codes));
+});
+
+it('leaves nothing but the password to confirm with once an undo removes a replaced authenticator app', function () {
+    Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
+    $signIn = function (?string $code = null) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+        if ($code !== null) {
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => $code]);
+        }
+    };
+    $enroll = function () {
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+
+        return [$secret, $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk()->json('recoveryCodes')];
+    };
+    $signOut = function () {
+        $this->post(route('logout'));
+        $this->flushSession();
+        Auth::forgetGuards();
+    };
+
+    // The codes come with a first app, which is replaced a month later.
+    $signIn();
+    [$first, $codes] = $enroll();
+    $firstId = Authenticator::query()->where('factor', 'totp')->sole()->id;
+    $signOut();
+
+    $this->travel(30)->days();
+    $signIn(totpCode($first));
+    [$second] = $enroll();
+    $this->deleteJson(route('keyring.authenticators.destroy', $firstId))->assertOk();
+    $signOut();
+
+    // An email change days later, confirmed from both addresses and undone.
+    $this->travel(3)->days();
+    $signIn(totpCode($second));
+    $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+    $change = PendingChange::sole();
+    $tokens = tokensFor('new@example.com', 'taylor@example.com');
+    confirmBoth($change, $tokens);
+    $signOut();
+
+    $this->travel(1)->day();
+    app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+    expect(Authenticator::query()->ownedBy($this->user)->pluck('factor')->all())->toBe([]);
+
+    $this->travel(1)->day();
+    $signIn();
+    $this->travel(20)->minutes();
+
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->inertia()->get(route('keyring.confirm.challenge'))
+        ->assertJsonPath('props.factor', 'password')
+        ->assertJsonPath('props.alternatives', []);
+    $this->flushHeaders();
+
+    $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => $codes[0]]);
+    $this->get('/account')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->postJson(route('keyring.email.store'), ['email' => 'other@example.com'])->assertStatus(423);
+});
+
+it('keeps recovery codes when an undo leaves a factor for them to recover', function () {
+    $codes = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+    $kept = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+    $change = requestChange($this->user, 'new@example.com', Assurance::AAL2);
+    $tokens = tokensFor('new@example.com', 'taylor@example.com');
+
+    $this->travel(1)->minutes();
+    $planted = Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+    confirmBoth($change, $tokens);
+    app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+    expect(Authenticator::find($planted->id))->toBeNull()
+        ->and(Authenticator::find($kept->id))->not->toBeNull()
+        ->and(Authenticator::find($codes->id))->not->toBeNull();
+});
+
+it('still asks the current address when the session proved a recovery code rather than its second factor', function () {
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+    Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa']);
+    $this->assertAuthenticatedAs($this->user);
+
+    $this->postJson(route('keyring.email.store'), ['email' => 'new@example.com'])->assertOk();
+
+    expect(PendingChange::query()->latest('id')->first()->current_token)->not->toBeNull();
+});
+
 it('cancels pending email changes when the password is reset', function () {
     $change = requestChange($this->user, 'attacker@example.com');
     $tokens = tokensFor('attacker@example.com', 'taylor@example.com');

@@ -21,6 +21,7 @@ use Keyring\Events\EmailChangeRequested;
 use Keyring\Events\EmailChangeReverted;
 use Keyring\Events\LinkRefused;
 use Keyring\Exceptions\MissingNotification;
+use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -350,6 +351,7 @@ class EmailChanges
 
         $ids = collect($this->assurance->all())
             ->filter(fn (Verification $verification) => $verification->authenticator !== null
+                && $verification->factor !== RecoveryCodes::KEY
                 && in_array(Category::Possession, $verification->categories, true))
             ->map(fn (Verification $verification) => $verification->authenticator);
 
@@ -482,11 +484,14 @@ class EmailChanges
     }
 
     /**
-     * One by one, so each removal is logged and announced.
+     * One by one, so each removal is logged and announced. Recovery codes
+     * go too when what's removed was the last factor they recover, as they
+     * do when the user removes it: left behind, a code would stand where
+     * that factor stood.
      */
     protected function removeAuthenticatorsAddedSince(Authenticatable&Model $user, CarbonInterface $since): void
     {
-        $this->keyring->authenticatorModel()::query()
+        $removed = $this->keyring->authenticatorModel()::query()
             ->ownedBy($user)
             ->where('created_at', '>=', $since)
             ->get()
@@ -494,6 +499,17 @@ class EmailChanges
                 $authenticator->delete();
                 AuthenticatorRemoved::dispatch($user, $authenticator);
             });
+
+        $keyring = $this->keyring->for($user)->refresh();
+
+        if ($removed->isEmpty() || $keyring->hasFactorToRecover()) {
+            return;
+        }
+
+        $keyring->of(RecoveryCodes::KEY)->each(function (Authenticator $codes) use ($user) {
+            $codes->delete();
+            AuthenticatorRemoved::dispatch($user, $codes);
+        });
     }
 
     protected function taken(Authenticatable&Model $user, string $email): bool
