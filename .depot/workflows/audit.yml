@@ -1,0 +1,49 @@
+# Depot CI Migration
+# Source: .github/workflows/audit.yml
+#
+# Changes made:
+# - Changed GitHub runs-on labels to their Depot equivalents
+
+name: audit
+
+# Advisories come out between pushes, so the dependencies are checked every
+# week as well as on every pull request (see tests.yml). SECURITY.md says how
+# soon a finding is acted on.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.5'
+          extensions: sodium, bcmath, intl
+          coverage: none
+      # No lock file is committed, so this is what an app installing Keyring
+      # today would get.
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer audit --abandoned=report
+
+  js:
+    runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Bun from npm: setup-bun downloads from GitHub releases, which has been flaky.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: npm install -g bun@1
+      - run: bun install --frozen-lockfile
+      - run: bun audit
