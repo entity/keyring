@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Lang;
 use Inertia\ComponentNotFoundException;
 use Inertia\ResponseFactory;
 use Keyring\Exceptions\MissingPage;
+use Keyring\Http\Responses\StatusResponse;
+use Keyring\Support\EncryptedSession;
 
 /**
  * Keyring's pages, rendered by the app: Inertia components or Blade views.
@@ -85,5 +87,20 @@ trait RendersPages
         $message = is_string($status) && Lang::has($key = 'keyring::status.'.$status) ? __($key) : null;
 
         return is_string($message) ? $message : null;
+    }
+
+    /**
+     * What the last status response flashed for the page beside its status,
+     * such as new recovery codes, or one key of it in dot notation, like
+     * "enrollment.secret". It's kept encrypted in the session, so read it
+     * here rather than from session('keyring.result'). Null, or $default,
+     * when nothing was flashed.
+     */
+    public function result(?string $key = null, mixed $default = null): mixed
+    {
+        $request = request();
+        $result = $request->hasSession() ? app(EncryptedSession::class)->get(StatusResponse::RESULT) : null;
+
+        return $key === null ? ($result ?? $default) : data_get($result, $key, $default);
     }
 }

@@ -515,7 +515,7 @@ JSON clients get the slug, its translated message, the redirect (when there is o
 }
 ```
 
-Other requests are redirected (back, or to `redirect`) with the slug flashed as `status`, and any data flashed as `keyring.result`, for example `session('keyring.result.recoveryCodes')`.
+Other requests are redirected (back, or to `redirect`) with the slug flashed as `status`, and any data flashed for the next request, encrypted with `APP_KEY` since it can hold a secret being set up or new recovery codes. Read it with `Keyring::result()`, or one key of it in dot notation, for example `Keyring::result('recoveryCodes')`. It's null when nothing was flashed. `session('keyring.result')` holds only the ciphertext.
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 

@@ -271,6 +271,7 @@
         "resetUserPasswordsUsing",
         "respondWith",
         "response",
+        "result",
         "risk",
         "routes",
         "securityEventModel",

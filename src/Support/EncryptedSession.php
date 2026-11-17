@@ -12,7 +12,8 @@ use JsonException;
 
 /**
  * Keeps half-finished work (a login waiting for its second factor, an
- * authenticator being set up) in the session as encrypted JSON, never
+ * authenticator being set up) and the results flashed for a page (a secret
+ * being set up, new recovery codes) in the session as encrypted JSON, never
  * serialize(). Encrypted even where the session already is, so a session
  * store that leaks doesn't give away a pending secret.
  *
@@ -31,6 +32,16 @@ class EncryptedSession
     public function put(string $key, array $data): void
     {
         $this->session->put($key, Crypt::encryptString(json_encode($data, JSON_THROW_ON_ERROR)));
+    }
+
+    /**
+     * Put it for the next request only, as Laravel's flash data is.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function flash(string $key, array $data): void
+    {
+        $this->session->flash($key, Crypt::encryptString(json_encode($data, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE)));
     }
 
     /**

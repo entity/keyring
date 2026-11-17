@@ -60,6 +60,7 @@ The first release. Nothing is tagged yet.
 
 - `keyring:install`, which asks which sign-in methods and features you want and publishes a config, a provider and your actions. Its defaults give the password alone, and every other sign-in method is in the provider, commented out, to turn on later. Also `keyring:import fortify`, and `keyring:prune`, scheduled daily.
 - Security headers on Keyring's responses: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin-allow-popups` and a referrer policy.
+- `Keyring::result()`, for a page to read what a form or Inertia response flashed for it, such as new recovery codes, which is kept encrypted in the session.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite that checks your setup still keeps Keyring's guarantees.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment, sessions and the challenge page, with Vue and React bindings.
 - Documentation of where Keyring stands on every requirement of OWASP ASVS 5.0.0 and NIST SP 800-63B-4 that bears on it, and of each place it deliberately does something else.

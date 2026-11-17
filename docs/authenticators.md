@@ -191,7 +191,7 @@ Every route answers with a [status response](sign-in-flow.md#status-responses). 
 | Update | `authenticator-updated` | `authenticator` |
 | Remove | `authenticator-removed` | |
 
-Other requests are redirected back with the `status` flashed, and the extra data flashed under `keyring.result` (for example `session('keyring.result.enrollment')`). The [browser package](frontend.md#managing-authenticators) uses the JSON form.
+Other requests are redirected back with the `status` flashed, and the extra data flashed, encrypted, for the next request. Read it with `Keyring::result()`, or one key with `Keyring::result('enrollment')`. The [browser package](frontend.md#managing-authenticators) uses the JSON form.
 
 ## From JavaScript
 

@@ -6,9 +6,11 @@ use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Concerns\HasKeyring;
@@ -341,8 +343,43 @@ it('keeps the session verified when enrolling from an inertia page', function ()
 
     // The enrollment details are flashed for the page, without wiping
     // Keyring's other session data (verifications, the session registry).
-    expect(session('keyring.result.enrollment.secret'))->not->toBeNull();
+    expect(Keyring::result('enrollment.secret'))->not->toBeNull();
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+});
+
+// What a form or Inertia page is handed goes through the session store, and
+// a store can be read without APP_KEY: a database, files, a backup.
+it('keeps a secret being set up and new recovery codes out of the stored session', function () {
+    $directory = sys_get_temp_dir().'/keyring-sessions-'.Str::random(8);
+    mkdir($directory);
+    config(['session.driver' => 'file', 'session.files' => $directory]);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    $stored = fn () => implode('', array_map(file_get_contents(...), glob($directory.'/*') ?: []));
+
+    $this->inertia()->post(route('keyring.authenticators.store', 'totp'))->assertRedirect();
+    $this->flushHeaders();
+    $secret = Keyring::result('enrollment.secret');
+
+    expect($secret)->toBeString()->not->toBe('')
+        ->and($stored())->not->toBe('')->not->toContain($secret);
+
+    $this->from('/settings')->post(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertRedirect('/settings');
+    $codes = Keyring::result('recoveryCodes');
+
+    expect($codes)->toBeArray()->not->toBeEmpty();
+
+    foreach ($codes as $code) {
+        expect($stored())->not->toContain($code);
+    }
+
+    // Read once, by the next request, like any flash.
+    $this->get('/settings');
+    $this->get('/settings');
+
+    expect(Keyring::result())->toBeNull();
+    File::deleteDirectory($directory);
 });
 
 it('only allows the shorter password with a real second factor, not recovery codes alone', function () {
