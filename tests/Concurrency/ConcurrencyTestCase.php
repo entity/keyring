@@ -20,9 +20,11 @@ abstract class ConcurrencyTestCase extends TestCase
 
     protected function tearDown(): void
     {
+        // Deleted rather than truncated: MySQL rebuilds a table it truncates,
+        // which takes most of a second each.
         foreach (Schema::getTableListing(schemaQualified: false) as $table) {
             if ($table !== 'migrations') {
-                DB::table($table)->truncate();
+                DB::table($table)->delete();
             }
         }
 

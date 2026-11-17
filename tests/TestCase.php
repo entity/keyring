@@ -25,6 +25,8 @@ use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
 use Orchestra\Testbench\TestCase as Orchestra;
 
+use function Orchestra\Testbench\load_migration_paths;
+
 abstract class TestCase extends Orchestra
 {
     use InteractsWithKeyring, RefreshDatabase;
@@ -49,6 +51,13 @@ abstract class TestCase extends Orchestra
         $app['config']->set('keyring.features', Features::all());
         // What a new Laravel app uses, so nothing relies on PHP serialization.
         $app['config']->set('session.serialization', 'json');
+
+        // Migrated once per process, with each test in a transaction. Loaded
+        // through testbench's defineDatabaseMigrations() instead, the tables
+        // are dropped and made again around every other test. A test that
+        // changes the schema on MySQL commits it, and Laravel then migrates
+        // afresh for the next one.
+        load_migration_paths($app, [__DIR__.'/database/migrations', __DIR__.'/../database/migrations']);
     }
 
     protected function setUp(): void
@@ -66,12 +75,6 @@ abstract class TestCase extends Orchestra
         // Laravel's own listener for new users, which an app's event service
         // provider registers and testbench leaves out.
         Event::listen(Registered::class, SendEmailVerificationNotification::class);
-    }
-
-    protected function defineDatabaseMigrations(): void
-    {
-        $this->loadMigrationsFrom(__DIR__.'/database/migrations');
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
     }
 
     /**
