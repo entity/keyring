@@ -303,6 +303,36 @@ it('gives an authenticator its usual name when the one sent is not text', functi
         ->assertJsonValidationErrors('name');
 });
 
+// Sent as a form: JSON can't carry text that isn't valid UTF-8.
+it('refuses a name that isn\'t valid text, on a rename and when adding one', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['name' => 'Phone']);
+    $json = ['Accept' => 'application/json'];
+
+    $this->patch(route('keyring.authenticators.update', $totp->id), ['name' => "\xff"], $json)->assertJsonValidationErrors('name');
+    $this->patchJson(route('keyring.authenticators.update', $totp->id), ['name' => "Work\0phone"])->assertJsonValidationErrors('name');
+    expect($totp->fresh()->name)->toBe('Phone');
+
+    $this->post(route('keyring.authenticators.store', 'totp'), ['name' => "\xff"], $json)->assertJsonValidationErrors('name');
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+    $this->post(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), 'name' => "Phone \xff"], $json)
+        ->assertJsonValidationErrors('name');
+
+    expect(Authenticator::query()->where('factor', 'totp')->count())->toBe(1);
+});
+
+it('keeps a name that isn\'t valid text as what can be read of it, however it is saved', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['name' => "Phone \xff"]);
+    app(AuthenticatorChanges::class)->update($totp, ['name' => "Work \xfe"]);
+
+    expect(mb_check_encoding($totp->fresh()->name, 'UTF-8'))->toBeTrue()
+        ->and($totp->fresh()->name)->toStartWith('Work ');
+
+    app(AuthenticatorChanges::class)->update($totp, ['name' => "Work\0phone"]);
+
+    expect($totp->fresh()->name)->toBe('Workphone');
+});
+
 it('limits password guesses when removing the last second factor', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 

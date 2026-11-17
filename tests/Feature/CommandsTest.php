@@ -800,6 +800,20 @@ describe('keyring:import fortify', function () {
         expect($this->user->keyring->refresh()->of('passkey')->first()->name)->toBe('MacBook');
     });
 
+    it('imports a passkey whose name isn\'t valid text as what can be read of it', function () {
+        if (DB::getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('PostgreSQL and strict MySQL refuse to store text that isn\'t valid UTF-8.');
+        }
+
+        passkeysTable();
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => "MacBook \xff", ...passkeyRow($this->user)]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $name = Authenticator::query()->where('factor', 'passkey')->sole()->name;
+        expect(mb_check_encoding($name, 'UTF-8'))->toBeTrue()->and($name)->toStartWith('MacBook ');
+    });
+
     it('imports a passkey whose algorithm the app does not take, and says it will be refused', function (bool $dryRun) {
         $key = VirtualAuthenticator::rsa();
         $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);

@@ -50,7 +50,7 @@ The first release. Nothing is tagged yet.
 
 ### Logging and Emails
 
-- A security log with a severity and a request ID on every entry, of sign ins, sessions "remember me" carried on, failures, lockouts, changes and what was refused, capped so a refused request can't fill it. Without the table it goes to your app's log.
+- A security log with a severity and a request ID on every entry, of sign ins, sessions "remember me" carried on, failures, lockouts, changes and what was refused, capped so a refused request can't fill it, and written whatever text an entry is about. Without the table it goes to your app's log.
 - "Was this you?" alerts at the next sign in.
 - Security emails about changes to how an account signs in and about suspicious attempts, sent from the start as far as your features go. Each is a notification you can swap for your own or turn off, and `SecurityNotice::toMailUsing()` writes them all from your own template.
 - `support_contact`, so every notice can say who to contact.

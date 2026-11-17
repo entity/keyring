@@ -15,6 +15,7 @@ use Keyring\Contracts\SendsCodes;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Events\EnrollmentRefused;
+use Keyring\Factors\Factor;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
@@ -53,6 +54,10 @@ class AuthenticatorController
     public function store(Request $request, string $factor): StatusResponse
     {
         $factor = $this->enrollable($request, $factor);
+
+        // A name given now is kept for the confirm, which may not send one.
+        // Anything that isn't text is left out of it, as before.
+        Input::validate($request, ['name' => [Factor::validText()]]);
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
@@ -108,7 +113,7 @@ class AuthenticatorController
         $authenticator = $this->changes->find($this->keyring->user(), $authenticator);
 
         $changes = $request->validate([
-            'name' => ['sometimes', 'string', 'max:64'],
+            'name' => ['sometimes', ...Factor::nameRules()],
             // Recovery codes are a fallback, never the way to sign in first.
             'default' => ['sometimes', 'boolean', Rule::prohibitedIf($authenticator->factor === RecoveryCodes::KEY)],
         ]);
