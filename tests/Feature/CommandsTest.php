@@ -59,17 +59,17 @@ describe('keyring:install', function () {
         $this->sandbox = sys_get_temp_dir().'/keyring-install-'.uniqid();
         $files = new Filesystem;
         $files->ensureDirectoryExists($this->sandbox.'/bootstrap');
+        $files->ensureDirectoryExists($this->sandbox.'/config');
         $files->put($this->sandbox.'/bootstrap/providers.php', "<?php\n\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n");
 
         $this->app->useAppPath($this->sandbox.'/app');
         $this->app->useBootstrapPath($this->sandbox.'/bootstrap');
+        $this->app->useConfigPath($this->sandbox.'/config');
+        $this->app->useDatabasePath($this->sandbox.'/database');
     });
 
     afterEach(function () {
-        $files = new Filesystem;
-        $files->deleteDirectory($this->sandbox);
-        $files->delete(config_path('keyring.php'));
-        $files->delete($files->glob(database_path('migrations/*_create_keyring_*')));
+        (new Filesystem)->deleteDirectory($this->sandbox);
     });
 
     // A new app starts small: everything past the password is there to turn on.
@@ -343,7 +343,7 @@ describe('keyring:install', function () {
             ->and(array_map(fn (string $name) => Str::after($name, '_create_'), array_slice($published, -2)))
             ->toBe(['keyring_failure_counts_table.php', 'keyring_password_holds_table.php']);
     });
-})->skip(fn () => getenv('TEST_TOKEN') !== false, 'Publishes into the testbench app every parallel worker shares.');
+});
 
 describe('the risk signals a new provider starts with', function () {
     /**
