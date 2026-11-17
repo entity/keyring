@@ -37,7 +37,7 @@ The first release. Nothing is tagged yet.
 
 - Protected `email` and `password` attributes, which only change through Keyring's flows once it handles them.
 - Email changes confirmed from both addresses and revertable from the old one, with the old address reserved while they can be undone.
-- Password changes that take the current password, and resets that sign nobody in, end every session and leave second factors alone.
+- Password changes that take the current password and are only saved over the one that was checked, and resets that sign nobody in, end every session and leave second factors alone.
 - Password rules that follow OWASP ASVS 5.0.0 and NIST SP 800-63B-4: 15 characters alone or 8 with a second factor, no composition rules, a bundled list of the most common passwords, your own context words, a breach check that can refuse what it couldn't check, Unicode normalised to NFC, and, with bcrypt, a password it would cut short or can't hash refused.
 - `Keyring::requirePasswordChange()`, and a risk action of the same name, to hold a user until they choose a new password when theirs is known to someone else.
 - Emailed links that only act on a button press, with the token or signature posted in the body, built from `APP_URL` and opened on pages that send no referrer.

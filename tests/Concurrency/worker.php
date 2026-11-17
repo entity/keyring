@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
+use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
@@ -112,6 +113,19 @@ try {
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),
+        'change-password' => (function () use ($id, $value) {
+            // A request its middleware let through as this session, with its
+            // current password checked against the user it loaded.
+            $request = Request::create('/user/password', 'PUT');
+            $request->setLaravelSession(app('session.store'));
+            $request->session()->put(Sessions::KEY, $value);
+
+            $user = User::findOrFail($id);
+
+            app(PasswordChanges::class)->change($user, fn () => $user->forceFill(['password' => 'a passphrase sent a moment later'])->save(), currentSession: $value, request: $request);
+
+            return 'changed';
+        })(),
         'request-email-change' => (function () use ($id, $value) {
             // A request its middleware let through as this session.
             $request = Request::create('/user/email', 'POST');

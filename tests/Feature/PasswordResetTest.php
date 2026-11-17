@@ -10,12 +10,14 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Timebox;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
 use Keyring\Events\FactorVerified;
 use Keyring\Events\PasswordChanged as PasswordChangedEvent;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Notifications\PasswordChanged;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -231,6 +233,80 @@ it('does not let a rehash put back the password a reset replaced while it was be
     $this->assertGuest();
     expect(Hash::check('a-brand-new-long-password-1', $user->fresh()->password))->toBeTrue()
         ->and(app(SessionRegistry::class)->forUser($user))->toBeEmpty();
+});
+
+/**
+ * A hasher that plays the given work just before its next check: after a
+ * request has loaded the user, while it checks their current password, and
+ * before it holds their row.
+ */
+function beforeNextHashCheck(Closure $work): void
+{
+    Hash::extend('racing', fn () => new class(['rounds' => 4]) extends BcryptHasher
+    {
+        public static ?Closure $before = null;
+
+        public function check(#[SensitiveParameter] $value, $hashedValue, array $options = [])
+        {
+            [$before, self::$before] = [self::$before, null];
+            $before?->__invoke();
+
+            return parent::check($value, $hashedValue, $options);
+        }
+    });
+    config(['hashing.driver' => 'racing']);
+
+    Hash::driver()::$before = $work;
+}
+
+// The change checked the password the reset replaced. Saved anyway, it
+// would put a password the owner never chose over the one they just did.
+it('does not save a password change over a reset that finished while its current password was being checked', function () {
+    $user = taylor();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    beforeNextHashCheck(function () use ($user) {
+        app(PasswordChanges::class)->reset(
+            $owner = $user->fresh(),
+            fn () => $owner->forceFill(['password' => 'a-brand-new-long-password-1'])->save(),
+        );
+
+        // The owner signs in again with the password they just chose.
+        $now = now()->getTimestamp();
+        app(SessionRegistry::class)->save(new RegisteredSession('owner', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    });
+
+    $this->putJson(route('user-password.update'), [
+        'current_password' => 'password',
+        'password' => 'a passphrase the owner never chose',
+        'password_confirmation' => 'a passphrase the owner never chose',
+    ])->assertUnauthorized();
+
+    expect(Hash::check('a-brand-new-long-password-1', $user->fresh()->password))->toBeTrue()
+        ->and(app(SessionRegistry::class)->find('owner')?->isActive(now()->getTimestamp()))->toBeTrue();
+});
+
+// Another of the account's sessions changed the password and kept this one
+// signed in. What this request checked is no longer the password.
+it('does not save a password change over another that finished while its current password was being checked', function () {
+    $user = taylor();
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    beforeNextHashCheck(fn () => app(PasswordChanges::class)->change(
+        $other = $user->fresh(),
+        fn () => $other->forceFill(['password' => 'a-brand-new-long-password-1'])->save(),
+        currentSession: null,
+        signOutOthers: false,
+    ));
+
+    $this->putJson(route('user-password.update'), [
+        'current_password' => 'password',
+        'password' => 'a passphrase sent a moment later',
+        'password_confirmation' => 'a passphrase sent a moment later',
+    ])->assertUnprocessable()->assertJsonValidationErrors('current_password');
+
+    expect(Hash::check('a-brand-new-long-password-1', $user->fresh()->password))->toBeTrue();
+    $this->assertAuthenticated();
 });
 
 it('does not leave a browser trusted by a sign in that a reset ended', function () {

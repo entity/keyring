@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
@@ -218,6 +220,28 @@ it('refuses a sign-in method from a session that is signed out while its request
 })->with([
     'signed out meanwhile' => [true, 'signed out'],
     'still signed in' => [false, 'added'],
+]);
+
+// A password saved while the change waits for the user's row: a reset's
+// UPDATE, or another session's change. The change then finds a password it
+// didn't check, and is refused.
+it('refuses a password change whose current password is replaced while its request waits', function (string $meanwhile, string $expected, string $stored) {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    app(SessionRegistry::class)->save(new RegisteredSession('asking', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    [$changed] = contend($user, [['change-password', $user->id, 'asking']], fn () => match ($meanwhile) {
+        'reset' => app(PasswordChanges::class)->reset($owner = $user->fresh(), fn () => $owner->forceFill(['password' => 'the reset password'])->save()),
+        'change' => app(PasswordChanges::class)->change($other = $user->fresh(), fn () => $other->forceFill(['password' => 'the reset password'])->save(), currentSession: 'asking', signOutOthers: false),
+        default => null,
+    });
+
+    expect($changed)->toBe($expected)
+        ->and(Hash::check($stored, $user->fresh()->password))->toBeTrue();
+})->with([
+    'reset meanwhile' => ['reset', 'signed out', 'the reset password'],
+    'changed elsewhere meanwhile' => ['change', 'refused', 'the reset password'],
+    'nothing meanwhile' => ['', 'changed', 'a passphrase sent a moment later'],
 ]);
 
 it('lets one of two requests use a "remember me" cookie, and starts one session between them', function () {
