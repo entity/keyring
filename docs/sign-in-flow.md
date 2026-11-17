@@ -276,6 +276,8 @@ By default (`registration.reveal_taken` is `false`), nobody can use the form to 
 
 - The answer is always the same: a redirect to the login page with the `registration-received` status ("Thanks for registering. We've emailed that address with what to do next."), or that status as JSON. Nobody is signed in.
 - Validation errors from your action are shown as usual. They're the same for every address, because your action never looks at whether it's taken.
+- After your action's `validate()`, Keyring refuses a password the hasher can't take, whatever your rules say: with bcrypt, one over 72 bytes or with a NUL byte. Only a free address hashes the password it was sent, so otherwise that address alone would fail.
+- **If `create()` throws**, which only happens for a free address, the exception is passed to `report()` and the answer is the usual one. Nothing is created or sent, so the visitor is told to check an inbox that gets nothing, and a `create()` that keeps failing shows in your error tracker rather than as failed requests. A `ValidationException` thrown there is shown like any other validation error, since it's your action refusing the form on purpose.
 - **A free address** gets its account, and Laravel's `Registered` event is dispatched once the response has been sent, which emails the verification link.
 - **A taken address** gets nothing created or changed. Once the response has been sent, Keyring emails it your `already_registered` [notification](security-log-and-emails.md#emails-a-flow-needs), which says someone tried to register and links to the login page and, with `Features::resetPasswords()`, the forgot password page. If the account there was never verified, it's sent another verification link instead, since the first may be lost or expired.
 - An address is mailed five times an hour at most by registration (`limits.notices` every `limits.notices_per`), verification links included, so the form can't be used to fill someone's inbox. Past that the answer stays the same and nothing is sent.
@@ -298,7 +300,7 @@ This needs email verification, and Keyring says so rather than leaking quietly:
 
 It also means an account that isn't verified can't be signed in at all, however it got that way: a session whose user loses `email_verified_at` is signed out on its next request. Mark accounts you create yourself (an import, a seeder, a social login) as verified.
 
-Three things are still yours to keep quiet. A username of your own that has to be unique (a handle, say) will say when it's taken, because your action checks it. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other, but anything your action's `create()` does that takes noticeably longer than the timebox will show. And your mail provider's bounce or delivery reports are outside the request altogether.
+Three things are still yours to keep quiet. A username of your own that has to be unique (a handle, say) will say when it's taken, because your action checks it, and so will a `ValidationException` your `create()` throws for a free address only. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other, but anything your action's `create()` does that takes noticeably longer than the timebox will show. And your mail provider's bounce or delivery reports are outside the request altogether.
 
 ### Saying When an Address Is Taken
 
@@ -314,6 +316,7 @@ Many apps would rather tell someone straight away that they already have an acco
 - A taken address gets Laravel's "has already been taken" error on the email field, next to any other validation errors. Nothing is emailed.
 - A new user is signed in straight away, counting the password they just chose as proved, and `Registered` is dispatched during the request. The policy isn't consulted, since they have no other factors yet. The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
 - Users can sign in before verifying their address, and email verification is optional.
+- An exception your action's `create()` throws isn't caught: there's nothing left to hide, so it fails like any other request.
 
 This tells anyone who asks whether an address has an account: the error says so, and so does being signed in. It's the trade most consumer apps make, and it doesn't meet ASVS 6.3.8.
 

@@ -7,7 +7,7 @@ The first release. Nothing is tagged yet.
 ### Signing In
 
 - Sign in, sign out, registration, password resets and email verification, with your own actions and pages.
-- Registration that doesn't reveal who has an account: the same answer for a free and a taken address, with new users signing in once they've verified theirs. `registration.reveal_taken` says when an address is taken instead.
+- Registration that doesn't reveal who has an account: the same answer for a free and a taken address, even when your action fails to create the user, with new users signing in once they've verified theirs. `registration.reveal_taken` says when an address is taken instead.
 - Factors behind one contract: password, authenticator apps, passkeys, security keys, email codes and recovery codes, plus your own. Many authenticators per user, with a default and "try another way".
 - Passkeys and security keys from one WebAuthn driver: ES256 and EdDSA by default, RS256 when you ask for it, a challenge that is answered once and runs out on the server, and sign in with Laravel's `@laravel/passkeys` client. Like Laravel's passkeys package, the options name the relying party by its ID, so there's no name to set.
 - `WebAuthn::securityKeys()->requireAttestation()` to only add hardware keys whose attestation chains to root certificates you list, and `allowOnly()` to limit them to certain models by AAGUID.
@@ -38,7 +38,7 @@ The first release. Nothing is tagged yet.
 - Protected `email` and `password` attributes, which only change through Keyring's flows once it handles them.
 - Email changes confirmed from both addresses and revertable from the old one, with the old address reserved while they can be undone.
 - Password changes that take the current password, and resets that sign nobody in, end every session and leave second factors alone.
-- Password rules that follow OWASP ASVS 5.0.0 and NIST SP 800-63B-4: 15 characters alone or 8 with a second factor, no composition rules, a bundled list of the most common passwords, your own context words, a breach check that can refuse what it couldn't check, and Unicode normalised to NFC.
+- Password rules that follow OWASP ASVS 5.0.0 and NIST SP 800-63B-4: 15 characters alone or 8 with a second factor, no composition rules, a bundled list of the most common passwords, your own context words, a breach check that can refuse what it couldn't check, Unicode normalised to NFC, and, with bcrypt, a password it would cut short or can't hash refused.
 - `Keyring::requirePasswordChange()`, and a risk action of the same name, to hold a user until they choose a new password when theirs is known to someone else.
 - Emailed links that only act on a button press, with the token or signature posted in the body, built from `APP_URL` and opened on pages that send no referrer.
 

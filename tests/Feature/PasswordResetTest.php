@@ -102,6 +102,21 @@ it('renders the reset page whatever the query string holds', function () {
         ->assertJsonPath('props.email', '');
 });
 
+it('refuses a new password bcrypt can\'t hash, on a change and a reset', function () {
+    $password = "correct horse\0battery staple";
+
+    $this->actingAs($this->plain)->freshAt(now())->putJson(route('user-password.update'), [
+        'current_password' => 'password',
+        'password' => $password,
+        'password_confirmation' => $password,
+    ])->assertUnprocessable()->assertJsonValidationErrors('password');
+    auth()->logout();
+
+    $this->postJson(route('password.update'), ['token' => Password::broker()->createToken($this->plain), 'email' => 'plain@example.com', 'password' => $password, 'password_confirmation' => $password])
+        ->assertUnprocessable()->assertJsonValidationErrors('password');
+    expect(Hash::check('password', $this->plain->fresh()->password))->toBeTrue();
+});
+
 it('ends outstanding reset links when the password is changed', function (bool $signOutOthers) {
     $token = Password::broker()->createToken($this->plain);
 

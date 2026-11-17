@@ -399,6 +399,17 @@ describe('how long a password can be', function () {
             : expect($errors->all())->toBe([__('keyring::keyring.password_too_long', ['attribute' => 'password'])])
                 ->and($errors->first())->toContain('72 bytes')->toContain('fewer with accented letters, other alphabets or emoji');
     })->with('64 characters');
+
+    it('refuses a NUL byte with bcrypt, which can\'t hash one, and takes it with argon2id', function () {
+        $password = "correct horse\0battery staple";
+        $errors = fn () => Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for()])->errors()->all();
+
+        expect($errors())->toBe([__('keyring::keyring.password_null_byte', ['attribute' => 'password'])]);
+
+        config(['hashing.driver' => 'argon2id']);
+
+        expect($errors())->toBe([]);
+    });
 });
 
 /**

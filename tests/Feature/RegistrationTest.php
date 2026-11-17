@@ -14,12 +14,15 @@ use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Timebox;
 use Illuminate\Testing\TestResponse;
+use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Exceptions\EmailVerificationRequired;
@@ -42,6 +45,34 @@ beforeEach(function () {
 });
 
 afterEach(fn () => Model::clearBootedModels());
+
+/**
+ * The published action, failing where it creates the user.
+ */
+class FailingCreateNewUser extends CreateNewUser
+{
+    public static ?Throwable $failure = null;
+
+    public function create(array $input): User
+    {
+        throw self::$failure ?? new LogicException('No failure set.');
+    }
+}
+
+/**
+ * An action with password rules of its own that leave out Keyring's.
+ */
+class LooseCreateNewUser extends CreateNewUser
+{
+    public function validate(array $input): array
+    {
+        return Validator::make($input, [
+            'name' => ['required', 'string'],
+            'email' => ['required', 'string', 'email'],
+            'password' => ['required', 'string', 'confirmed'],
+        ])->validate();
+    }
+}
 
 /**
  * The registration form, filled in well unless a field says otherwise.
@@ -171,6 +202,32 @@ describe('hiding who has an account', function () {
         expect($answers['free']['status'])->toBe($json ? 200 : 302)
             ->and($answers['free']['guest'])->toBeTrue()
             ->and($answers['free']['errors'])->toBe([]);
+
+        foreach ($answers as $case => $answer) {
+            expect($answer)->toEqual($answers['free'], "A {$case} address was answered differently.");
+        }
+    })->with(['a form post' => false, 'json' => true]);
+
+    // Bcrypt can't hash a NUL byte, and only a free address hashes the
+    // visitor's password, so it's refused before either path is taken.
+    it('refuses a password bcrypt can\'t hash the same for every address', function (bool $json) {
+        $answers = [];
+
+        foreach (addressesToRegister() as $case => $address) {
+            $this->flushSession();
+            $this->travel(2)->minutes();
+
+            $form = registrationForm(['email' => $address(), 'password' => "correct horse\0battery staple", 'password_confirmation' => "correct horse\0battery staple"]);
+
+            $answers[$case] = visibleAnswer($json ? $this->postJson('/register', $form) : $this->post('/register', $form));
+        }
+
+        expect($answers['free']['status'])->toBe($json ? 422 : 302)
+            ->and(User::query()->where('email', 'free@example.com')->exists())->toBeFalse();
+
+        $json
+            ? expect(json_decode($answers['free']['body'], true)['errors'])->toHaveKey('password')
+            : expect($answers['free']['errors'])->toHaveKey('password');
 
         foreach ($answers as $case => $answer) {
             expect($answer)->toEqual($answers['free'], "A {$case} address was answered differently.");
@@ -406,20 +463,68 @@ describe('hiding who has an account', function () {
         expect(User::sole()->is($owner))->toBeTrue();
     });
 
-    it('still fails when the users table refuses a new user for another reason', function () {
+    // Only a free address gets as far as creating a user, so however that
+    // fails, it's answered like the rest. The app still hears of it.
+    it('answers the same when the action can\'t create the user, and reports why', function (Throwable $failure) {
+        Exceptions::fake();
+        FailingCreateNewUser::$failure = $failure;
+        Keyring::createUsersUsing(FailingCreateNewUser::class);
+        $answers = [];
+
+        foreach (addressesToRegister() as $case => $address) {
+            $this->flushSession();
+            $this->travel(2)->minutes();
+
+            $answers[$case] = visibleAnswer($this->post('/register', registrationForm(['email' => $address()])));
+        }
+
+        foreach ($answers as $case => $answer) {
+            expect($answer)->toEqual($answers['free'], "A {$case} address was answered differently.");
+        }
+
+        expect($answers['free']['session']['status'] ?? null)->toBe('registration-received')
+            ->and(User::query()->where('email', 'free@example.com')->exists())->toBeFalse();
+        Exceptions::assertReported($failure::class);
+        Exceptions::assertReportedCount(1);
+
+        // Nothing goes to the free address: it has no account to speak of.
+        Notification::assertNotSentTo(new AnonymousNotifiable, AlreadyRegistered::class, fn ($n, $c, $to) => $to->routes['mail'] === 'free@example.com');
+    })->with([
         // A unique index on something else, which the action let through.
-        Keyring::createUsersUsing((new class extends CreateNewUser
-        {
-            public function create(array $input): User
-            {
-                throw new UniqueConstraintViolationException('testing', 'insert into users', [], new Exception('users_handle_unique'));
-            }
-        })::class);
+        'a unique index' => fn () => new UniqueConstraintViolationException('testing', 'insert into users', [], new Exception('users_handle_unique')),
+        'anything else' => fn () => new RuntimeException('The users table is unavailable.'),
+    ]);
 
-        $this->withoutExceptionHandling();
+    it('passes on a validation error the action throws while creating the user', function () {
+        FailingCreateNewUser::$failure = ValidationException::withMessages(['email' => 'Not from that domain.']);
+        Keyring::createUsersUsing(FailingCreateNewUser::class);
 
-        expect(fn () => $this->post('/register', registrationForm()))->toThrow(UniqueConstraintViolationException::class);
+        $this->post('/register', registrationForm(['email' => 'free@example.com']))->assertSessionHasErrors(['email' => 'Not from that domain.']);
     });
+
+    // Keyring's own check, whatever rules the action has: bcrypt can't hash
+    // these, and only a free address would try.
+    it('refuses a password the hasher can\'t take the same for every address, whatever the action\'s rules', function (string $password) {
+        Keyring::createUsersUsing(LooseCreateNewUser::class);
+        $answers = [];
+
+        foreach (addressesToRegister() as $case => $address) {
+            $this->flushSession();
+            $this->travel(2)->minutes();
+
+            $answers[$case] = visibleAnswer($this->post('/register', registrationForm(['email' => $address(), 'password' => $password, 'password_confirmation' => $password])));
+        }
+
+        expect($answers['free']['errors'])->toHaveKey('password')
+            ->and(User::query()->where('email', 'free@example.com')->exists())->toBeFalse();
+
+        foreach ($answers as $case => $answer) {
+            expect($answer)->toEqual($answers['free'], "A {$case} address was answered differently.");
+        }
+    })->with([
+        'a NUL byte' => ["correct horse\0battery staple"],
+        'over 72 bytes' => [str_repeat('correct horse battery staple ', 3)],
+    ]);
 
     it('refuses the password alone until the address is verified, like an account that isn\'t there', function () {
         $this->post('/register', registrationForm());
@@ -633,6 +738,15 @@ describe('hiding who has an account', function () {
 describe('saying when an address is taken', function () {
     beforeEach(function () {
         revealTakenAddresses();
+    });
+
+    it('still fails when the action can\'t create the user, since it says the address was free anyway', function () {
+        FailingCreateNewUser::$failure = new RuntimeException('The users table is unavailable.');
+        Keyring::createUsersUsing(FailingCreateNewUser::class);
+
+        $this->withoutExceptionHandling();
+
+        expect(fn () => $this->post('/register', registrationForm()))->toThrow(RuntimeException::class, 'The users table is unavailable.');
     });
 
     it('registers and signs in like any other login', function () {
