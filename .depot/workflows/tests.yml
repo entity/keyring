@@ -38,7 +38,7 @@ jobs:
       - run: vendor/bin/pint --test
       - run: vendor/bin/phpstan analyse --no-progress
       - run: vendor/bin/phpstan analyse -c phpstan.stubs.neon --no-progress
-      - run: vendor/bin/pest
+      - run: vendor/bin/pest --parallel
 
   # The oldest versions composer.json allows, so its floors stay true.
   lowest:
@@ -54,7 +54,7 @@ jobs:
       # Without the analyser, which needs a newer Laravel than Keyring does.
       - run: composer remove --dev calebdw/phpstan-laravel --no-update --no-interaction
       - run: composer update --prefer-lowest --prefer-stable --no-interaction --prefer-dist
-      - run: vendor/bin/pest
+      - run: vendor/bin/pest --parallel
 
   databases:
     runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
@@ -97,7 +97,7 @@ jobs:
           extensions: pdo_pgsql, pdo_mysql, sodium, bcmath, intl
           coverage: none
       - run: composer install --no-interaction --prefer-dist
-      - run: vendor/bin/pest
+      - run: vendor/bin/pest --parallel
       - run: vendor/bin/pest --testsuite=Concurrency
 
   js:

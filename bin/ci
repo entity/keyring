@@ -33,7 +33,7 @@ tests() {
     step vendor/bin/pint --test &&
     step vendor/bin/phpstan analyse --no-progress &&
     step vendor/bin/phpstan analyse -c phpstan.stubs.neon --no-progress &&
-    step vendor/bin/pest --compact
+    step vendor/bin/pest --compact --parallel
 }
 
 # The oldest versions composer.json allows, in a copy, so this checkout's
@@ -48,7 +48,7 @@ lowest() {
         cd "$copy" &&
         step composer remove --dev calebdw/phpstan-laravel --no-update --no-interaction --quiet &&
         step composer update --prefer-lowest --prefer-stable --no-interaction --prefer-dist --quiet &&
-        step vendor/bin/pest --compact
+        step vendor/bin/pest --compact --parallel
     )
     local status=$?
 
@@ -58,7 +58,7 @@ lowest() {
 }
 
 database() {
-    step vendor/bin/pest --compact && step vendor/bin/pest --compact --testsuite=Concurrency
+    step vendor/bin/pest --compact --parallel && step vendor/bin/pest --compact --testsuite=Concurrency
 }
 
 pgsql() {
