@@ -88,10 +88,9 @@ class Registration
      * after the response. Each path makes one password hash, the slowest
      * thing either does.
      *
-     * Only a free address runs the action's create(), so anything it throws
-     * would say the address was free. It's reported and answered like the
-     * rest, with nothing sent. A ValidationException is the action refusing
-     * the form on purpose, and is passed on.
+     * Anything the action's create() throws is reported and answered like
+     * the rest, with nothing sent. A ValidationException is the action
+     * refusing the form on purpose, and is passed on.
      *
      * @throws ValidationException
      */

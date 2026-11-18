@@ -209,8 +209,8 @@ describe('hiding who has an account', function () {
         }
     })->with(['a form post' => false, 'json' => true]);
 
-    // Bcrypt can't hash a NUL byte, and only a free address hashes the
-    // visitor's password, so it's refused before either path is taken.
+    // Bcrypt can't hash a NUL byte: refused before Keyring looks at the
+    // address, so the same for every one.
     it('refuses a password bcrypt can\'t hash the same for every address', function (bool $json) {
         $answers = [];
 
