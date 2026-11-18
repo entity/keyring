@@ -145,6 +145,17 @@ it('records an account that may not add a sign-in method yet, with the same 403'
         ->and(logEntry('enrollment_refused')->user()->is($unverified))->toBeTrue();
 });
 
+it('records a refusal for a factor key too long for the log, cut to fit', function () {
+    revealTakenAddresses();
+    $unverified = User::create(['name' => 'New', 'email' => 'new@example.com', 'password' => 'password']);
+
+    $this->actingAs($unverified)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.authenticators.store', str_repeat('a', 80)))
+        ->assertForbidden();
+
+    expect(logEntry('enrollment_refused')->factor)->toBe(str_repeat('a', 64));
+});
+
 it('records a refused attempt to remove the last sign-in method the account needs', function () {
     Event::fake([AuthenticatorRemovalRefused::class]);
     Keyring::require(Requirement::aal2());

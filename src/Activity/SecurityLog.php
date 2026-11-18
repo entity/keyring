@@ -180,7 +180,9 @@ class SecurityLog
         $event = new ($this->keyring->securityEventModel())([
             'type' => $type,
             'severity' => $severity ?? Severity::of($type),
-            'factor' => $factor,
+            // Taken from the URL for a refused enrollment, so cut to fit the
+            // column, and the entry is still kept.
+            'factor' => $factor === null ? null : mb_substr($factor, 0, 64),
             'device_id' => $device,
             'ip' => $this->keyring->recordedIp(request()),
             'user_agent' => UserAgent::from(request()),
