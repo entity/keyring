@@ -196,7 +196,7 @@ Other requests are redirected back with the `status` flashed, and the extra data
 ## From JavaScript
 
 ```ts
-import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@entity/keyring'
+import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
 
 // Passkeys, security keys and recovery codes need no input in between.
 const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })

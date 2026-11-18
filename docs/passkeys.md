@@ -254,7 +254,7 @@ Security keys can't do this. `/login/security-key` and `/login/security-key/opti
 
 ## Laravel's Passkeys Client
 
-Keyring's passkey routes are driven by [`@entity/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package. Each call lets you change its two paths, but not the method it uses or the JSON it reads. That's enough for signing in, which works against Keyring's two login routes. Adding a passkey and step-up don't fit. Checked against `@laravel/passkeys` 0.2.0 and 0.4.1, and `laravel/passkeys` 0.3.0:
+Keyring's passkey routes are driven by [`@keyringjs/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package. Each call lets you change its two paths, but not the method it uses or the JSON it reads. That's enough for signing in, which works against Keyring's two login routes. Adding a passkey and step-up don't fit. Checked against `@laravel/passkeys` 0.2.0 and 0.4.1, and `laravel/passkeys` 0.3.0:
 
 | What the client does | What Keyring does |
 |---|---|
@@ -327,7 +327,7 @@ Every check is the same as for Keyring's own helper: the per-IP limits, the sing
 
 ### Adding a Passkey and Step-Up
 
-These still need `@entity/keyring`. Fitting the client would take a second set of routes for the same ceremonies, so Keyring doesn't try. Use [`enroll()`](frontend.md#managing-authenticators) to add a passkey and [`useChallenge()`](frontend.md#the-challenge-page) for the challenge and confirm pages. [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey) signs in through the same two routes, as an Inertia visit, if you'd rather use one package for everything. Passkeys made with `laravel/passkeys` keep working once [imported](upgrading-from-fortify.md#importing-two-factor-data).
+These still need `@keyringjs/keyring`. Fitting the client would take a second set of routes for the same ceremonies, so Keyring doesn't try. Use [`enroll()`](frontend.md#managing-authenticators) to add a passkey and [`useChallenge()`](frontend.md#the-challenge-page) for the challenge and confirm pages. [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey) signs in through the same two routes, as an Inertia visit, if you'd rather use one package for everything. Passkeys made with `laravel/passkeys` keep working once [imported](upgrading-from-fortify.md#importing-two-factor-data).
 
 ## Customising a Profile
 
@@ -352,7 +352,7 @@ WebAuthn::securityKeys()->requireAttestation()->allowOnly([$aaguid]),
 Each returns a new instance. A factor key other than `passkey` or `security-key` needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment()` decides whether to run the WebAuthn ceremony from the options the server sends, so it works for any key:
 
 ```ts
-import { enroll } from '@entity/keyring'
+import { enroll } from '@keyringjs/keyring'
 
 await enroll('backup-key', { name: 'Spare key' })
 ```

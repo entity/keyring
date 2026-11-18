@@ -20,27 +20,20 @@
 
 ## Introduction
 
-Keyring is headless, like Fortify. It renders [pages](sign-in-flow.md#pages) with props and answers JSON requests, and your app owns every page. `@entity/keyring` is a small browser package that does the fiddly parts: WebAuthn, enrollment, and Vue and React bindings for Inertia v3.
+Keyring is headless, like Fortify. It renders [pages](sign-in-flow.md#pages) with props and answers JSON requests, and your app owns every page. `@keyringjs/keyring` is a small browser package that does the fiddly parts: WebAuthn, enrollment, and Vue and React bindings for Inertia v3.
 
 ```bash
-npm install @entity/keyring
+npm install @keyringjs/keyring
 ```
-
-> `@entity/keyring` isn't on npm yet. Until the first release, build it from the Composer package and install it from there:
->
-> ```bash
-> (cd vendor/keyring/keyring/js && npm install && npm run build)
-> npm install ./vendor/keyring/keyring/js
-> ```
 
 It's plain ES modules, so it works with any bundler. The main entry point has no dependencies, so a Blade app without a bundler can copy its `dist` folder into `public/` and import it from a `<script type="module">`. It has four entry points:
 
 | Import | Contains |
 |---|---|
-| `@entity/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes and types. No framework code. |
-| `@entity/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
-| `@entity/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
-| `@entity/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
+| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes and types. No framework code. |
+| `@keyringjs/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
+| `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
+| `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
 
 ## Building the Pages
 
@@ -106,7 +99,7 @@ Adding a factor on the server means adding one line here. In React, use `lazy()`
 
 ```vue
 <script setup lang="ts">
-import { useChallenge, type ChallengeProps } from '@entity/keyring/vue'
+import { useChallenge, type ChallengeProps } from '@keyringjs/keyring/vue'
 import factors from '../../keyring/factors'
 
 const props = defineProps<ChallengeProps>()
@@ -145,7 +138,7 @@ When a factor has no component in the map, `component` is `undefined`. A good fa
 ### React
 
 ```tsx
-import { useChallenge, type ChallengeProps } from '@entity/keyring/react'
+import { useChallenge, type ChallengeProps } from '@keyringjs/keyring/react'
 import { Suspense } from 'react'
 import factors from '../../keyring/factors'
 
@@ -182,7 +175,7 @@ A factor component shows the right input and calls the challenge's methods. Fact
 
 ```vue
 <script setup lang="ts">
-import type { Challenge } from '@entity/keyring/vue'
+import type { Challenge } from '@keyringjs/keyring/vue'
 
 const { challenge } = defineProps<{ challenge: Challenge }>()
 </script>
@@ -206,7 +199,7 @@ A security key component usually calls `challenge.verifyKey()` as soon as it mou
 
 ```vue
 <script setup lang="ts">
-import { usePasskeyLogin } from '@entity/keyring/vue'
+import { usePasskeyLogin } from '@keyringjs/keyring/vue'
 import { useForm } from '@inertiajs/vue3'
 
 const form = useForm({ email: '', password: '', remember: false })
@@ -233,7 +226,7 @@ It returns `supported` (whether the browser has WebAuthn), `processing`, `error`
 
 ## Challenge Helpers Without Vue or React
 
-The Vue and React bindings are thin layers over these helpers, exported from `@entity/keyring/inertia` (and re-exported by the Vue and React entries). Use them to build the challenge page or passkey sign in with another framework. They post with Inertia's router (`@inertiajs/core`).
+The Vue and React bindings are thin layers over these helpers, exported from `@keyringjs/keyring/inertia` (and re-exported by the Vue and React entries). Use them to build the challenge page or passkey sign in with another framework. They post with Inertia's router (`@inertiajs/core`).
 
 | Function | Does |
 |---|---|
@@ -249,7 +242,7 @@ The Vue and React bindings are thin layers over these helpers, exported from `@e
 | `errorMessage(error)` | A readable message for any thrown value. |
 
 ```ts
-import { errorMessage, isAbort, passkeyCredential, signInWith } from '@entity/keyring/inertia'
+import { errorMessage, isAbort, passkeyCredential, signInWith } from '@keyringjs/keyring/inertia'
 
 try {
   const credential = await passkeyCredential('passkey')
@@ -264,7 +257,7 @@ try {
 The enrollment helpers call the [authenticator routes](authenticators.md) with JSON:
 
 ```ts
-import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@entity/keyring'
+import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
 
 // One step for factors that need no input in between.
 const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })
@@ -297,7 +290,7 @@ If `recoveryCodes` comes back, show the codes and ask the user to save them.
 Three helpers call the [session routes](devices-and-sessions.md#listing-and-ending-sessions), which every app has:
 
 ```ts
-import { endOtherSessions, endSession, listSessions } from '@entity/keyring'
+import { endOtherSessions, endSession, listSessions } from '@keyringjs/keyring'
 
 const sessions = await listSessions()
 
@@ -318,7 +311,7 @@ await endOtherSessions()           // every session but this one
 The authenticator routes need a [fresh verification](step-up.md#fresh-verification). When the user doesn't have one, a JSON request fails with `423` and a `redirect` to the confirm page. The helpers throw a `KeyringRequestError` with that status:
 
 ```ts
-import { KeyringRequestError, enroll } from '@entity/keyring'
+import { KeyringRequestError, enroll } from '@keyringjs/keyring'
 import { router } from '@inertiajs/vue3'
 
 try {
@@ -349,7 +342,7 @@ The same applies to any of your own routes behind `keyring:aal2` or `keyring.fre
 `json(method, url, body?)` is the small `fetch` wrapper the helpers use. It sends `Accept: application/json`, `X-Requested-With` and Laravel's `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`, so Keyring answers with JSON and CSRF protection passes. Use it for Keyring's other JSON routes:
 
 ```ts
-import { json } from '@entity/keyring'
+import { json } from '@keyringjs/keyring'
 
 const { devices } = await json('GET', '/user/devices')
 const { pending } = await json('GET', '/user/email')
@@ -377,7 +370,7 @@ They use the browser's built-in JSON parsing when it exists, and convert by hand
 The helpers use Keyring's default paths. If you changed the `prefix` option, tell them once at startup:
 
 ```ts
-import { configureRoutes } from '@entity/keyring'
+import { configureRoutes } from '@keyringjs/keyring'
 
 configureRoutes({ prefix: 'account' })
 ```

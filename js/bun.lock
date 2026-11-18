@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@entity/keyring",
+      "name": "@keyringjs/keyring",
       "devDependencies": {
         "@inertiajs/core": "^3.0.0",
         "@inertiajs/react": "^3.0.0",

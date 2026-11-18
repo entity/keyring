@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Keyring has no tagged release yet. Once it does, security fixes go into the latest release.
+Security fixes go into the latest release.
 
 ## Reporting a Vulnerability
 
@@ -30,7 +30,7 @@ Keyring is a small project, and these are the targets its maintainers hold thems
 | Acting on a medium or low advisory in a dependency | 30 days |
 | Moving off a dependency version that no longer gets security fixes | 30 days after its support ends |
 
-A fix ships in a new release, with a GitHub security advisory naming the versions affected. Until there's a tagged release, fixes go to `main`.
+A fix ships in a new release, with a GitHub security advisory naming the versions affected.
 
 ## Dependencies
 

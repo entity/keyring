@@ -19,7 +19,7 @@ Fortify keeps 2FA in three columns on `users`. That gives one TOTP per user, and
 
 Every feature and sign-in method beyond the password is opt-in. See [Start Small, Add What You Need](#start-small-add-what-you-need).
 
-> Work in progress: not tagged or production-tested yet.
+> Keyring is new and not production-tested yet. Until 1.0, a minor release may change the public API: see [What's Stable](#whats-stable).
 
 ## Requirements
 
@@ -34,13 +34,6 @@ composer require keyring/keyring
 php artisan keyring:install
 php artisan migrate
 ```
-
-> Keyring has no tagged release yet. Until it does, install it from GitHub:
->
-> ```bash
-> composer config repositories.keyring vcs https://github.com/entity/keyring
-> composer require keyring/keyring:dev-main
-> ```
 
 `keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model. Users who register themselves verify their address before they can sign in, so implement `MustVerifyEmail` too:
 
@@ -61,10 +54,8 @@ Coming from Fortify? `php artisan keyring:import fortify` copies `two_factor_*` 
 For the frontend helpers:
 
 ```bash
-npm install @entity/keyring
+npm install @keyringjs/keyring
 ```
-
-> It isn't on npm yet either. Until it is, build it from the Composer package: see [Frontend](docs/frontend.md#introduction).
 
 ## Start Small, Add What You Need
 
