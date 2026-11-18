@@ -292,7 +292,7 @@ Include the names of your organisation, products, systems, projects, departments
 
 Here's how the words are compared:
 
-- The whole password is compared, not the words inside it, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). A password is refused when, with its digits, spaces, and punctuation taken out, it is one of these words or several of them run together. `acme2026!`, `Taylor.Otwell.1990`, and `acmeacmeacme` are all refused. A passphrase that happens to contain one is as hard to guess as any other, so `acme sells the best anvils` passes. Refusing it would be a composition rule by another name.
+- The whole password is compared, not the words inside it, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). A password is refused when, with its digits, spaces, and punctuation taken out, it is one of these words or several of them run together. `acme2026!`, `acmeacmeacme`, and `Grace.Hopper.1906` for a user named Grace Hopper are all refused. A passphrase that happens to contain one is as hard to guess as any other, so `acme sells the best anvils` passes. Refusing it would be a composition rule by another name.
 - Case doesn't matter. Each value also counts word by word, split at anything that isn't a letter or a digit, so `Acme Rockets` counts as `acme` and `rockets`.
 - Characters that stand in for letters count as those letters: `0` counts as `o`, `1` and `l` as `i`, `3` as `e`, `4` and `@` as `a`, `5` and `$` as `s`, and `7` as `t`. So `k3yr1ng` counts as `keyring`.
 - Words under four characters don't count, because they turn up by chance. The exception is your app's name or a listed entry as a whole. Those count from three characters, so an app called `IBM` refuses `ibm-ibm-ibm`. Two characters or fewer never count.
