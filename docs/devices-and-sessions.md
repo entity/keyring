@@ -22,6 +22,7 @@
 - [For Administrators](#for-administrators)
 - [Timeouts](#timeouts)
     - [Inactivity and "Remember Me"](#inactivity-and-remember-me)
+    - [Ending a Session With Its Level](#ending-a-session-with-its-level)
 - [Pruning](#pruning)
 - [Events](#events)
 
@@ -40,20 +41,20 @@ Keyring keeps track of two things:
 
 Because sessions are always kept, the routes that [list and end them](#listing-and-ending-sessions) are always registered. No feature turns them on or off.
 
-When devices are on, Keyring sets its cookie at sign in, offers "don't ask again on this device," lists where the user is signed in, and adds "this wasn't me" links. Without devices, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry`, `ImpossibleTravel`, and `InactiveAccount` [risk signals](risk.md) need devices. So does a separate limit for the owner's own known device, which stops someone else's failed guesses from locking the owner out of that device.
+When devices are on, Keyring sets its cookie at sign in, offers "don't ask again on this device," lists where the user is signed in, and adds "this wasn't me" links. Without devices, no cookie is set and no device is recorded. The `NewDevice`, `NewCountry`, `ImpossibleTravel`, and `InactiveAccount` [risk signals](risk.md) need devices. Devices also let Keyring keep some of an account's allowed failures for browsers it has signed in from ([`limits.consecutive_elsewhere`](security.md#at-the-cap)), so someone else's failed guesses can't lock the owner out of their own device.
 
 ## Routes
 
 | Method | URI | Name | Middleware | Does |
 |---|---|---|---|---|
 | `GET` | `/user/sessions` | `keyring.sessions.index` | `auth:{guard}` | Lists the user's sessions as JSON. |
-| `DELETE` | `/user/sessions/{id}` | `keyring.sessions.destroy` | `auth:{guard}`, `changes_middleware` | Ends one session. |
+| `DELETE` | `/user/sessions/{session}` | `keyring.sessions.destroy` | `auth:{guard}`, `changes_middleware` | Ends one session. |
 | `DELETE` | `/user/sessions` | `keyring.sessions.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
 | `GET` | `/user/devices` | `keyring.devices.index` | `auth:{guard}` | Lists the user's devices as JSON. |
-| `DELETE` | `/user/devices/{id}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
+| `DELETE` | `/user/devices/{device}` | `keyring.devices.destroy` | `auth:{guard}`, `changes_middleware` | Signs one device out. |
 | `DELETE` | `/user/devices` | `keyring.devices.destroy-others` | `auth:{guard}`, `changes_middleware` | Signs out every other session. |
-| `GET` | `/devices/{id}/report` | `keyring.devices.report` | signed, `keyring` limiter | The "this wasn't me" link: a page with a button. |
-| `POST` | `/devices/{id}/report` | `keyring.devices.report.store` | signature in the body, `keyring` limiter | Signs the device out. |
+| `GET` | `/devices/{device}/report` | `keyring.devices.report` | signed, `keyring-pages` limiter | The "this wasn't me" link: a page with a button. |
+| `POST` | `/devices/{device}/report` | `keyring.devices.report.store` | signature in the body, `keyring` limiter | Signs the device out. |
 
 The three session routes are always registered, but the device routes need `Features::devices()`. Looking at a list needs only a signed-in user. Ending a session or a device also needs `changes_middleware`, which is a [fresh verification](step-up.md#fresh-verification) by default.
 
@@ -65,13 +66,13 @@ An account keeps its 50 most recently seen devices (`devices.limit`). When a sig
 
 Each device records a readable name built from the user agent (the browser and the operating system, as in ":browser on :platform"), the last IP address and location, and when it was first and last seen. The user agent is never a factor. It's only a weak risk signal. `SessionFingerprintChanged` notices when a session's browser or platform changes.
 
-A browser shared by several accounts has one cookie and a device for each account that signed in on it. An account's device never takes a value the browser sent. Keyring can't tell a cookie that two accounts share from one that was placed in the browser holding a value someone else's device has. Taking it would get that someone's own browser recognised as this account's. So an account signing in on a browser for the first time gives it a new cookie, and the accounts already on that browser move to the new one with it. Every login that reaches AAL2 gives the browser a new cookie too, so the previous one stops working.
+A browser shared by several accounts has one cookie and a device for each account that signed in on it. An account's device never takes a cookie value the browser sent. A value might be there because two accounts share the browser, or because someone planted the value of another person's device. Keyring can't tell these apart, and accepting a planted value would make that person's browser count as one of this account's devices. So an account signing in on a browser for the first time gives it a new cookie, and the accounts already on that browser move to the new one with it. Every login that reaches AAL2 gives the browser a new cookie too, so the previous one stops working.
 
 ### Trusted Devices
 
 When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device as trusted for that long (30 days by default), counted from the moment trust is granted. It only counts when that login reached AAL2, for example with a password and an authenticator app's code. If `Features::emailVerification()` is on, the email address must also be verified.
 
-An [emailed code](factors.md#email-codes) isn't a factor. So a login that used one beside the password isn't offered trust (`canTrustDevice` is false), and it can't earn it. Sending `trust` with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
+An [emailed code](factors.md#email-codes) doesn't count as a second factor. So a login that used one beside the password isn't offered trust (`canTrustDevice` is false), and it can't earn it. Sending `trust` with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
 
 Trust on its own changes nothing. Your [policy](policies.md#deciding-per-user-and-attempt) is what makes use of it:
 
@@ -81,7 +82,14 @@ Keyring::require(fn (User $user, Attempt $attempt) => $attempt->device()?->isTru
     : Requirement::aal2()->ifEnrolled());
 ```
 
-Revoking a device stops trusting it, and signing out everywhere else stops trusting every other device. Every device also stops being trusted in several other situations. These are when the password changes or is reset, when an authenticator is removed, or when a factor that allows only one per user is replaced (new recovery codes don't count). They also include when an email change is applied or reverted, when a signed-in request places a [risk lock](risk.md#responding-to-risk), and after a critical risk on a signed-in session. Risk detected at login leaves the owner's sessions and trusted devices alone, whether it refuses the attempt or locks the account.
+Revoking a device stops trusting it, and signing out everywhere else stops trusting every other device. Every device stops being trusted when:
+
+- the password changes or is reset,
+- an authenticator is removed, or a factor that allows only one per user is replaced (new recovery codes don't count),
+- an email change is applied or reverted,
+- a signed-in request places a [risk lock](risk.md#responding-to-risk), or a signed-in session meets a critical risk.
+
+Risk detected at login leaves the owner's sessions and trusted devices alone, whether it refuses the attempt or locks the account.
 
 ### New Device Sign Ins
 
@@ -100,7 +108,7 @@ When the location is known, `$device->description()` adds it, as in ":browser on
 
 ### The "This Wasn't Me" Link
 
-`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{id}/report`. It's valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page. Its props are `device` (a description such as "Chrome on macOS"), `url`, `expires`, and `signature`. Its button posts `expires` and `signature` in the body to `url`, which is the link's path without its query string.
+`$event->revokeUrl()` (or `$device->revokeUrl($days)`) returns a signed link to `GET /devices/{device}/report`. It's valid for 7 days by default (`devices.report_link_for`). Opening it shows the `device-report` page. Its props are `device` (a description such as "Chrome on macOS"), `url`, `expires`, and `signature`. Its button posts `expires` and `signature` in the body to `url`, which is the link's path without its query string.
 
 That revokes the device without the user needing to sign in. Its sessions end, it stops being trusted, and every "remember me" cookie for the user stops working. The user lands on the login page, with a message recommending a password change. The event is logged as `device_reported`, which shows as a ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) at their next sign in.
 
@@ -161,7 +169,7 @@ $this->app->bind(HeaderLocator::class, fn () => new HeaderLocator([
 ```
 
 > [!WARNING]
-> Only use `HeaderLocator` when requests can't reach your app without passing through that proxy. Anyone can send those headers.
+> Only use `HeaderLocator` when requests can't reach your application without passing through that proxy. Anyone can send those headers.
 
 ### Device Names
 
@@ -213,7 +221,7 @@ With `Features::devices()` on, `GET /user/devices` returns the user's devices th
 }
 ```
 
-`DELETE /user/devices/{id}` revokes one device. Its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page. JSON clients get that redirect as `redirect`.
+`DELETE /user/devices/{device}` revokes one device. Its sessions end, it stops being trusted, and the user's "remember me" token is changed. The response is a [status response](sign-in-flow.md#status-responses) with `device-revoked`. Revoking the current device also signs this session out, and the response redirects to the login page. JSON clients get that redirect as `redirect`.
 
 `DELETE /user/devices` and [`DELETE /user/sessions`](#listing-and-ending-sessions) do the same thing under two names. The second is registered whether or not `Features::devices()` is on, so "sign out everywhere else" is always available to offer. Either one signs out every session except the current one, changes the "remember me" token, stops trusting every other device, cancels any pending email change, and gives the current session a new ID. That last part means someone who copied its cookie is signed out too. The response is `sessions-revoked`.
 
@@ -234,7 +242,7 @@ A user can also ask for this [along with adding or removing a sign-in method](au
 
 `rotate` regenerates the session, which destroys the old one on the server. Laravel's `cookie` session driver has nothing on the server to destroy. With that driver, `rotate` also moves the session to a new registry record and revokes the old one. Keyring calls it after every step-up as well. A browser that signs in while it's already signed in has the session it was on revoked. So on any driver, a copy of the session from before is signed out on its next request.
 
-Laravel keeps one "remember me" token per user. Changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes it, as Laravel does. A session that ends on its own (through an idle or absolute timeout, a risk response, or a revoked record) leaves the token alone, so other remembered browsers stay signed in. That browser's cookies stop working because its record has ended. See ["Remember Me"](#remember-me).
+Laravel keeps one "remember me" token per user. Changing it signs out every remembered browser at once, including the current one the next time its session ends. Signing out on purpose changes the token, as it does in any Laravel application. A session that ends on its own (through an idle or absolute timeout, a risk response, or a revoked record) leaves the token alone, so other remembered browsers stay signed in. That browser's cookies stop working because its record has ended. See ["Remember Me"](#remember-me).
 
 ## Listing and Ending Sessions
 
@@ -262,13 +270,13 @@ Laravel keeps one "remember me" token per user. Changing it signs out every reme
 
 `id` is a handle, not the session's registry ID. The registry ID is what the ["remember me" cookie](#remember-me) carries, so it never leaves the server by any other route. A page that could read it could hand someone the session. The handle is an HMAC-SHA256 of that ID under your `APP_KEY`. It can't be turned back into the ID, and it's the wrong length to be mistaken for one. The only thing that accepts it is the route below, which looks for it among the signed-in user's own sessions. A session that moves to a new record gets a new handle, so fetch the list again before acting on an old one.
 
-`DELETE /user/sessions/{id}` ends the session with that handle. Its record is revoked, so that browser is signed out on its next request, and its "remember me" cookie brings nothing back. The response is a [status response](sign-in-flow.md#status-responses) with `session-revoked`. `SessionsRevoked` is dispatched with a count of one. The user's "remember me" token is left alone, so their other remembered browsers stay signed in.
+`DELETE /user/sessions/{session}` ends the session with that handle. Its record is revoked, so that browser is signed out on its next request, and its "remember me" cookie brings nothing back. The response is a [status response](sign-in-flow.md#status-responses) with `session-revoked`. `SessionsRevoked` is dispatched with a count of one. The user's "remember me" token is left alone, so their other remembered browsers stay signed in.
 
 A handle that isn't one of the user's own sessions, someone else's included, gets a `404` and is logged as `access_refused`. Anything that isn't shaped like a handle, a registry ID included, doesn't match the route at all.
 
 Ending the current session is the same as signing out. Keyring does everything `POST /logout` does, including changing the "remember me" token and dispatching `LoggedOut`. It answers with the same [`LogoutResponse`](sign-in-flow.md#signing-out). A JSON client gets a `204`, so send the user to your login page when `current` was `true`.
 
-`DELETE /user/sessions` signs out every session except this one. See [below](#listing-and-revoking-devices) for everything it ends.
+`DELETE /user/sessions` signs out every session except this one. See [Listing and Revoking Devices](#listing-and-revoking-devices) for everything it ends.
 
 From your own code:
 
@@ -346,9 +354,9 @@ An account can be signed in 100 times at once (`sessions.max`). A sign in beyond
 
 Keyring ends the oldest session and never refuses the new sign in. Refusing would let whoever holds an account's sessions keep its owner out, and the owner couldn't even sign in to end them.
 
-The number is a ceiling, not a rule about how many devices someone may use. It's twice [`devices.limit`](#devices). So each of the 50 devices an account keeps can have a session, plus one more that it left behind by closing the browser, before anything still in use is ended. Without devices, it's the only thing that stops one account from filling the registry by signing in over and over. You may lower it to allow fewer sessions at once. For example, `1` allows a single session, and each sign in ends the last. You may also set it to `null` for no limit.
+The number is a ceiling, not a rule about how many devices someone may use. It's twice [`devices.limit`](#devices). That leaves room for each of the 50 devices an account keeps to have two sessions, the one in use and one left behind when the browser was closed, before anything still in use is ended. Without devices, it's the only thing that stops one account from filling the registry by signing in over and over. You may lower it to allow fewer sessions at once. For example, `1` allows a single session, and each sign in ends the last. You may also set it to `null` for no limit.
 
-Only sessions count. A record that was revoked, has expired, or that its session [moved on from](#the-session-registry) doesn't count. Sign ins for one account are counted one at a time, so two at the same moment can't both slip under the limit. A session your app starts with its own `Auth::login()` counts like any other.
+Only sessions count. A record that was revoked, has expired, or that its session [moved on from](#the-session-registry) doesn't count. Sign ins for one account are counted one at a time, so two at the same moment can't both slip under the limit. A session your application starts with its own `Auth::login()` counts like any other.
 
 ### The Session Middleware
 
@@ -429,7 +437,7 @@ A shorter time leaves less room for a copy to slip in next to the owner. It also
 
 ## Keyring's Cookies
 
-Keyring sets two cookies of its own. One is the device cookie. The other ties ["remember me"](#remember-me) to its session. Their names depend on how your app is served:
+Keyring sets two cookies of its own. One is the device cookie. The other ties ["remember me"](#remember-me) to its session. Their names depend on how your application is served:
 
 | Your App | Device Cookie | "Remember Me" Cookie |
 |---|---|---|
@@ -439,17 +447,17 @@ Keyring sets two cookies of its own. One is the device cookie. The other ties ["
 
 The names say what each cookie is for, not what set it. OWASP's Session Management Cheat Sheet asks for that, because a name that tells an attacker which software is behind it also tells them what to look up. Laravel's session cookie is yours to name (`SESSION_COOKIE`). See [Secure Cookies](security.md#secure-cookies).
 
-Keyring treats your app as served over HTTPS when `APP_URL` starts with `https://`, or when `session.secure` (`SESSION_SECURE_COOKIE`) is `true`. It goes by those settings and not by the request. The name has to be the same on every request. Behind a proxy that your app doesn't [trust](security.md#what-your-app-must-provide), every request looks like plain HTTP.
+Keyring treats your application as served over HTTPS when `APP_URL` starts with `https://`, or when `session.secure` (`SESSION_SECURE_COOKIE`) is `true`. It goes by those settings and not by the request. The name has to be the same on every request. Behind a proxy that your application doesn't [trust](security.md#trusted-proxies), every request looks like plain HTTP.
 
 Over HTTPS, both cookies are always `Secure`. A browser only accepts a `__Host-` cookie that is `Secure`, has `Path=/`, and has no `Domain`. So another subdomain, or a page loaded over plain HTTP, can't set or replace it. A cookie shared with subdomains can't have that prefix, so Keyring falls back to `__Secure-`, which only promises that the cookie was set over HTTPS. Over plain HTTP, a browser refuses both prefixes, so the plain names are used. The cookies are `Secure` whenever the request itself came over HTTPS.
 
 To use names of your own, set `devices.cookie` and `sessions.remember_cookie`. Keyring uses a name you set exactly as it is, and it's still `Secure` over HTTPS. It's up to you to give it a prefix.
 
-A browser that was given the plain cookies before your app moved to HTTPS keeps its device and its remembered session. While it holds no cookie under the new name, Keyring reads the plain one. The next time that browser signs in, or "remember me" brings it back, it gets the cookie under the new name, and the plain one is deleted. Anything on your domain could have set a plain cookie. So a plain cookie is only ever used to find a device the account already has, never to start a new one.
+A browser that was given the plain cookies before your application moved to HTTPS keeps its device and its remembered session. While it holds no cookie under the new name, Keyring reads the plain one. The next time that browser signs in, or "remember me" brings it back, it gets the cookie under the new name, and the plain one is deleted. Anything on your domain could have set a plain cookie. So a plain cookie is only ever used to find a device the account already has, never to start a new one.
 
 ## For Administrators
 
-Whoever runs the app can end sessions without waiting for them to time out.
+Whoever runs the application can end sessions without waiting for them to time out.
 
 ```bash
 php artisan keyring:sign-out 42
@@ -500,13 +508,13 @@ As with every sign-out that isn't the browser's own, these take effect on a sess
 - **`levels`** sets how long each [assurance level](policies.md#assurance-levels) keeps counting (`aal1`, `aal2`, or `aal3`). The defaults are NIST SP 800-63B-4's reauthentication limits (Sec. 2.2.3 and 2.3.3).
 - **`end_on_lapse`** ends a session when the level it signed in at runs out. See [below](#ending-a-session-with-its-level).
 
-#### Inactivity and "Remember Me"
+### Inactivity and "Remember Me"
 
 Ticking "remember me" asks to stay signed in on that browser between visits, so the two-hour limit can't apply to it. Otherwise, every remembered browser would ask for a sign in again after an afternoon away, and the checkbox would do nothing. Instead, Keyring handles it like this:
 
 - A remembered session isn't ended by `idle`. It's ended by `remember_idle`, after 14 days without a request, and by `absolute`, 30 days after the sign in. Coming back never restarts that limit.
 - Once it has been unused for `idle`, it keeps nothing it proved. A browser that comes back on its cookies starts with no level at all. A browser whose Laravel session outlived the two hours has every level lapsed. Either way, routes behind [`keyring:aal2`](step-up.md#raising-assurance) or [`keyring.fresh`](step-up.md#fresh-verification) ask the user to verify again, and so do Keyring's own routes for changing how someone signs in.
-- So a remembered browser left unattended still opens whatever sits behind `auth` alone. Put anything that shouldn't be reachable that way behind a level or a fresh verification, or don't offer "remember me". You can avoid offering it by leaving the `remember` field off your login form, or by setting `remember_idle` to the same value as `idle`. NIST SP 800-63B-4 (Sec. 5.1) doesn't accept a cookie in place of authentication at all, so an app that follows it leaves the checkbox out. See [Known Limitations](security.md#where-keyring-departs-from-a-standard).
+- So a remembered browser left unattended still opens whatever sits behind `auth` alone. Put anything that shouldn't be reachable that way behind a level or a fresh verification, or don't offer "remember me". You can avoid offering it by leaving the `remember` field off your login form, or by setting `remember_idle` to the same value as `idle`. NIST SP 800-63B-4 (Sec. 5.1) doesn't accept a cookie in place of authentication at all, so an application that follows it leaves the checkbox out. See [Known Limitations](security.md#where-keyring-departs-from-a-standard).
 
 Set `remember_idle` no shorter than `idle`, or ticking the box would sign people out sooner.
 
@@ -516,7 +524,7 @@ A level lapses on its own clock, without ending the session. It lapses after its
 
 NIST SP 800-63B-4 (Sec. 5.2) says a session is terminated when its inactivity or overall timeout passes. It also lets a session be treated as a lower level than it was authenticated at (Sec. 5.1). That's what Keyring does by default. A session that signed in with two factors stops being AAL2 after an hour idle or 24 hours. It then carries on as the AAL1 session that its password alone would have started, under `idle` and `absolute`. Nothing behind `keyring:aal2` or `keyring.fresh` is reachable in the meantime. This is the default because ending those sessions would sign out the people who set up a second factor after an hour away, and it would leave everyone who didn't set one up signed in for 30 days.
 
-That isn't enough where the whole app is meant to be AAL2, or where you want NIST's wording to the letter. In that case, turn the lapse into the end of the session:
+That isn't enough where the whole application is meant to be AAL2, or where you want NIST's wording to the letter. In that case, turn the lapse into the end of the session:
 
 ```php
 'sessions' => [
@@ -525,13 +533,13 @@ That isn't enough where the whole app is meant to be AAL2, or where you want NIS
 ```
 
 - A session ends on the first request after the level it **signed in at** runs out. That's after that level's `idle` without a request, or after its `absolute` limit counted from when the factors were proved. The user is signed out as for any other timeout, with the reason `idle` or `expired` on `SessionEnded`.
-- Proving every factor for that level again before then, (any [step-up](step-up.md) that asks for them all) starts both limits over, as reauthenticating does in NIST.
+- Proving every factor for that level again before then (any [step-up](step-up.md) that asks for them all) starts both limits over, as reauthenticating does in NIST.
 - A level reached later by a step-up still lapses on its own, and it takes nothing with it. A session that signed in with a password and stepped up for one page stays an AAL1 session.
 - A [risk response](risk.md#responding-to-risk) that asks a signed-in session to step up ends it too. Forgetting what the session proved is its level running out. The reason on `SessionEnded` is `risk`.
 - "Remember me" brings nothing back. Its cookie proves nothing, so there's no level for the session to carry on at, and the browser signs in again. NIST doesn't accept such a cookie in place of authenticating either (Sec. 5.1), so leave the checkbox off your login page.
 - The timeouts leave sessions signed in at AAL1 as they were, because `idle` and `absolute` already end those.
 
-[Recipes](recipes.md#an-app-whose-every-page-needs-aal2) has the full setup for an app whose every page needs AAL2.
+[Recipes](recipes.md#an-app-whose-every-page-needs-aal2) has the full setup for an application whose every page needs AAL2.
 
 ## Pruning
 
@@ -542,7 +550,7 @@ That isn't enough where the whole app is meant to be AAL2, or where you want NIS
 - security log entries older than `security_log.keep_for`,
 - registered sessions that have expired or been revoked, through the registry's `prune` method. A record "remember me" replaced stays until it would have expired, so its cookie is still recognised as used. The cache driver's records expire on their own.
 
-Keyring adds the prune task to Laravel's scheduler itself, every day at 03:00. That means it runs wherever your app's `schedule:run` does, and nothing is kept past its time because a line was left out of `routes/console.php`. `php artisan schedule:list` shows it. To run it at another time, change `prune_at`:
+Keyring adds the prune task to Laravel's scheduler itself, every day at 03:00. That means it runs wherever your application's `schedule:run` does, and nothing is kept past its time because a line was left out of `routes/console.php`. `php artisan schedule:list` shows it. To run it at another time, change `prune_at`:
 
 ```php
 // config/keyring.php
@@ -570,7 +578,8 @@ The events are in `Keyring\Events`:
 |---|---|
 | `NewDeviceSignedIn` | `user`, `device`, and `revokeUrl($days = null)` |
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
-| `SessionsRevoked` | `user`, `count`. After signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the app keeps out. |
+| `SessionsRevoked` | `user`, `count`. After signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the application keeps out. |
+| `SessionEnded` | `user`, `reason` (`revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed`) |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
 | `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as) |
 | `AccessRefused` | `user`, `resource` (`device`), `id`. A request to sign out a device that isn't the user's, answered with a 404. |

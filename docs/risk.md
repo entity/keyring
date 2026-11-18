@@ -6,6 +6,7 @@
 - [Levels](#levels)
 - [Responding to Risk](#responding-to-risk)
 - [Actions](#actions)
+    - [Requiring a New Password](#requiring-a-new-password)
 - [Checkpoints](#checkpoints)
 - [Configuring Signals](#configuring-signals)
 - [Writing a Signal](#writing-a-signal)
@@ -17,7 +18,7 @@
 
 Risk signals look for things that make a sign in or a session look suspicious. Examples include a new device, a new country, or a session cookie turning up in another browser. Each signal that fires adds a score. The scores add up, to a maximum of 100, to a **level**. You decide what to do at each level.
 
-You pick the signals in your `KeyringServiceProvider`. The list that the `keyring:install` Artisan command publishes starts with the signals that make no network call and need nothing your app doesn't already have. Each one is turned on only when the feature it reads from is enabled:
+You pick the signals in your `KeyringServiceProvider`. The list that the `keyring:install` Artisan command publishes starts with the signals that make no network call and need nothing your application doesn't already have. Each one is turned on only when the feature it reads from is enabled. With every feature on, the list looks like this:
 
 ```php
 use Keyring\Risk\Signals;
@@ -45,7 +46,7 @@ With the installer's default features, that means `SessionFingerprintChanged`, `
 
 Unless you set your own responses, Keyring responds to what the signals find, [as shown below](#responding-to-risk). The starting set is chosen so that those responses can't keep out a user who has only a password. A step-up asks a user who has a second factor for one, and does nothing to a user who doesn't. The signals that can fire for such a user (`NewDevice`, `InactiveAccount`, and `SuccessAfterFailures`) add up to 75. That's short of the 90 at which a sign in is refused. `RepeatedFactorFailures` only counts failures that follow a correct password, so someone has to know the password to raise it. Adding `RecentlyChangedRecovery`, or raising a score, can take a password-only user past 90. Check the sums whenever you change the list.
 
-If your app doesn't use the published provider, it has no signals until you call `Keyring::risk()->signals([...])`.
+If your application doesn't use the published provider, it has no signals until you call `Keyring::risk()->signals([...])`.
 
 ## Built-in Signals
 
@@ -126,7 +127,7 @@ If you don't write your own responder, Keyring takes these actions at every chec
 
 At login, `revokeAllSessions` is always ignored. A critical login is refused and the `suspicious_activity` email goes out, but the owner stays signed in everywhere else.
 
-Three findings are answered whatever the level:
+Three findings are answered whatever the level. Two of them add a notice, and one adds a hold:
 
 - A sign in that follows several failures (`SuccessAfterFailures`) or a long quiet period (`InactiveAccount`) adds `->notify()` to the action above. See [Telling the User](#telling-the-user).
 - When `BreachedPassword` finds the password used to sign in in a breach, `->requirePasswordChange()` is added. See [Requiring a New Password](#requiring-a-new-password).
@@ -246,7 +247,17 @@ Keyring::risk()->signals([
 
 Use `app()->make()` for signals that have dependencies: `RepeatedFactorFailures`, `SuccessAfterFailures`, `InactiveAccount`, `RecentlyChangedRecovery`, and `BreachedPassword`.
 
-The constructor options are as follows. `score` works on every signal. `maxKph` and `minKm` apply to `ImpossibleTravel`. `threshold` and `within` apply to `RepeatedFactorFailures`, and `within` is a [duration](configuration.md#durations) that defaults to `15m`. `SuccessAfterFailures` takes the same two options, with the defaults `5` and `1h`. `InactiveAccount` takes `after`, a duration that defaults to `90d`:
+These are the constructor options. `within` and `after` are [durations](configuration.md#durations):
+
+| Signal | Options | Defaults |
+|---|---|---|
+| Every signal | `score` | See the table above. |
+| `ImpossibleTravel` | `maxKph`, `minKm` | `900`, `500` |
+| `RepeatedFactorFailures` | `threshold`, `within` | `5`, `15m` |
+| `SuccessAfterFailures` | `threshold`, `within` | `5`, `1h` |
+| `InactiveAccount` | `after` | `90d` |
+
+For example:
 
 ```php
 use Keyring\Risk\Signals\InactiveAccount;

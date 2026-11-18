@@ -30,19 +30,19 @@ The package is plain ES modules, so it works with any bundler. Its main entry po
 
 | Import | Contains |
 |---|---|
-| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes and types. No framework code. |
+| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes, and types. No framework code. |
 | `@keyringjs/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
 | `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
 
 ## Building the Pages
 
-Keyring renders components such as `auth/login`, `auth/challenge`, and so on. The [Pages](sign-in-flow.md#pages) documentation lists each one and its props. Most are plain forms that post to Keyring's routes, but two need a little more work:
+Keyring renders components named `auth/login`, `auth/challenge`, and so on. The [Pages](sign-in-flow.md#pages) documentation lists each one and its props. Most are plain forms that post to Keyring's routes, but two need a little more work:
 
 - **The challenge page** (and `confirm`, for step-up) shows whichever factor comes next. [`useChallenge`](#the-challenge-page) does the work.
 - **The login page** can offer passkeys, with [`usePasskeyLogin`](#signing-in-with-a-passkey).
 
-Settings pages for authenticators, sessions, devices, and the email address are yours to build too, using the [helpers below](#managing-authenticators) and the JSON routes. If you'd like a reference, the [example app](https://github.com/entity/keyring-example) has every page, written in React with the components from the Laravel starter kit.
+Settings pages for authenticators, sessions, devices, and the email address are yours to build too, using the [helpers below](#managing-authenticators) and the JSON routes. If you'd like a reference, the [example application](https://github.com/entity/keyring-example) has every page, written in React with the components from the Laravel starter kit.
 
 ## The Pages Emailed Links Open
 
@@ -72,11 +72,11 @@ export default function DeviceReport({ device, url, expires, signature }: { devi
 
 The `email-verification` page works the same way, with its own wording. The `email-change` page posts `{ token }` and reads `action` (`confirm` or `revert`) to choose its wording. Hidden inputs work as well as `transform`. Don't put the token or signature back in the URL you post to. Keyring reads them from the body only.
 
-These pages are sent with `Referrer-Policy: no-referrer`, since their address holds the secret. When the form succeeds, Keyring has Inertia load the next page in full, so the rest of your application goes back to sending a referrer. You don't need to do anything for this. It's why the visit after one of these pages isn't a client-side visit.
+These pages are sent with `Referrer-Policy: no-referrer`, since their address holds the secret. When the form succeeds, Keyring has Inertia load the next page in full, so the rest of your application goes back to sending a referrer. That's why the visit after one of these pages isn't a client-side visit, and there's nothing you need to do for it.
 
 ## The Challenge Page
 
-The `challenge` page (and `confirm`) receives the [challenge props](sign-in-flow.md#page-props). `useChallenge` turns them into everything the page needs: the component for the current factor, a form, "try another way," and submission.
+The `challenge` page (and `confirm`) receives the [challenge props](sign-in-flow.md#page-props). `useChallenge` turns them into everything the page needs: the component for the current factor, a form, "try another way", and submission.
 
 Pass it a map of factor keys to components. For example, you may define that map in `resources/js/keyring/factors.ts`:
 
@@ -218,11 +218,17 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 |---|---|
 | `autofill` | Also offer passkeys in the email field's autofill, when the browser supports it. The field needs `autocomplete="username webauthn"`. |
 | `factor` | The factor key, `passkey` by default. |
-| `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. The same in Vue and React, for example `remember: () => form.data.remember` in React. |
+| `remember` | A function returning whether "remember me" is ticked, read when the passkey is used. It works the same way in Vue and React. In React, for example, pass `remember: () => form.data.remember`. |
+
+`usePasskeyLogin` returns `supported` (whether the browser has WebAuthn), `processing`, `error`, and `signIn`. In Vue, the first three are refs. A few details are worth knowing:
+
+- Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`.
+- `processing` is also true while a passkey picked from autofill is being checked.
+- Closing the prompt isn't an error.
+- After an explicit sign in that didn't work, the email field offers passkeys again.
+- The autofill request is cancelled when the component unmounts.
 
 If your starter kit's passkey button uses `@laravel/passkeys`, you can keep it. It [signs in through the same two routes](passkeys.md#laravels-passkeys-client) once you give it their paths. Adding a passkey and the challenge page still need the helpers here.
-
-`usePasskeyLogin` returns `supported` (whether the browser has WebAuthn), `processing`, `error`, and `signIn`. In Vue, the first three are refs. The autofill request is cancelled when the component unmounts. Starting a new sign in cancels the one in progress, and only the newest one updates `processing` and `error`. `processing` is also true while a passkey picked from autofill is being checked. Closing the prompt isn't an error. After an explicit sign in that didn't work, the email field offers passkeys again.
 
 ## Challenge Helpers Without Vue or React
 
@@ -238,8 +244,11 @@ The Vue and React bindings are thin layers over these helpers, which are exporte
 | `passkeyCredential(factor, { autofill?, signal? })` | Fetches the usernameless options, reads them from `options` in the answer, and runs the prompt (or autofill). |
 | `signInWith(factor, credential, remember, { onError, onFinish })` | Posts a credential from `passkeyCredential()` to sign in. `onError` gets the first error message. |
 | `passkeyLogin(options, onChange)` | The state behind `usePasskeyLogin()`: call `start()` once mounted, `signIn()` for the button, and `stop()` when unmounting. `onChange` gets `{ processing, error }`. |
-| `isAbort(error)` | Whether the error means the user closed the prompt (or it timed out), or that a newer request replaced it. Browsers report those cases as `NotAllowedError`. Browsers also throw that error when WebAuthn isn't allowed at all, such as in a cross-origin iframe without the `publickey-credentials-get` permission. If a prompt never appears, check that first. |
+| `isAbort(error)` | Whether the error means the user closed the prompt (or it timed out), or that a newer request replaced it. |
 | `errorMessage(error)` | A readable message for any thrown value. |
+
+> [!NOTE]
+> Browsers report a closed prompt and a timeout as `NotAllowedError`. They also throw that error when WebAuthn isn't allowed at all, such as in a cross-origin iframe without the `publickey-credentials-get` permission. If a prompt never appears, check that first.
 
 ```ts
 import { errorMessage, isAbort, passkeyCredential, signInWith } from '@keyringjs/keyring/inertia'
@@ -304,7 +313,7 @@ await endOtherSessions()           // every session but this one
 | `endSession(id)` | `DELETE /user/sessions/{id}`. Ending the one marked `current` signs the user out and resolves to `{}`, so send them to the login page. |
 | `endOtherSessions()` | `DELETE /user/sessions`. |
 
-The `id` is a handle that only these routes accept. It changes when a session moves to a new record, so list the sessions again before ending one from a list that's been open for a while. An old handle gets a `404`. Both functions that end sessions need a fresh verification, as the authenticator helpers do. See below.
+The `id` is a handle that only these routes accept. It changes when a session moves to a new record, so list the sessions again before ending one from a list that's been open for a while. An old handle gets a `404`. Both functions that end sessions need a fresh verification, as the authenticator helpers do. [Handling Step-Up in JavaScript](#handling-step-up-in-javascript) shows how to handle that.
 
 ## Handling Step-Up in JavaScript
 
@@ -314,15 +323,17 @@ The authenticator routes need a [fresh verification](step-up.md#fresh-verificati
 import { KeyringRequestError, enroll } from '@keyringjs/keyring'
 import { router } from '@inertiajs/vue3'
 
-try {
-  await enroll('passkey')
-} catch (error) {
-  if (error instanceof KeyringRequestError && error.status === 423) {
-    router.visit(error.data.redirect)
-    return
-  }
+async function addPasskey() {
+  try {
+    await enroll('passkey')
+  } catch (error) {
+    if (error instanceof KeyringRequestError && error.status === 423) {
+      router.visit(error.data.redirect)
+      return
+    }
 
-  throw error
+    throw error
+  }
 }
 ```
 
@@ -386,15 +397,15 @@ configureRoutes({
 })
 ```
 
-The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `sessions` and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three.
-
-Keyring's own paths put a factor's key or an ID into the URL as one encoded path segment. They throw a `TypeError` for `.` and `..`, since a browser resolves those away however they're written. So a value the server didn't issue, one with a `/` or a `?` in it, can't send the request and the user's cookies to another path. An override is used exactly as written, without the `prefix`, so you should encode the values your override receives too:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `sessions`, and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
 
 ```ts
 configureRoutes({
   challengeBase: purpose => purpose === 'login' ? '/account/login/challenge' : '/account/confirm',
 })
 ```
+
+Keyring's own paths put a factor's key or an ID into the URL as one encoded path segment. They throw a `TypeError` for `.` and `..`, since a browser resolves those away however they're written. So a value the server didn't issue, one with a `/` or a `?` in it, can't send the request and the user's cookies to another path. An override is used exactly as written, without the `prefix`, so encode the values your override receives too, as the `enroll` example above does.
 
 Update any paths your own pages link to directly, such as `/login` or `/register`.
 

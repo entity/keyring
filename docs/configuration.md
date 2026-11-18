@@ -26,11 +26,11 @@ You configure Keyring in two places:
 - Your `config/keyring.php` configuration file holds values: your features, timeouts, limits, and route options.
 - Your `app/Providers/KeyringServiceProvider.php` file holds behaviour: which factors exist, the policy, risk responses, swapped responses, and pages. You put these calls in the provider's `boot()` method.
 
-The `keyring:install` command publishes a short config file with the options most apps change: `guard`, `username`, `home`, `features`, `registration`, `enrollment_url`, and `support_contact`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you only need to copy the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced as a whole. If you'd rather have the full file, run `php artisan vendor:publish --tag=keyring-config`.
+The `keyring:install` command publishes a short config file with the options most applications change: `guard`, `username`, `home`, `features`, `registration`, `enrollment_url`, and `support_contact`. Every other option on this page keeps its default until you copy it into that file. Keyring merges your file over its defaults key by key, so you only need to copy the part you change, such as `'sessions' => ['absolute' => '7d']`. Lists, like `features`, are replaced as a whole. If you'd rather have the full file, run `php artisan vendor:publish --tag=keyring-config`.
 
 ## Durations
 
-Options that take a duration accept a number of seconds, or a string such as `"30s"`, `"15m"`, `"12h"`, or `"7d"`. Any other value throws an `InvalidArgumentException`. The two short ones, `timebox` and `webauthn.timeout`, also accept milliseconds, such as `"250ms"`. They always need a unit.
+Options that take a duration accept a number of seconds, or a string such as `"30s"`, `"15m"`, `"12h"`, or `"7d"`. Any other value throws an `InvalidArgumentException`. The two short ones, `timebox` and `webauthn.timeout`, also accept milliseconds, such as `"250ms"`. Those two always need a unit, so a bare number throws.
 
 ## Guard and Users
 
@@ -65,7 +65,7 @@ use Keyring\Features;
 ],
 ```
 
-Signing in and out, challenges, and step-up are always on. Everything else is a feature. Each feature adds its routes, and anything else it needs, only once it's in this list. Without a config file, Keyring turns on registration, password resets, email verification, password changes, and the security log. Those are also the defaults `keyring:install` picks, unless you choose otherwise. Your list replaces that default list as a whole, so keep `Features::securityLog()` in it, unless you'd rather have those events in [your app's log](security-log-and-emails.md#without-the-table). For a description of what each feature adds, see [Adding Features](quick-start.md#adding-features).
+Signing in and out, challenges, and step-up are always on. Everything else is a feature. Each feature adds its routes, and anything else it needs, only once it's in this list. An unknown feature in `config/keyring.php` stops the application from booting, rather than quietly leaving that feature off. Without a config file, Keyring turns on registration, password resets, email verification, password changes, and the security log. Those are also the defaults `keyring:install` picks, unless you choose otherwise. Your list replaces that default list as a whole, so keep `Features::securityLog()` in it, unless you'd rather have those events in [your application's log](security-log-and-emails.md#without-the-table). For a description of what each feature adds, see [Adding Features](quick-start.md#adding-features).
 
 You may check for a feature in your own code with `Features::enabled(Features::devices())`. The `Features::all` method lists all of them, which is handy in tests.
 
@@ -103,7 +103,7 @@ Users who are signed out are sent to the route named `login`.
 'middleware' => ['web', AddSecurityHeaders::class],
 ```
 
-Keyring registers its routes inside a group that uses this prefix, domain, and middleware. The `Keyring\Http\Middleware\AddSecurityHeaders` middleware sends `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin-allow-popups`, and `Referrer-Policy: same-origin` on every Keyring response. It sends `Referrer-Policy: no-referrer` on the pages that emailed links open. It leaves `X-Frame-Options` off a response that already says who may frame it, either with a header of its own or with a `frame-ancestors` directive. That means a middleware listed after it here can allow framing. See [Links and Headers](security.md#links-and-headers). If your app sets those headers itself, you may take this middleware out of the list. In that case, you still need to keep the URLs of emailed links out of `Referer` headers some other way, because they carry their token.
+Keyring registers its routes inside a group that uses this prefix, domain, and middleware. The `Keyring\Http\Middleware\AddSecurityHeaders` middleware sends `Cache-Control: no-store, private`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin-allow-popups`, and `Referrer-Policy: same-origin` on every Keyring response. It sends `Referrer-Policy: no-referrer` on the pages that emailed links open. It leaves `X-Frame-Options` off a response that already says who may frame it, either with a header of its own or with a `frame-ancestors` directive. That means a middleware listed after it here can allow framing. See [Links and Headers](security.md#links-and-headers). If your application sets those headers itself, you may take this middleware out of the list. In that case, you still need to keep the URLs of emailed links out of `Referer` headers some other way, because they carry their token.
 
 If you set `routes` to `false`, Keyring registers nothing. Instead, you call `Keyring::routes()` wherever you want them. For example, you may call it inside your own group:
 
@@ -111,7 +111,7 @@ If you set `routes` to `false`, Keyring registers nothing. Instead, you call `Ke
 Route::prefix('account')->middleware('throttle:60,1')->group(fn () => Keyring::routes());
 ```
 
-The `Keyring::routes` method adds the `middleware` option, but it doesn't add `prefix` or `domain`. Your group decides those. To change the routes themselves, copy `vendor/keyring/keyring/routes/keyring.php` into your app instead, and keep the route names. Keyring's controllers, emails, and middleware link to routes by name, such as `login`, `keyring.confirm.challenge`, and `keyring.devices.report`.
+The `Keyring::routes` method adds the `middleware` option, but it doesn't add `prefix` or `domain`. Your group decides those. To change the routes themselves, copy `vendor/keyring/keyring/routes/keyring.php` into your application instead, and keep the route names. Keyring's controllers, emails, and middleware link to routes by name, such as `login`, `keyring.confirm.challenge`, and `keyring.devices.report`.
 
 The browser package uses Keyring's default paths. If you change the prefix, tell the package with [`configureRoutes({ prefix })`](frontend.md#changing-routes).
 
@@ -143,7 +143,7 @@ The `algorithms` option lists the signature algorithms that keys may use, in ord
 'changes_middleware' => ['keyring.fresh:15m'],
 ```
 
-This is extra middleware for adding, renaming, and removing authenticators, revoking devices, changing the password, and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default, these routes need a verification from the last 15 minutes. See [Step-Up](step-up.md#fresh-verification).
+This is extra middleware for adding, renaming, and removing authenticators, ending sessions, revoking devices, changing the password, and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default, these routes need a verification from the last 15 minutes, as [Step-Up](step-up.md#fresh-verification) explains.
 
 ```php
 'enrollment_url' => null,
@@ -192,7 +192,7 @@ This is how long a user has to finish adding a sign-in method, once they've star
 ],
 ```
 
-The `cookie` option sets the name of the device cookie. When it's `null`, the name is `known_device`, with the `__Host-` prefix once your app is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)). A name you set is used exactly as it is. The `cookie_lifetime` option sets how long the browser keeps the cookie. 400 days is the most browsers allow.
+The `cookie` option sets the name of the device cookie. When it's `null`, the name is `known_device`, with the `__Host-` prefix once your application is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)). A name you set is used exactly as it is. The `cookie_lifetime` option sets how long the browser keeps the cookie. 400 days is the most browsers allow.
 
 The `limit` option sets how many devices one account keeps. If a sign in from a new browser goes past that limit, the device seen longest ago is forgotten and signed out. Set it to `null` for no limit.
 
@@ -276,7 +276,7 @@ The `Features::updatePasswords()` feature adds `password` to the protected attri
 
 For more, see [Password Rules](protected-changes.md#password-rules). The `broker` option sets the password broker used for resets. `null` means your default broker.
 
-The `min_with_mfa` and `min_without_mfa` options are counted in characters. Neither can be set below 8, which is the shortest password that OWASP ASVS 5.0.0 (6.2.1) and NIST SP 800-63B-4 (Sec. 3.1.1.2) allow. If you set a lower value, Keyring throws a `LogicException` as the app boots, and again wherever the option is read. It won't quietly use 8 instead.
+The `min_with_mfa` and `min_without_mfa` options are counted in characters. Neither can be set below 8, which is the shortest password that OWASP ASVS 5.0.0 (6.2.1) and NIST SP 800-63B-4 (Sec. 3.1.1.2) allow. If you set a lower value, Keyring throws a `LogicException` as the application boots, and again wherever the option is read. It won't quietly use 8 instead.
 
 The `max` option is counted in characters, but how much of that you get depends on the hasher. Bcrypt, Laravel's default, only reads the first 72 bytes of a password. So with bcrypt, Keyring refuses anything longer, rather than ignoring the end of it. That makes the real limit 72 bytes, not 128 characters. In practice, that's 72 plain characters, but only 36 accented or Cyrillic ones, 24 Chinese, Japanese, or Korean ones, or 18 emoji. OWASP ASVS 5.0.0 (6.2.9) asks that passwords of at least 64 characters are allowed, which bcrypt can't promise. To accept every password up to `max`, use argon2id to hash passwords:
 
@@ -288,9 +288,9 @@ HASH_VERIFY=false
 
 Keyring doesn't hash a password before bcrypt to get around the limit. Those hashes would no longer be ones that Laravel's own hasher can check. The [conformance suite](testing.md#the-conformance-suite) fails on bcrypt until you switch hashers, or say that you're keeping bcrypt.
 
-The `context` option is your list of words that a password mustn't be made up of. Include the names of your organisation, products, systems, projects, departments, and roles. It's the documented list that OWASP ASVS 5.0.0 (6.1.2) asks for. Keyring always adds your app's name and what it knows about the user, too. See [Context-Specific Words](protected-changes.md#context-specific-words) for how the words are compared.
+The `context` option is your list of words that a password mustn't be made up of. Include the names of your organisation, products, systems, projects, departments, and roles. It's the documented list that OWASP ASVS 5.0.0 (6.1.2) asks for. Keyring always adds your application's name and what it knows about the user, too. See [Context-Specific Words](protected-changes.md#context-specific-words) for how the words are compared.
 
-The `uncompromised` option checks new passwords against Have I Been Pwned over the network. The default, `null`, runs the check only when the app is in production. That way, local development and tests make no network calls. Set it to `true` or `false` to choose for every environment.
+The `uncompromised` option checks new passwords against Have I Been Pwned over the network. The default, `null`, runs the check only when the application is in production. That way, local development and tests make no network calls. Set it to `true` or `false` to choose for every environment.
 
 The check is Laravel's own (`Password::uncompromised()`). It fails open. When Have I Been Pwned can't be reached, times out, or answers with an error, Laravel reports the exception and lets the password through. On those requests, only the [bundled list](protected-changes.md#password-rules) of common passwords stands between a user and a breached password.
 
@@ -329,7 +329,7 @@ The `keep_for` option sets how long entries are kept before the [`keyring:prune`
 
 The table is turned on by `Features::securityLog()`, which is on by default. Without it, the same events are written to the log `channel` instead. `null` means your default channel. Without the table, "was this you?" alerts and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
 
-The `context_key` option is the key in Laravel's Context where your app keeps a request's ID, if it keeps one. Every entry that the request writes then carries that ID. If your app doesn't keep one, Keyring makes an ID of its own for each request. If you set it to `null`, the ID is left out. See [Request IDs](security-log-and-emails.md#request-ids).
+The `context_key` option is the key in Laravel's Context where your application keeps a request's ID, if it keeps one. Every entry that the request writes then carries that ID. If your application doesn't keep one, Keyring makes an ID of its own for each request. If you set it to `null`, the ID is left out. See [Request IDs](security-log-and-emails.md#request-ids).
 
 The `refusals` option sets how many entries of one type are written about one account, or about one IP address when no account is known. It counts over each `refusals_per` period. This applies to things that were refused and can be asked for again without end. A `null` writes them all. See [Refusals That Repeat](security-log-and-emails.md#refusals-that-repeat).
 
@@ -364,15 +364,15 @@ The `pending_logins.keep_for` option sets how long a half-finished login or conf
 
 The `timebox` option sets the minimum time that a refused verification takes. That way, timing doesn't reveal whether an account exists, or whether a password that was refused for another reason was right. It covers every pipeline step. So a request refused by a rate limit or by validation waits too, and so do a registration and a refused password reset. Verifications that go through return straight away.
 
-The timebox only hides work that's shorter than it. The slowest thing a refusal does is hash a password, and not every refusal hashes one at the same cost. An account's password is checked at the cost its stored hash was made with, which differs from today's cost while old hashes are being moved to a new one. A reset token is only checked for an address with a link outstanding. So keep `timebox` comfortably longer than one password hash takes on your servers. Bcrypt at 12 rounds takes around 200ms on current hardware, and more on a small instance. Keyring tells you when it isn't. A refusal that takes longer than `timebox` writes a warning to your app's log, at most once an hour. That warning is the check that sees your real hashing cost on your real servers. The [conformance suite](testing.md#the-conformance-suite) also times a hash where your tests run, and it fails when the hash doesn't fit, as an early guide.
+The timebox only hides work that's shorter than it. The slowest thing a refusal does is hash a password, and not every refusal hashes one at the same cost. An account's password is checked at the cost its stored hash was made with, which differs from today's cost while old hashes are being moved to a new one. A reset token is only checked for an address with a link outstanding. So keep `timebox` comfortably longer than one password hash takes on your servers. Bcrypt at 12 rounds takes around 200ms on current hardware, and more on a small instance. When a refusal takes longer than `timebox`, Keyring writes a warning to your application's log, at most once an hour. That warning is the check that sees your real hashing cost on your real servers. As an early guide, the [conformance suite](testing.md#the-conformance-suite) also times a hash where your tests run, and fails when the hash doesn't fit.
 
-The `limits` option sets the default attempts per minute for each factor, per account and per IP address. It also has `consecutive`, which is the number of failures in a row that one of an account's authenticators allows before it's refused for that account. `null` means no cap, and 100 is the most that NIST SP 800-63B-4 allows (Sec. 3.2.2). Those failures are counted in the `keyring_failure_counts` table. Nothing brings a refused authenticator back by itself. See [At the Cap](security.md#at-the-cap). The `consecutive_elsewhere` option sets how many of those failures may come from browsers that the account hasn't signed in from. The rest are kept for the owner's own sign-ins. It only applies with `Features::devices()` on, and `null` keeps nothing back. The `remember_names_for` option sets how long the cache keeps the failures in a row counted under each typed username. The sign-in form answers from those counts.
+The `limits` option sets the default attempts per minute for each factor, per account and per IP address. It also has `consecutive`, which is the number of failures in a row that one of an account's authenticators allows before it's refused for that account. `null` means no cap, and 100 is the most that NIST SP 800-63B-4 allows (Sec. 3.2.2). Those failures are counted in the `keyring_failure_counts` table. Nothing brings a refused authenticator back by itself, as [At the Cap](security.md#at-the-cap) explains. The `consecutive_elsewhere` option sets how many of those failures may come from browsers that the account hasn't signed in from. The rest are kept for the owner's own sign-ins. It only applies with `Features::devices()` on, and `null` keeps nothing back. The `remember_names_for` option sets how long the cache keeps the failures in a row counted under each typed username. The sign-in form answers from those counts.
 
-Keyring keeps the per-minute counts and their locks in the cache store that Laravel's rate limiter uses. That's `cache.limiter` in `config/cache.php`, or your default store. Point it at a database or Redis store. Octane's in-memory `octane` store fills up, isn't atomic across workers, and is emptied by a restart. See [Octane's Cache Store](security.md#octanes-cache-store).
+Keyring keeps the per-minute counts and their locks in the cache store that Laravel's rate limiter uses. That's `cache.limiter` in `config/cache.php`, or your default store. Point it at a database or Redis store. Octane's in-memory `octane` store fills up, isn't atomic across workers, and is emptied by a restart, as [Octane's Cache Store](security.md#octanes-cache-store) explains.
 
 Each lockout lasts twice as long as the one before it, up to `longest_lock`. For a whole IP address, the limit is `longest_ip_lock`. Set `lock_after` to refuse an account as it would be at the cap, once it has been locked out of signing in that many times in a day. The account stays refused until its password is reset. See [Locking Until a Reset](security.md#locking-until-a-reset). An account can be sent `codes` codes for one factor every `codes_per` period. It can also receive `notices` security notices of one kind, or email change requests, every `notices_per` period. Registration also mails an address at that rate. See [Rate Limiting](security.md#rate-limiting).
 
-Keyring's form routes use a named rate limiter called `keyring`. These routes include registration, password resets, enrollment confirmation, email changes, verification emails, and the emailed links. The limiter allows 6 requests a minute per user, or per IP address for guests. To change it, define your own `keyring` limiter in the `boot()` method of a service provider:
+Keyring's form routes use a named rate limiter called `keyring`. These routes include registration, password resets, enrollment confirmation, email changes, verification emails, and the buttons on the pages that emailed links open. The limiter allows 6 requests a minute per user, or per IP address for guests. To change it, define your own `keyring` limiter in the `boot()` method of a service provider:
 
 ```php
 use Illuminate\Cache\RateLimiting\Limit;
@@ -468,10 +468,10 @@ The facade also answers questions about your setup. These are useful in your own
 | `Keyring::linkRoot()` | Where emailed links start. |
 | `Keyring::email()` | The attribute holding the user's address, `email` by default. |
 | `Keyring::policy($user, $attempt)` | What the policy asks of this user, before considering what they've enrolled. |
-| `Keyring::steps()` | The pipeline's steps, in order. `Keyring::dangerouslyChangedSteps()` lists the mandatory ones an app took out. |
+| `Keyring::steps()` | The pipeline's steps, in order. `Keyring::dangerouslyChangedSteps()` lists the mandatory ones an application took out. |
 | `Keyring::notification($type, $arguments)` | The notification for a type, Keyring's own or yours, or `null` when it's turned off. `Keyring::requiredNotification()` throws when it is. |
 | `Keyring::belongsToGuard($user)` | Whether Keyring's guard would load this user back, so they can be signed in. |
 | `Keyring::recordedIp($request)` | The request's IP address as Keyring stores it. |
-| `Keyring::allowsSignIn($user)` | Whether the app lets this user be signed in. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
+| `Keyring::allowsSignIn($user)` | Whether the application lets this user be signed in. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowsEnrollment($user)` | Whether the user may add a sign-in method. See [Who May Enroll](authenticators.md#who-may-enroll). |
-| `Keyring::authenticatorModel()` | The authenticator model's class. `deviceModel()`, `pendingChangeModel()`, `securityEventModel()` and `failureCountModel()` do the same for theirs. |
+| `Keyring::authenticatorModel()` | The authenticator model's class. `deviceModel()`, `pendingChangeModel()`, `securityEventModel()`, and `failureCountModel()` do the same for theirs. |

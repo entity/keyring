@@ -32,7 +32,7 @@ Keyring records sign ins, failures, lockouts, refusals, changes, and automatic a
 
 The log never holds passwords, codes, tokens, signatures, session IDs, or anything else from the request body.
 
-The security log is turned on by default. The `Features::securityLog` feature is part of Keyring's default features, and the `keyring:install` command includes it in your list unless you leave it out. You can configure the log with these options:
+The security log is turned on by default. The `Features::securityLog()` feature is part of Keyring's default features, and the `keyring:install` command includes it in your list unless you leave it out. You can configure the log with these options:
 
 ```php
 'security_log' => [
@@ -47,11 +47,11 @@ The security log is turned on by default. The `Features::securityLog` feature is
 
 The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report`, writes the entry to [your application's log](#without-the-table) instead, and carries on, so the sign in, refusal, or email still goes ahead. If the log can't be read, there are no alerts, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals find nothing.
 
-There is one exception. If the `protection_bypassed` entry can't be written, [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection) throws an exception before it runs your callback. This means a bypass never happens without being logged.
+There is one exception. If the `protection_bypassed` entry can't be written, [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection) throws an exception before it runs your callback. So a bypass never happens without being logged.
 
 ### Without the Table
 
-If you remove `Features::securityLog` from your features, nothing is written to the `keyring_events` table. The events are still recorded, though. Each one becomes a line in your application's log, so there's never a moment when nothing is recorded. Each line is written as `Keyring: {type}` at the entry's [severity](#severity). It includes `at` (the time, [with its offset](#times)), the user (as `{morph class}:{id}`), `factor`, `device_id`, `ip`, `user_agent`, `request_id`, and `meta` as its context. The `channel` option names the log channel to use, and `null` selects your default channel:
+If you remove `Features::securityLog()` from your features, nothing is written to the `keyring_events` table. The events are still recorded, though. Each one becomes a line in your application's log, so there's never a moment when nothing is recorded. Each line is written as `Keyring: {type}` at the entry's [severity](#severity). It includes `at` (the time, [with its offset](#times)), the user (as `{morph class}:{id}`), `factor`, `device_id`, `ip`, `user_agent`, `request_id`, and `meta` as its context. The `channel` option names the log channel to use, and `null` selects your default channel:
 
 ```php
 // config/logging.php
@@ -82,7 +82,7 @@ How long those lines are kept, and who can read them, is up to that channel. The
 | `new_device` | notice | A sign in from a new device. | `device` |
 | `device_revoked` | info | A device was signed out. | `device` |
 | `device_reported` | warning | A device was signed out from the "this wasn't me" link. | `device` |
-| `sessions_revoked` | info | "Sign out everywhere else" was used, one session was ended from the sessions list, an administrator ran `keyring:sign-out` for the user, or the first request was refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `count` |
+| `sessions_revoked` | info | "Sign out everywhere else" was used, one session was ended from the sessions list, an administrator ran `keyring:sign-out` for the user, or the first request was refused for an account [the application keeps out](sign-in-flow.md#who-may-sign-in). | `count` |
 | `session_ended` | info | Keyring signed a session out on its own. | `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
 | `session_resumed` | info | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved, which is why this isn't a `signed_in` entry. | |
 | `remember_me_reused` | warning | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), and the session ended for both browsers. The entry's address and user agent come from the request that brought the used cookie. `device_id` is the device the ended session was on. | `device` |
@@ -134,7 +134,7 @@ SecurityEvent::query()->where('severity', Severity::Critical)->where('created_at
 
 ### Request IDs
 
-Every entry a request writes has the same `request_id`. This means a failed second factor, the lockout it caused, and the email it sent can all be read together:
+Every entry a request writes has the same `request_id`. A failed second factor, the lockout it caused, and the email it sent can then all be read together:
 
 ```php
 SecurityEvent::query()->where('request_id', $event->request_id)->oldest('id')->get();
@@ -220,7 +220,7 @@ For a complete list of everything Keyring keeps, how it's protected, and for how
 
 ## "Was This You?" Alerts
 
-After a successful sign in, Keyring flashes `keyring.alerts` to the session. This is a list of log entries worth asking the user about, which they haven't seen yet. Each alert is shown only once. When `Features::devices` is on, a browser only receives alerts for entries logged after the account first used that browser. A browser that hasn't signed in to the account before receives none. A browser first used after an alert was logged doesn't receive that alert either, since it could belong to whoever caused the event. Those alerts wait for a browser the account already had.
+After a successful sign in, Keyring flashes `keyring.alerts` to the session. This is a list of log entries worth asking the user about, which they haven't seen yet. Each alert is shown only once. When `Features::devices()` is on, a browser only receives alerts for entries logged after the account first used that browser. A browser that hasn't signed in to the account before receives none. A browser first used after an alert was logged doesn't receive that alert either, since it could belong to whoever caused the event. Those alerts wait for a browser the account already had.
 
 ```json
 [
@@ -261,9 +261,9 @@ Keyring::notifications([
 
 Types you leave out keep Keyring's own notification. Every security notice is turned on from the start, except `clone_suspected`, which is sent once you list it as shown above. A notice is sent when its event happens, so a notice that depends on a feature you haven't turned on is never sent:
 
-- `new_device` needs `Features::devices`.
+- `new_device` needs `Features::devices()`.
 - `second_factor_failed` needs a sign-in method besides the password.
-- `email_changed` and `email_change_reverted` need `Features::emailChanges`.
+- `email_changed` and `email_change_reverted` need `Features::emailChanges()`.
 
 NIST SP 800-63B-4 requires a notice when an authenticator is bound to an account (Sec. 4.1.2.1: `authenticator_added`, and `password_changed` for a new password). It also requires one when an account is recovered (Sec. 4.2.3: `password_changed` after a reset, and `recovery_code_used`), and when recovery codes are replaced (Sec. 4.2.1.1: `recovery_codes_generated`). NIST recommends a notice when an authenticator is removed (Sec. 4.5: `authenticator_removed`).
 

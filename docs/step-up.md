@@ -43,9 +43,9 @@ Route::delete('/account', [AccountController::class, 'destroy'])
 
 `keyring:aal2` lets the request through when the session has reached AAL2 or higher. `keyring:aal1` and `keyring:aal3` work the same way. On its own, `keyring` means `keyring:aal2`. An unknown level name throws an `InvalidArgumentException`.
 
-`keyring:aal3` needs a key that was added with a [verified attestation](passkeys.md#attestation-and-aal3). An app that doesn't check attestation can ask for more of AAL2 by name instead. `keyring:aal2,device-bound` requires a phishing-resistant key that stays on its device, among what the session proved. `keyring:aal2,phishing-resistant` requires any passkey or security key. [`keyring.enrolled`](policies.md#requiring-a-second-factor) takes the same names.
+`keyring:aal3` needs a key that was added with a [verified attestation](passkeys.md#attestation-and-aal3). An application that doesn't check attestation can ask for more of AAL2 by name instead. `keyring:aal2,device-bound` requires a phishing-resistant key that stays on its device, among what the session proved. `keyring:aal2,phishing-resistant` requires any passkey or security key. [`keyring.enrolled`](policies.md#requiring-a-second-factor) takes the same names.
 
-It counts everything proved so far this session, so it only asks for what's missing. An emailed code isn't a factor, so it counts for nothing here. A user who signed in with a password is asked for a possession factor to reach AAL2. A user who signed in with a passkey is already at AAL2. That user is at AAL3 too, if the passkey stays on its device and was added with a verified attestation.
+The middleware counts everything proved so far in the session, so it only asks for what's missing. An emailed code isn't a factor, so it counts for nothing here. A user who signed in with a password is asked for a possession factor to reach AAL2. A user who signed in with a passkey is already at AAL2. That user is at AAL3 too, if the passkey stays on its device and was added with a verified attestation.
 
 A level doesn't last for the whole session. It lapses after its idle and overall limits. By default, at AAL2, those are an hour without a request or 24 hours, as NIST SP 800-63B-4 asks. After that, the next `keyring:aal2` route asks again. See [Timeouts](devices-and-sessions.md#timeouts). To end the session at that point instead, see [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level). The idle limit is tracked by the [session middleware](devices-and-sessions.md#the-session-registry), which Keyring adds to the `web` group. Routes outside that group, such as Sanctum's `api` group, need `keyring.session` too. A [risk response](risk.md#checkpoints) can also clear a level. An authenticator that's removed stops counting in every session it was used in.
 
@@ -72,11 +72,11 @@ NIST SP 800-63B-4 (Sec. 4.1.2.1) binds a new authenticator at the highest level 
 - A recovery code stands in for a lost key, along with the password, as it does at sign in. A policy that takes no codes there (`noDowngrade(except: [])`, or an explicit `phishingResistant()`) takes none here either. A code is never the whole of a confirmation. A user whose only other sign-in method is a set of recovery codes confirms with the password, and isn't offered the codes.
 - Users who have any possession factor (an authenticator app, a passkey, or a security key) always use one. An [email code](factors.md#email-codes) isn't a possession factor, so it can't stand in. A user whose only other sign-in method is an emailed code proves the password and that code. That's what lets them add a real second factor.
 - A policy the user can't fully meet yet, such as one that asks for a passkey they haven't added, counts as far as they can go, so they can still add it.
-- A policy that asks for more than that is honoured. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about an attempt nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honored, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
+- A policy that asks for more than that is honoured. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about an attempt nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification, and it doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is also fresh for step-up. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
 
-Keyring uses `keyring.fresh:15m` on its own sensitive routes. It applies this through the `changes_middleware` config option, on top of `auth:{guard}`. Those routes cover managing authenticators and devices, changing the password, and starting an email change.
+Keyring uses `keyring.fresh:15m` on its own sensitive routes. It applies this through the `changes_middleware` config option, on top of `auth:{guard}`. Those routes cover managing authenticators, ending sessions, signing out devices, changing the password, and starting an email change.
 
 ## The Confirm Flow
 
@@ -88,7 +88,7 @@ When a request needs step-up, Keyring starts a confirm attempt with the requirem
 | `POST` | `/confirm/{factor}` | `keyring.confirm.verify` |
 | `POST` | `/confirm/{factor}/send` | `keyring.confirm.send` |
 
-These routes need a user signed in to Keyring's guard (`auth:{guard}`). The page, and its verify and send routes, take the session lock, as the login challenge does. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress, including after one times out, starts one. Any single factor except a recovery code satisfies that attempt. Keyring doesn't know what the user was doing, so a code spent there might not get them there. A user with nothing to confirm with (no password, and no other sign-in method) is sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) instead. Without one, they get a `403`.
+These routes need a user signed in to Keyring's guard (`auth:{guard}`). The page, and its verify and send routes, take the session lock, as the login challenge does. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress, including after one times out, starts one. Any single factor except a recovery code satisfies that attempt. Keyring doesn't know which route the user was heading for, so a recovery code spent on this page might not be enough to get them through. A user with nothing to confirm with (no password, and no other sign-in method) is sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) instead. Without one, they get a `403`.
 
 If a page asks again while a confirm attempt for the same requirement is in progress, it continues that attempt. That way, what the user already proved isn't lost.
 
@@ -104,7 +104,7 @@ Once the user has verified enough, Keyring does the following:
 
 For a `GET` request, the intended URL is the page that needed step-up. For other methods, Laravel uses the previous URL instead. That way, the user returns to the page with the form, rather than to a URL they can't `GET`.
 
-The confirm attempt expires after `pending_logins.keep_for`, in the same way as a login attempt. When it expires, the user returns to `/confirm`, and `keyring::keyring.expired` appears on the field of the factor it asks for next.
+The confirm attempt expires after `pending_logins.keep_for`, in the same way as a sign in attempt. When it expires, the user returns to `/confirm`, and `keyring::keyring.expired` appears on the field of the factor it asks for next.
 
 ## JSON Requests
 

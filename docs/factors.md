@@ -20,7 +20,7 @@ A **factor** is a way of proving who you are, such as a password, an authenticat
 
 An **authenticator** is one user's instance of a factor. That might be the authenticator app on their phone, the security key on their keychain, or their set of recovery codes. Authenticators are `Keyring\Models\Authenticator` rows in `keyring_authenticators`. A user may have as many as the factor allows. Factors that keep their state somewhere else, like the password on the `users` table, appear as unsaved "virtual" authenticators.
 
-Each factor has a **key**, such as `totp` or `passkey`. You'll see the key in URLs like `/login/challenge/totp`, in the `factor` column, and in the frontend's component map. Keys must match `[a-z0-9-]+`, and `challenge` is reserved.
+Each factor has a **key**, such as `totp` or `passkey`. You'll see the key in URLs like `/login/challenge/totp`, in the `factor` column, and in the frontend's factor map. Keys must match `[a-z0-9-]+`, and `challenge` is reserved.
 
 ## Registering Factors
 
@@ -42,7 +42,11 @@ Keyring::factors([
 ]);
 ```
 
-If you don't call `Keyring::factors`, Keyring uses the password alone. The `keyring:install` command writes the list for the methods you pick. To let users set up the others themselves, turn on [`Features::manageAuthenticators()`](authenticators.md). NIST SP 800-63B-4 asks for at least one phishing-resistant option wherever AAL2 is offered (Sec. 2.2.2), and passkeys are one.
+If you don't call `Keyring::factors`, Keyring uses the password alone. The `keyring:install` command writes this list for the sign-in methods you pick.
+
+Registering a factor only makes it available. To let users add authenticators for it themselves, turn on [`Features::manageAuthenticators()`](authenticators.md).
+
+NIST SP 800-63B-4 asks for at least one phishing-resistant option wherever AAL2 is offered (Sec. 2.2.2). Passkeys are one.
 
 The list accepts class names (resolved from the container), instances, and closures that receive the container:
 
@@ -62,11 +66,13 @@ Keyring::extend('sms', fn ($app) => $app->make(SmsCode::class));
 
 Keyring registers the factor under the first argument. The factor's `key` method must return the same value, or Keyring throws an `InvalidArgumentException` when it resolves the factors.
 
-Removing a factor from the list doesn't delete anyone's authenticators. A user who still has authenticators for an unregistered factor can't sign in or step up, because Keyring can't check those authenticators, and skipping them would let the password alone through. Those users see `keyring::keyring.unavailable`, and Keyring reports a `Keyring\Exceptions\UnregisteredFactor` naming the factor. To fix this, register the factor again or delete those rows. Code that calls `$authenticator->factor()` on such a row throws `Keyring\Exceptions\UnknownFactor`, so delete or migrate those rows if you drop a factor for good. Because `UnknownFactor` is an HTTP exception, an unregistered factor key in a URL gives a `404`.
+Removing a factor from the list doesn't delete anyone's authenticators. A user who still has authenticators for an unregistered factor can't sign in or step up. Keyring can't check those authenticators, and skipping them would let the password alone through. Those users see `keyring::keyring.unavailable`, and Keyring reports a `Keyring\Exceptions\UnregisteredFactor` that names the factor.
+
+To fix this, register the factor again, or delete or migrate those rows. Until you do, code that calls `$authenticator->factor()` on such a row throws `Keyring\Exceptions\UnknownFactor`. That exception is an HTTP exception, so an unregistered factor key in a URL gives a `404`.
 
 ## Built-in Factors
 
-| Key | Class | Categories | Starts a Login | Users Add It | Priority |
+| Key | Class | Categories | Starts a Sign In | Users Add It | Priority |
 |---|---|---|---|---|---|
 | `password` | `Password` | knowledge | yes | no | 40 |
 | `totp` | `Totp` | possession | no | yes | 60 |
@@ -81,7 +87,7 @@ When Keyring needs another factor, it offers the user's default authenticator fi
 
 The password stays in your `users` table, so password resets and Laravel's own helpers keep working. A user without a password doesn't have this authenticator. You can't add or remove it through Keyring's authenticator routes. Instead, it changes through the [password change](protected-changes.md#changing-the-password) and [reset](protected-changes.md#resetting-the-password) flows.
 
-When a login starts with an unknown address, Keyring still runs a password hash, so the response takes the same time either way. If your hashing settings have changed, a correct password is rehashed.
+When a sign in starts with an unknown address, Keyring still runs a password hash, so the response takes the same time either way. If your hashing settings have changed, a correct password is rehashed.
 
 Keyring puts a typed password into Unicode's NFC form before it checks the password. It does this for every password its routes set, so a password matches however the device composed its characters. See [Password Rules](protected-changes.md#password-rules).
 
@@ -89,7 +95,7 @@ Keyring puts a typed password into Unicode's NFC form before it checks the passw
 
 These are time-based one-time passwords (RFC 6238). Enrolling returns a 32 character secret, an `otpauth://` URL, and an SVG QR code.
 
-By default, a code is accepted for one 30 second time step either side of now. The `window` constructor argument controls this, so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps the default anyway. RFC 6238 recommends accepting one earlier step for the time a code takes to arrive (Section 5.2), and it allows a limit on clock drift in either direction (Section 6). Without any window, a code typed near the end of its step is refused, and that would turn away a large share of honest sign ins.
+By default, a code is accepted for one 30 second time step either side of now. The `window` constructor argument controls this, so one code can work for up to about 90 seconds. **That default does not meet OWASP ASVS 5.0.0 requirement 6.5.5**, which gives a TOTP a maximum lifetime of 30 seconds. Keyring keeps the default anyway. RFC 6238 recommends accepting one earlier step for the time a code takes to arrive (Sec. 5.2), and it allows a limit on clock drift in either direction (Sec. 6). Without any window, a code typed near the end of its step is refused, and that would turn away a large share of honest sign ins.
 
 To meet 6.5.5 to the letter, give the factor a window of zero, so a code only works during its own step:
 
@@ -103,9 +109,7 @@ Keyring::factors([
 
 The widest window allowed is one step (`Totp::MAX_WINDOW`). Any other value throws a `LogicException` when the factor is built.
 
-Each authenticator remembers the last time step it accepted, and it does so under a row lock. That way, a code can't be used twice, even by two requests at the same moment.
-
-A user can have several authenticator apps.
+Each authenticator remembers the last time step it accepted, under a row lock, so a code can't be used twice, even by two requests at the same moment. A user can have several authenticator apps.
 
 Codes use HMAC-SHA1 by default. This is a compatibility choice, not a matter of preference. It's the digest RFC 6238 defaults to, and it's the only one every authenticator app generates. Some widely used apps have ignored a request for any other digest, and they keep showing SHA-1 codes that never match. Google Authenticator's own key format notes said so for years. The user then can't finish adding the app. OWASP ASVS lists HMAC-SHA-1 as a legacy algorithm, which it allows for compatibility like this. The weakness that retired SHA-1 for signatures is finding two inputs with the same hash. That doesn't help anyone guess a code keyed with a secret they don't have.
 
@@ -135,11 +139,10 @@ Six digits is the shortest a code can be, and ten minutes is the longest it can 
 
 The code goes out in your `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs). The `keyring:install` command publishes and registers that notification.
 
-Each code:
+Whatever limits you choose, each code:
 
 - is only sent when the user asks for it (see [Sending Codes](sign-in-flow.md#sending-codes)), and never because they opened the challenge page,
-- expires after 10 minutes,
-- allows five wrong guesses per sign in, across every code sent for that sign in,
+- shares its wrong-guess limit with every other code sent for that sign in,
 - is replaced by any newer code,
 - works once,
 - is stored as a keyed hash, never in plain text.
@@ -172,7 +175,7 @@ A user has at most one set. Generating a new set replaces the old one. Users get
 
 The factor's key is available as `RecoveryCodes::KEY` (`recovery`). Use it in code that looks up a user's set.
 
-The hashes are keyed with a key derived from `APP_KEY` for recovery codes alone. When you rotate that key, put the old one in `APP_PREVIOUS_KEYS`, and existing codes keep working.
+When you rotate `APP_KEY`, put the old key in `APP_PREVIOUS_KEYS`, and existing codes keep working.
 
 Once every code is used, the set no longer counts as a factor. Policies and step-up stop asking for it.
 
@@ -187,9 +190,9 @@ Every verification proves one or more **categories**, from `Keyring\Enums\Catego
 - `Knowledge`: something the user knows, like a password.
 - `Possession`: something they have, such as a phone, a key, or saved recovery codes.
 - `Inherence`: something they are, such as a fingerprint checked by their authenticator.
-- `Address`: something sent to an address of theirs, such as a code by email. This one isn't an authentication factor. It shows that whoever answers can read the address, and NIST SP 800-63B-4 doesn't accept email as an authenticator. A verification with only this category is a step that an app can ask for, and it never raises the session's level. Use `Category::authenticates()` to tell the two kinds apart.
+- `Address`: something sent to an address of theirs, such as a code by email. This one isn't an authentication factor. It shows that whoever answers can read the address, and NIST SP 800-63B-4 doesn't accept email as an authenticator. A verification with only this category is a step that an application can ask for, and it never raises the session's level. Use `Category::authenticates()` to tell the two kinds apart.
 
-Policies count distinct categories, not verifications. That means a password and a PIN together are still one factor. See [Policies](policies.md).
+Policies count distinct categories, not verifications, so a password and a PIN together are still one factor. See [Policies](policies.md).
 
 As NIST SP 800-63B-4 does (Sec. 2.2.1), AAL2 and AAL3 need `Possession` among what was proved. A biometric is only accepted together with the authenticator it unlocks. So if you write a factor that checks something the user is, report `Inherence` only when a device they hold made the check, and report `Possession` along with it. A factor that reports `Inherence` alone can be asked for as a second step, but the session stays at AAL1.
 
@@ -197,9 +200,7 @@ A factor declares the categories it expects in the `categories` method, and Keyr
 
 ## Writing a Code Factor
 
-[Recipes](recipes.md#sms-codes) includes a complete SMS factor, and [a social login](recipes.md#social-login-with-socialite) is written as a factor that starts a sign in.
-
-If your factor sends a one-time code, extend `Keyring\Factors\CodeFactor`. It handles sending, checking, expiry, single use, guess limits, resending, and enrollment. It also keeps each code's state on the server (`Keyring\Factors\SentCodes`), in the same way as it does for [email codes](#email-codes). A code only verifies the authenticator it was sent to. That means a user with two phones can't send a code to one and type it in against the other. You provide a key, a default name, and how the code is delivered:
+If your factor sends a one-time code, extend `Keyring\Factors\CodeFactor`. It handles sending, checking, expiry, single use, guess limits, resending, and enrollment. It also keeps each code's state on the server (`Keyring\Factors\SentCodes`), in the same way as it does for [email codes](#email-codes). A code only verifies the authenticator it was sent to, so a user with two phones can't send a code to one and type it in against the other. You provide a key, a default name, and how the code is delivered:
 
 ```php
 namespace App\Keyring;
@@ -275,6 +276,9 @@ The `deliver` method then reads the number from `$authenticator->secret`.
 
 Because codes go to the address on the authenticator, confirming the enrollment proves the user can receive them.
 
+
+For a complete example, see the [SMS recipe](recipes.md#sms-codes). A factor that starts a sign in, such as [a social login](recipes.md#social-login-with-socialite), is covered in [Writing Any Other Factor](#writing-any-other-factor).
+
 ## Writing Any Other Factor
 
 Any other factor implements `Keyring\Contracts\Factor`. Extending `Keyring\Factors\Factor` gives you defaults for everything except `key`, `categories`, and `verify`.
@@ -335,7 +339,7 @@ The contract's methods are:
 These helpers come from `Keyring\Factors\Factor`:
 
 - Use `verified($authenticator, $categories = null, $phishingResistant = null, $deviceBound = null)` to build the `Verification`.
-- Use `consume($authenticator, $callback)` for anything single-use. It reloads the authenticator with a row lock inside a transaction, and it saves the authenticator if your callback returns `true`. That way, two requests with the same proof can't both pass.
+- Use `consume($authenticator, $callback)` for anything single-use. It reloads the authenticator with a row lock inside a transaction, and it saves the authenticator if your callback returns `true`. So two requests with the same proof can't both pass.
 - Use `makeAuthenticator($attributes)` to make an unsaved authenticator of the configured model.
 - `nameFrom($request, $default)` reads the optional `name` the user typed. Keyring trims it and cuts it to 64 characters, or returns the default.
 - Use `normalizeCode($code)` to strip spaces and dashes from a code.
@@ -348,14 +352,22 @@ Implement these as well when they apply:
 
 | Contract | Means | Methods |
 |---|---|---|
-| `Keyring\Contracts\PrimaryFactor` | It can start a login by identifying the user (`POST /login/{key}`). | `startsLogin()` says whether it can, as configured. WebAuthn returns `false` for security keys. `answersChallenges()` says whether `verify()` checks a proof of its own. Return `false` when the proof is who `identify()` found, as with a social login. Keyring then keeps the factor off the challenge and confirm pages, which never call `identify()`. `identify($request)` returns the authenticator the request is for, or `null`. An authenticator whose user Keyring's guard wouldn't load back counts as `null`. It must take the same time whether or not a user is found. `stall()` spends the time `verify()` would take. Keyring calls it instead when it turns away whoever `identify()` found, without looking at their proof. That happens for an account that `allowSignInWhen()` keeps out, or one whose own rate limit refuses. The base factor's `stall()` does nothing, so only write one when checking a proof is slow, as a password hash is. `identificationRules()` validates the identifying fields. |
+| `Keyring\Contracts\PrimaryFactor` | It can start a sign in by identifying the user (`POST /login/{key}`). | `startsLogin`, `answersChallenges`, `identify`, `stall`, and `identificationRules`. See below. |
 | `Keyring\Contracts\DiscoverableFactor` | A primary factor that needs no username, such as a passkey. | `loginOptions($request)` returns what the browser needs. It's served under `options` at `GET /login/{key}/options`. |
 | `Keyring\Contracts\Enrollable` | Users can add it themselves. | `beginEnrollment`, `enrollmentRules`, `confirmEnrollment`, and `multiple`. See below. |
 | `Keyring\Contracts\SendsCodes` | It sends something when asked. | `send($attempt, $authenticator)`, called by `POST .../{key}/send`. |
 
+A `PrimaryFactor` has five methods:
+
+- `startsLogin()` says whether the factor can start a sign in, as configured. WebAuthn returns `false` for security keys.
+- `answersChallenges()` says whether `verify()` checks a proof of its own. Return `false` when the proof is who `identify()` found, as with a social login. Keyring then keeps the factor off the challenge and confirm pages, which never call `identify()`.
+- `identify($request)` returns the authenticator the request is for, or `null`. An authenticator whose user Keyring's guard wouldn't load back counts as `null`. The method must take the same time whether or not a user is found.
+- `stall()` spends the time `verify()` would take. Keyring calls it instead when it turns away whoever `identify()` found, without looking at their proof. That happens for an account that `allowSignInWhen()` keeps out, or one whose own rate limit refuses. The base factor's `stall()` does nothing, so only write one when checking a proof is slow, as a password hash is.
+- `identificationRules()` validates the identifying fields.
+
 An `Enrollable` factor enrolls in two steps. `beginEnrollment($user, $request)` returns a `Keyring\Enrollment\Enrollment`, which you build with `Enrollment::make()`. Its props go to the browser, and only its state stays in the session, for 15 minutes. `confirmEnrollment($user, $enrollment, $request)` checks the proof against that state. It returns an unsaved authenticator, or `null`. Keyring saves the authenticator once. An enrollment that has already added its authenticator can't be confirmed again, even from an earlier copy of the session. Keyring also counts the authenticator as verified in the session. So only return one when the proof really shows that the new authenticator works. Return `false` from `multiple` if confirming a new one should replace the old one, as recovery codes and email codes do.
 
-The `enrollmentRules` method validates the confirm request. On `Keyring\Factors\Factor`, it defaults to the factor's `rules` plus an optional `name`. That means a name can be given when confirming, as well as when beginning.
+The `enrollmentRules` method validates the confirm request. On `Keyring\Factors\Factor`, it defaults to the factor's `rules` plus an optional `name`, so a name can be given when confirming, as well as when beginning.
 
 Here's a `beginEnrollment` method that generates a serial number to show the user:
 
@@ -377,7 +389,6 @@ The challenge page picks a component by factor key (see [Frontend](frontend.md#t
 ```ts
 'sms': defineAsyncComponent(() => import('./factors/Code.vue')),
 ```
-
 
 ## Using Your Own Authenticator Model
 

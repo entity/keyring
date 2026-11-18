@@ -17,7 +17,7 @@
 
 Keyring is a frontend agnostic authentication backend for Laravel. It registers the routes and controllers needed for sign in, registration, password resets, and email verification, and lets you grow from there with passkeys, authenticator apps, security keys, step-up authentication, and device management.
 
-Every way a user can prove who they are is a **factor**. Users may hold as many **authenticators** as they like, and your **policy** decides what they need to prove. Of course, you're free to write factors of your own, too.
+Every way a user can prove who they are is a **factor**. Users may hold as many **authenticators** as they like, and your **policy** decides what they need to prove. You're free to write factors of your own, too.
 
 > [!NOTE]
 > Keyring is new and hasn't been production-tested yet. Until 1.0, a minor release may change the public API. See [What's Stable](#whats-stable) for details.
@@ -26,7 +26,7 @@ Every way a user can prove who they are is a **factor**. Users may hold as many 
 
 - **Many authenticators per user.** Authenticator apps, passkeys, security keys, email codes, and recovery codes, with "try another way" built in. [Factors](docs/factors.md)
 - **Your own factors.** Add SMS, push notifications, or anything else without new routes, controllers, or tables. [Extending Keyring](docs/extending.md)
-- **Devices and sessions.** New device emails, a list of where each user is signed in, and "sign out everywhere else", on any session driver. [Devices & Sessions](docs/devices-and-sessions.md)
+- **Devices and sessions.** A list of each user's sessions and "sign out everywhere else" on any session driver, plus trusted devices and new device emails. [Devices & Sessions](docs/devices-and-sessions.md)
 - **Step-up authentication.** The `keyring:aal2` and `keyring.fresh:15m` middleware accept a passkey or code, not just a password. [Step-Up](docs/step-up.md)
 - **Protected account changes.** Email changes are confirmed from both addresses and may be undone. [Protected Changes](docs/protected-changes.md)
 - **Risk signals.** New devices, new countries, impossible travel, session cookies reused in another browser, and breached passwords. [Risk](docs/risk.md)
@@ -78,7 +78,7 @@ Everything else is already in your application, commented out. To enable a featu
 |---|---|
 | Authenticator apps, passkeys, security keys, or email codes | Its line in `Keyring::factors([...])`, along with `Features::manageAuthenticators()` |
 | A second factor for everyone | The `keyring.enrolled` line in your provider |
-| Trusted devices, a list of sessions, and new device emails | `Features::devices()` |
+| Trusted devices, a list of where each user is signed in, and new device emails | `Features::devices()` |
 | Confirmed, undoable email changes | `Features::emailChanges()` |
 | More risk signals | Their lines in `Keyring::risk()->signals([...])` |
 
@@ -88,7 +88,7 @@ The [Adding Features](docs/quick-start.md#adding-features) documentation covers 
 
 - **Getting Started:** [Quick Start](docs/quick-start.md) · [Installation](docs/installation.md) · [Configuration](docs/configuration.md) · [Upgrading From Fortify](docs/upgrading-from-fortify.md)
 - **Signing In:** [Factors](docs/factors.md) · [Policies](docs/policies.md) · [The Sign In Flow](docs/sign-in-flow.md) · [Step-Up](docs/step-up.md) · [Passkeys & Security Keys](docs/passkeys.md)
-- **Account Security:** [Authenticators](docs/authenticators.md) · [Devices & Sessions](docs/devices-and-sessions.md) · [Protected Changes](docs/protected-changes.md) · [Risk](docs/risk.md) · [Security Log & Emails](docs/security-log-and-emails.md) · [Events](docs/events.md)
+- **Account Security:** [Managing Authenticators](docs/authenticators.md) · [Devices & Sessions](docs/devices-and-sessions.md) · [Protected Changes](docs/protected-changes.md) · [Risk](docs/risk.md) · [Security Log & Emails](docs/security-log-and-emails.md) · [Events](docs/events.md)
 - **Building Your Application:** [Frontend](docs/frontend.md) · [Extending Keyring](docs/extending.md) · [Recipes](docs/recipes.md) · [Testing](docs/testing.md) · [Example Application](https://github.com/entity/keyring-example)
 - **Security:** [Security](docs/security.md) · [OWASP ASVS and NIST SP 800-63B](docs/owasp-asvs.md)
 
@@ -98,7 +98,7 @@ The [changelog](CHANGELOG.md) lists what changed in each release, and the [upgra
 
 Everything described in the documentation is public API: configuration options, routes, middleware, the facade, builders, contracts, events, emails, security log entry types, Artisan commands, testing helpers, and the browser package's exports. Any change to these will be called out in the [upgrade guide](UPGRADE.md). Before 1.0, a minor release may include one.
 
-The rest of `src/`, such as controllers, pipeline internals, and `Keyring\Support`, may change in any release. If you find yourself extending one of these, [Extending Keyring](docs/extending.md) likely has a supported way to do it. If it doesn't, feel free to open an issue.
+The rest of `src/`, such as controllers and pipeline internals, may change in any release. The same goes for any class in `Keyring\Support` that the documentation doesn't mention. If you find yourself extending one of these, [Extending Keyring](docs/extending.md) likely has a supported way to do it. If it doesn't, feel free to open an issue.
 
 ## Contributing
 

@@ -43,7 +43,7 @@ WebAuthn verifications resist phishing. The browser binds every response to your
 | Discoverable (resident key) | required | discouraged |
 | User verification | required | preferred |
 | Authenticator attachment | any (platform or roaming) | cross-platform only |
-| Can start a login | yes, without a username | no, only as a further factor |
+| Can start a sign in | yes, without a username | no, only as a further factor |
 | Priority | 100 | 90 |
 
 Users may add either one through the [authenticator routes](authenticators.md). When Keyring asks the browser for a new credential, it excludes every WebAuthn credential the user already has. It also refuses any credential that's already registered to any account.
@@ -54,12 +54,14 @@ Every WebAuthn verification proves possession. It proves inherence too, but only
 
 - A passkey always requires user verification, so it proves both possession and inherence. That's enough on its own to reach [AAL2](policies.md#assurance-levels). Most passkeys sync between devices through iCloud Keychain or Google Password Manager, and NIST caps synced passkeys at AAL2.
 - A security key that doesn't verify the user proves possession only. Paired with a password, that's AAL2.
-- Whether a key may sync depends on the backup-eligible flag it reports. Keyring reads that flag on every sign in, and not only at registration, and a key that hasn't reported it counts as synced. A key that says it can't sync is "device bound," and `Requirement::deviceBound` and `keyring:aal2,device-bound` ask for one.
+- Whether a key may sync depends on the backup-eligible flag it reports. Keyring reads that flag on every sign in, and not only at registration, and a key that hasn't reported it counts as synced. A key that says it can't sync is "device bound", and `Requirement::deviceBound` and `keyring:aal2,device-bound` ask for one.
 - AAL3 takes more than that flag, since the flag is only the key's word. The key has to have been added with a [verified attestation](#requiring-attestation), and its second factor has to be its own user verification or a password. See [Attestation and AAL3](#attestation-and-aal3).
 
 When planning what to offer, Keyring assumes a security key will verify the user if it did so when it was registered. The categories that count, though, are always the ones in the actual response.
 
 ## Relying Party and Origins
+
+The WebAuthn options live under `webauthn` in your `config/keyring.php` configuration file. These are the defaults, apart from the two [signature algorithm](#signature-algorithms) options, which are covered below:
 
 ```php
 'webauthn' => [
@@ -131,7 +133,7 @@ Each key's AAGUID, its model identifier, is stored in the `aaguid` column. Witho
 
 ### Requiring Attestation
 
-If your app should only accept certain hardware keys, you may ask each new key to prove who made it. The key sends a statement signed with a certificate its maker put on it, and Keyring only adds the key when that certificate chains to a root you trust:
+If your application should only accept certain hardware keys, you may ask each new key to prove who made it. The key sends a statement signed with a certificate its maker put on it, and Keyring only adds the key when that certificate chains to a root you trust:
 
 ```php
 Keyring::factors([
@@ -151,7 +153,7 @@ List the makers' root certificates in your `config/keyring.php` configuration fi
 ],
 ```
 
-With that set in place, the following applies to this factor:
+With that in place, the following applies to this factor:
 
 - Keyring asks the browser for `direct` attestation. Some browsers ask the user before passing it on, and a user who says no sends `none`.
 - A key is added only when its statement is valid and its certificates chain to one of the roots. Every certificate in the chain must be within its dates, and each must be signed by a certificate that's allowed to sign others. A root itself is trusted as listed, whatever it says about signing. The chain can't include a SHA-1 signature or an RSA key under 2048 bits.
@@ -160,7 +162,7 @@ With that set in place, the following applies to this factor:
 
 Keyring reads two formats: `packed`, which FIDO2 keys use, and `fido-u2f`, which older keys use. These are what hardware security keys send. It refuses the formats platforms use (`tpm`, `android-key`, and `apple`), along with `compound` and any other format.
 
-Each setting belongs to one factor, so your passkeys carry on as before. That matters, because passkeys that sync between devices send no attestation worth checking. Requiring it on `WebAuthn::passkeys()` would turn away nearly all of them. Keep it for security keys, or for a second key of its own:
+Each setting belongs to one factor, so your passkeys carry on as before. That matters, because passkeys that sync between devices send no attestation worth checking. Requiring it on `WebAuthn::passkeys()` would turn away nearly all of them. Keep it for security keys, or for a second security key factor registered under a factor key of its own:
 
 ```php
 WebAuthn::securityKeys()->as('staff-key')->requireAttestation(),
@@ -179,6 +181,7 @@ A key reaches [AAL3](policies.md#assurance-levels) only when its factor uses `re
     ```php
     Keyring::authenticatorModel()::query()->where('aaguid', $aaguid)->update(['attestation' => null]);
     ```
+
 - The attestation applies to the key itself. Its second factor still has to be its own user verification or a password. Touching an attested key after signing in with a synced passkey only reaches AAL2.
 
 NIST's AAL3 also requires the authenticator to be validated to FIPS 140 (Sec. 2.3.2). Attestation tells you which model a key is, but not whether that model was validated. To accept only the models you've checked, use `allowOnly`.
@@ -227,7 +230,7 @@ Return PEM certificates, or the bare base64 certificates that a metadata stateme
 
 ### What Is Kept
 
-When a key passes, its `attestation` column holds the kind of attestation that was checked (`basic`, a certificate its maker shares across a batch of keys). The certificates the key sent are kept with the credential record in `public_key`. The column is `null` for every key added without the check. For those keys, `aaguid` is still only what the key reported.
+When a key passes, its `attestation` column holds the kind of attestation that was checked, such as `basic`, which means a certificate the maker shares across a batch of keys. The certificates the key sent are kept with the credential record in `public_key`. The column is `null` for every key added without the check. For those keys, `aaguid` is still only what the key reported.
 
 ## Counters and Cloned Keys
 
@@ -334,7 +337,7 @@ Adding a passkey and step-up still need `@keyringjs/keyring`. Fitting the client
 
 ## Customising a Profile
 
-You may register the same profile under a second key, for example to treat hardware keys from one program separately:
+You may register the same profile a second time under another factor key, for example to treat the hardware keys from one programme separately:
 
 ```php
 WebAuthn::securityKeys()->as('backup-key'),
@@ -352,7 +355,7 @@ To accept only keys whose maker vouches for them, or only certain models (see [A
 WebAuthn::securityKeys()->requireAttestation()->allowOnly([$aaguid]),
 ```
 
-Each of these returns a new instance. A factor key other than `passkey` or `security-key` also needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment` decides whether to run the WebAuthn ceremony from the options the server sends, so it works with any key:
+Each of these returns a new instance. A factor key other than `passkey` or `security-key` also needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `enroll` helper decides whether to run the WebAuthn ceremony from the options the server sends, so it works with any factor key:
 
 ```ts
 import { enroll } from '@keyringjs/keyring'

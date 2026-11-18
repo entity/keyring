@@ -30,7 +30,7 @@
 
 Signing in follows a short sequence of steps:
 
-1. The user proves a first factor, usually their password, by posting to `POST /login`. This identifies them.
+1. The user proves a first factor, usually their password, by posting to `/login`. This identifies them.
 2. Keyring asks the [policy](policies.md) what they need. If the policy is satisfied, they're signed in.
 3. Otherwise, Keyring regenerates the session ID, saves a pending **attempt** in the session, and sends them to the challenge page, which asks for the next factor. They repeat this until the requirement is met.
 
@@ -53,9 +53,9 @@ The pending attempt is encrypted JSON in the session. It lasts `pending_logins.k
 | `POST` | `/register` | `register.store` | Create an account. Uses the `keyring` rate limiter. See [Registration](#registration). |
 | `POST` | `/logout` | `logout` | Sign out. |
 
-The login and registration routes are for guests only, and the `/logout` route requires `auth:{guard}`. The registration routes exist only when the `registration` feature is on. By default, the `keyring` rate limiter allows 6 a minute. See [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits).
+The login and registration routes are for guests only, and the `/logout` route requires `auth:{guard}`. The registration routes exist only when the `registration` feature is on. By default, the `keyring` rate limiter allows six a minute. See [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits).
 
-The routes that spend session state (`POST /login`, `POST /login/{factor}`, the challenge page, and its verify and send routes) take Laravel's session lock with `->block()`. That way, parallel requests in one session wait their turn instead of spending the same state twice.
+The routes that spend session state (`POST /login`, `POST /login/{factor}`, the challenge page, and its verify and send routes) take Laravel's session lock with `->block()`, so parallel requests in one session wait their turn instead of spending the same state twice.
 
 > [!NOTE]
 > Your cache store must support locks.
@@ -78,7 +78,7 @@ Send these fields in the request body, either as a form or as JSON. Keyring does
 
 ### Finding the User
 
-By default, Keyring looks the user up by the `username` attribute, trimmed and lowercased. You may change either behaviour in your `KeyringServiceProvider`:
+By default, Keyring looks the user up by the attribute named in the `username` configuration option, which is `email`. The value is trimmed and lowercased first. You may change either behaviour in your `KeyringServiceProvider`:
 
 ```php
 use App\Models\User;
@@ -97,6 +97,10 @@ Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username));
 Whether a lookup respects case also depends on your database. MySQL's default collations ignore case, while PostgreSQL and SQLite don't.
 
 The finder only tells Keyring whose username was typed, and only the password form asks it. A passkey finds its account without one. To keep an account out, use `allowSignInWhen`.
+
+Failed attempts count against the user your finder returns, however the username was typed. That gives an account one limit, whether someone guesses its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep the finder to a simple lookup.
+
+`findUsersUsing` only finds the user. Keyring still checks the password, and a `null` result gets the same answer as a wrong password, in the same time. The answer is also the same for a user that Keyring's guard wouldn't load back through its provider, such as a user of another model. The username field's validation still applies. If you need to change it, do so with a [pipeline step](#writing-a-step).
 
 ### Who May Sign In
 
@@ -138,10 +142,6 @@ That is also what OWASP ASVS 5.0.0 (7.4.2) asks for: a disabled account's sessio
 > [!WARNING]
 > Use `allowSignInWhen` rather than a global scope on the user model to keep an account out. A scope makes the account look missing to Keyring, which ends nothing. Its sessions, "remember me" cookies, trusted devices, and any pending email change all remain when the scope shows the account again, and no event fires to clear them.
 
-Failed attempts count against the user your finder returns, however the username was typed. That gives an account one limit, whether someone guesses its email address or its username. Keyring calls the finder once to count the attempt and again to check it, so keep the finder to a simple lookup.
-
-`findUsersUsing` only finds the user. Keyring still checks the password, and a `null` result gets the same answer as a wrong password, in the same time. The answer is also the same for a user that Keyring's guard wouldn't load back through its provider, such as a user of another model. The username field's validation still applies. If you need to change it, do so with a [pipeline step](#writing-a-step).
-
 ## Signing In With a Passkey
 
 Passkeys can sign a user in without a username. The browser requests options, runs the WebAuthn ceremony, and posts the result in two steps:
@@ -159,7 +159,7 @@ The same options also work for autofill ("conditional UI"), where the browser of
 
 A passkey sign in still goes through the policy, so a policy such as `Requirement::factors(3)` would still ask for more.
 
-Only factors that implement `PrimaryFactor` and return `true` from `startsLogin` can start a login. Only `DiscoverableFactor`s serve options, and any other factor key returns a 404. Security keys share the passkey driver, but their `startsLogin` returns `false`, so `/login/security-key` and its options route return a 404 too.
+Only factors that implement `PrimaryFactor` and return `true` from `startsLogin` can start a sign in. Only `DiscoverableFactor`s serve options, and any other factor key returns a 404. Security keys share the passkey driver, but their `startsLogin` returns `false`, so `/login/security-key` and its options route return a 404 too.
 
 ## Starting a Sign In Yourself
 
@@ -180,11 +180,11 @@ The [Social Login With Socialite](recipes.md#social-login-with-socialite) recipe
 
 ## The Challenge Page
 
-`GET /login/challenge` shows the next factor to verify. `GET /login/challenge/{factor}` shows a specific one, if that would help. If there's no pending attempt, the user goes back to the login page.
+`GET /login/challenge` shows the next factor to verify. `GET /login/challenge/{factor}` shows that factor instead, as long as it would bring the user closer to the requirement. If there's no pending attempt, the user goes back to the login page.
 
 ### Page Props
 
-The page (`challenge` for logins, `confirm` for step-up) receives:
+The page (`challenge` for sign ins, `confirm` for step-up) receives:
 
 ```json
 {
@@ -208,7 +208,7 @@ The page (`challenge` for logins, `confirm` for step-up) receives:
 | `authenticator` | How the factor presents this authenticator. It leaves out the dates a [settings page](authenticators.md#adding-an-authenticator) gets, so someone who has only the password isn't told when its owner last signed in. It always includes `factor`, `id`, and `name`, and `id` is `null` for the password. Email codes add `hint`, a masked address such as `t•••@example.com`. Recovery codes add `remaining` and `replace`. `replace` says whether a code has been used, so the user should [make a new set](authenticators.md#recovery-codes). |
 | `challenge` | Props specific to the factor. See below. |
 | `alternatives` | The user's other authenticators that would help, for a "try another way" link. These have the same shape as `authenticator`. |
-| `canTrustDevice` | Whether to show a "don't ask again on this device" option. This is `true` for logins when `Features::devices()` is on and `devices.trust_for` isn't `null`. |
+| `canTrustDevice` | Whether to show a "don't ask again on this device" option. This is `true` for sign ins when `Features::devices()` is on, `devices.trust_for` isn't `null`, and verifying this authenticator would bring the sign in to AAL2. |
 | `expiresAt` | When the pending attempt expires, as an ISO 8601 date. |
 
 The `challenge` prop holds these values for the built-in factors:
@@ -219,7 +219,7 @@ The `challenge` prop holds these values for the built-in factors:
 | `email-code` | `length` (the number of digits), `sent` (whether a code has been sent), and `expiresAt` (the code's expiry, or `null`). |
 | `passkey`, `security-key` | `options`, the WebAuthn request options for the browser. |
 
-Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, only passkeys and security keys are offered.
+Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, a user who has a passkey or security key is only offered their other keys, plus recovery codes unless the policy refuses those too.
 
 ### Choosing an Authenticator
 
@@ -279,7 +279,7 @@ When the requirement is met, Keyring:
 - `validate(array $input): array` checks the form and returns what `create()` needs. The published version validates `name`, `email`, `password`, and `password_confirmation`, using `PasswordRules::for`. See [Password Rules](protected-changes.md#password-rules).
 - `create(array $input)` saves the user, using what `validate` returned.
 
-You may change both to fit your app, but leave out any check that the address is free. Keyring makes that check itself, after `validate` has passed and before `create` is called. An address counts as taken when an account has it, including a soft deleted account or one that a global scope of yours hides. It also counts as taken when the address is [held for its previous owner](protected-changes.md#the-old-address-is-reserved) while their email change can still be undone. What Keyring does with a taken address is controlled by the `registration.reveal_taken` option.
+You may change both to fit your application, but leave out any check that the address is free. Keyring makes that check itself, after `validate` has passed and before `create` is called. An address counts as taken when an account has it, including a soft deleted account or one that a global scope of yours hides. It also counts as taken when the address is [held for its previous owner](protected-changes.md#the-old-address-is-reserved) while their email change can still be undone. What Keyring does with a taken address is controlled by the `registration.reveal_taken` option.
 
 ### Without Revealing Who Has an Account
 
@@ -299,7 +299,7 @@ A new user can't sign in until their address is verified. If they could, anyone 
 
 Verifying takes the emailed link and the password together:
 
-1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session, under a new session ID, and sends them to the login page with the `sign-in-to-verify` status. The new ID means only the browser that followed the link holds it, whoever else had the one it came with. The new session also comes with a new CSRF token, so a login page already open in another tab of that browser needs reloading before it can post. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
+1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session and sends them to the login page with the `sign-in-to-verify` status. It gives the session a new ID first, so only the browser that followed the link holds the remembered link, even if someone else knew the old session ID. The new session also comes with a new CSRF token, so a login page already open in another tab of that browser needs reloading before it can post. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
 2. They sign in. From the browser that followed the link, the account may sign in, and doing so verifies the address. Laravel's `Verified` event fires. They're then sent back to the link, which has nothing left to do, and it sends them on to `home`.
 
 From then on, they can sign in anywhere, like anyone else. A link works until it expires (`auth.verification.expire`, 60 minutes). Registering again with the same address sends a new link. A finished [password reset](protected-changes.md#resetting-the-password) verifies the address too, since its link went to the same inbox. A password reset is the way in for the owner of an address that someone else registered first. That owner can't verify an account whose password they don't know, and whoever registered it never sees the link.
@@ -311,11 +311,16 @@ This needs email verification. Keyring tells you when it's missing, rather than 
 
 This also means an unverified account can't sign in at all, however it got that way. A session whose user loses `email_verified_at` is signed out on its next request. Mark accounts that you create yourself, through an import, a seeder, or a social login, as verified.
 
-Three things are still yours to keep quiet. A username of your own that must be unique, such as a handle, will say when it's taken, because your action checks it. The same goes for a `ValidationException` your `create` throws for a free address only. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other. But anything your action's `create` does that takes noticeably longer than the timebox will show. And your mail provider's bounce or delivery reports are outside the request altogether.
+A few things are still yours to keep quiet:
+
+- A username of your own that must be unique, such as a handle, will say when it's taken, because your action checks it.
+- The same goes for a `ValidationException` that your `create` throws for a free address only.
+- Anything your action's `create` does that takes noticeably longer than the timebox will show. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other.
+- Your mail provider's bounce and delivery reports are outside the request altogether.
 
 ### Saying When an Address Is Taken
 
-Many apps would rather tell someone straight away that they already have an account. To do that, set the option, and registration works the way it does in Laravel's starter kits:
+Many applications would rather tell someone straight away that they already have an account. To do that, set the option, and registration works the way it does in Laravel's starter kits:
 
 ```php
 // config/keyring.php
@@ -441,14 +446,14 @@ The context holds:
 | `$context->attempt` | The pending `Attempt`. |
 | `$context->authenticator` | The authenticator being verified. |
 | `$context->verification` | The `Verification`, once `VerifyFactor` has passed. |
-| `$context->identifying` | Whether this request also identifies the user (the first factor of a login). |
+| `$context->identifying` | Whether this request also identifies the user (the first factor of a sign in). |
 | `$context->outcome` | The `Keyring\Pipeline\Outcome`, set by `CompleteAttempt` or by a failure. |
 
-`Location::of($request)` asks the configured [locator](devices-and-sessions.md#locations) once per request and remembers the answer. That way, steps, signals, and device tracking share a single lookup.
+`Location::of($request)` asks the configured [locator](devices-and-sessions.md#locations) once per request and remembers the answer, so steps, signals, and device tracking share a single lookup.
 
 To refuse with the same generic error as a wrong password, return `$context->fail()`. To answer as rate limited, return `$context->lockout($seconds)`. A failure counts toward the rate limits, the same as a wrong password.
 
-Where you put a step matters. Before `VerifyFactor`, the first factor of a login has no attempt or authenticator yet, so `$context->attempt` is `null`. After `VerifyFactor`, steps only run when the proof was right, and the attempt is always set.
+Where you put a step matters. Before `VerifyFactor`, the first factor of a sign in has no attempt or authenticator yet, so `$context->attempt` is `null`. After `VerifyFactor`, steps only run when the proof was right, and the attempt is always set.
 
 ## Responses
 
@@ -480,7 +485,7 @@ use Keyring\Contracts\Responses\AuthenticatedResponse;
 Keyring::respondWith(AuthenticatedResponse::class, WelcomeBack::class);
 ```
 
-Your class must implement the contract. Keyring builds it through the container and passes what it knows by constructor parameter name. Each contract lists those names in its `BUILT_WITH` constant: `status`, `data`, and `redirect` for a `StatusResponse`, `reason` for a `SignedOutResponse`, and `justNow` for a `VerifiedResponse`. Take only the ones you need, and type-hint anything else for the container to inject. A required parameter that Keyring can't fill is refused when you call `respondWith`. That way, the problem shows up at boot, not at someone's first sign in.
+Your class must implement the contract. Keyring builds it through the container and passes what it knows by constructor parameter name. Each contract lists those names in its `BUILT_WITH` constant: `status`, `data`, and `redirect` for a `StatusResponse`, `reason` for a `SignedOutResponse`, and `justNow` for a `VerifiedResponse`. Take only the ones you need, and type-hint anything else for the container to inject. A required parameter that Keyring can't fill is refused when you call `respondWith`, so the problem shows up at boot, not at someone's first sign in.
 
 After a verification, Keyring builds responses with the pipeline's `context`, so you may accept it in the constructor:
 
@@ -551,7 +556,7 @@ Keyring renders these pages:
 | Name | Props |
 |---|---|
 | `login` | `canResetPassword`, `canRegister`, `status` (a translated message) |
-| `challenge` | See [Page Props](#page-props). Used for logins. |
+| `challenge` | See [Page Props](#page-props). Used for sign ins. |
 | `confirm` | The same props, with `purpose: "confirm"`. Used for step-up. |
 | `register` | None. The published action expects `name`, `email`, `password`, and `password_confirmation`. Afterwards, the user lands on the login page with the `registration-received` status, unless [registration signs them in](#saying-when-an-address-is-taken). |
 | `forgot-password` | `status` (a translated message) |

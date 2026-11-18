@@ -18,7 +18,7 @@
 
 ## Introduction
 
-A single set of routes adds, renames, and removes authenticators for every factor. You don't need to register any per-factor routes. When you add a factor, its enrollment works through the same endpoints. To turn these routes on, enable the `Features::manageAuthenticators()` feature:
+A [factor](factors.md) is a kind of sign-in method, such as an authenticator app or a passkey. An authenticator is one that a user has set up. A single set of routes adds, renames, and removes authenticators for every factor. You don't need to register any per-factor routes. When you add a factor, its enrollment works through the same endpoints. To turn these routes on, enable the `Features::manageAuthenticators()` feature:
 
 ```php
 'features' => [
@@ -26,7 +26,7 @@ A single set of routes adds, renames, and removes authenticators for every facto
 ],
 ```
 
-Without this feature, users can't set up any sign-in method besides the password on their own. The `keyring:install` command turns it on when you choose a sign-in method.
+Without this feature, users have no way to set up a sign-in method besides the password for themselves. The `keyring:install` command turns it on when you choose a sign-in method.
 
 ## Routes
 
@@ -34,8 +34,8 @@ Without this feature, users can't set up any sign-in method besides the password
 |---|---|---|---|
 | `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begins an enrollment: returns a QR code, WebAuthn options, recovery codes, and so on. |
 | `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finishes it by proving the new authenticator works. Uses the `keyring` rate limiter and the session lock. |
-| `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Renames the authenticator, or makes it the default. |
-| `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Removes the authenticator. Uses the `keyring` rate limiter, because it may check the password. |
+| `PATCH` | `/user/authenticators/{authenticator}` | `keyring.authenticators.update` | Renames the authenticator, or makes it the default. |
+| `DELETE` | `/user/authenticators/{authenticator}` | `keyring.authenticators.destroy` | Removes the authenticator. Uses the `keyring` rate limiter, because it may check the password. |
 
 These routes require `auth:{guard}` middleware, along with the middleware set in the `changes_middleware` configuration option. By default, that is `['keyring.fresh:15m']`. Users must have verified, within the last 15 minutes, the strongest combination their account can offer. For example, someone with a key that can't leave its device uses that key before adding another, and someone with only a password uses the password. See [Fresh Verification](step-up.md#fresh-verification).
 
@@ -47,7 +47,7 @@ When your user model implements `MustVerifyEmail`, users must verify their email
 
 Until an address is verified, the account may belong to whoever typed that address first. Any factors they added would survive the real owner's password reset.
 
-For that reason, if `Features::registration()` is on, and anyone can type any address, users must be able to verify theirs. Your user model must implement `MustVerifyEmail`, and `Features::emailVerification()` must be on. Otherwise, enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` exception that explains what to change.
+For that reason, when `Features::registration()` is on, anyone can type any address, so users must be able to verify theirs. Your user model must implement `MustVerifyEmail`, and `Features::emailVerification()` must be on. Otherwise, enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` exception that explains what to change.
 
 Without registration, accounts come from you, through an admin, an import, or an invitation, so verification isn't required.
 
@@ -56,7 +56,7 @@ Without registration, accounts come from you, through an admin, an import, or an
 
 ### Who May Enroll
 
-If your app proves addresses another way, such as with a code at sign-up, single sign-on, or an admin approving accounts, you may decide who can add a sign-in method yourself. This replaces the rule above, including the exception:
+If your application proves addresses another way, such as with a code at sign-up, single sign-on, or an admin approving accounts, you may decide who can add a sign-in method yourself. Your callback takes the place of the whole rule above. Keyring no longer checks for a verified address, and it no longer throws `EmailVerificationRequired`:
 
 ```php
 Keyring::allowEnrollmentWhen(fn (User $user) => $user->approved_at !== null);
@@ -126,13 +126,13 @@ Confirming an authenticator also proves it, so the session counts it as verified
 
 ## Recovery Codes
 
-The first time a user adds an extra factor while they have no recovery codes, or have used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once, and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) isn't a factor, so adding one comes with no codes.
+The first time a user adds an extra factor while they have no recovery codes, or have used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once, and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) doesn't count as a second factor, so adding one comes with no codes.
 
 To give the user a new set, enroll the `recovery` factor. Beginning returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored. An email code doesn't count as that second factor.
 
 Each code works only once. The challenge page shows how many are left as `remaining`, and the `Keyring\Events\RecoveryCodeUsed` event carries the same count.
 
-NIST SP 800-63B-4 (Sec. 4.2.1.1) says a new code should be issued once one is used. A new code is only worth something once the user has seen and saved it, so Keyring doesn't generate one behind the user's back. Instead, it marks the set and tells your app, which then sends the user to make a new set:
+NIST SP 800-63B-4 (Sec. 4.2.1.1) says a new code should be issued once one is used. A new code is only worth something once the user has seen and saved it, so Keyring doesn't generate one behind the user's back. Instead, it marks the set and tells your application, which then sends the user to make a new set:
 
 - `$user->keyring->shouldReplaceRecoveryCodes()` is true from the moment a code is used until the set is replaced, however many times the user signs in meanwhile.
 - The set's [presentation](sign-in-flow.md#page-props) includes the same answer as `replace`, next to `remaining`, wherever you list authenticators.
@@ -144,13 +144,13 @@ To share this with your pages, add it to the props your `HandleInertiaRequests` 
 'replaceRecoveryCodes' => fn () => (bool) $request->user()?->keyring->shouldReplaceRecoveryCodes(),
 ```
 
-This loads the user's authenticators, so keep it lazy, as shown above. A session that signed in a moment ago with a recovery code and its password is fresh. It can generate the new set straight away without confirming again. Until your app does this, a used code is spent and nothing takes its place. NIST's rule is only met once the user has their new set.
+This loads the user's authenticators, so keep it lazy, as shown above. A session that signed in a moment ago with a recovery code and its password is fresh. It can generate the new set straight away without confirming again. Until your application does this, a used code is spent and nothing takes its place. NIST's rule is only met once the user has their new set.
 
 Users with no codes left keep the empty set until they make a new one, add another factor (which replaces it with a new set), or remove it along with their last factor. An empty set is never offered as a way in.
 
 ## Renaming and Choosing the Default
 
-`PATCH /user/authenticators/{id}` accepts these fields:
+`PATCH /user/authenticators/{authenticator}` accepts these fields:
 
 | Field | Description |
 |---|---|
@@ -161,13 +161,13 @@ The default authenticator is offered first when a second factor is needed. Recov
 
 ## Removing Authenticators
 
-`DELETE /user/authenticators/{id}` removes an authenticator. The request fails, though, if what remains would leave the user unable to sign in, or unable to meet the policy (for policies without `ifEnrolled()`). In that case, the error is `keyring::keyring.last_factor`, on `authenticator`.
+`DELETE /user/authenticators/{authenticator}` removes an authenticator. The request fails, though, if what remains would leave the user unable to sign in, or unable to meet the policy (for policies without `ifEnrolled()`). In that case, the error is `keyring::keyring.last_factor`, on `authenticator`.
 
 Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes are removed with it. The policy is checked against what will actually remain.
 
 Removing an authenticator also stops trusting all of the user's devices. See [Trusted Devices](devices-and-sessions.md#trusted-devices).
 
-Removing an authenticator also clears the failures counted against it. An authenticator that failed too many times in a row is refused until it's set up again (see [At the Cap](security.md#at-the-cap)). To do that, a user signs in another way, removes the authenticator, and adds it back. The new one starts from nothing. The password is set up again by resetting or changing it.
+An authenticator that failed too many times in a row is refused until it's set up again (see [At the Cap](security.md#at-the-cap)). Removing it clears those failures. So a user in that position signs in another way, removes the authenticator, and adds it back, and the new one starts from nothing. The password is set up again by resetting or changing it.
 
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
@@ -178,11 +178,14 @@ Removing the user's last second factor (the last one beyond recovery codes and e
 A user often adds or removes a sign-in method because someone else is signed in to the account. Confirming an enrollment (including the one that creates new recovery codes) and removing an authenticator both accept an optional boolean, `sign_out_others`. When it's `true` and the change goes through, Keyring signs the user out everywhere except here, in the same way as [`DELETE /user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) does. Every other session is revoked, the "remember me" token is changed, no other device stays trusted, and a pending email change is cancelled. This session carries on under a new ID.
 
 ```ts
+// confirmEnrollment sends its fields as they are
 await confirmEnrollment('totp', enrollment, { code, sign_out_others: true })
+
+// removeAuthenticator takes an option, and sends it as sign_out_others
 await removeAuthenticator(id, undefined, { signOutOthers: true })
 ```
 
-This is off unless the request asks for it, so you may offer it as a checkbox next to the button. A password change works the other way round. It [signs other sessions out unless you tell it not to](protected-changes.md#changing-the-password), because everyone who was signed in knew the old password. Adding a new passkey takes nothing away from a session that signed in without it. A removed authenticator already stops counting in every session it was used in.
+This is off unless the request asks for it, so you may offer it as a checkbox next to the button. Leaving it off costs nothing: adding a new passkey takes nothing away from a session that signed in without it, and a removed authenticator already stops counting in every session it was used in. A password change works the other way round. It [signs other sessions out unless you tell it not to](protected-changes.md#changing-the-password), because everyone who was signed in knew the old password.
 
 A value that isn't a boolean fails with an error on `sign_out_others` before the enrollment is spent. A change that's refused ends no sessions.
 

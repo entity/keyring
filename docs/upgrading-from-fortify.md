@@ -18,9 +18,9 @@
 
 Keyring covers what Fortify does: login, registration, password resets, email verification, password confirmation, and two factor authentication. It takes Fortify's place in your application. Fortify keeps its two factor state in three columns on the `users` table, which allows one authenticator app per user. Keyring stores each sign-in method in its own table, so a user can have several.
 
-Your users keep their passwords, authenticator apps, recovery codes, and `laravel/passkeys` passkeys. There is one exception. bcrypt only ever stored the first 72 bytes of a password, and Keyring refuses input longer than that rather than comparing a truncated value. Users with a password over 72 bytes on a bcrypt hash will need to reset it.
+Your users keep their passwords, authenticator apps, recovery codes, and `laravel/passkeys` passkeys. There are two exceptions. Bcrypt only ever stored the first 72 bytes of a password, and Keyring refuses input longer than that rather than comparing a truncated value. Users with a password over 72 bytes on a bcrypt hash will need to reset it.
 
-The same goes for a password containing characters that weren't typed in Unicode's NFC form, such as an accented letter entered as a plain letter followed by a separate accent. Few keyboards produce that. Fortify hashed the password exactly as typed, but Keyring [checks the NFC form](protected-changes.md#password-rules), so the old hash no longer matches.
+The second is a password containing characters that weren't typed in Unicode's NFC form, such as an accented letter entered as a plain letter followed by a separate accent. Few keyboards produce that. Fortify hashed the password exactly as typed, but Keyring [checks the NFC form](protected-changes.md#password-rules), so the old hash no longer matches.
 
 ## Steps
 
@@ -45,7 +45,7 @@ The same goes for a password containing characters that weren't typed in Unicode
 
    The command exits with a non-zero status if any factor couldn't be imported. Sort those out before you go on. See [Importing Two Factor Data](#importing-two-factor-data).
 
-4. Remove `laravel/fortify`, its service provider (`App\Providers\FortifyServiceProvider` in `bootstrap/providers.php`), `config/fortify.php`, and any Fortify actions you no longer need. Keyring registers routes with the same names as Fortify's, such as `login`, `logout`, `register`, and `password.request`. Both packages can't be installed at once without clashing.
+4. Remove `laravel/fortify`, its service provider (`App\Providers\FortifyServiceProvider` in `bootstrap/providers.php`), `config/fortify.php`, and any Fortify actions you no longer need. Keyring registers routes with the same names as Fortify's, such as `login`, `logout`, `register`, and `password.request`, so the two can't stay installed together once the import is done.
 
 5. Move your settings into `config/keyring.php` and `app/Providers/KeyringServiceProvider.php`, using the tables below as your guide.
 
@@ -74,7 +74,7 @@ The file names come from the React starter kit, which the [example application](
 | `app/Actions/Fortify/` and `app/Concerns/PasswordValidationRules.php` | The published `app/Actions/Keyring/` actions replace them, and they come with their own password rules. |
 | `app/Http/Requests/Settings/PasswordUpdateRequest.php` and `TwoFactorAuthenticationRequest.php` | Keyring's routes validate these requests. |
 | `app/Http/Requests/Settings/ProfileDeleteRequest.php` | It asked for the current password. The `keyring.fresh` middleware on the route asks for more. |
-| The `add_two_factor_columns_to_users_table` and `create_passkeys_table` migrations | You can remove these only in an app with no users. If you have users, keep them until the import is done, and then [drop the columns](#steps). |
+| The `add_two_factor_columns_to_users_table` and `create_passkeys_table` migrations | You can remove these only in an application with no users. If you have users, keep them until the import is done, and then [drop the columns](#steps). |
 | The two factor and passkey components, and the `auth/two-factor-challenge` and `auth/confirm-password` pages | Your `challenge` and `confirm` pages, along with your settings page, replace them. |
 
 **Change**
@@ -113,12 +113,12 @@ There are a few things to know before you run it.
 - Skipped rows are secrets that Fortify wasn't enforcing, which means `confirm` was on and the user never confirmed. Pass `--unconfirmed` to import them anyway.
 - The command exits non-zero when anything failed. That covers a secret or recovery codes it can't decrypt or read, a passkey with no user, a credential ID that isn't base64url, and a credential that isn't a WebAuthn record. The factors for those users aren't imported. A user whose two factor data failed does get an authenticator app that can't be verified, so they're still challenged rather than signing in with only a password. The cause is usually the wrong key. Fix the key and run the command again, and the correct data replaces the placeholder. If the data is gone for good, delete that authenticator with `Authenticator::where('meta->import_failed_from', 'fortify')`, and the user enrolls again.
 - The command only imports into users who have no sign-in methods in Keyring yet. Once a user has some, those methods belong to them. A later run counts the user as already imported, or skips them if they set up Keyring themselves. This means the command never brings back an authenticator app, passkey, or recovery code that a user removed.
-- There is one exception. A failed two factor import's placeholder is replaced by a later run that can read the secret, whatever else the user has by then. A passkey that failed has no placeholder. If the user's two factor came across in the meantime, a later run lists that passkey as skipped. The command can't tell a row that failed from one the user removed, so the user adds the passkey again in the app.
+- There is one exception. A failed two factor import's placeholder is replaced by a later run that can read the secret, whatever else the user has by then. A passkey that failed has no placeholder. If the user's two factor came across in the meantime, a later run lists that passkey as skipped. The command can't tell a row that failed from one the user removed, so the user adds the passkey again in the application.
 - The command never deletes or changes Fortify's columns or the `passkeys` table, and it's safe to run more than once. Drop them once the import is clean. A user who removes every sign-in method in Keyring has none left to tell a later run they were already imported.
 - Imported passkeys need `WebAuthn::passkeys()` among your [factors](factors.md), and imported codes need `Totp` and `RecoveryCodes`.
-- `laravel/passkeys` accepts RS256 keys, but Keyring doesn't by default. As a result, a passkey made by Windows Hello may be imported and then refused at sign in. The command still imports it, since it may be the only sign-in method that user has, and it starts working as soon as the app accepts its algorithm. The command tells you about this: how many passkeys will be refused, the algorithm they sign with, whose they are, and what to change. Add `RS256` to [`webauthn.algorithms`](passkeys.md#rs256-and-windows-hello) to keep those passkeys working. Otherwise, those users will need to add a new passkey. The same warning covers an RSA key shorter than `webauthn.minimum_rsa_bits`. It's a warning rather than a failure, so the exit code stays zero, and a dry run shows it before anything is written.
+- `laravel/passkeys` accepts RS256 keys, but Keyring doesn't by default. As a result, a passkey made by Windows Hello may be imported and then refused at sign in. The command still imports it, since it may be the only sign-in method that user has, and it starts working as soon as the application accepts its algorithm. The command tells you about this: how many passkeys will be refused, the algorithm they sign with, whose they are, and what to change. Add `RS256` to [`webauthn.algorithms`](passkeys.md#rs256-and-windows-hello) to keep those passkeys working. Otherwise, those users will need to add a new passkey. The same warning covers an RSA key shorter than `webauthn.minimum_rsa_bits`. It's a warning rather than a failure, so the exit code stays zero, and a dry run shows it before anything is written.
 - Imported recovery codes work as they did before. You type them as Fortify showed them, capitals included, and spaces and dashes are ignored. Keyring stores each code as a keyed hash. OWASP ASVS 5.0.0 requirement 6.5.2 allows that for a code with 112 random bits or more. Fortify's 20 letters and digits have 119 bits, but only while their case counts. The codes Keyring generates itself are case-insensitive.
-- A recovery code set that holds anything other than Fortify's own codes, such as an app that swapped in a shorter format, is left behind and listed as skipped. A short code can't safely be stored that way. Those users keep their authenticator app and generate new codes.
+- A recovery code set that holds anything other than Fortify's own codes, such as an application that swapped in a shorter format, is left behind and listed as skipped. A short code can't safely be stored that way. Those users keep their authenticator app and generate new codes.
 - The `--dry-run` option reports the same outcome and exit code, without writing anything.
 
 ## How Fortify Concepts Map
@@ -184,7 +184,7 @@ Pass a component name or a closure to `Keyring::page()`. See [Pages](sign-in-flo
 | `PUT /user/password` | `PUT /user/password` (same name, `user-password.update`) |
 | `PUT /user/profile-information` | Not included. |
 
-Fortify's `password.confirm` middleware keeps working, because confirming through Keyring satisfies it. Keyring's own [`keyring.fresh`](step-up.md#fresh-verification) middleware is stricter, and users with a second factor must use it.
+Fortify's `password.confirm` middleware keeps working, because confirming through Keyring satisfies it. Keyring's own [`keyring.fresh`](step-up.md#fresh-verification) middleware is stricter. A user who has a second factor has to confirm with it, not with the password alone.
 
 ### Responses
 
@@ -228,7 +228,7 @@ Keyring's other form routes, such as registration, password resets, email change
 - **Sessions end after two hours without activity**, whatever `session.lifetime` says, unless the browser ticked "remember me". To match a longer lifetime, change `sessions.idle`. See [Timeouts](devices-and-sessions.md#timeouts).
 - **Remembered browsers sign in once more.** ["Remember me"](devices-and-sessions.md#remember-me) only brings back a session that Keyring registered. A "remember me" cookie from before the switch is refused the first time it's used.
 - **Registering doesn't say when an address is taken, and it doesn't sign the new user in.** The new user is emailed a verification link and signs in once they've followed it. An address that already has an account is emailed instead of being mentioned on the form. Your `register` page needs to say "check your inbox", and your user model needs to implement `MustVerifyEmail`. To keep Fortify's behaviour, set `registration.reveal_taken`. See [Registration](sign-in-flow.md#registration).
-- **The email verification link opens a page.** Fortify verifies the address when the link's `GET` request arrives. Keyring shows the `email-verification` page instead, and its button does the verifying. Add that page. In tests, post the link's `expires` and `signature` values to its path. See [Email Verification](protected-changes.md#email-verification).
+- **The email verification link opens a page.** Fortify verifies the address when the link's `GET` request arrives. Keyring shows the `email-verification` page instead, and its button does the verifying. Add that page if you set `registration.reveal_taken`. With the default registration flow, the link sends the user to sign in instead, and signing in verifies their address. In tests, post the link's `expires` and `signature` values to its path. See [Email Verification](protected-changes.md#email-verification).
 - **Adding a factor needs a fresh verification.** That means a second factor if the user has one. It also needs a verified email address if your user model implements `MustVerifyEmail`.
 - **Recovery codes can't be viewed again.** They're stored as hashes, so users generate a new set instead.
 - **Recovery codes come automatically** with a user's first extra factor.

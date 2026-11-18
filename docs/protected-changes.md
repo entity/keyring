@@ -14,6 +14,7 @@
 - [Changing the Password](#changing-the-password)
 - [Requiring a Password Change](#requiring-a-password-change)
 - [Password Rules](#password-rules)
+    - [Context-Specific Words](#context-specific-words)
 - [Resetting the Password](#resetting-the-password)
 - [Email Verification](#email-verification)
 - [Events](#events)
@@ -31,7 +32,7 @@ Whoever controls the email address and password controls the account. That's why
 ],
 ```
 
-Once Keyring handles password changes with `updatePasswords()`, or email changes with `emailChanges()`, that attribute is [protected](#protected-attributes). From then on, it can only change through Keyring's flow. Without the feature, your app may change it however it likes.
+Once Keyring handles password changes with `updatePasswords()`, or email changes with `emailChanges()`, that attribute is [protected](#protected-attributes). From then on, it can only change through Keyring's flow. Without the feature, your application may change it however it likes.
 
 ## Routes
 
@@ -40,9 +41,9 @@ Once Keyring handles password changes with `updatePasswords()`, or email changes
 | `POST` | `/user/email` | `keyring.email.store` | `auth`, `changes_middleware`, limited |
 | `GET` | `/user/email` | `keyring.email.show` | `auth` |
 | `DELETE` | `/user/email` | `keyring.email.destroy` | `auth` |
-| `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | limited |
+| `GET` | `/email-changes/{change}/confirm/{token}` | `keyring.email.confirm` | limited by `keyring-pages` |
 | `POST` | `/email-changes/{change}/confirm` | `keyring.email.confirm.store` | limited |
-| `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited |
+| `GET` | `/email-changes/{change}/revert/{token}` | `keyring.email.revert` | limited by `keyring-pages` |
 | `POST` | `/email-changes/{change}/revert` | `keyring.email.revert.store` | limited |
 | `PUT` | `/user/password` | `user-password.update` | `auth`, `changes_middleware`, limited |
 | `GET` | `/forgot-password` | `password.request` | guest |
@@ -50,11 +51,11 @@ Once Keyring handles password changes with `updatePasswords()`, or email changes
 | `GET` | `/reset-password/{token}` | `password.reset` | guest |
 | `POST` | `/reset-password` | `password.update` | guest, limited |
 | `GET` | `/email/verify` | `verification.notice` | `auth` |
-| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | signed, limited |
+| `GET` | `/email/verify/{id}/{hash}` | `verification.verify` | signed, limited by `keyring-pages` |
 | `POST` | `/email/verify/{id}/{hash}` | `verification.verify.store` | `auth`, signature in the body, limited |
 | `POST` | `/email/verification-notification` | `verification.send` | `auth`, limited |
 
-In this table, `auth` means `auth:{guard}`, which uses Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), which allows 6 a minute by default. The email routes exist only with `Features::emailChanges()`. The password route needs `Features::updatePasswords()`, the reset routes need `Features::resetPasswords()`, and the verification routes need `Features::emailVerification()`.
+In this table, `auth` means `auth:{guard}`, which uses Keyring's guard. "Limited" means the `keyring` [rate limiter](configuration.md#pending-logins-timebox-and-rate-limits), which allows 6 a minute by default. The three `GET` routes that emailed links open use the looser `keyring-pages` limiter instead, which allows 60 a minute per IP address, so opening a link doesn't use up the tries its button gets. The email routes exist only with `Features::emailChanges()`. The password route needs `Features::updatePasswords()`, the reset routes need `Features::resetPasswords()`, and the verification routes need `Features::emailVerification()`.
 
 ## Protected Attributes
 
@@ -99,20 +100,20 @@ To ask for a change, send `email` to `POST /user/email`. The request needs a [fr
 
 Keyring then does the following:
 
-1. cancels any change the user already has waiting,
-2. stores a pending change with hashed, single-use tokens. The change is valid for `email_changes.confirmable_for`, which is 24 hours by default,
-3. emails the **new** address a link to confirm,
-4. emails the **current** address a notice with a link to revert, and a link to confirm as well when it's needed (see below).
+1. It cancels any change the user already has waiting.
+2. It stores a pending change with hashed, single-use tokens. The change is valid for `email_changes.confirmable_for`, which is 24 hours by default.
+3. It emails the **new** address a link to confirm.
+4. It emails the **current** address a notice with a link to revert, and a link to confirm as well when it's needed (see below).
 
 If the new address belongs to another account, everything the account can see stays the same: the response, the pending change, and the notice to the current address. Only the email to the new address differs. That email says someone tried to use the address, and it carries no link. The change can therefore never be confirmed, and it expires like any other. Asking for the current address does nothing.
 
-Keyring sends all of these emails after the response, using Laravel's `defer()`. That way, the time a request takes doesn't reveal which case it was.
+Keyring sends all of these emails after the response, using Laravel's `defer()`, so the time a request takes doesn't reveal which case it was.
 
 A `MustVerifyEmail` user whose address isn't verified yet is refused with the `keyring::keyring.verify_email_to_change` message. The change would have to wait for a confirmation from that address, and nobody has shown they can read it yet. Each request emails two addresses, so an account can ask five times an hour (`limits.notices` every `limits.notices_per`). After that, it gets a `429`. No address is emailed more often than that, whichever accounts ask for it. Once an address has used up its share, requests for it are answered and stored the same way, but nothing more is sent to it.
 
 ### Confirming
 
-The new address must always confirm. The current address must confirm too, unless this session proved a possession factor, other than a recovery code, that the account has had for `email_changes.established_after` (7 days by default), and has had since before this session signed in. A newer factor doesn't count. That way, whoever got into the account can't add a factor, use it to skip the check, whether in the same session or by signing in again with it. Another account's factor doesn't count either, so an impersonated or switched session can't skip the check with the admin's factor.
+The new address must always confirm. The current address must confirm too, unless this session proved a possession factor, other than a recovery code, that the account has had for `email_changes.established_after` (7 days by default), and has had since before this session signed in. A newer factor doesn't count. That way, whoever got into the account can't add a factor and then use it to skip the check, whether in the same session or by signing in again with it. Another account's factor doesn't count either, so an impersonated or switched session can't skip the check with the admin's factor.
 
 The change applies once every required confirmation is in. When it's time to apply it, Keyring checks that the address is still the one the change was requested from, and that nobody else has taken the new address in the meantime. If either has changed, the pending change is cancelled. Applying the change also sets `email_verified_at`, when the model has that attribute loaded, and stops trusting the user's devices.
 
@@ -152,11 +153,19 @@ The current address can revert the change while it's pending, and for `email_cha
 
 After that, the user is redirected to the forgot password page, or to the login page when password resets are off, with `status` set to `email-change-reverted`. That's because whoever made the change may also know the password. Reverting doesn't change the password itself.
 
-**Who the undo trusts.** The link is for an owner who has lost everything but their old mailbox. For example, someone got into the account, added a passkey of their own, and moved the address. So the link asks for nothing but the link itself, and it takes away the sign-in methods that are too new to be surely the owner's. That works both ways. Whoever can read the old mailbox can press it. When the change was the owner's own, and they're moving away from a mailbox someone else can read, the undo removes a second factor the owner added in that window. A password reset through the same mailbox then signs in without one. Keyring can't tell the two people apart, because each holds exactly the old mailbox. `established_after` is where the line sits. A sign-in method the account has had for longer than that, added before the session that asked signed in, survives an undo. So a second factor set up a week or more before changing address is safe from it. When the change had applied, the new address is told it was undone, so the owner hears about it there. If your users are more likely to lose their mailbox than to have their session taken over, shorten `revertable_for` and `established_after`. If it's the opposite, lengthen them.
+**Who the undo trusts.** The link is for an owner who has lost everything but their old mailbox. For example, someone got into the account, added a passkey of their own, and moved the address. So the link asks for nothing but the link itself, and it takes away the sign-in methods that are too new to be surely the owner's. That works both ways, because whoever can read the old mailbox can press it. Suppose the change was the owner's own, and they're moving away from a mailbox someone else can read. That person can undo the change, which removes any second factor the owner added in that window. A password reset through the same mailbox then signs in without one. Keyring can't tell the two people apart, because each holds exactly the old mailbox.
+
+`established_after` is where the line sits. A sign-in method the account has had for longer than that, added before the session that asked signed in, survives an undo. So a second factor set up a week or more before changing address is safe from it. When the change had applied, the new address is told it was undone, so the owner hears about it there.
+
+If your users are more likely to lose their mailbox than to have their session taken over, shorten `revertable_for` and `established_after`. If it's the opposite, lengthen them.
 
 ### The Old Address Is Reserved
 
-While a change can still be reverted, nobody else can take the address it replaced. Otherwise, someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back. This also covers lookalikes. An address that differs only in case, accents, letter width, or characters that don't show is held back too. That's because MySQL's and MariaDB's default collations treat those as the same address, and their unique index would refuse to give it back. Another account that asks to move to a reserved address gets the same "address in use" email as for any taken address. [Registration](sign-in-flow.md#registration) counts it as taken too, so it's answered like any address that has an account. If your own code creates users or gives them a new address, such as an admin screen or an import, the `Keyring\Rules\UnreservedAddress` rule refuses a reserved one with Laravel's "has already been taken" message. Use it alongside `Rule::unique()`:
+While a change can still be reverted, nobody else can take the address it replaced. Otherwise, someone who changed the address could register a new account with the old one, and the owner's revert would have nowhere to put it back.
+
+This also covers lookalikes. An address that differs only in case, accents, letter width, or characters that don't show is held back too. That's because MySQL's and MariaDB's default collations treat those as the same address, and their unique index would refuse to give it back. Another account that asks to move to a reserved address gets the same "address in use" email as for any taken address. [Registration](sign-in-flow.md#registration) counts it as taken too, so it's answered like any address that has an account.
+
+If your own code creates users or gives them a new address, such as an admin screen or an import, the `Keyring\Rules\UnreservedAddress` rule refuses a reserved one with Laravel's "has already been taken" message. Use it alongside `Rule::unique()`:
 
 ```php
 'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class), new UnreservedAddress],
@@ -237,9 +246,9 @@ Next, tell Keyring where your change-password form is:
 
 While a user is held:
 
-- A held user can still sign in. On every signed-in request in the `web` group, they're sent to `password_change_url` with the `change-password` status. JSON requests get a `403` with that status, and the URL as `redirect`. Without a `password_change_url`, they get a plain `403`.
+- They can still sign in. On every signed-in request in the `web` group, they're sent to `password_change_url` with the `change-password` status. JSON requests get a `403` with that status, and the URL as `redirect`. Without a `password_change_url`, they get a plain `403`.
 - The change-password page is let through for any method. So are `PUT /user/password`, the [confirm page](step-up.md#the-confirm-flow) the user may be sent to, signing out, and email verification. Nothing else is let through, including Keyring's other routes.
-- The hold ends when the password changes, either through `PUT /user/password` or through a [password reset](#resetting-the-password). The new password has to be a different one. `PUT /user/password` refuses the current password as the new one, for every user. A reset to the same password goes through like any other, but it leaves the hold in place. That way, the form doesn't tell whoever holds the link that they guessed the password. If your app saves passwords itself, without `Features::updatePasswords()`, call `Keyring::cancelPasswordChange($user)` once it has saved a new one. Check that it's a new one first, because nothing in that call checks it.
+- The hold ends when the password changes, either through `PUT /user/password` or through a [password reset](#resetting-the-password). The new password has to be a different one. `PUT /user/password` refuses the current password as the new one, for every user. A reset to the same password goes through like any other, but it leaves the hold in place. That way, the form doesn't tell whoever holds the link that they guessed the password. If your application saves passwords itself, without `Features::updatePasswords()`, call `Keyring::cancelPasswordChange($user)` once it has saved a new one. Check that it's a new one first, because nothing in that call checks it.
 - Signing out and back in changes nothing. The hold is a row in `keyring_password_holds`, not something stored in the session or the cache.
 - A hold placed during a request applies to that request's session straight away. Other sessions that are already signed in find out about it within a minute.
 
@@ -251,11 +260,11 @@ The check runs in the `Keyring\Http\Middleware\RequirePasswordChange` middleware
 
 `Keyring\Support\PasswordRules::for($user)` returns validation rules that follow the password requirements in OWASP ASVS 5.0.0 (section 6.2). [Standards](security.md#standards) lists them one by one. In brief, the rules check the following:
 
-- A password must be at least `min_with_mfa` characters (8) when the user has a second factor, and at least `min_without_mfa` characters (15) when they don't. Here, "a second factor" means their authenticators could meet AAL2, including possession, without counting recovery codes (a fallback) or email codes (not a factor). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own. See [Removing Authenticators](authenticators.md#removing-authenticators). Neither option can be set below 8. If you try, Keyring throws a `LogicException` rather than accept a shorter minimum.
+- A password must be at least `min_with_mfa` characters (8) when the user has a second factor, and at least `min_without_mfa` characters (15) when they don't. Here, "a second factor" means their authenticators could meet AAL2, including possession, without counting recovery codes (a fallback) or email codes (not a second factor). Removing the last one takes the password typed again, so Keyring can check it's long enough on its own. See [Removing Authenticators](authenticators.md#removing-authenticators). Neither option can be set below 8. If you try, Keyring throws a `LogicException` rather than accept a shorter minimum.
 - A password can be at most `max` characters (128) with a hasher that reads a whole password, such as argon2id.
 - There are no composition rules, such as "one uppercase, one symbol". Any characters are accepted, including spaces, punctuation, and emoji.
 - Breached passwords are rejected, in production by default. Laravel's check lets a password through when Have I Been Pwned can't be reached. To refuse it in that case too, set [`passwords.refuse_unchecked`](configuration.md#passwords).
-- The most common passwords are always rejected, whatever their case and with or without spaces around them. The list comes bundled with Keyring: the 10,000 most common of 8 characters or more, and the 3,000 most common of 15 or more, 13,052 in all. It's taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source.
+- The most common passwords are always rejected, whatever their case and with or without spaces around them. The list comes bundled with Keyring: the 10,000 most common of 8 characters or more, the 3,000 most common of 15 or more, and the entries from the list Keyring shipped before, 13,052 in all. It's taken from SecLists (MIT licensed). `resources/passwords/README.md` in the package records the exact source.
 - Passwords made up of [context-specific words](#context-specific-words) are refused. Those words are the site's name, the words you list, and the user's name, email username, and email domain.
 - With bcrypt, Laravel's default, passwords over 72 bytes are rejected, because bcrypt silently ignores the rest. Passwords with a NUL byte are rejected too, since bcrypt can't hash them at all. That's 72 plain characters, but as few as 18 emoji reach the same limit, so 64 characters don't always fit. To accept every password up to `max`, which is what OWASP ASVS 5.0.0 (6.2.9) needs, set `HASH_DRIVER=argon2id`. See [Passwords](configuration.md#passwords).
 - The `confirmed` rule applies too, so the request needs `password_confirmation`.
@@ -266,13 +275,13 @@ Passwords may contain any Unicode characters. Keyring converts each one to Unico
 $user->password = Hash::make(PasswordRules::normalize($password));
 ```
 
-A password hashed without normalizing only matters when it has characters that aren't already in NFC. Keyring only ever checks the NFC form, so that hash never matches, and there's no second try with the password as typed. Keyring has done this since its first release, so no hash it made needs one.
+A password hashed without normalising only matters when it has characters that aren't already in NFC. Keyring only ever checks the NFC form, so that hash never matches, and there's no second try with the password as typed. Keyring has done this since its first release, so no hash it made needs one.
 
-Calling `PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. There's no user to take a name from at registration, so pass the name and email yourself. The published `CreateNewUser` does this in `validate()`: `PasswordRules::for(context: [$input['name'], $input['email']])`.
+Calling `PasswordRules::for()` with no user applies the stricter, no-MFA minimum, which is what registration uses. There's no user to take a name from at registration, so pass the name and email yourself. The published `CreateNewUser` does this in `validate()`, through the trait's `passwordRules(context: [$input['name'] ?? null, $input['email']])`.
 
 ### Context-Specific Words
 
-A password that's only the name of your app, your company, or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 5.0.0 (6.1.2) asks you to keep a list of such words, and 6.2.11 asks you to use that list to stop easy-to-guess passwords. Put the list in the `passwords.context` option:
+A password that's only the name of your application, your company, or its owner is easy to guess for anyone who knows where it's used. OWASP ASVS 5.0.0 (6.1.2) asks you to keep a list of such words, and 6.2.11 asks you to use that list to stop easy-to-guess passwords. Put the list in the `passwords.context` option:
 
 ```php
 'passwords' => [
@@ -284,7 +293,7 @@ Include the names of your organisation, products, systems, projects, departments
 
 | | From |
 |---|---|
-| Your app's name | `app.name` |
+| Your application's name | `app.name` |
 | The words you list | `passwords.context` |
 | The user's name | Their `name` attribute, or the `context` argument at registration |
 | Their email username | What's before the `@` in their username and email attributes |
@@ -295,7 +304,7 @@ Here's how the words are compared:
 - The whole password is compared, not the words inside it, as NIST SP 800-63B-4 asks (Sec. 3.1.1.2). A password is refused when, with its digits, spaces, and punctuation taken out, it is one of these words or several of them run together. `acme2026!`, `acmeacmeacme`, and `Grace.Hopper.1906` for a user named Grace Hopper are all refused. A passphrase that happens to contain one is as hard to guess as any other, so `acme sells the best anvils` passes. Refusing it would be a composition rule by another name.
 - Case doesn't matter. Each value also counts word by word, split at anything that isn't a letter or a digit, so `Acme Rockets` counts as `acme` and `rockets`.
 - Characters that stand in for letters count as those letters: `0` counts as `o`, `1` and `l` as `i`, `3` as `e`, `4` and `@` as `a`, `5` and `$` as `s`, and `7` as `t`. So `k3yr1ng` counts as `keyring`.
-- Words under four characters don't count, because they turn up by chance. The exception is your app's name or a listed entry as a whole. Those count from three characters, so an app called `IBM` refuses `ibm-ibm-ibm`. Two characters or fewer never count.
+- Words under four characters don't count, because they turn up by chance. The exception is your application's name or a listed entry as a whole. Those count from three characters, so an app called `IBM` refuses `ibm-ibm-ibm`. Two characters or fewer never count.
 - A name made of several words also counts run together. `My App` counts as `myapp`, even though `my` and `app` alone are too short to count.
 
 The published actions all take their rules from one trait, `app/Actions/Keyring/PasswordValidationRules.php`, so that's where you change them. To add to Keyring's rules, pass a callback that receives the `Illuminate\Validation\Rules\Password` rule, with its length already set for the user, and returns it:
@@ -310,7 +319,7 @@ protected function passwordRules((Authenticatable&Model)|null $user = null, arra
 }
 ```
 
-Ask for more length rather than for particular kinds of character. A composition rule, such as `mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match, takes your app out of OWASP ASVS 5.0.0 (6.2.5). That requirement wants passwords of any composition accepted, and NIST SP 800-63B-4 says the same (Sec. 3.1.1.2). People meet such rules with `Password1!`, which the length rules and the lists above handle better.
+Ask for more length rather than for particular kinds of character. A composition rule, such as `mixedCase()`, `letters()`, `numbers()`, `symbols()`, or a pattern of your own that a password has to match, takes your application out of OWASP ASVS 5.0.0 (6.2.5). That requirement wants passwords of any composition accepted, and NIST SP 800-63B-4 says the same (Sec. 3.1.1.2). People meet such rules with `Password1!`, which the length rules and the lists above handle better.
 
 ## Resetting the Password
 
@@ -340,7 +349,7 @@ Resets use Laravel's password broker, which is `passwords.broker` or your defaul
 ],
 ```
 
-`throttle` is the number of seconds an account waits between reset links. It's the only limit on how often one account is mailed. Keyring's own limit on `POST /forgot-password` is the [form limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute per sender. That doesn't stop many senders from asking for one account. A new Laravel app has `throttle` set to 60 seconds. Keyring neither sets nor checks it when the app runs, so keep it in place. The [conformance suite](testing.md#the-conformance-suite) fails when it's missing or zero. A request the broker throttles gets the same `reset-link-sent` answer as any other. `expire` is how many minutes a link works for. OWASP's Forgot Password Cheat Sheet asks for both settings. NIST SP 800-63B-4 (Sec. 4.2.1.2) asks for a link that lasts 24 hours at most. Keyring doesn't cap `expire` itself, so don't raise it past 1440.
+`throttle` is the number of seconds an account waits between reset links. It's the only limit on how often one account is mailed. Keyring's own limit on `POST /forgot-password` is the [form limiter](configuration.md#pending-logins-timebox-and-rate-limits), 6 a minute per sender. That doesn't stop many senders from asking for one account. A new Laravel application has `throttle` set to 60 seconds. Keyring neither sets nor checks it when the application runs, so keep it in place. The [conformance suite](testing.md#the-conformance-suite) fails when it's missing or zero. A request the broker throttles gets the same `reset-link-sent` answer as any other. `expire` is how many minutes a link works for. OWASP's Forgot Password Cheat Sheet asks for both settings. NIST SP 800-63B-4 (Sec. 4.2.1.2) asks for a link that lasts 24 hours at most. Keyring doesn't cap `expire` itself, so don't raise it past 1440.
 
 A reset link stops working as soon as the password changes through Keyring, the account's email address changes, or the user is deleted. Password reset keeps working while an account is locked, and it lifts the lock, so a lock can't keep the owner out for good.
 
@@ -381,8 +390,9 @@ These events live in `Keyring\Events`:
 | `EmailChangeReverted` | `user`, `change` |
 | `PasswordChanged` | `user` |
 | `PasswordReset` | `user` |
+| `PasswordChangeRequired` | `user`, `reason` |
 | `ProtectionBypassed` | `reason` |
-| `LinkRefused` | `link`, `reason`, `user`. It's dispatched for an email change link with a wrong or ended token, a reset with a token that wasn't the one sent, or a signed link that didn't check out |
+| `LinkRefused` | `link`, `reason`, `user`. It's dispatched for an email change link with a wrong or ended token, a reset with a token that wasn't the one sent, or a signed link that didn't check out. |
 
 The `change` property is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden from serialisation, and the addresses are encrypted at rest.
 

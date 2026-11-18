@@ -42,17 +42,27 @@ $this->actingAs($user)->withAssurance(Assurance::AAL2)->get('/billing')->assertO
 $this->actingAs($user)->freshAt(now()->subHour())->deleteJson('/account')->assertStatus(423);
 ```
 
+Here, `/billing` and `/account` stand for routes of your own, behind `keyring:aal2` and `keyring.fresh`.
+
 - The `withAssurance` method pretends the session proved enough to reach the level you pass. For example, a password is enough for AAL1, a password and a TOTP code reach AAL2, and an attested security key that verified the user reaches AAL3. `Assurance::None` proves nothing.
 - The `freshAt` method pretends those verifications happened at the time you pass, which matters for [`keyring.fresh`](step-up.md#fresh-verification). Without it, they happen now.
 
 You may chain both methods, in either order. The level defaults to AAL1, so calling `freshAt` on its own gives the user a password verification at that time.
 
-A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, respond with a `423` status. For those routes, add `withAssurance`:
+A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, ask for step-up. A JSON request gets a `423` status, and any other request is redirected to the confirm page. For those routes, add `withAssurance`:
 
 ```php
 $this->actingAs($user)->withAssurance(Assurance::AAL1)
     ->postJson(route('keyring.authenticators.store', 'totp'))
     ->assertOk();
+```
+
+A plain request that needs step-up, such as a `delete` instead of a `deleteJson`, is redirected rather than answered with a `423`:
+
+```php
+$this->actingAs($user)->freshAt(now()->subHour())
+    ->delete('/account')
+    ->assertRedirect(route('keyring.confirm.challenge'));
 ```
 
 The `sessionErrors` method returns the validation errors the last request flashed, as a `MessageBag`. Prefer it over `session('errors')`. Right after a request, `session('errors')` is a plain array when the session is serialized as JSON, which is the default in new Laravel applications:
@@ -61,14 +71,6 @@ The `sessionErrors` method returns the validation errors the last request flashe
 $this->post('/login', ['email' => $user->email, 'password' => 'wrong']);
 
 expect($this->sessionErrors()->first('email'))->toBe(__('auth.failed'));
-```
-
-The `423` response only comes back for JSON requests. A plain `delete` request that needs step-up is redirected to the confirm page instead:
-
-```php
-$this->actingAs($user)->freshAt(now()->subHour())
-    ->delete('/account')
-    ->assertRedirect(route('keyring.confirm.challenge'));
 ```
 
 ## Acting With Real Authenticators
@@ -205,10 +207,10 @@ The constructor accepts these options:
 
 | Option | Default | |
 |---|---|---|
-| `origin` | Your `APP_URL`'s origin | The origin the key claims to be on. By default, it's the first origin Keyring accepts. |
+| `origin` | The first origin Keyring accepts | The origin the key claims to be on. Unless you set `webauthn.origins`, that's your `APP_URL`'s origin. |
 | `userVerification` | `true` | Whether the key reports that it verified the user. Use `false` for a basic security key. |
 | `aaguid` | 16 zero bytes | The AAGUID the key reports, as raw bytes. |
-| `algorithm` | `ES256` | `ES256`, `EdDSA` or `RS256`. |
+| `algorithm` | `ES256` | `ES256`, `EdDSA`, or `RS256`. |
 | `bits` | `2048` | How long an `RS256` key is. |
 | `backedUp` | `null` | Whether a `synced` key reports that it has been backed up yet. `null` means it has. |
 | `synced` | `false` | Whether the key reports that it is a passkey that syncs between devices. |
@@ -236,7 +238,7 @@ $this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['crede
 
 The `key` method takes the model's AAGUID, the format (`packed` by default, or `fido-u2f`, which has no AAGUID), and whether the key verifies the user. Create the manufacturer with `new VirtualManufacturer(intermediate: true)` to sign its keys' certificates with an intermediate certificate instead of the root. The `days:` argument sets how long its certificates last.
 
-To check that your app turns keys away, use a key from a second `VirtualManufacturer` that you don't trust, or `new VirtualAuthenticator()->selfAttested()`, which attests with its own key pair.
+To check that your application turns keys away, use a key from a second `VirtualManufacturer` that you don't trust, or `new VirtualAuthenticator()->selfAttested()`, which attests with its own key pair.
 
 ## The Conformance Suite
 
@@ -283,8 +285,10 @@ The suite checks that:
 - every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out stops working there,
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - the password broker Keyring uses has a `throttle`, so one account can't be sent [a reset link](protected-changes.md#resetting-the-password) as often as anyone asks (skipped without `Features::resetPasswords()`),
-- one password hash takes less time than [`timebox`](configuration.md#pending-logins-timebox-and-rate-limits). That's what keeps a refusal that hashes from taking longer than one that doesn't. The check times a hash where the tests run, so it's a guide to your servers, not a measurement of them. Bcrypt is timed at 12 rounds, or at your own setting if that's higher, since a test suite usually runs with fewer. If production hashes with different options, return those from `keyringProductionHashOptions`,
+- one password hash takes less time than [`timebox`](configuration.md#pending-logins-timebox-and-rate-limits), which is what keeps a refusal that hashes from taking longer than one that doesn't,
 - no mandatory pipeline step was removed or replaced with `dangerouslyRemove` or `dangerouslyReplace`.
+
+The timing check times a hash where the tests run, so it's a guide to your servers, not a measurement of them. Bcrypt is timed at 12 rounds, or at your own setting if that's higher, since a test suite usually runs with fewer. If production hashes with different options, return those from `keyringProductionHashOptions`.
 
 If you remove a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from the `keyringAcknowledgedDangerousSteps` method in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password`, and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.
 

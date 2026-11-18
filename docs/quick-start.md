@@ -11,7 +11,7 @@
 
 ## Introduction
 
-Keyring starts as a small foundation: signing in with a password, signing out, and the challenge and confirm pages. Everything else is a feature or sign-in method that you may add whenever your application needs it.
+Signing in with a password, signing out, challenges, and step-up are always on. A default installation adds registration, password resets, email verification, password changes, and the security log. Everything else is a feature or sign-in method that you may add whenever your application needs it.
 
 ## Installing
 
@@ -27,9 +27,9 @@ php artisan migrate
 
 The `keyring:install` command will ask which sign-in methods you would like besides the password, whether everyone must set up a second factor (if you picked a sign-in method that can be one), and which features to enable. Recovery codes are included with any second sign-in method, so losing it isn't the end of an account.
 
-If you accept every default, or run the command with `--no-interaction`, you'll get the password, registration, password resets, email verification, password changes, and the security log. Don't worry, you may add the rest later by uncommenting a line. Every sign-in method is already in your service provider, every feature is in the configuration file, and every action is published, so each one works as soon as you enable it.
+If you accept every default, or run the command with `--no-interaction`, you'll get the password, registration, password resets, email verification, password changes, and the security log. Everything else can be added later by uncommenting a line. Every sign-in method is already in your service provider, every feature is in the configuration file, and every action is published, so each one works as soon as you enable it.
 
-Next, add the `HasKeyring` trait to your `User` model, and keep Laravel's `hashed` cast on the `password` attribute. Registration leaves a new user signed out until they have verified their email address, so nobody can use the registration form to discover who has an account. For this reason, your model should also implement `MustVerifyEmail`. The installer enables email verification for you:
+Next, add the `HasKeyring` trait to your `User` model, implement `MustVerifyEmail`, and keep Laravel's `hashed` cast on the `password` attribute. The interface is needed because registration leaves a new user signed out until they've verified their email address, so nobody can use the registration form to discover who has an account. The installer has already enabled email verification:
 
 ```php
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -43,13 +43,15 @@ class User extends Authenticatable implements MustVerifyEmail
 
 If the trait is missing, signing in will throw a `Keyring\Exceptions\MissingTrait` exception naming the model, rather than quietly working without the protection the trait adds.
 
+A new user can't sign in until they've followed the verification link, so make sure your application can send mail. In a new Laravel application, the default `log` mailer writes each email, link included, to `storage/logs/laravel.log`.
+
 ## Your Pages
 
 Keyring is headless, meaning it handles the requests while you build the pages. When using Inertia, Keyring renders `auth/{page}` components. Otherwise, it renders Blade views named `auth.{page}`.
 
 If a view is missing, Keyring throws an error that names the file you need to create and the data it receives. The same is true of a missing Inertia component when Inertia's `pages.ensure_pages_exist` option is enabled.
 
-Keyring renders nine pages, though you only need the ones for the features you've enabled:
+Keyring renders ten pages, though you only need the ones for the features you've enabled:
 
 | Page | When It's Needed |
 |---|---|
@@ -132,7 +134,7 @@ class SecurityController
 
 From there, the page uses Keyring's routes: [`/user/authenticators`](authenticators.md#routes) to add, rename, and remove sign-in methods, [`/user/devices`](devices-and-sessions.md#routes) to sign devices out, [`/user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) to list sessions and end one, [`PUT /user/password`](protected-changes.md#changing-the-password), and [`POST /user/email`](protected-changes.md#changing-the-email-address). The [browser package](frontend.md#managing-authenticators) wraps the authenticator routes for you, including the passkey ceremony.
 
-These routes require a [fresh verification](step-up.md#fresh-verification), which lasts 15 minutes by default. You should place the same middleware on your settings page, after `auth`, so users confirm once when they open the page rather than halfway through adding a passkey:
+The routes that change something require a [fresh verification](step-up.md#fresh-verification), which lasts 15 minutes by default. The two that only list sessions and devices don't. You should place the same middleware on your settings page, after `auth`, so users confirm once when they open the page rather than halfway through adding a passkey:
 
 ```php
 Route::get('/settings/security', [SecurityController::class, 'edit'])
@@ -164,7 +166,7 @@ You may also add `KeyringConformance` to a test class to verify that your setup 
 
 ## Adding Features
 
-Features are enabled in your `config/keyring.php` configuration file. Each feature only registers its routes, and anything else it needs, once it's in the list:
+Features are enabled in your `config/keyring.php` configuration file. Each feature only registers its routes, and anything else it needs, once it's in the list. This is the list as the installer writes it:
 
 ```php
 use Keyring\Features;
@@ -174,7 +176,10 @@ use Keyring\Features;
     Features::resetPasswords(),
     Features::emailVerification(),
     Features::updatePasswords(),
-    Features::manageAuthenticators(),
+    Features::securityLog(),
+    // Features::manageAuthenticators(),
+    // Features::devices(),
+    // Features::emailChanges(),
 ],
 ```
 
@@ -217,6 +222,8 @@ Keyring::factors([
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
+AAL stands for authenticator assurance level, NIST's scale for how strongly a session has been proved. AAL1 is a single factor, such as a password. AAL2 adds something the user has, such as an authenticator app, or comes from a passkey on its own. See [Assurance Levels](policies.md#assurance-levels).
+
 Next:
 
 1. Enable `Features::manageAuthenticators()` in your `config/keyring.php` file so users can set them up.
@@ -231,7 +238,7 @@ The following protections are part of the foundation. You don't need to set any 
 
 | Protection | Default | How to Change It |
 |---|---|---|
-| Rate limits on signing in | 5 a minute per account and 20 per IP address. An authenticator is refused after 100 failures in a row until it's set up again. | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
+| Rate limits on signing in | 5 a minute per account and 20 per IP address. After 100 failures in a row, an authenticator is refused until a password reset or `Keyring::unlock()` clears it, or until the second factor is removed and added again. | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Failed checks take the same amount of time, as does every registration and refused password reset | 500ms | `timebox` |
 | Registration gives the same response whether or not an address has an account | Enabled | [`registration.reveal_taken`](sign-in-flow.md#registration) |
 | Password rules | 15 characters without a second factor, and 8 with one. Common passwords and ones containing the user's or site's name are refused, as are breached passwords in production. | [Password Rules](protected-changes.md#password-rules) |

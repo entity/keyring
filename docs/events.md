@@ -40,7 +40,7 @@ No event has a password, code, or token among its properties. However, `Attempti
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |
 
-`purpose` is the `Keyring\Enums\Purpose` enum, either `Login` or `Confirm`. The verification events fire for both purposes, so check `$event->attempt->purpose` when a listener should only react to sign ins. See [The Sign In Flow](sign-in-flow.md#events).
+`purpose` is the `Keyring\Enums\Purpose` enum, either `Login` or `Confirm`. `FactorChallenged`, `FactorVerified`, and `FactorFailed` fire for both purposes, so check `$event->attempt?->purpose` when a listener should only react to sign ins. On `FactorFailed`, `attempt` is null when the user wasn't found. See [The Sign In Flow](sign-in-flow.md#events).
 
 ## Sessions and Devices
 
@@ -48,7 +48,7 @@ No event has a password, code, or token among its properties. However, `Attempti
 |---|---|---|
 | `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)`. The link is valid for `devices.report_link_for` unless you pass a number of days. It's the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link). |
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
-| `SessionsRevoked` | Sessions were signed out. This happens with "sign out everywhere else", when one session is ended from the sessions list, when an administrator runs `keyring:sign-out` for the user, or on the first request refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
+| `SessionsRevoked` | Sessions were signed out. This happens with "sign out everywhere else", when one session is ended from the sessions list, when an administrator runs `keyring:sign-out` for the user, or on the first request refused for an account [the application keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
 | `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed` |
 | `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved. | `user`, `session` (the `RegisteredSession` it carries on as) |
 | `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). This means two browsers held the same cookies, so the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended. Its device, IP address, and user agent belong to whoever used the cookie first.) |
@@ -115,7 +115,7 @@ Event::listen(fn (Lockout $event) => Metrics::increment('auth.locked_out', ['fac
 Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited', ['route' => $event->route]));
 ```
 
-`Metrics` stands for whatever your app reports to.
+`Metrics` stands for whatever your application reports to.
 
 ## Laravel's Auth Events
 

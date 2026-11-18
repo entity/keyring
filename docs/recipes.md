@@ -63,6 +63,11 @@ Next, point Keyring at your locator, turn on devices, and choose the signals you
 
 ```php
 // config/keyring.php
+'features' => [
+    // ...
+    Features::devices(),
+],
+
 'devices' => [
     'locator' => App\Keyring\IpLocator::class,
 ],
@@ -103,7 +108,8 @@ If your application can only be reached through Cloudflare, Cloudflare can tell 
 
 Cloudflare sends `CF-IPCountry` by default. The city, region, and coordinates, which impossible travel needs, are provided by its "Add visitor location headers" managed transform.
 
-Only use this approach when requests can't reach your application without going through the proxy. Anyone who can reach your application directly can send these headers themselves and choose their own location.
+> [!WARNING]
+> Only use this approach when requests can't reach your application without going through the proxy. Anyone who can reach your application directly can send these headers themselves and choose their own location.
 
 For another proxy or CDN, bind the locator with your own header names. See [Locations](devices-and-sessions.md#locations).
 
@@ -165,6 +171,10 @@ A template is a Vue file. Anything that changes from one email to the next is a 
       <Raw>@isset($actionUrl)</Raw>
       <Button href="{{ $actionUrl }}" class="bg-slate-900 text-white"><Raw>{{ $actionText }}</Raw></Button>
       <Raw>@endisset</Raw>
+
+      <Raw>@isset($contact)</Raw>
+      <Text class="text-sm text-slate-500"><Raw>{{ __("If this wasn't you and you need help, contact us:") }} {{ $contact }}</Raw></Text>
+      <Raw>@endisset</Raw>
     </Container>
   </Layout>
 </template>
@@ -194,7 +204,7 @@ SecurityNotice::toMailUsing(function (SecurityNotice $notice, object $notifiable
 });
 ```
 
-The `$notice->contact` property holds your [support contact](security-log-and-emails.md#a-support-contact), which is `null` until you set one. A template of your own must display it itself. Keyring's own template does so in the `toMail` method that this callback replaces.
+The `$notice->contact` property holds your [support contact](security-log-and-emails.md#a-support-contact), which is `null` until you set one. A template of your own must display it itself, as the one above does. Keyring's own template does so in the `toMail` method that this callback replaces, and also turns a URL or an address into a link, where this version prints it as plain text.
 
 Each of the [emails a flow needs](security-log-and-emails.md#emails-a-flow-needs), such as the emailed code, has its own shape. To give one of those a template, extend Keyring's class and register yours, as [Your Own Templates](security-log-and-emails.md#your-own-templates) shows.
 
@@ -298,15 +308,26 @@ class SmsVerificationCode extends Notification
 }
 ```
 
-Once you register the factor, users can add it like any other sign-in method. Your form posts `phone` to `POST /user/authenticators/sms`, and then posts the code to `POST /user/authenticators/sms/confirm`:
+Register the factor alongside your others:
 
 ```php
 Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SmsCode::class]);
 ```
 
+Users can then add it like any other sign-in method. Your form posts `phone` to `POST /user/authenticators/sms`, and then posts the code to `POST /user/authenticators/sms/confirm`.
+
 Don't queue the notification, so the code arrives while the user is still waiting. Confirming the enrollment proves that the number can receive codes, and a code only verifies the phone it was sent to.
 
-SMS is a weak second factor. Numbers can be moved to a new SIM by someone who talks the carrier into it. Unlike email, NIST SP 800-63B-4 still accepts SMS as an authenticator, so this factor keeps `CodeFactor`'s possession category, and a password with a texted code counts as an AAL2 session. It's the one authenticator NIST calls restricted (Sec. 3.1.3.3 and 3.2.9), which places conditions on your application that Keyring can't meet for you. Every user has to be offered another second factor that isn't restricted, every user has to be told about the risks of text messages, and you have to plan for the day when text messages are no longer accepted. Codes may last ten minutes at most. For these reasons, register SMS alongside an authenticator app or passkeys, never in their place, and say so on the page where users choose a factor. By default, each account can be sent [three codes every ten minutes](configuration.md#pending-logins-timebox-and-rate-limits), which also caps how much a stranger can make you spend.
+> [!WARNING]
+> SMS is a weak second factor. Numbers can be moved to a new SIM by someone who talks the carrier into it.
+
+Unlike email, NIST SP 800-63B-4 still accepts SMS as an authenticator, so this factor keeps `CodeFactor`'s possession category, and a password with a texted code counts as an AAL2 session. It's the one authenticator NIST calls restricted (Sec. 3.1.3.3 and 3.2.9), which places conditions on your application that Keyring can't meet for you:
+
+- Every user has to be offered another second factor that isn't restricted.
+- Every user has to be told about the risks of text messages.
+- You have to plan for the day when text messages are no longer accepted.
+
+Codes may last ten minutes at most. For these reasons, register SMS alongside an authenticator app or passkeys, never in their place, and say so on the page where users choose a factor. By default, each account can be sent [three codes every ten minutes](configuration.md#pending-logins-timebox-and-rate-limits), which also caps how much a stranger can make you spend.
 
 To use a different provider, only the `deliver` method needs to change. Call that provider's SDK there, or route the notification to its channel.
 
@@ -425,7 +446,13 @@ class GitHub extends Factor implements PrimaryFactor
 }
 ```
 
-Register the factor with your other factors, and add the two routes. The `Keyring::attempt` method starts a sign in with a factor from a route of your own, and it responds the same way the login form does:
+Register the factor with your other factors:
+
+```php
+Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, GitHub::class]);
+```
+
+Next, add the two routes. The `Keyring::attempt` method starts a sign in with a factor from a route of your own, and it responds the same way the login form does:
 
 ```php
 use Illuminate\Http\Request;
@@ -452,25 +479,39 @@ The `block` method takes the session lock, as Keyring's own sign-in routes do.
 
 With this setup:
 
-- A linked user with no second factor is signed in and sent to `home`.
+- A linked user with no second factor is signed in and sent to the `home` path (`/dashboard` by default).
 - A linked user with an authenticator app or passkey is sent to the challenge page first.
 - A GitHub account that isn't linked gets the same "these credentials don't match" message as a wrong password.
 - Attempts count against the per-IP limit, and a [risk lock](risk.md#actions) refuses them, like any other sign in.
 - GitHub is never offered on the confirm page. A user is asked for their password or another sign-in method there. A user who only has GitHub signs in again to do anything behind [`keyring.fresh`](step-up.md).
 
-**Match on the provider's ID, never on the email address.** Some providers let an account carry an address its owner hasn't proven, so matching on the address would let someone sign in to whoever has that address in your application.
+> [!WARNING]
+> Match on the provider's ID, never on the email address. Some providers let an account carry an address its owner hasn't proven, so matching on the address would let someone sign in to whoever has that address in your application.
 
-To link an account, send a signed-in user through the same redirect to a second callback that saves the ID. Linking adds a way to sign in, so this callback should have what Keyring's own routes for that purpose have: `keyring.fresh`, and the rule that [the account's address is verified first](authenticators.md#who-may-enroll). Without the second, someone who registers an address that isn't theirs could link their own GitHub account to it, and still sign in after the real owner had reset the password:
+To link an account, send a signed-in user to GitHub with a callback of its own that saves the ID. Linking adds a way to sign in, so this callback should have what Keyring's own routes for that purpose have: `keyring.fresh`, and the rule that [the account's address is verified first](authenticators.md#who-may-enroll). Without the second, someone who registers an address that isn't theirs could link their own GitHub account to it, and still sign in after the real owner had reset the password:
 
 ```php
-Route::get('/settings/github/callback', function (Request $request) {
-    abort_unless(Keyring::allowsEnrollment($request->user()), 403);
+Route::middleware(['auth', 'keyring.fresh:15m'])->group(function () {
+    Route::get('/settings/github', fn () => Socialite::driver('github')
+        ->redirectUrl(url('/settings/github/callback'))
+        ->redirect());
 
-    $request->user()->forceFill(['github_id' => Socialite::driver('github')->user()->getId()])->save();
+    Route::get('/settings/github/callback', function (Request $request) {
+        abort_unless(Keyring::allowsEnrollment($request->user()), 403);
 
-    return to_route('security.edit');
-})->middleware(['auth', 'keyring.fresh:15m']);
+        $githubId = Socialite::driver('github')
+            ->redirectUrl(url('/settings/github/callback'))
+            ->user()
+            ->getId();
+
+        $request->user()->forceFill(['github_id' => $githubId])->save();
+
+        return to_route('security.edit');
+    });
+});
 ```
+
+Socialite sends GitHub the callback from `config/services.php` unless you pass another with `redirectUrl`, so both routes pass this one. Make sure your GitHub OAuth app accepts that URL as a callback too.
 
 Keyring doesn't know about this link, so none of Keyring's own features removes it. A password reset and an [undone email change](protected-changes.md#changing-the-email-address) remove the sign-in methods Keyring holds, but they leave `github_id` where it is. Clear the link when the account is recovered by listening for the `PasswordReset` and `EmailChangeReverted` events:
 
@@ -566,7 +607,9 @@ You can also configure how long Keyring keeps records:
 'email_changes' => ['keep_ended_for' => '7d'],
 ```
 
-The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, and log entries at the same time. To keep no devices at all, leave `Features::devices()` off. Without `Features::securityLog()`, there's no log table, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
+The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, and log entries at the same time.
+
+You can also keep less by leaving features off. To keep no devices at all, leave `Features::devices()` off. Without `Features::securityLog()`, there's no log table, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
 
 ## Accounts an Admin Approves
 
@@ -603,7 +646,7 @@ This replaces Keyring's own rule, so only use it when approving an account means
 
 ## An App Whose Every Page Needs AAL2
 
-Some applications can't show anything to a session that hasn't proved two factors. For example, NIST SP 800-63B-4 (Sec. 2) asks federal agencies to choose at least AAL2 wherever personal information is made available online. By default, Keyring signs users in with whatever they have and lets an assurance level lapse without ending the session. To make AAL2 the minimum, you need to change three settings.
+Some applications can't show anything to a session that hasn't proved two factors. For example, NIST SP 800-63B-4 (Sec. 2) asks federal agencies to choose at least AAL2 wherever personal information is made available online. By default, Keyring signs users in with whatever they have and lets an assurance level lapse without ending the session. To make AAL2 the minimum, you need to make three changes.
 
 First, update the policy and the factors. Don't register email codes, which [aren't a factor](factors.md#what-turning-email-codes-on-means):
 
@@ -614,7 +657,7 @@ Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, WebAuthn::
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
-The `ifEnrolled` condition stays in place, so a new user can sign in once with their password to set up a second factor. The middleware keeps them from reaching anything else until they've done so, and the `keyring:aal2` route group below asks every other session for AAL2:
+The `ifEnrolled` condition stays in place, so a new user can sign in once with their password to set up a second factor. Next, add the `keyring.enrolled` middleware, which keeps that user from reaching anything else until they've done so, and put your pages in a `keyring:aal2` group, which asks every other session for AAL2. Tell Keyring where the enrollment page is with `enrollment_url`:
 
 ```php
 // bootstrap/app.php

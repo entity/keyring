@@ -25,7 +25,7 @@ The `keyring:install` command adds this line when you pick a second sign-in meth
 
 ## Requirements
 
-A `Keyring\Login\Requirement` counts **distinct categories** (knowledge, possession, and inherence), not verifications. A password plus a PIN is still one factor, and so is a TOTP code plus a recovery code. Those three categories are the authentication factors. An [email code](factors.md#email-codes) belongs to a fourth category, `Category::Address`. That category isn't an authentication factor. It never counts as a factor, and it only counts as a step where steps are asked for.
+A `Keyring\Login\Requirement` counts **distinct categories**, not verifications. The three categories that count as authentication factors are knowledge, possession, and inherence. A password plus a PIN is still one factor, and so is a TOTP code plus a recovery code. An [email code](factors.md#email-codes) belongs to a fourth category, `Category::Address`, which isn't an authentication factor. It never counts as a factor, and it only counts as a step where steps are asked for.
 
 | | Means |
 |---|---|
@@ -67,7 +67,7 @@ A user-verified passkey proves possession and inherence in one step, so it reach
 
 AAL2 means two categories, one of which is possession, which is something the user has. NIST SP 800-63B-4 (Sec. 2.2.1) accepts a password or a biometric only together with a physical authenticator. It never accepts a biometric by itself (Sec. 3.2.3). Every factor Keyring ships fits this rule. Inherence only ever comes from a passkey or security key that verified the user, and that is possession too. This matters for [a factor of your own](factors.md#categories). A factor that reports `Knowledge` and `Inherence`, or `Inherence` alone, leaves a session at AAL1, however it's combined with a password.
 
-AAL3 is narrower than "two factors with a hardware key." NIST asks for a key that can't be exported, along with a second factor that's either the key's own activation or a password (Sec. 2.3.1 and 2.3.2). So Keyring needs all of the following:
+AAL3 is narrower than "two factors with a hardware key". NIST asks for a key that can't be exported, along with a second factor that's either the key's own activation or a password (Sec. 2.3.1 and 2.3.2). So Keyring needs all of the following:
 
 - The key is phishing resistant, and it reports that it can't sync. Keyring reads that from the backup-eligible flag on every sign in. A key that hasn't reported the flag counts as synced.
 - Something has to vouch for that report. A key's flags are only what the key says about itself, and software can say the same. The key has to belong to a factor set up with [`requireAttestation()`](passkeys.md#requiring-attestation), and it has to have been added with an attestation that chained to a root you trust.
@@ -75,7 +75,7 @@ AAL3 is narrower than "two factors with a hardware key." NIST asks for a key tha
 
 Without attestation, no session reaches AAL3, and `keyring:aal3` sends users to your enrollment page. You can still ask for a phishing-resistant key that stays on its device, which is worth having on its own. Use `Requirement::aal2()->deviceBound()` in a policy, or [`keyring:aal2,device-bound`](step-up.md#raising-assurance) on a route. Those sessions are AAL2.
 
-A session that Keyring calls AAL3 has met what NIST asks of the authentication itself. NIST's AAL3 also needs authenticators and verifier cryptography validated to FIPS 140, and no library can supply that. Before you tell anyone your app is AAL3, you'll need to buy validated keys, limit the factor to those models with [`allowOnly()`](passkeys.md#allowing-only-certain-models), and run PHP on a validated cryptographic module.
+A session that Keyring calls AAL3 has met what NIST asks of the authentication itself. NIST's AAL3 also needs authenticators and verifier cryptography validated to FIPS 140, and no library can supply that. Before you tell anyone your application is AAL3, you'll need to buy validated keys, limit the factor to those models with [`allowOnly()`](passkeys.md#allowing-only-certain-models), and run PHP on a validated cryptographic module.
 
 The [step-up middleware](step-up.md#raising-assurance) asks for these levels by name, as in `keyring:aal2`.
 
@@ -104,10 +104,12 @@ Without `ifEnrolled()`, users who can't meet the requirement can't sign in at al
 
 It lets guests through and leaves them to `auth`, so you can add it to the `web` group. It also works on a single route or group, placed after `auth`.
 
-When you pick an authenticator app, passkeys, or security keys, the `keyring:install` command asks "Require a second factor for everyone?" The answer is yes unless you say otherwise. The command then adds the middleware to the `web` group in your `KeyringServiceProvider`. That does the same as the lines above, and it also sets `enrollment_url` to `/settings/security`:
+When you pick an authenticator app, passkeys, or security keys, the `keyring:install` command asks "Require a second factor for everyone?" The answer is yes unless you say otherwise. The command then adds the middleware to the `web` group in your `KeyringServiceProvider`. That does the same as the lines above:
 
 ```php
 // app/Providers/KeyringServiceProvider.php
+use Illuminate\Contracts\Http\Kernel;
+
 $this->app->make(Kernel::class)->appendMiddlewareToGroup('web', 'keyring.enrolled');
 ```
 
@@ -122,7 +124,7 @@ Users are sent to the page at `enrollment_url` in your `config/keyring.php` conf
 
 Users still sign in with what they have. After that, every request under the middleware sends them to `enrollment_url` with the `enroll-first` status, until they've set up enough to reach AAL2. JSON requests get a `403` response with that status and the URL to send them to. Without an `enrollment_url`, they get a plain `403`.
 
-Recovery codes don't count, and neither do email codes, because they aren't a factor. A user who signs in with a password and an emailed code is sent to add a real one. This is the same rule as for the [shorter password](configuration.md#passwords). To ask for an attested key that stays on its device instead, use `keyring.enrolled:aal3`. For a key that stays on its device, attested or not, use `keyring.enrolled:aal2,device-bound`.
+Recovery codes don't count, and neither do email codes, because they aren't a factor. A user who signs in with a password and an emailed code is sent to add a real one. The same rule decides which accounts may use the [shorter minimum password length](configuration.md#passwords). To ask for an attested key that stays on its device instead, use `keyring.enrolled:aal3`. For a key that stays on its device, attested or not, use `keyring.enrolled:aal2,device-bound`.
 
 The enrollment page is always let through, and so are the routes users need to get there and back out. Those are Keyring's own (adding authenticators and confirming), `logout`, email verification, and changing the password. Keep anything else that the enrollment page calls outside the middleware.
 
@@ -151,6 +153,8 @@ Keyring::require(fn (User $user, Attempt $attempt) => match (true) {
     $user->is_admin => Requirement::aal2()->phishingResistant(),
     $attempt->device()?->isTrusted() === true => Requirement::aal1(),
     $attempt->risk?->isElevated() === true => Requirement::aal2(),
+    // An unknown device and risk land here, so keep this the strictest
+    // answer you want for an attempt Keyring knows nothing about.
     default => Requirement::aal2()->ifEnrolled(),
 });
 ```
@@ -169,16 +173,16 @@ The attempt tells you the following:
 | `$attempt->remember` | Whether "remember me" was ticked. |
 | `$attempt->keyring()` | The user's authenticators. |
 
-Your closure must cope with `null` devices and risk, and give its strictest answer for them. Keyring also calls it outside a login, for an attempt that nothing is known about (no device, no risk, and `isNewDevice()` false):
+Your closure must cope with `null` devices and risk, and give its strictest answer for them. Keyring also calls it outside a sign in, for an attempt that nothing is known about (no device, no risk, and `isNewDevice()` false):
 
 - When a user removes an authenticator, to check that what's left still meets the policy.
 - On every route behind [`keyring.fresh`](step-up.md#fresh-verification), to work out what signing in would ask. There, the closure is asked a second time, with the request's device looked up, and the stricter of the two answers stands. Risk is never assessed there, so `$attempt->risk` is `null` both times. The policy can only add to what that route asks. Its floor is the strongest combination the account can give.
 
 ## How the Policy Is Applied
 
-- The policy is asked again after every factor the user verifies during a login. A risk assessment can raise it partway through.
+- The policy is asked again after every factor the user verifies during a sign in. A risk assessment can raise it partway through.
 - When the [risk response](risk.md#responding-to-risk) asks for a step-up and the user has enough authenticators, the requirement becomes at least `aal2()`.
-- The policy applies to logins, and to [fresh verification](step-up.md#fresh-verification). Fresh verification asks for as much as a login would, and never less than the strongest combination the account can give. [Step-up](step-up.md) to a level sets its own requirement.
+- The policy applies to sign ins, and to [fresh verification](step-up.md#fresh-verification). Fresh verification asks for as much as a sign in would, and never less than the strongest combination the account can give. [Step-up](step-up.md) to a level sets its own requirement.
 - [Registration](sign-in-flow.md#registration) doesn't sign anyone in by default. If `registration.reveal_taken` makes it sign the new user in, it does so with their password and doesn't ask the policy, since they can't have other factors yet.
 - Users can't remove an authenticator if what's left can't sign in, or can't meet the policy, unless the policy uses `ifEnrolled()`. See [Removing Authenticators](authenticators.md#removing-authenticators).
 

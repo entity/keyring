@@ -1,6 +1,6 @@
 # Keyring Documentation
 
-Keyring handles the authentication side of a Laravel application. It takes care of signing in, registration, password resets, email verification, second factors, passkeys, step-up, devices, sessions, and account changes. Keyring doesn't ship any UI of its own. Your application owns the pages and the account actions, and Keyring provides everything around them.
+Keyring handles the authentication side of a Laravel application, taking care of signing in, registration, password resets, email verification, second factors, passkeys, step-up, devices, sessions, and account changes. It doesn't ship any UI of its own. Your application owns the pages and the account actions, and Keyring provides everything around them.
 
 The pages below are grouped by topic.
 
@@ -27,12 +27,16 @@ The pages below are grouped by topic.
 - [Risk](risk.md): risk signals, and what to do about them.
 - [Security Log & Emails](security-log-and-emails.md): the activity log, "was this you?" alerts, and security emails.
 - [Events](events.md): every event Keyring dispatches, and what each one carries.
+
+## Security
+
 - [Security](security.md): what Keyring guarantees, where each choice comes from, and its known limitations.
 - [OWASP ASVS and NIST SP 800-63B](owasp-asvs.md): where Keyring stands on every requirement of ASVS 5.0.0 that bears on it, what to turn on for each level, and what its assurance levels mean in NIST's terms.
 
-## Building Your App
+## Building Your Application
 
 - [Frontend](frontend.md): the Inertia pages, and the `@keyringjs/keyring` browser package.
+- [Example Application](https://github.com/entity/keyring-example): every page, written in React.
 - [Extending Keyring](extending.md): every option and hook in one place, and what stays fixed.
 - [Recipes](recipes.md): worked examples with real packages, such as IP locations, Maizzle emails, SMS codes, and social login.
 - [Testing](testing.md): test helpers, fakes, factories, and the conformance suite.

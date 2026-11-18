@@ -22,7 +22,7 @@ The [Quick Start](quick-start.md) gives you the short version. This page covers 
 
 ## Installing Keyring
 
-To get started, install the package with Composer. Then run the install command:
+To get started, install the package with Composer, then run the `keyring:install` Artisan command and your migrations:
 
 ```bash
 composer require keyring/keyring
@@ -34,7 +34,7 @@ php artisan migrate
 The `keyring:install` Artisan command asks you three questions:
 
 1. **Which sign-in methods besides the password?** None by default. A new app starts with the password, and the other methods stay in your provider, commented out, so you can add them later. Recovery codes come with any of them. Email codes are listed as what they are: an extra step at sign in, not a second factor. A password and an emailed code is still AAL1 (see [Email Codes](factors.md#what-turning-email-codes-on-means)), and the provider says so above their line.
-2. **Require a second factor for everyone?** This question is asked when you pick an authenticator app, passkeys or security keys, and the answer is yes by default. Users can still sign in with what they have, but every page then sends them to `/settings/security` until they've set one up (see [Requiring a Second Factor](policies.md#requiring-a-second-factor)). The question isn't asked with the password alone or with only email codes, since nobody could meet the requirement in those cases. Then nothing requires a second factor.
+2. **Require a second factor for everyone?** This question is asked when you pick an authenticator app, passkeys, or security keys, and the answer is yes by default. Users can still sign in with what they have, but every page then sends them to `/settings/security` until they've set one up (see [Requiring a Second Factor](policies.md#requiring-a-second-factor)). The question isn't asked with the password alone or with only email codes. Nobody could meet the requirement in those cases, so nothing requires a second factor.
 3. **Which features?** By default, you get registration, password resets, email verification, changing the password, and the security log. If you picked a sign-in method, you also get managing sign-in methods. Registration always brings email verification with it, because by default [new users sign in once they've verified their address](sign-in-flow.md#without-revealing-who-has-an-account).
 
 Without prompts (`--no-interaction`, or in CI), you get the same defaults, which means the password alone. You may also answer the questions with options:
@@ -43,7 +43,13 @@ Without prompts (`--no-interaction`, or in CI), you get the same defaults, which
 php artisan keyring:install --factor=totp --factor=passkeys --feature=registration --feature=manage-authenticators --require-second-factor
 ```
 
-The `--factor` option takes `totp`, `passkeys`, `security-keys` or `email-codes`. It also takes `none`, which keeps the password alone without asking. The `--feature` option takes `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes` or `security-log`. It replaces the defaults (`registration`, `reset-passwords`, `email-verification`, `update-passwords` and `security-log`), so list those too if you want them. An unknown value stops the command before it writes anything. An unknown feature in `config/keyring.php` stops the app from booting, rather than quietly leaving that feature off. The `--require-second-factor` and `--optional-second-factor` options answer the second question. Requiring a second factor without a sign-in method that counts also stops the command.
+| Option | Values |
+|---|---|
+| `--factor` | `totp`, `passkeys`, `security-keys`, or `email-codes`. `none` keeps the password alone without asking. |
+| `--feature` | `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes`, or `security-log`. |
+| `--require-second-factor`, `--optional-second-factor` | Answer the second question. |
+
+The `--feature` option replaces the defaults (`registration`, `reset-passwords`, `email-verification`, `update-passwords`, and `security-log`), so list those too if you want them. An unknown value stops the command before it writes anything, and so does requiring a second factor without a sign-in method that counts.
 
 If you need to overwrite files that already exist, pass `--force`. Without it, existing files are skipped. And when `config/keyring.php` is already there, the command doesn't ask which features to turn on.
 
@@ -58,7 +64,7 @@ The `keyring:install` command publishes the following files:
 | File | What It Is |
 |---|---|
 | `config/keyring.php` | A short config file with the guard, username, home, your features, how registration answers, your enrollment page, and your support contact. Every other option keeps Keyring's default. You may copy any option from [Configuration](configuration.md) to change it. |
-| `database/migrations/*_create_keyring_*_table.php` | Seven tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes`, `keyring_events`, `keyring_failure_counts` and `keyring_password_holds`. They're all created now, so you won't need a new migration to turn on a feature later. Tables for features you don't use stay empty. |
+| `database/migrations/*_create_keyring_*_table.php` | Seven tables: `keyring_authenticators`, `keyring_devices`, `keyring_sessions`, `keyring_pending_changes`, `keyring_events`, `keyring_failure_counts`, and `keyring_password_holds`. They're all created now, so you won't need a new migration to turn on a feature later. Tables for features you don't use stay empty. |
 | `app/Providers/KeyringServiceProvider.php` | Where you register sign-in methods, the policy, the risk signals, and your actions. It lists every sign-in method, with the ones you didn't pick commented out. It does the same for the `keyring.enrolled` middleware, which requires a second factor, and for the [risk signals](risk.md) that your features can't feed yet. To add one later, uncomment its line. The provider is added to `bootstrap/providers.php` for you. |
 | `app/Actions/Keyring/*.php` | Your code for the features that need it. All of these are published and registered, so a feature works as soon as you turn it on: registration (`CreateNewUser`), password resets (`ResetUserPassword`), password changes (`UpdateUserPassword`), email change requests (`ValidateEmailChange`), and the password rules they share (`PasswordValidationRules`). Keyring does the security work around them. |
 
@@ -97,19 +103,19 @@ class User extends Authenticatable implements MustVerifyEmail
 
 The `HasKeyring` trait does three things for you:
 
-- It adds `$user->keyring`, `$user->authenticators()` and `$user->devices()`.
+- It adds `$user->keyring`, `$user->authenticators()`, and `$user->devices()`.
 - Once Keyring handles changes to the `password` and `email` attributes, which happens when you enable `Features::updatePasswords()` and `Features::emailChanges()`, the trait stops those attributes from changing outside Keyring's own flows. See [Protected Changes](protected-changes.md).
 - When you delete a user, the trait revokes their sessions, ends their reset links, and deletes their authenticators, devices, and pending changes. With soft deletes, the sessions and reset links end straight away, along with "remember me" cookies, device trust, and any pending email change. Everything else waits for a force delete. A restored user keeps their sign-in methods and signs in again.
 
-Of course, the published actions hash the password themselves, so they work with or without the `hashed` cast shown above. When you use the cast, a password that's already hashed isn't hashed again.
+The published actions hash the password themselves, so they work with or without the `hashed` cast shown above. When you use the cast, a password that's already hashed isn't hashed again.
 
-Implement `MustVerifyEmail` together with `Features::emailVerification()`, since one doesn't work without the other. If you have the interface but not the feature, registering throws an exception that says so, before anything is saved. With registration on, you need both, unless you set [`registration.reveal_taken`](sign-in-flow.md#saying-when-an-address-is-taken). That's because a new user is signed out until they've verified their address. So the app won't boot without the feature, and registering throws without the interface. If your users implement `MustVerifyEmail`, they must also verify their address before they can add a sign-in method. See [Managing Authenticators](authenticators.md#email-verification).
+`MustVerifyEmail` and `Features::emailVerification()` go together. If your model has the interface but the feature is off, registering throws an exception that says so, before anything is saved. Registration needs both, because a new user is signed out until they've verified their address: the application won't boot with registration on and the feature off, and registering throws without the interface. The exception is [`registration.reveal_taken`](sign-in-flow.md#saying-when-an-address-is-taken), which needs neither. If your users implement `MustVerifyEmail`, they must also verify their address before they can add a sign-in method. See [Managing Authenticators](authenticators.md#email-verification).
 
 By default, Keyring looks users up by the `email` attribute. You may change this with `username` (see [Configuration](configuration.md#guard-and-users)). Lookups trim and lowercase the input, so store addresses the same way. The `Keyring::normalizeUsername` method does exactly that, and the published `CreateNewUser` action uses it. To normalise differently, see [Finding the User](sign-in-flow.md#finding-the-user).
 
 ## Frontend
 
-To use WebAuthn and the challenge page, your pages may use `@keyringjs/keyring`, Keyring's browser package (see [Frontend](frontend.md)):
+If you plan to offer passkeys or security keys, install `@keyringjs/keyring`, Keyring's browser package. It also has helpers for the challenge page:
 
 ```bash
 npm install @keyringjs/keyring
