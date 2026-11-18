@@ -82,8 +82,8 @@ class Ceremonies
     public function creationOptions(Authenticatable&Model $user, Profile $profile, array $exclude): PublicKeyCredentialCreationOptions
     {
         return PublicKeyCredentialCreationOptions::create(
-            // No name: WebAuthn deprecates it and browsers don't show it, so
-            // the options carry the relying party ID in its place.
+            // No name: WebAuthn deprecates it and most browsers don't show
+            // it, so the options carry the relying party ID in its place.
             rp: PublicKeyCredentialRpEntity::create(id: $this->relyingPartyId()),
             user: PublicKeyCredentialUserEntity::create(
                 name: (string) $user->getAttribute($this->keyring->username()),
@@ -338,7 +338,7 @@ class Ceremonies
             unset($options->rp->name);
         }
 
-        return json_encode($options, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return json_encode($options, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     /**
