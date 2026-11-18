@@ -148,7 +148,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | State | Creates |
 |---|---|
 | `totp($secret = null)` | An authenticator app with a random secret, or the one you give. This is also the default state. |
-| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the codes you give. Each must be in the form Keyring makes them, 24 base32 characters (`a`-`z` and `2`-`7`), with or without dashes. Anything else throws an `InvalidArgumentException`. |
+| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the codes you give. Each must be in the form Keyring makes them, 26 base32 characters (`a`-`z` and `2`-`7`), with or without dashes. Anything else throws an `InvalidArgumentException`. |
 | `emailCode()` | Email codes. |
 | `passkey($synced = true)` | A user-verified passkey, which is synced unless you pass `false`. One that isn't synced is device bound, and it reaches AAL3 when it's `attested()` and its factor requires attestation. |
 | `securityKey($userVerified = false)` | A security key. |
