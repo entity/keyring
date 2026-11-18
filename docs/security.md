@@ -677,4 +677,4 @@ Each of these is a choice. The reason is given once, here, and the [requirement-
 - **A request overlapping a session ID change can undo or lose it.** Laravel saves the session when each request ends, so a request still running when the ID changes can save the old session again, and a copied cookie would then keep working. A request sent with the old ID just after the change finds no session, and that browser has to sign in again.
 - **Location signals need trustworthy data.** `HeaderLocator` trusts request headers, so only use it behind a proxy that sets them and can't be bypassed.
 - **Session guards only.** Pending logins and step-up live in the session, so stateless API clients and mobile apps can't use the sign in flow directly.
-- **Work in progress.** Keyring hasn't been tagged or used in production yet.
+- **Not production-tested yet.** Keyring is new, and until 1.0 a minor release may change the public API (see [What's Stable](../README.md#whats-stable)).
