@@ -1664,6 +1664,10 @@ describe('how long the defaults give someone guessing from elsewhere', function 
         while (true) {
             $response = test()->withCookie('known_device', 'a browser nobody has seen')->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
 
+            // A wrong guess or a lock, and nothing else: a request that
+            // errors would never lock, and would go round forever.
+            expect($response->status())->toBeIn([422, 429]);
+
             if ($response->json('errors.email.0') === __('keyring::keyring.locked')) {
                 return [$wrong, (int) $started->diffInMinutes(now())];
             }
