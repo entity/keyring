@@ -66,7 +66,7 @@ This is the last resort. A class you've replaced stops getting Keyring's fixes f
 
 ## Changing the Routes
 
-Set `routes` to `false` and call `Keyring::routes()` inside your own group to change the prefix or middleware. To change a route itself, copy `vendor/entity/keyring/routes/keyring.php` into your app and load that instead. Keep the route names: Keyring's controllers, responses and emailed links find routes by name. See [Routes](configuration.md#routes).
+Set `routes` to `false` and call `Keyring::routes()` inside your own group to change the prefix or middleware. To change a route itself, copy `vendor/keyring/keyring/routes/keyring.php` into your app and load that instead. Keep the route names: Keyring's controllers, responses and emailed links find routes by name. See [Routes](configuration.md#routes).
 
 ## What Stays Fixed
 

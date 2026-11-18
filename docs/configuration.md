@@ -111,7 +111,7 @@ If you set `routes` to `false`, Keyring registers nothing, and you call `Keyring
 Route::prefix('account')->middleware('throttle:60,1')->group(fn () => Keyring::routes());
 ```
 
-`Keyring::routes()` adds the `middleware` option, but not `prefix` or `domain`; your group decides those. To change the routes themselves, copy `vendor/entity/keyring/routes/keyring.php` into your app instead, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
+`Keyring::routes()` adds the `middleware` option, but not `prefix` or `domain`; your group decides those. To change the routes themselves, copy `vendor/keyring/keyring/routes/keyring.php` into your app instead, and keep the route names: Keyring's controllers, emails and middleware link to routes by name (for example `login`, `keyring.confirm.challenge` and `keyring.devices.report`).
 
 The browser package uses Keyring's default paths. If you change the prefix, tell it with [`configureRoutes({ prefix })`](frontend.md#changing-routes).
 

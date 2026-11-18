@@ -13,7 +13,7 @@ Keyring starts as a small foundation: signing in with a password, signing out, a
 ## Installing
 
 ```bash
-composer require entity/keyring
+composer require keyring/keyring
 php artisan keyring:install
 php artisan migrate
 ```
@@ -22,7 +22,7 @@ php artisan migrate
 >
 > ```bash
 > composer config repositories.keyring vcs https://github.com/entity/keyring
-> composer require entity/keyring:dev-main
+> composer require keyring/keyring:dev-main
 > ```
 
 `keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), and which features to turn on. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes and the security log. You can add the rest later by uncommenting a line: every sign-in method is in your provider, every feature is in the config, and every action is published, so each works as soon as it's on.

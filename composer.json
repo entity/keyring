@@ -1,5 +1,5 @@
 {
-    "name": "entity/keyring",
+    "name": "keyring/keyring",
     "description": "Factor-driven authentication for Laravel: many authenticators per user, devices, sessions, step-up and risk.",
     "keywords": [
         "laravel",
