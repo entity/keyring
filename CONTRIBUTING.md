@@ -1,5 +1,9 @@
 # Contributing
 
+Thank you for considering a contribution to Keyring. Every fix, test, and suggestion helps, and we're glad you're here.
+
+Keyring's checks are Composer scripts, listed below:
+
 ```bash
 composer test      # tests
 composer lint      # code style
@@ -10,12 +14,12 @@ composer check     # everything CI runs: Rector (dry run), Pint, PHPStan and Pes
 
 Run `composer check` before opening a pull request.
 
-`bin/ci` runs every CI job on your own machine: the checks above, the oldest dependencies Keyring allows, PostgreSQL, MySQL (in Docker) and the browser package. `bin/ci tests js` runs only the jobs you name. Run one at a time.
+The `bin/ci` script runs every CI job on your own machine. That covers the checks above, the oldest dependencies Keyring allows, PostgreSQL, MySQL (in Docker), and the browser package. To run only some of the jobs, name them, as in `bin/ci tests js`. Run one at a time.
 
-The race tests run operations in separate processes against a real database, so they need PostgreSQL or MySQL and run as their own suite (CI runs them on both):
+The race tests run operations in separate processes against a real database. That means they need PostgreSQL or MySQL, and they run as their own suite. CI runs them on both databases:
 
 ```bash
 DB_CONNECTION=pgsql DB_DATABASE=keyring_test vendor/bin/pest --testsuite=Concurrency
 ```
 
-Please don't open a public issue for a security problem. See the [security policy](SECURITY.md) for how to report one.
+Please don't open a public issue for a security problem. The [security policy](SECURITY.md) explains how to report one.

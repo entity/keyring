@@ -11,7 +11,7 @@
 
 ## Introduction
 
-Every event Keyring dispatches is in the `Keyring\Events` namespace, and its data is in public readonly properties. Listen for them the way you would any Laravel event:
+Every event lives in the `Keyring\Events` namespace, and its data is stored in public readonly properties. To listen for them, use the same approach you would for any Laravel event. For example, this listener saves the time of each sign in:
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -22,9 +22,9 @@ Event::listen(function (Authenticated $event) {
 });
 ```
 
-`user` is always your user model. Events fire whether or not a feature that reacts to them is on: the [security log](security-log-and-emails.md) and the [security emails](security-log-and-emails.md#security-emails) are listeners of these same events, so your own listeners don't need either.
+The `user` property is always an instance of your user model. Keyring fires events whether or not a feature that reacts to them is turned on. The [security log](security-log-and-emails.md) and the [security emails](security-log-and-emails.md#security-emails) are listeners for these same events, so your own listeners don't need either one.
 
-No event has a password, code or token among its properties. `Attempting`, `FactorFailed` and `Lockout` do carry the request as it arrived, which includes what the user typed, so don't log or serialise it whole, and don't queue a listener for those three.
+No event has a password, code, or token among its properties. However, `Attempting`, `FactorFailed`, and `Lockout` do carry the request as it arrived, including whatever the user typed. Don't log or serialise that request in full, and don't queue a listener for those three events.
 
 ## Signing In and Confirming
 
@@ -34,26 +34,26 @@ No event has a password, code or token among its properties. `Attempting`, `Fact
 | `FactorChallenged` | The challenge page showed a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (null when the user wasn't found), `authenticator` (nullable), `factor`, `request` |
-| `Lockout` | A rate limit was hit, including an account's own limit refusing a sign in that is answered like a wrong password. Dispatched for every request the limit refuses; the [security log](security-log-and-emails.md#refusals-that-repeat) notes it once per lock. | `request`, `factor`, `retryAfter` (seconds, or `null` when waiting won't help: the factor is refused until its failures in a row are cleared) |
-| `AccountLocked` | Failed attempts got a factor that can start a sign in refused for the account until a password reset or `Keyring::unlock()`: it used up its failures in a row, or `limits.lock_after` held it. Browsers the account has signed in from may still get in. | `user`, `factor` |
-| `Authenticated` | A login completed and the user was signed in. | `user`, `attempt`, `device` (null without `Features::devices()`) |
+| `Lockout` | A rate limit was hit. This includes an account's own limit refusing a sign in, which is answered like a wrong password. It's dispatched for every request the limit refuses. The [security log](security-log-and-emails.md#refusals-that-repeat) notes it once per lock. | `request`, `factor`, `retryAfter` (in seconds, or `null` when waiting won't help, meaning the factor stays refused until its failures in a row are cleared) |
+| `AccountLocked` | Failed attempts have caused a factor that can start a sign in to be refused for the account until a password reset or `Keyring::unlock()`. This happens when the factor used up its failures in a row, or when `limits.lock_after` held it. Browsers the account has signed in from may still get in. | `user`, `factor` |
+| `Authenticated` | A login completed, and the user was signed in. | `user`, `attempt`, `device` (null without `Features::devices()`) |
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |
 
-`purpose` is the `Keyring\Enums\Purpose` enum, `Login` or `Confirm`. The verification events fire for both, so check `$event->attempt->purpose` when a listener should only react to sign ins. See [The Sign In Flow](sign-in-flow.md#events).
+`purpose` is the `Keyring\Enums\Purpose` enum, either `Login` or `Confirm`. The verification events fire for both purposes, so check `$event->attempt->purpose` when a listener should only react to sign ins. See [The Sign In Flow](sign-in-flow.md#events).
 
 ## Sessions and Devices
 
 | Event | When | Properties |
 |---|---|---|
-| `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)` (valid for `devices.report_link_for` unless you pass days) for a ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
+| `NewDeviceSignedIn` | Someone signed in from a device the account hasn't used before. | `user`, `device`, and `revokeUrl($days = null)`. The link is valid for `devices.report_link_for` unless you pass a number of days. It's the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link). |
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
-| `SessionsRevoked` | Sessions were signed out: "sign out everywhere else", one session ended from the sessions list, an administrator's `keyring:sign-out` for the user, or the first request refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
-| `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk` or `not_allowed` |
-| `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused, with nothing proved. | `user`, `session` (the `RegisteredSession` it carries on as) |
-| `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice), so two browsers held the same ones, and the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended: its device, IP address and user agent are those of whoever used the cookie first) |
+| `SessionsRevoked` | Sessions were signed out. This happens with "sign out everywhere else", when one session is ended from the sessions list, when an administrator runs `keyring:sign-out` for the user, or on the first request refused for an account [the app keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
+| `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed` |
+| `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved. | `user`, `session` (the `RegisteredSession` it carries on as) |
+| `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). This means two browsers held the same cookies, so the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended. Its device, IP address, and user agent belong to whoever used the cookie first.) |
 
-A user signing out on purpose is `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`; `RememberMeReused` fires once, and only when there was still a session to end. See [Devices & Sessions](devices-and-sessions.md#events).
+A user who signs out on purpose triggers `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`. `RememberMeReused` fires once, and only when there was still a session to end. See [Devices & Sessions](devices-and-sessions.md#events).
 
 ## Authenticators
 
@@ -63,46 +63,46 @@ A user signing out on purpose is `LoggedOut`, not `SessionEnded`. The request th
 | `AuthenticatorRemoved` | The user removed one. | `user`, `authenticator` |
 | `RecoveryCodesGenerated` | New recovery codes were made, and the old ones stopped working. | `user`, `authenticator` |
 | `RecoveryCodeUsed` | A recovery code was used. | `authenticator`, `remaining` |
-| `CloneSuspected` | A passkey or security key's counter went backwards, and the sign in was refused. | `authenticator` |
+| `CloneSuspected` | A passkey or security key's counter went backwards, so the sign in was refused. | `authenticator` |
 
-Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`. Where an event has no `user`, the owner is `$event->authenticator->user()`. See [Managing Authenticators](authenticators.md#events) and [Counters and Cloned Keys](passkeys.md#counters-and-cloned-keys).
+Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`. When an event has no `user` property, the owner is `$event->authenticator->user()`. See [Managing Authenticators](authenticators.md#events) and [Counters and Cloned Keys](passkeys.md#counters-and-cloned-keys).
 
 ## Account Changes
 
 | Event | When | Properties |
 |---|---|---|
-| `EmailChangeRequested` | An email change was requested and its links were sent. | `user`, `change` |
-| `EmailChanged` | The email address changed. The old address can still revert it for a while. | `user`, `change` |
+| `EmailChangeRequested` | An email change was requested, and its links were sent. | `user`, `change` |
+| `EmailChanged` | The email address changed. The old address can still revert the change for a while. | `user`, `change` |
 | `EmailChangeReverted` | The old address undid a change. Every session was signed out. | `user`, `change` |
 | `PasswordChanged` | The user changed their password. | `user` |
 | `PasswordReset` | The password was reset from a reset link. Every session was signed out. | `user` |
 | `PasswordChangeRequired` | A user was [held until they choose a new password](protected-changes.md#requiring-a-password-change). | `user`, `reason` (nullable) |
-| `ProtectionBypassed` | Protected attributes were changed with [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection). | `reason` (nullable) |
+| `ProtectionBypassed` | Protected attributes were changed with [`Keyring::withoutProtection`](protected-changes.md#bypassing-protection). | `reason` (nullable) |
 
-`change` is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden when it's serialised. See [Protected Changes](protected-changes.md#events).
+The `change` property is a `Keyring\Models\PendingChange`. Its tokens and addresses are hidden when it's serialised. See [Protected Changes](protected-changes.md#events).
 
 ## Risk
 
 | Event | When | Properties |
 |---|---|---|
-| `RiskAssessed` | Risk was assessed and the action did something. | `user`, `risk`, `action`, `checkpoint` (`Checkpoint::Login` or `Checkpoint::Request`) |
+| `RiskAssessed` | Keyring assessed the risk, and the action did something. | `user`, `risk`, `action`, `checkpoint` (`Checkpoint::Login` or `Checkpoint::Request`) |
 
-An assessment that ends in `Action::allow()` dispatches nothing. See [Risk](risk.md#events-and-logging).
+An assessment that ends in `Action::allow` dispatches nothing. See [Risk](risk.md#events-and-logging).
 
 ## Refusals
 
 | Event | When | Properties |
 |---|---|---|
-| `AccessRefused` | A signed-in user asked for an authenticator, device or session that isn't theirs, or that doesn't exist (both get the same 404, so the event doesn't tell them apart), or opened an email verification link made for another account. | `user`, `resource` (`authenticator`, `device`, `session` or `email_verification`), `id` (what was asked for, as it was sent; for a session, its handle) |
-| `RateLimited` | The form limiter refused a request to one of Keyring's routes outside the sign-in limits: registration, a reset, a change, an emailed link or the page it opens, or passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring`, `keyring-pages` or `keyring-login-options`), `route` (its name), `retryAfter` (seconds) |
-| `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down: a wrong code, a key it won't take) or `not_allowed` (the account may not add one yet) |
+| `AccessRefused` | A signed-in user asked for an authenticator, device, or session that isn't theirs, or that doesn't exist. Both cases get the same 404, so the event doesn't tell them apart. The event also fires when someone opens an email verification link made for another account. | `user`, `resource` (`authenticator`, `device`, `session`, or `email_verification`), `id` (what was asked for, as it was sent. For a session, this is its handle.) |
+| `RateLimited` | The form limiter refused a request to one of Keyring's routes, outside the sign-in limits. This covers registration, a reset, a change, an emailed link or the page it opens, and passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring`, `keyring-pages`, or `keyring-login-options`), `route` (its name), `retryAfter` (in seconds) |
+| `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down, such as with a wrong code or a key it won't take) or `not_allowed` (the account may not add one yet) |
 | `AuthenticatorRemovalRefused` | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `user`, `authenticator` |
-| `LinkRefused` | An emailed link was refused: a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
-| `VerificationRefused` | A sign in or step-up met its requirement and was still refused, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `attempt`, `factor`, `skipped` (the steps' class names) |
+| `LinkRefused` | An emailed link was refused. This happens for a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
+| `VerificationRefused` | A sign in or step-up met its requirement but was still refused, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `attempt`, `factor`, `skipped` (the steps' class names) |
 
-None of these changes what the person who was refused sees. Each fires every time, however often it's repeated: only the [security log](security-log-and-emails.md#refusals-that-repeat) limits how many it writes down. A form that fails ordinary validation dispatches nothing.
+None of these changes what the refused person sees. Each one fires every time, however often it's repeated. Only the [security log](security-log-and-emails.md#refusals-that-repeat) limits how many it writes down. A form that fails ordinary validation dispatches nothing.
 
-That makes them the place to count from. Keyring keeps no metrics of its own, so if you watch for credential stuffing, feed your counters from a listener:
+That makes these events the right place to count from. Keyring keeps no metrics of its own, so if you watch for credential stuffing, you may feed your counters from a listener:
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -119,9 +119,9 @@ Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited',
 
 ## Laravel's Auth Events
 
-Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on, so the verification email it sends doesn't show in how long a new address takes to answer. It also dispatches these next to its own, so listeners and packages built for them keep working:
+Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered`, and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on. That way, the verification email it sends doesn't show up in how long a new address takes to get an answer. Keyring also dispatches these events alongside its own, so listeners and packages built for them keep working:
 
-| Laravel event | Dispatched with |
+| Laravel Event | Dispatched With |
 |---|---|
 | `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
 | `Illuminate\Auth\Events\Lockout` | `Lockout`, so once for every refused request. |

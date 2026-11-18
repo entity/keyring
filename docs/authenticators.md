@@ -18,7 +18,7 @@
 
 ## Introduction
 
-One set of routes adds, renames and removes authenticators for every factor. There are no per-factor routes to register: when you add a factor, its enrollment works through the same endpoints. Turn them on with `Features::manageAuthenticators()`:
+A single set of routes adds, renames, and removes authenticators for every factor. You don't need to register any per-factor routes. When you add a factor, its enrollment works through the same endpoints. To turn these routes on, enable the `Features::manageAuthenticators()` feature:
 
 ```php
 'features' => [
@@ -26,51 +26,56 @@ One set of routes adds, renames and removes authenticators for every factor. The
 ],
 ```
 
-Without it, users can't set up any sign-in method besides the password themselves. `keyring:install` turns it on when you pick one.
+Without this feature, users can't set up any sign-in method besides the password on their own. The `keyring:install` command turns it on when you choose a sign-in method.
 
 ## Routes
 
 | Method | URI | Name | Does |
 |---|---|---|---|
-| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begin: returns a QR code, WebAuthn options, recovery codes... |
-| `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finish: prove it works. Uses the `keyring` rate limiter and the session lock. |
-| `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Rename, or make it the default. |
-| `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Remove it. Uses the `keyring` rate limiter, as it can check the password. |
+| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begins an enrollment: returns a QR code, WebAuthn options, recovery codes, and so on. |
+| `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finishes it by proving the new authenticator works. Uses the `keyring` rate limiter and the session lock. |
+| `PATCH` | `/user/authenticators/{id}` | `keyring.authenticators.update` | Renames the authenticator, or makes it the default. |
+| `DELETE` | `/user/authenticators/{id}` | `keyring.authenticators.destroy` | Removes the authenticator. Uses the `keyring` rate limiter, because it may check the password. |
 
-These routes need `auth:{guard}`, plus the `changes_middleware` config option, `['keyring.fresh:15m']` by default. Users must have verified, in the last 15 minutes, the strongest combination their account can give: someone with a key that can't leave its device uses it before adding another, and someone with only a password uses that. See [Fresh Verification](step-up.md#fresh-verification).
+These routes require `auth:{guard}` middleware, along with the middleware set in the `changes_middleware` configuration option. By default, that is `['keyring.fresh:15m']`. Users must have verified, within the last 15 minutes, the strongest combination their account can offer. For example, someone with a key that can't leave its device uses that key before adding another, and someone with only a password uses the password. See [Fresh Verification](step-up.md#fresh-verification).
 
-`{factor}` must be a registered factor that implements `Enrollable`; otherwise the route returns a 404. Users can only see and change their own authenticators; anyone else's ID returns a 404.
+The `{factor}` segment must be a registered factor that implements `Enrollable`. If it isn't, the route returns a 404. Users can only see and change their own authenticators, and requesting anyone else's ID also returns a 404.
 
 ## Email Verification
 
-When your user model implements `MustVerifyEmail`, users must verify their email address before beginning or confirming an enrollment. Until then, both routes return a `403` with `keyring::keyring.verify_email_first`.
+When your user model implements `MustVerifyEmail`, users must verify their email address before they begin or confirm an enrollment. Until they do, both routes return a `403` response with `keyring::keyring.verify_email_first`.
 
-Until the address is verified, the account may belong to whoever typed that address first. Factors they added would survive the real owner's password reset.
+Until an address is verified, the account may belong to whoever typed that address first. Any factors they added would survive the real owner's password reset.
 
-So with `Features::registration()` on, where anyone can type any address, users must be able to verify theirs: your user model must implement `MustVerifyEmail`, with `Features::emailVerification()` on. Otherwise enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` that says what to change. Without registration, accounts come from you (an admin, an import, an invitation), so this isn't required. `keyring:install` turns on email verification whenever you pick registration, which [needs it by default](sign-in-flow.md#without-revealing-who-has-an-account) for its own reasons: there, nobody is signed in at all until their address is verified.
+For that reason, if `Features::registration()` is on, and anyone can type any address, users must be able to verify theirs. Your user model must implement `MustVerifyEmail`, and `Features::emailVerification()` must be on. Otherwise, enrolling throws a `Keyring\Exceptions\EmailVerificationRequired` exception that explains what to change.
+
+Without registration, accounts come from you, through an admin, an import, or an invitation, so verification isn't required.
+
+> [!NOTE]
+> The `keyring:install` command turns on email verification whenever you choose registration. Registration [needs it by default](sign-in-flow.md#without-revealing-who-has-an-account) for its own reasons: there, nobody is signed in at all until their address is verified.
 
 ### Who May Enroll
 
-If your app proves addresses another way (a code at sign-up, single sign-on, an admin approving accounts), say who may add a sign-in method yourself. This replaces the rule above, including the exception:
+If your app proves addresses another way, such as with a code at sign-up, single sign-on, or an admin approving accounts, you may decide who can add a sign-in method yourself. This replaces the rule above, including the exception:
 
 ```php
 Keyring::allowEnrollmentWhen(fn (User $user) => $user->approved_at !== null);
 ```
 
-A user it refuses gets the same `403`. Only return true once you know the account is its owner's: anything less brings back the takeover the rule is there to stop.
+A user this check refuses gets the same `403`. Only return `true` once you know the account belongs to its owner. Anything less brings back the takeover that the rule is there to stop.
 
 ## Adding an Authenticator
 
-Adding is always two steps. Nothing is saved until the second one succeeds.
+Adding an authenticator always takes two steps. Nothing is saved until the second one succeeds.
 
 ### Beginning
 
-`POST /user/authenticators/{factor}` starts an enrollment and keeps its secret state in the session for 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)). Starting again replaces it. Starting one for a factor that sends a code counts toward the account's [three codes per 10 minutes](sign-in-flow.md#sending-codes). The response's `enrollment` holds what to show the user:
+`POST /user/authenticators/{factor}` starts an enrollment. It keeps the enrollment's secret state in the session for 15 minutes ([`enrollments.keep_for`](configuration.md#account-changes-and-enrollment)). Starting again replaces the previous enrollment. If the factor sends a code, starting it counts toward the account's [three codes per 10 minutes](sign-in-flow.md#sending-codes). The `enrollment` in the response holds what you should show the user:
 
-| Factor | Request fields | `enrollment` |
+| Factor | Request Fields | `enrollment` |
 |---|---|---|
 | `totp` | `name` (optional) | `secret`, `algorithm` (`SHA1` unless the factor is [set up with another](factors.md#authenticator-apps-totp)), `url` (`otpauth://`), `qr` (an SVG string) |
-| `email-code` | `name` (optional) | `length`, `sent: true`. A code is sent to the current address. |
+| `email-code` | `name` (optional) | `length`, and `sent: true`. A code is sent to the current address. |
 | `recovery` | none | `codes`: the new plain codes, shown once |
 | `passkey`, `security-key` | none | `options`: WebAuthn creation options for the browser |
 
@@ -87,11 +92,11 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
 }
 ```
 
-Authenticator apps and email codes take an optional `name` when beginning or confirming (the one sent when confirming wins); passkeys and security keys take it when confirming. Names default to "Authenticator app", "Email", "Passkey" or "Security key", and are cut to 64 characters. A name that isn't valid UTF-8, or holds a NUL character, is refused with an error on `name`.
+Authenticator apps and email codes accept an optional `name` when beginning or confirming. If you send one in both places, the name sent when confirming wins. Passkeys and security keys accept a `name` when confirming. If no name is sent, it defaults to "Authenticator app", "Email", "Passkey", or "Security key", depending on the factor. Names are cut to 64 characters. A name that isn't valid UTF-8, or that holds a NUL character, is refused with an error on `name`.
 
 ### Confirming
 
-`POST /user/authenticators/{factor}/confirm` proves the enrollment works:
+`POST /user/authenticators/{factor}/confirm` proves that the enrollment works:
 
 | Factor | Fields |
 |---|---|
@@ -99,9 +104,9 @@ Authenticator apps and email codes take an optional `name` when beginning or con
 | `recovery` | none: confirming means "I've saved these" |
 | `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 
-A wrong proof fails with `keyring::keyring.invalid`, and an expired or missing enrollment, or one that was already confirmed, with `keyring::keyring.enrollment_expired`, both on the factor's field (`code`, or `credential` for passkeys and security keys). Email enrollment codes keep their guess count between tries, like email codes at sign in.
+A wrong proof fails with `keyring::keyring.invalid`. An expired or missing enrollment, or one that has already been confirmed, fails with `keyring::keyring.enrollment_expired`. Both errors appear on the factor's field: `code`, or `credential` for passkeys and security keys. Email enrollment codes keep their guess count between tries, as email codes at sign in do.
 
-On success, the response contains the new authenticator, as its factor's `present()` gives it:
+On success, the response contains the new authenticator, as its factor's `present` method gives it:
 
 ```json
 {
@@ -111,78 +116,79 @@ On success, the response contains the new authenticator, as its factor's `presen
 }
 ```
 
-`createdAt` and `lastUsedAt` are when it was added and last used to sign in or confirm, as ISO 8601 dates, for the list on your settings page: OWASP's Passkey Security Cheat Sheet has a page that manages credentials show both. The [challenge page](sign-in-flow.md#page-props) gets the same shape without them.
+`createdAt` and `lastUsedAt` record when the authenticator was added and last used to sign in or confirm. They're ISO 8601 dates, and they're meant for the list on your settings page. OWASP's Passkey Security Cheat Sheet suggests that a page managing credentials shows both. The [challenge page](sign-in-flow.md#page-props) gets the same shape, without them.
 
-`recoveryCodes` is only there when Keyring generated recovery codes along with this authenticator (see below).
+The `recoveryCodes` key only appears when Keyring generated recovery codes along with this authenticator (see below).
 
-The user's first saved authenticator becomes their default (never recovery codes). A passkey or security key that's already registered, to anyone, can't be registered again. Confirming a factor that allows only one per user (`email-code`, `recovery`) replaces the one they had.
+The first authenticator a user saves becomes their default, though recovery codes never do. A passkey or security key that's already registered, to anyone, can't be registered again. Confirming a factor that allows only one per user (`email-code` or `recovery`) replaces the one they already have.
 
-Confirming takes proving the new authenticator, so the session then counts it as verified, like one used to sign in: a user who signed in with a password and adds an authenticator app is at [AAL2](policies.md#assurance-levels) from that response on, and the session ID changes as it does for any proof. That's also why the first recovery codes can be shown there: NIST SP 800-63B-4 (Sec. 3.1.2.1) wants codes delivered online to go to a session that has proved two factors. New recovery codes prove nothing and count for nothing, and nothing proved earlier gets any fresher.
+Confirming an authenticator also proves it, so the session counts it as verified, in the same way as a sign in. For example, a user who signed in with a password and then adds an authenticator app reaches [AAL2](policies.md#assurance-levels) with that response. The session ID changes, as it does after any proof. This is also why the first recovery codes can be shown at that point. NIST SP 800-63B-4 (Sec. 3.1.2.1) expects codes delivered online to go to a session that has proved two factors. New recovery codes prove nothing and count for nothing, and nothing proved earlier becomes any fresher.
 
 ## Recovery Codes
 
-The first time a user adds an extra factor and has no recovery codes, or has used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) isn't a factor, so adding one comes with no codes.
+The first time a user adds an extra factor while they have no recovery codes, or have used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once, and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) isn't a factor, so adding one comes with no codes.
 
-To give the user a new set, enroll the `recovery` factor: begin returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor (an email code isn't one) fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored.
+To give the user a new set, enroll the `recovery` factor. Beginning returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored. An email code doesn't count as that second factor.
 
-Each code works once. The challenge page shows how many are left (`remaining`), and `Keyring\Events\RecoveryCodeUsed` carries the count.
+Each code works only once. The challenge page shows how many are left as `remaining`, and the `Keyring\Events\RecoveryCodeUsed` event carries the same count.
 
-NIST SP 800-63B-4 (Sec. 4.2.1.1) says a new code is issued once one is used. A new code is only worth something once the user has seen and saved it, so Keyring doesn't make one up behind their back. It marks the set and tells your app, and your app sends the user to make a new set:
+NIST SP 800-63B-4 (Sec. 4.2.1.1) says a new code should be issued once one is used. A new code is only worth something once the user has seen and saved it, so Keyring doesn't generate one behind the user's back. Instead, it marks the set and tells your app, which then sends the user to make a new set:
 
-- `$user->keyring->shouldReplaceRecoveryCodes()` is true from the moment a code is used until the set is replaced, however many times they sign in meanwhile.
-- The set's [presentation](sign-in-flow.md#page-props) carries the same answer as `replace`, next to `remaining`, wherever you list authenticators.
+- `$user->keyring->shouldReplaceRecoveryCodes()` is true from the moment a code is used until the set is replaced, however many times the user signs in meanwhile.
+- The set's [presentation](sign-in-flow.md#page-props) includes the same answer as `replace`, next to `remaining`, wherever you list authenticators.
 
-Share it with your pages and show a banner that links to where they generate codes, or redirect there after a sign in:
+To share this with your pages, add it to the props your `HandleInertiaRequests` middleware shares. Then show a banner that links to where users generate codes, or redirect them there after a sign in:
 
 ```php
 // app/Http/Middleware/HandleInertiaRequests.php
 'replaceRecoveryCodes' => fn () => (bool) $request->user()?->keyring->shouldReplaceRecoveryCodes(),
 ```
 
-It loads the user's authenticators, so keep it lazy as above. A session that just signed in with a recovery code and its password is fresh, so it can generate the new set straight away without confirming again. Until your app does this, a used code is used up and nothing takes its place: NIST's rule is only met once the user has their new set.
- Users with no codes left keep the (empty) set until they make a new one, add another factor (which replaces it with a new set) or it's removed along with their last factor. An empty set is never offered as a way in.
+This loads the user's authenticators, so keep it lazy, as shown above. A session that signed in a moment ago with a recovery code and its password is fresh. It can generate the new set straight away without confirming again. Until your app does this, a used code is spent and nothing takes its place. NIST's rule is only met once the user has their new set.
+
+Users with no codes left keep the empty set until they make a new one, add another factor (which replaces it with a new set), or remove it along with their last factor. An empty set is never offered as a way in.
 
 ## Renaming and Choosing the Default
 
-`PATCH /user/authenticators/{id}` accepts:
+`PATCH /user/authenticators/{id}` accepts these fields:
 
-| Field | |
+| Field | Description |
 |---|---|
 | `name` | Optional, up to 64 characters of valid UTF-8. |
-| `default` | Optional boolean. `true` makes this the default and clears the flag on the user's others. Not allowed for recovery codes. |
+| `default` | An optional boolean. Passing `true` makes this authenticator the default, and clears the flag on the user's others. This isn't allowed for recovery codes. |
 
-The default authenticator is offered first when a second factor is needed. Recovery codes are a fallback, so they can't be made the default.
+The default authenticator is offered first when a second factor is needed. Recovery codes are only a fallback, so they can't be made the default.
 
 ## Removing Authenticators
 
-`DELETE /user/authenticators/{id}` removes an authenticator, unless what's left would leave the user unable to sign in, or unable to meet the policy (for policies without `ifEnrolled()`). That fails with `keyring::keyring.last_factor` on `authenticator`.
+`DELETE /user/authenticators/{id}` removes an authenticator. The request fails, though, if what remains would leave the user unable to sign in, or unable to meet the policy (for policies without `ifEnrolled()`). In that case, the error is `keyring::keyring.last_factor`, on `authenticator`.
 
-Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes go with it. The policy is checked against what will actually be left.
+Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes are removed with it. The policy is checked against what will actually remain.
 
-Removing an authenticator stops trusting all of the user's devices (see [Trusted Devices](devices-and-sessions.md#trusted-devices)).
+Removing an authenticator also stops trusting all of the user's devices. See [Trusted Devices](devices-and-sessions.md#trusted-devices).
 
-It also forgets the failures counted against it. An authenticator that failed too many times in a row is refused until it's set up again (see [At the Cap](security.md#at-the-cap)), and this is how a user does that: they sign in another way, remove it and add it back, and the new one starts from nothing. The password is set up again by resetting or changing it.
+Removing an authenticator also clears the failures counted against it. An authenticator that failed too many times in a row is refused until it's set up again (see [At the Cap](security.md#at-the-cap)). To do that, a user signs in another way, removes the authenticator, and adds it back. The new one starts from nothing. The password is set up again by resetting or changing it.
 
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
-Removing the user's last second factor (the last one beyond recovery codes and email codes) also needs their current password in the request as `password`. Their password may have been as short as `min_with_mfa` while it had a second factor beside it, and on its own NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so it checks the length then: a missing or wrong password, or one that's too short, gets an error on `password` asking them to change it first.
+Removing the user's last second factor (the last one beyond recovery codes and email codes) also requires their current password in the request, as `password`. While a second factor sat beside it, their password may have been as short as `min_with_mfa`. On its own, though, NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so at this point it checks the length. A missing or wrong password, or one that's too short, gets an error on `password` asking the user to change it first.
 
 ## Signing Out Other Sessions
 
-Someone else being signed in is often why a user adds or removes a sign-in method. Confirming an enrollment (new recovery codes included) and removing an authenticator both take an optional boolean, `sign_out_others`. When it's `true` and the change went through, Keyring signs the user out everywhere but here, as [`DELETE /user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) does: every other session is revoked, the "remember me" token is changed, no other device stays trusted, a pending email change is cancelled, and this session carries on under a new ID.
+A user often adds or removes a sign-in method because someone else is signed in to the account. Confirming an enrollment (including the one that creates new recovery codes) and removing an authenticator both accept an optional boolean, `sign_out_others`. When it's `true` and the change goes through, Keyring signs the user out everywhere except here, in the same way as [`DELETE /user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) does. Every other session is revoked, the "remember me" token is changed, no other device stays trusted, and a pending email change is cancelled. This session carries on under a new ID.
 
 ```ts
 await confirmEnrollment('totp', enrollment, { code, sign_out_others: true })
 await removeAuthenticator(id, undefined, { signOutOthers: true })
 ```
 
-It's off unless the request asks, so offer it as a checkbox next to the button. A password change is the other way round, [on unless told otherwise](protected-changes.md#changing-the-password), because everyone who was signed in knew the old password. A new passkey takes nothing away from a session that signed in without it, and an authenticator that's removed already stops counting in every session it was used in.
+This is off unless the request asks for it, so you may offer it as a checkbox next to the button. A password change works the other way round. It [signs other sessions out unless you tell it not to](protected-changes.md#changing-the-password), because everyone who was signed in knew the old password. Adding a new passkey takes nothing away from a session that signed in without it. A removed authenticator already stops counting in every session it was used in.
 
-Anything but a boolean fails with an error on `sign_out_others` before the enrollment is spent, and a change that's refused ends no sessions.
+A value that isn't a boolean fails with an error on `sign_out_others` before the enrollment is spent. A change that's refused ends no sessions.
 
 ## Responses
 
-Every route answers with a [status response](sign-in-flow.md#status-responses). Requests that expect JSON (and aren't Inertia visits) get JSON with `status`, `message` and the extra data:
+Every route answers with a [status response](sign-in-flow.md#status-responses). Requests that expect JSON, and that aren't Inertia visits, get JSON with `status`, `message`, and the extra data:
 
 | Action | `status` | Also |
 |---|---|---|
@@ -191,7 +197,7 @@ Every route answers with a [status response](sign-in-flow.md#status-responses). 
 | Update | `authenticator-updated` | `authenticator` |
 | Remove | `authenticator-removed` | |
 
-Other requests are redirected back with the `status` flashed, and the extra data flashed, encrypted, for the next request. Read it with `Keyring::result()`, or one key with `Keyring::result('enrollment')`. The [browser package](frontend.md#managing-authenticators) uses the JSON form.
+Other requests are redirected back with the `status` flashed to the session. The extra data is flashed too, encrypted, for the next request. Read it with `Keyring::result()`, or read a single key with `Keyring::result('enrollment')`. The [browser package](frontend.md#managing-authenticators) uses the JSON form instead.
 
 ## From JavaScript
 
@@ -211,11 +217,11 @@ await makeDefault(id)
 await removeAuthenticator(id)
 ```
 
-`confirmEnrollment()` runs the browser's WebAuthn ceremony for `passkey` and `security-key`. These helpers throw a `KeyringRequestError` on failure, including the `423` from step-up. See [Frontend](frontend.md#managing-authenticators).
+For `passkey` and `security-key`, `confirmEnrollment()` runs the browser's WebAuthn ceremony. If a helper fails, it throws a `KeyringRequestError`. That includes the `423` response from step-up. See [Frontend](frontend.md#managing-authenticators).
 
 ## From PHP
 
-`$user->keyring` (or `Keyring::for($user)`) is a `Keyring\UserKeyring`:
+`$user->keyring`, or `Keyring::for($user)`, gives you a `Keyring\UserKeyring`:
 
 ```php
 use Keyring\Enums\Category;
@@ -229,13 +235,13 @@ $user->keyring->canMeet($requirement);
 $user->keyring->canSignIn();                 // can anything start a login?
 ```
 
-The result is cached on the model. Call `$user->keyring->refresh()` after changing authenticators in the same request.
+Keyring caches the result on the model. If you change authenticators within the same request, call `$user->keyring->refresh()` afterward.
 
-`$user->authenticators()` is a normal Eloquent relationship if you need to query rows directly. Secrets, public keys and credential IDs are hidden when the model is serialised, and `secret` is encrypted at rest.
+If you need to query rows directly, `$user->authenticators()` is a normal Eloquent relationship. When the model is serialised, secrets, public keys, and credential IDs are hidden. The `secret` attribute is also encrypted at rest.
 
 ## Events
 
-In `Keyring\Events`:
+The events are in `Keyring\Events`:
 
 | Event | Properties |
 |---|---|
@@ -249,4 +255,4 @@ In `Keyring\Events`:
 
 Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.
 
-The last three are what was turned away: a confirmation whose code or key was wrong (or an account that may not enroll yet), a removal that would have left the user unable to sign in, and a request for an authenticator that isn't the user's. Each is answered as before, a 422, 403 or 404, and written to the [security log](security-log-and-emails.md#entry-types).
+The last three events record what was turned away. These are a confirmation whose code or key was wrong (or that came from an account not yet allowed to enroll), a removal that would have left the user unable to sign in, and a request for an authenticator that isn't the user's. Each one still gets the same response: a 422, 403, or 404. Each is also written to the [security log](security-log-and-emails.md#entry-types).

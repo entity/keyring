@@ -20,7 +20,7 @@
 
 ## Introduction
 
-Keyring supports WebAuthn through one factor class, `Keyring\Factors\WebAuthn`, with two profiles. Register either or both:
+Keyring supports WebAuthn through a single factor class, `Keyring\Factors\WebAuthn`, which comes in two profiles. You may register either one or both:
 
 ```php
 use Keyring\Factors\WebAuthn;
@@ -33,7 +33,7 @@ Keyring::factors([
 ]);
 ```
 
-WebAuthn verifications are phishing resistant: the browser binds every response to your site's origin, so a look-alike site can't use it. Keyring uses `web-auth/webauthn-lib` for the ceremonies.
+WebAuthn verifications resist phishing. The browser binds every response to your site's origin, so a look-alike site can't use it. Keyring relies on the `web-auth/webauthn-lib` package for the ceremonies.
 
 ## The Two Profiles
 
@@ -46,18 +46,18 @@ WebAuthn verifications are phishing resistant: the browser binds every response 
 | Can start a login | yes, without a username | no, only as a further factor |
 | Priority | 100 | 90 |
 
-Users add either through the [authenticator routes](authenticators.md). Keyring excludes every WebAuthn credential the user already has when it asks the browser for a new one, and refuses a credential that's already registered to any account.
+Users may add either one through the [authenticator routes](authenticators.md). When Keyring asks the browser for a new credential, it excludes every WebAuthn credential the user already has. It also refuses any credential that's already registered to any account.
 
 ## What a Key Proves
 
-Every WebAuthn verification proves possession. It also proves inherence only when the authenticator reports that it verified the user this time (the UV flag), with a PIN, fingerprint or face.
+Every WebAuthn verification proves possession. It proves inherence too, but only when the authenticator reports that it verified the user this time (the UV flag), using a PIN, fingerprint, or face.
 
-- A passkey always requires user verification, so it proves possession and inherence, and reaches [AAL2](policies.md#assurance-levels) on its own. Most passkeys sync between devices (iCloud Keychain, Google Password Manager), and NIST caps those at AAL2.
-- A security key that doesn't verify the user proves possession only. After a password, that's AAL2.
-- Whether a key may sync is the backup-eligible flag it reports. Keyring reads it on every sign in, not just at registration, and a key that hasn't reported it counts as synced. A key that says it can't is "device bound": `Requirement::deviceBound()` and `keyring:aal2,device-bound` ask for one.
-- AAL3 takes more than that flag, which is only the key's word. The key has to have been added with a [verified attestation](#requiring-attestation), and its second factor has to be its own user verification or a password. See [Attestation and AAL3](#attestation-and-aal3).
+- A passkey always requires user verification, so it proves both possession and inherence. That's enough on its own to reach [AAL2](policies.md#assurance-levels). Most passkeys sync between devices through iCloud Keychain or Google Password Manager, and NIST caps synced passkeys at AAL2.
+- A security key that doesn't verify the user proves possession only. Paired with a password, that's AAL2.
+- Whether a key may sync depends on the backup-eligible flag it reports. Keyring reads that flag on every sign in, and not only at registration, and a key that hasn't reported it counts as synced. A key that says it can't sync is "device bound," and `Requirement::deviceBound` and `keyring:aal2,device-bound` ask for one.
+- AAL3 takes more than that flag, since the flag is only the key's word. The key has to have been added with a [verified attestation](#requiring-attestation), and its second factor has to be its own user verification or a password. See [Attestation and AAL3](#attestation-and-aal3).
 
-When planning what to offer, Keyring assumes a security key will verify the user if it did so when it was registered. The categories that count are always the ones from the actual response.
+When planning what to offer, Keyring assumes a security key will verify the user if it did so when it was registered. The categories that count, though, are always the ones in the actual response.
 
 ## Relying Party and Origins
 
@@ -73,19 +73,19 @@ When planning what to offer, Keyring assumes a security key will verify the user
 ],
 ```
 
-- **`relying_party.id`** is the domain keys are bound to. It defaults to the host of `APP_URL`. Keys registered for `example.com` also work on its subdomains, so set it to your registrable domain if users sign in on more than one subdomain. Changing it later makes existing keys stop working.
-- There's no relying party name to set: WebAuthn deprecates it and most browsers don't show it, so Keyring sends the relying party ID in its place.
-- **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL: if none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If you set a relying party ID that covers several subdomains, list each origin here.
-- **`timeout`** is how long the browser waits, as a [duration](configuration.md#durations).
-- **`login_options_for`** is how long the server takes an answer to the challenge of a [usernameless sign in](#signing-in-without-a-username), also a duration.
-- **`attestation_roots`** are the certificates a key's attestation has to chain to, for a factor that [requires attestation](#requiring-attestation).
-- **`algorithms`** and **`minimum_rsa_bits`** decide which [signatures](#signature-algorithms) keys may use.
+- **`relying_party.id`** is the domain your keys are bound to. It defaults to the host of `APP_URL`. Keys registered for `example.com` also work on its subdomains, so set it to your registrable domain if users sign in on more than one subdomain. Changing it later makes existing keys stop working.
+- You don't need to set a relying party name. WebAuthn deprecates it, and most browsers don't show it, so Keyring sends the relying party ID in its place.
+- **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When it's empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL. If none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If your relying party ID covers several subdomains, list each origin here.
+- **`timeout`** controls how long the browser waits, written as a [duration](configuration.md#durations).
+- **`login_options_for`** sets how long the server accepts an answer to the challenge of a [usernameless sign in](#signing-in-without-a-username). It's also a duration.
+- **`attestation_roots`** hold the certificates a key's attestation has to chain to, for a factor that [requires attestation](#requiring-attestation).
+- **`algorithms`** and **`minimum_rsa_bits`** decide which [signature algorithms](#signature-algorithms) keys may use.
 
-For local development, `APP_URL` must match the address in your browser, for example `http://localhost:8000`. Browsers only allow WebAuthn on `https` origins and on `localhost`.
+During local development, `APP_URL` must match the address in your browser, such as `http://localhost:8000`. Browsers only allow WebAuthn on `https` origins and on `localhost`.
 
 ## Signature Algorithms
 
-`webauthn.algorithms` lists the signature algorithms keys may use, in order of preference:
+The `webauthn.algorithms` option lists the signature algorithms keys may use, in order of preference:
 
 ```php
 'webauthn' => [
@@ -100,35 +100,38 @@ For local development, `APP_URL` must match the address in your browser, for exa
 | `EdDSA` | Ed25519 | Only offered when PHP's `sodium` extension is loaded. |
 | `RS256` | RSASSA-PKCS1-v1_5 with SHA-256 | Off by default. See below. |
 
-Only these are offered to the browser, and only these are accepted: a new key that signs with anything else is refused, and so is a sign in with a stored key whose algorithm has since been taken off the list. Its owner then needs another way in, so check what your users have before removing one. An empty list, or a name that isn't one of the three, throws rather than falling back to anything.
+Keyring only offers these algorithms to the browser, and it only accepts these. A new key that signs with anything else is refused. So is a sign in with a stored key whose algorithm has since been taken off the list. That leaves its owner needing another way in, so check what your users have before you remove an algorithm. An empty list, or a name that isn't one of the three, throws rather than falling back to anything.
 
-The list covers the signature on an [attestation statement](#requiring-attestation) too.
+The list also covers the signature on an [attestation statement](#requiring-attestation).
 
 ### RS256 and Windows Hello
 
-RS256 is left out because OWASP ASVS 5.0.0 doesn't approve it: its padding (PKCS #1 v1.5) is on the disallowed list of Appendix C, and the 2048 bit keys that use it give 112 bits of strength where ASVS 11.2.3 asks for 128. ES256 and Ed25519 are approved and give 128. NIST SP 800-63B-4 asks for 112 (Sec. 3.1.6.2), so RS256 with a 2048 bit key meets NIST but not ASVS.
+RS256 is left out because OWASP ASVS 5.0.0 doesn't approve it. Its padding, PKCS #1 v1.5, is on the disallowed list in Appendix C, and 2048 bit keys that use it give 112 bits of strength, where ASVS 11.2.3 asks for 128. ES256 and Ed25519 are approved and give 128 bits. NIST SP 800-63B-4 asks for 112 bits (Sec. 3.1.6.2), so RS256 with a 2048 bit key meets NIST but not ASVS.
 
-The cost of leaving it out falls on Windows. Windows Hello signed with RS256 alone for years, and still does on some machines: older builds, and ones where it has no TPM that makes ES256 keys. There the browser can't create a passkey with Windows Hello while RS256 isn't offered, and the user is shown a phone or a security key to use, or an error. They can still add a passkey from a phone or a hardware key, or sign in with their password and another second factor.
+Leaving it out has a cost, and that cost falls on Windows. For years, Windows Hello signed with RS256 alone, and it still does on some machines: older builds, and machines without the TPM that makes ES256 keys. On those, the browser can't create a passkey with Windows Hello while RS256 isn't offered. The user is then shown a phone or a security key to use instead, or an error. They can still add a passkey from a phone or a hardware key, or sign in with their password and another second factor.
 
-If those users matter more to you than ASVS conformance here, add it, last so every other authenticator keeps choosing a stronger one:
+If those users matter more to you than ASVS conformance, you may add RS256. Put it last, so every other authenticator keeps choosing a stronger algorithm:
 
 ```php
 'algorithms' => ['ES256', 'EdDSA', 'RS256'],
 ```
 
-Record that as a deviation from ASVS 11.6.1 and 11.2.3 if you assess against it.
+If you assess against ASVS, record this as a deviation from ASVS 11.6.1 and 11.2.3.
 
-With RS256 on, Keyring refuses an RSA key shorter than `minimum_rsa_bits`, both when it's added and at every sign in, and never takes one under 2048 bits however low that's set (RFC 8812, Section 2, requires 2048 bits for RS256). Raising it to 3072 would give RSA the 128 bits ASVS asks for, but Windows Hello's RSA keys are 2048 bits, so in practice it refuses the keys RS256 was turned on for, after the browser has already made them. If you want 128 bits throughout, leave RS256 off.
+When RS256 is enabled, Keyring refuses an RSA key shorter than `minimum_rsa_bits`. It checks when a key is added, and again at every sign in. It never accepts a key under 2048 bits, however low you set the option, because RFC 8812, Section 2, requires 2048 bits for RS256.
+
+> [!WARNING]
+> Raising `minimum_rsa_bits` to 3072 would give RSA the 128 bits ASVS asks for. But Windows Hello's RSA keys are 2048 bits. In practice, that refuses the keys RS256 was turned on for, after the browser has already made them. If you want 128 bits throughout, leave RS256 off.
 
 ## Attestation and AAGUIDs
 
-By default Keyring registers keys without attestation. It asks the browser for `none` attestation and only accepts `none` attestation statements. That means any authenticator is accepted, including passkeys synced through a password manager or a platform account.
+By default, Keyring registers keys without attestation. It asks the browser for `none` attestation, and it only accepts `none` attestation statements. That means any authenticator is accepted, including passkeys synced through a password manager or a platform account.
 
-Each key's AAGUID (its model identifier) is stored in the `aaguid` column. Without attestation, the AAGUID is only what the key says about itself, and nothing checks it. It's fine for showing a friendly model name. It isn't a way to allow only certain models: a key, or software pretending to be one, can report any AAGUID.
+Each key's AAGUID, its model identifier, is stored in the `aaguid` column. Without attestation, the AAGUID is only what the key says about itself, and nothing checks it. That's fine for showing a friendly model name. It isn't a way to allow only certain models, because a key, or software pretending to be one, can report any AAGUID.
 
 ### Requiring Attestation
 
-An app that only accepts certain hardware keys can ask each new key to prove who made it. The key sends a statement signed with a certificate its maker put on it, and Keyring only adds the key when that certificate chains to a root you trust:
+If your app should only accept certain hardware keys, you may ask each new key to prove who made it. The key sends a statement signed with a certificate its maker put on it, and Keyring only adds the key when that certificate chains to a root you trust:
 
 ```php
 Keyring::factors([
@@ -138,7 +141,7 @@ Keyring::factors([
 ]);
 ```
 
-List the makers' root certificates in `config/keyring.php`, as PEM text or as paths to PEM files. A file can hold several. Makers publish theirs, and Keyring never downloads anything:
+List the makers' root certificates in your `config/keyring.php` configuration file, as PEM text or as paths to PEM files. A single file can hold several certificates. Makers publish their roots, and Keyring never downloads anything:
 
 ```php
 'webauthn' => [
@@ -148,41 +151,41 @@ List the makers' root certificates in `config/keyring.php`, as PEM text or as pa
 ],
 ```
 
-With that set, for this factor:
+With that set in place, the following applies to this factor:
 
-- Keyring asks the browser for `direct` attestation. Some browsers ask the user before they pass it on, and a user who says no sends `none`.
-- A key is added only when its statement is valid and its certificates chain to one of the roots, each within its dates, each signed by a certificate that is allowed to sign others (a root itself is trusted as listed, whatever it says about signing), with no SHA-1 signature or RSA key under 2048 bits on the way.
-- `none`, a key that attests for itself, a chain to any other root and a statement that doesn't match the response are all refused the same way, and nothing is added. The error is `keyring::keyring.key_not_accepted`, which tells the person this isn't a key the site takes, since trying again wouldn't help.
-- If no root is listed, or one can't be read, every key is refused and Keyring reports an exception saying which.
+- Keyring asks the browser for `direct` attestation. Some browsers ask the user before passing it on, and a user who says no sends `none`.
+- A key is added only when its statement is valid and its certificates chain to one of the roots. Every certificate in the chain must be within its dates, and each must be signed by a certificate that's allowed to sign others. A root itself is trusted as listed, whatever it says about signing. The chain can't include a SHA-1 signature or an RSA key under 2048 bits.
+- Keyring refuses `none`, a key that attests for itself, a chain to any other root, and a statement that doesn't match the response, all in the same way. Nothing is added. The error is `keyring::keyring.key_not_accepted`, which tells the person that this isn't a key the site accepts. Trying again wouldn't help.
+- If no root is listed, or if one can't be read, Keyring refuses every key and reports an exception that says which.
 
-Two formats are read: `packed`, which FIDO2 keys use, and `fido-u2f`, which older keys use. Those are what hardware security keys send. The formats platforms use (`tpm`, `android-key`, `apple`) and `compound` are refused, as is any other.
+Keyring reads two formats: `packed`, which FIDO2 keys use, and `fido-u2f`, which older keys use. These are what hardware security keys send. It refuses the formats platforms use (`tpm`, `android-key`, and `apple`), along with `compound` and any other format.
 
-Each setting belongs to one factor, so passkeys carry on as before. That matters: passkeys that sync between devices send no attestation worth checking, and requiring it on `WebAuthn::passkeys()` would turn nearly all of them away. Keep it for security keys, or for a second key of its own:
+Each setting belongs to one factor, so your passkeys carry on as before. That matters, because passkeys that sync between devices send no attestation worth checking. Requiring it on `WebAuthn::passkeys()` would turn away nearly all of them. Keep it for security keys, or for a second key of its own:
 
 ```php
 WebAuthn::securityKeys()->as('staff-key')->requireAttestation(),
 ```
 
-Certificates aren't looked up for revocation, since that needs the network. If a maker withdraws a root, take it out of the list. Keys added before then stay: attestation is checked once, when a key is added.
+Keyring doesn't check certificates for revocation, since that needs the network. If a maker withdraws a root, remove it from the list. Keys added before then stay, because attestation is checked once, when a key is added.
 
 ### Attestation and AAL3
 
-A key reaches [AAL3](policies.md#assurance-levels) only when its factor uses `requireAttestation()` and the key was added with an attestation Keyring verified, which is what the `attestation` column records. Nothing else tells a hardware key from software that reports the same flags.
+A key reaches [AAL3](policies.md#assurance-levels) only when its factor uses `requireAttestation()` and the key was added with an attestation that Keyring verified. The `attestation` column records that. Nothing else tells a hardware key apart from software that reports the same flags.
 
-- Keys added before the factor asked for attestation have nothing in that column and stay at AAL2. Their owners add them again to reach AAL3.
-- Take `requireAttestation()` off a factor and its keys stop reaching AAL3, whatever the column says.
-- Narrowing [`allowOnly()`](#allowing-only-certain-models), or taking a root out of the list, only stops more of those keys being added. The ones already on accounts keep their level, so changing what you hand out doesn't lock out everyone holding the old model. When a model has to stop counting (it was found to be weak, say), clear the column for its keys, which leaves them as second factors at AAL2, or delete the rows to remove them:
+- Keys added before the factor asked for attestation have nothing in that column, so they stay at AAL2. Their owners need to add them again to reach AAL3.
+- If you remove `requireAttestation()` from a factor, its keys stop reaching AAL3, whatever the column says.
+- Narrowing [`allowOnly`](#allowing-only-certain-models), or taking a root out of the list, only stops more of those keys from being added. Keys already on accounts keep their level, so changing what you hand out won't lock out everyone holding the old model. When a model has to stop counting, for example because it was found to be weak, clear the column for its keys. That leaves them as second factors at AAL2. Alternatively, delete the rows to remove them:
 
     ```php
     Keyring::authenticatorModel()::query()->where('aaguid', $aaguid)->update(['attestation' => null]);
     ```
-- The attestation is for the key. Its second factor still has to be its own user verification or a password: touching an attested key after signing in with a synced passkey is AAL2.
+- The attestation applies to the key itself. Its second factor still has to be its own user verification or a password. Touching an attested key after signing in with a synced passkey only reaches AAL2.
 
-NIST AAL3 also needs the authenticator validated to FIPS 140 (Sec. 2.3.2). Attestation says which model a key is, not whether that model was validated, so use `allowOnly()` to accept only the models you've checked.
+NIST's AAL3 also requires the authenticator to be validated to FIPS 140 (Sec. 2.3.2). Attestation tells you which model a key is, but not whether that model was validated. To accept only the models you've checked, use `allowOnly`.
 
 ### Allowing Only Certain Models
 
-Give the AAGUIDs of the models you accept. Their makers publish them:
+List the AAGUIDs of the models you accept. Their makers publish them:
 
 ```php
 WebAuthn::securityKeys()
@@ -193,15 +196,15 @@ WebAuthn::securityKeys()
     ]),
 ```
 
-The list only works with `requireAttestation()`. Without it, Keyring throws a `LogicException` when a user starts adding a key, since the list would accept anything that claims an AAGUID on it.
+The list only works together with `requireAttestation()`. Without it, Keyring throws a `LogicException` when a user starts adding a key, because the list would accept anything that claims an AAGUID on it.
 
-Keys that only speak U2F have no AAGUID (they report all zeros), so a list leaves them out.
+Keys that only speak U2F have no AAGUID (they report all zeros), so the list leaves them out.
 
-Every root in `attestation_roots` is trusted for every model. If you trust more than one maker, any of them could issue a certificate for another's AAGUID. When that matters, [trust each model separately](#trusting-each-model-separately).
+Every root in `attestation_roots` is trusted for every model. If you trust more than one maker, any of them could issue a certificate for another maker's AAGUID. When that matters to you, [trust each model separately](#trusting-each-model-separately).
 
 ### Trusting Each Model Separately
 
-Keyring asks `Keyring\Contracts\TrustsAuthenticators` for the roots a model's attestation may chain to. The default reads `attestation_roots` and answers the same for every model. Bind your own to answer per AAGUID. That's also how to use the FIDO Metadata Service: download its blob, verify it and keep it up to date yourself, and answer with each model's roots from it, leaving out the models it reports as compromised.
+Keyring asks the `Keyring\Contracts\TrustsAuthenticators` contract for the roots a model's attestation may chain to. The default implementation reads `attestation_roots` and gives the same answer for every model. To answer per AAGUID, bind your own implementation. This is also how you use the FIDO Metadata Service. Download its blob, verify it, and keep it up to date yourself. Then answer with each model's roots from it, leaving out the models it reports as compromised.
 
 ```php
 use Keyring\Contracts\TrustsAuthenticators;
@@ -220,53 +223,53 @@ class ModelRoots implements TrustsAuthenticators
 $this->app->bind(TrustsAuthenticators::class, ModelRoots::class);
 ```
 
-Return PEM certificates, or the bare base64 a metadata statement lists in `attestationRootCertificates`. A model with no roots is refused. U2F keys ask with an AAGUID of all zeros.
+Return PEM certificates, or the bare base64 certificates that a metadata statement lists in `attestationRootCertificates`. A model with no roots is refused. U2F keys ask with an AAGUID of all zeros.
 
 ### What Is Kept
 
-When a key passes, its `attestation` column holds the kind of attestation that was checked (`basic`, a certificate its maker shares across a batch of keys), and the certificates it sent are kept with the credential record in `public_key`. The column is `null` for every key added without the check, and then `aaguid` is still only what the key reported.
+When a key passes, its `attestation` column holds the kind of attestation that was checked (`basic`, a certificate its maker shares across a batch of keys). The certificates the key sent are kept with the credential record in `public_key`. The column is `null` for every key added without the check. For those keys, `aaguid` is still only what the key reported.
 
 ## Counters and Cloned Keys
 
-Each assertion carries a signature counter, which Keyring stores in `sign_count`. If a key presents a counter lower than the last one seen, that suggests a cloned key. Keyring refuses that sign in and dispatches `Keyring\Events\CloneSuspected`, which is logged and can send the `clone_suspected` [security email](security-log-and-emails.md#security-emails).
+Each assertion carries a signature counter, which Keyring stores in `sign_count`. If a key presents a counter lower than the last one seen, that suggests the key has been cloned. Keyring refuses that sign in and dispatches the `Keyring\Events\CloneSuspected` event. The event is logged, and it can send the `clone_suspected` [security email](security-log-and-emails.md#security-emails).
 
 Synced passkeys usually report a counter of zero every time, so this check doesn't apply to them.
 
 ## Signing In Without a Username
 
-Passkeys sign in on their own:
+Passkeys can sign in on their own, without a username:
 
-1. The browser fetches `GET /login/passkey/options`, which answers `{ "options": { ... } }`. The options have an empty `allowCredentials` and require user verification. Keyring keeps the challenge in the session.
+1. The browser fetches `GET /login/passkey/options`, which answers with `{ "options": { ... } }`. The options have an empty `allowCredentials` and require user verification. Keyring keeps the challenge in the session.
 2. The user picks a passkey, and the browser posts the response to `POST /login/passkey` as `credential`.
-3. Keyring finds the passkey by its credential ID, among those of the model behind its guard, checks the signature, and continues with the [policy](policies.md) as for any login.
+3. Keyring finds the passkey by its credential ID, among those belonging to the model behind its guard. It checks the signature, then continues with the [policy](policies.md), as it does for any login.
 
-The same options work for autofill, where the browser lists passkeys in the email field (give the field `autocomplete="username webauthn"`). The browser package's `usePasskeyLogin({ autofill: true })` starts that for you. See [Frontend](frontend.md#signing-in-with-a-passkey). The client in Laravel's starter kits can sign in through these two routes as well. See [Laravel's Passkeys Client](#laravels-passkeys-client).
+The same options also work for autofill, where the browser lists passkeys in the email field. To enable it, give the field `autocomplete="username webauthn"`. The browser package's `usePasskeyLogin({ autofill: true })` starts autofill for you. See [Frontend](frontend.md#signing-in-with-a-passkey). The client in Laravel's starter kits can also sign in through these two routes. See [Laravel's Passkeys Client](#laravels-passkeys-client).
 
-A challenge works once, for this kind of sign in only: trying it spends it, even if the sign in fails, and it can't finish the second factor of a password login or a step-up. Those use the challenge their own page issued. Spending it takes it out of the session and records, in the cache store your rate limits use (`cache.limiter`), that it was answered. That record is what refuses the same signed answer a second time when the session can't: with an earlier copy of the session on Laravel's `cookie` session driver, or from a second request that arrived together with the first. It's kept until the challenge would have expired, and it's the same for a second factor's challenge, a step-up's and a new key's. See [Known Limitations](security.md#known-limitations) for what that leaves.
+A challenge works only once, and only for this kind of sign in. Trying it spends it, even if the sign in fails. It can't finish the second factor of a password login or a step-up, which use the challenge their own page issued. Spending a challenge removes it from the session and records, in the cache store your rate limits use (`cache.limiter`), that it was answered. That record refuses the same signed answer a second time when the session can't. This happens with an earlier copy of the session on Laravel's `cookie` session driver, or with a second request that arrived together with the first. The record is kept until the challenge would have expired. The same applies to a second factor's challenge, a step-up's challenge, and a new key's challenge. See [Known Limitations](security.md#known-limitations) for what that leaves.
 
-It also runs out. The session it's kept in can last for days, so Keyring notes when each challenge was issued and refuses an answer that comes more than `webauthn.login_options_for` later (five minutes by default, and never less than `webauthn.timeout`). The other challenges need no clock of their own: a second factor's and a step-up's are kept in the pending login, which ends after `pending_logins.keep_for` (10 minutes), and a new key's in its enrollment, which ends after `enrollments.keep_for` (15 minutes).
+Challenges also expire. The session they're kept in can last for days, so Keyring records when each challenge was issued. It refuses an answer that arrives more than `webauthn.login_options_for` later. That defaults to five minutes, and it's never less than `webauthn.timeout`. The other challenges don't need a clock of their own. A second factor's challenge and a step-up's are kept in the pending login, which ends after `pending_logins.keep_for` (10 minutes). A new key's challenge is kept in its enrollment, which ends after `enrollments.keep_for` (15 minutes).
 
-With autofill the login page asks for its options as it loads, and the browser's own timeout doesn't apply while it waits for someone to pick a passkey. So a page left open for longer than `login_options_for` answers with a challenge that has run out. That sign in fails like any refused passkey, the browser package asks for new options straight away, and picking the passkey again works. Raise `login_options_for` if your users leave the login page open for long.
+With autofill, the login page asks for its options as it loads. The browser's own timeout doesn't apply while it waits for someone to pick a passkey. So a page left open for longer than `login_options_for` gets a challenge that has run out. That sign in fails like any refused passkey. The browser package then asks for new options straight away, and picking the passkey again works. If your users leave the login page open for a long time, raise `login_options_for`.
 
-These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket every user shares. Fetching the options has its own limit of 60 requests a minute per IP address, so a login page that reloads (and an office sharing one address) doesn't run out.
+These requests don't name an account, so only the per-IP [rate limit](security.md#rate-limiting) applies. Junk requests can't fill a bucket that every user shares. Fetching the options has its own limit of 60 requests a minute per IP address, so a login page that reloads, or an office sharing one address, doesn't run out.
 
-Security keys can't do this. `/login/security-key` and `/login/security-key/options` return a `404`.
+Security keys can't sign in this way. `/login/security-key` and `/login/security-key/options` return a `404`.
 
 ## Laravel's Passkeys Client
 
-Keyring's passkey routes are driven by [`@keyringjs/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package. Each call lets you change its two paths, but not the method it uses or the JSON it reads. That's enough for signing in, which works against Keyring's two login routes. Adding a passkey and step-up don't fit. Checked against `@laravel/passkeys` 0.2.0 and 0.4.1, and `laravel/passkeys` 0.3.0:
+Keyring's passkey routes are driven by [`@keyringjs/keyring`](frontend.md). `@laravel/passkeys`, the client in Laravel's starter kits, is written for the routes of the `laravel/passkeys` Composer package. Each call lets you change its two paths, but not the method it uses or the JSON it reads. That's enough for signing in, which works against Keyring's two login routes. Adding a passkey and step-up don't fit. This was checked against `@laravel/passkeys` 0.2.0 and 0.4.1, and `laravel/passkeys` 0.3.0:
 
-| What the client does | What Keyring does |
+| What the Client Does | What Keyring Does |
 |---|---|
-| Signing in, it reads `options` from the JSON of `GET /passkeys/login/options`. | The same. `GET /login/passkey/options` answers `{ "options": { ... } }`. |
+| When signing in, it reads `options` from the JSON of `GET /passkeys/login/options`. | The same. `GET /login/passkey/options` answers `{ "options": { ... } }`. |
 | It posts `{ credential, remember }` to `/passkeys/login` and reads `redirect`. | The same. `POST /login/passkey` answers `{ "status": "authenticated", "redirect": "..." }`. |
-| Adding a passkey, it reads `options` from `GET /user/passkeys/options`. | Enrolling begins with a `POST` to `/user/authenticators/passkey`, and the options are under `enrollment.options`. |
+| When adding a passkey, it reads `options` from `GET /user/passkeys/options`. | Enrolling begins with a `POST` to `/user/authenticators/passkey`, and the options are under `enrollment.options`. |
 | It posts `{ name, credential }` to `/user/passkeys`. `usePasskeyRegister()` doesn't pass the response on. | `POST /user/authenticators/passkey/confirm` takes those fields, but its response can carry [recovery codes](authenticators.md#recovery-codes) that are only shown once. |
-| Confirming, it reads `options` from `GET /passkeys/confirm/options`. | [Step-up](step-up.md) has no options route. The confirm page gets the options as props, for whichever of the user's authenticators comes next. |
+| When confirming, it reads `options` from `GET /passkeys/confirm/options`. | [Step-up](step-up.md) has no options route. The confirm page gets the options as props, for whichever of the user's authenticators comes next. |
 
 ### Signing In With It
 
-Give the client Keyring's two login routes:
+To use Keyring's login routes, pass them to the client:
 
 ```ts
 import { Passkeys } from '@laravel/passkeys'
@@ -281,7 +284,7 @@ if (redirect) {
 }
 ```
 
-The React and Vue hooks take the same `routes`, for the button and for autofill:
+The React and Vue hooks accept the same `routes`, for both the button and autofill:
 
 ```tsx
 import { usePasskeyVerify } from '@laravel/passkeys/react'
@@ -315,41 +318,41 @@ const { verify, isLoading, error, isSupported } = usePasskeyVerify({
 </script>
 ```
 
-A few things to know:
+There are a few things to keep in mind:
 
-- Always go to `redirect`. It's the page the user was after, or the [challenge page](sign-in-flow.md#the-challenge-page) when your [policy](policies.md) asks for another factor after the passkey.
-- A passkey that's refused answers `422`, and a rate limit `429`. The client throws either with the message in the answer, which the hooks return as `error`. That goes for autofill too, so a login page reloaded past the options limit shows that message, where Keyring's helper stays quiet.
+- Always send the user to `redirect`. It's the page the user was after, or the [challenge page](sign-in-flow.md#the-challenge-page) when your [policy](policies.md) asks for another factor after the passkey.
+- A refused passkey answers with `422`, and a rate limit answers with `429`. The client throws either one with the message from the answer, and the hooks return that message as `error`. This also applies to autofill, so a login page reloaded past the options limit shows that message, where Keyring's own helper stays quiet.
 - For autofill, the email field needs `autocomplete="username webauthn"`. The client expects a field whose `autocomplete` ends in `webauthn`.
-- `remember` came in `@laravel/passkeys` 0.4. Older versions leave it out, and the user isn't remembered.
-- If you [changed the route prefix](configuration.md#routes), put it in front of both paths.
+- The `remember` option was added in `@laravel/passkeys` 0.4. Older versions leave it out, so the user isn't remembered.
+- If you [changed the route prefix](configuration.md#routes), add it in front of both paths.
 
-Every check is the same as for Keyring's own helper: the per-IP limits, the single-use challenge and the policy.
+Every check is the same as in Keyring's own helper: the per-IP limits, the single-use challenge, and the policy.
 
 ### Adding a Passkey and Step-Up
 
-These still need `@keyringjs/keyring`. Fitting the client would take a second set of routes for the same ceremonies, so Keyring doesn't try. Use [`enroll()`](frontend.md#managing-authenticators) to add a passkey and [`useChallenge()`](frontend.md#the-challenge-page) for the challenge and confirm pages. [`usePasskeyLogin()`](frontend.md#signing-in-with-a-passkey) signs in through the same two routes, as an Inertia visit, if you'd rather use one package for everything. Passkeys made with `laravel/passkeys` keep working once [imported](upgrading-from-fortify.md#importing-two-factor-data).
+Adding a passkey and step-up still need `@keyringjs/keyring`. Fitting the client would take a second set of routes for the same ceremonies, so Keyring doesn't try. To add a passkey, use [`enroll`](frontend.md#managing-authenticators). For the challenge and confirm pages, use [`useChallenge`](frontend.md#the-challenge-page). If you'd rather use one package for everything, [`usePasskeyLogin`](frontend.md#signing-in-with-a-passkey) signs in through the same two routes, as an Inertia visit. Passkeys made with `laravel/passkeys` keep working once you [import them](upgrading-from-fortify.md#importing-two-factor-data).
 
 ## Customising a Profile
 
-Register the same profile under a second key, for example to treat hardware keys from one program separately:
+You may register the same profile under a second key, for example to treat hardware keys from one program separately:
 
 ```php
 WebAuthn::securityKeys()->as('backup-key'),
 ```
 
-Require user verification for security keys:
+To require user verification for security keys, use:
 
 ```php
 WebAuthn::securityKeys()->requireUserVerification(),
 ```
 
-Only accept keys whose maker vouches for them, or only certain models (see [Attestation and AAGUIDs](#attestation-and-aaguids)):
+To accept only keys whose maker vouches for them, or only certain models (see [Attestation and AAGUIDs](#attestation-and-aaguids)), use:
 
 ```php
 WebAuthn::securityKeys()->requireAttestation()->allowOnly([$aaguid]),
 ```
 
-Each returns a new instance. A factor key other than `passkey` or `security-key` needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment()` decides whether to run the WebAuthn ceremony from the options the server sends, so it works for any key:
+Each of these returns a new instance. A factor key other than `passkey` or `security-key` also needs a line in the frontend's [factor map](frontend.md#the-challenge-page). The browser package's `confirmEnrollment` decides whether to run the WebAuthn ceremony from the options the server sends, so it works with any key:
 
 ```ts
 import { enroll } from '@keyringjs/keyring'
@@ -357,7 +360,7 @@ import { enroll } from '@keyringjs/keyring'
 await enroll('backup-key', { name: 'Spare key' })
 ```
 
-To change more than the profile, extend the class. `passkeys()` and `securityKeys()` return `static` and the constructor is `final`, so they build your subclass:
+To change more than the profile, extend the class. The `passkeys` and `securityKeys` methods return `static`, and the constructor is `final`, so they build your subclass:
 
 ```php
 use Keyring\Factors\WebAuthn;
@@ -372,20 +375,20 @@ Keyring::factors([AuditedWebAuthn::passkeys(), AuditedWebAuthn::securityKeys()])
 
 ## Stored Data
 
-Each key is a row in `keyring_authenticators` with:
+Each key is stored as a row in the `keyring_authenticators` table, with these columns:
 
 | Column | Holds |
 |---|---|
-| `credential_id` | The credential ID, base64url without padding, up to 512 characters. Unique across all users. A key that sends a longer ID is refused at registration. |
+| `credential_id` | The credential ID, in base64url without padding, up to 512 characters. Unique across all users. A key that sends a longer ID is refused at registration. |
 | `public_key` | The full credential record as JSON, including the public key and counter. |
 | `sign_count` | The last counter seen. |
 | `aaguid` | The model identifier the key reported. |
-| `attestation` | The kind of attestation that was checked against your roots when the key was added (`basic`), which is what vouches for `aaguid`. `null` when none was. |
+| `attestation` | The kind of attestation checked against your roots when the key was added (`basic`). This is what vouches for `aaguid`. `null` when none was checked. |
 | `transports` | How the browser can reach the key (`usb`, `nfc`, `internal`...). |
 | `meta.user_verified` | Whether the key verified the user when registered. |
 | `meta.backup_eligible` | Whether the key said it can be synced. |
 | `meta.backed_up` | Whether the key said it has been backed up, which a key that can sync may not have been yet. Read again on every sign in, like `backup_eligible`. Keyring only records it: assurance goes by whether the key can sync at all. |
 
-The user handle given to authenticators is an HMAC of the user's model (its morph class) and ID, under a key derived from `APP_KEY` for that purpose alone, never their real ID or email. The model is part of it because an authenticator keeps one passkey per handle for a site: with two user models, a `User` 7 and a `Staff` 7 would otherwise share a handle, and a new passkey for one would replace the other's. Once a user has a key, new ones reuse its handle, so rotating `APP_KEY` (or adding a morph map later) doesn't make password managers list the account twice. A passkey imported from `laravel/passkeys` keeps the handle that package gave it.
+The user handle given to authenticators is an HMAC of the user's model (its morph class) and ID. The HMAC uses a key derived from `APP_KEY` for that purpose alone, and the handle is never the user's real ID or email. The model is part of the HMAC because an authenticator keeps one passkey per handle for a site. With two user models, a `User` 7 and a `Staff` 7 would otherwise share a handle, and a new passkey for one would replace the other's. Once a user has a key, new ones reuse its handle. This means that rotating `APP_KEY`, or adding a morph map later, doesn't make password managers list the account twice. A passkey imported from `laravel/passkeys` keeps the handle that package gave it.
 
-To test passkeys without a browser, see [VirtualAuthenticator](testing.md#virtual-authenticators).
+To test passkeys without a browser, see the [VirtualAuthenticator](testing.md#virtual-authenticators) documentation.
