@@ -65,7 +65,6 @@ When planning what to offer, Keyring assumes a security key will verify the user
 'webauthn' => [
     'relying_party' => [
         'id' => env('KEYRING_WEBAUTHN_RP_ID'),
-        'name' => env('KEYRING_WEBAUTHN_RP_NAME'),
     ],
     'origins' => [],
     'timeout' => '60s',
@@ -75,7 +74,7 @@ When planning what to offer, Keyring assumes a security key will verify the user
 ```
 
 - **`relying_party.id`** is the domain keys are bound to. It defaults to the host of `APP_URL`. Keys registered for `example.com` also work on its subdomains, so set it to your registrable domain if users sign in on more than one subdomain. Changing it later makes existing keys stop working.
-- **`relying_party.name`** is shown by some browsers when creating a key. It defaults to `APP_NAME`.
+- There's no relying party name to set: WebAuthn deprecates it and browsers don't show it, so Keyring sends the relying party ID in its place.
 - **`origins`** lists the exact origins (`scheme://host[:port]`) allowed to complete a ceremony. When empty, only the `APP_URL` origin is allowed. Each entry has to be a full URL: if none is (a host name on its own, or an `APP_URL` with no scheme), Keyring refuses every passkey and security key response and reports an exception saying so. If you set a relying party ID that covers several subdomains, list each origin here.
 - **`timeout`** is how long the browser waits, as a [duration](configuration.md#durations).
 - **`login_options_for`** is how long the server takes an answer to the challenge of a [usernameless sign in](#signing-in-without-a-username), also a duration.

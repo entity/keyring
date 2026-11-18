@@ -126,7 +126,6 @@ return [
     'webauthn' => [
         'relying_party' => [
             'id' => env('KEYRING_WEBAUTHN_RP_ID'),
-            'name' => env('KEYRING_WEBAUTHN_RP_NAME'),
         ],
         'origins' => [],
         'timeout' => '60s',

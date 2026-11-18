@@ -23,8 +23,7 @@
         ],
         "webauthn": {
             "relying_party": {
-                "id": null,
-                "name": null
+                "id": null
             },
             "origins": [],
             "timeout": "60s",
