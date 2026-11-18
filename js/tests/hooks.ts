@@ -2,10 +2,12 @@ import { router } from '@inertiajs/core'
 import { spyOn } from 'bun:test'
 import { standIn } from './browser'
 
-// What the Vue and React hook tests share: the browser's key prompt, the
+// What the Inertia, Vue and React tests share: the browser's key prompt, the
 // options request and Inertia's router, as stand-ins the tests drive by
-// hand. Keyring's own modules and Inertia's useForm stay real. Call
-// restore() in afterEach: Bun runs every file in the one process.
+// hand. Keyring's own modules and Inertia's useForm stay real, and nothing
+// is replaced with mock.module: Bun keeps a module mock for every file that
+// runs after. Call restore() in afterEach: Bun runs every file in the one
+// process.
 export type Prompt = { options: object, autofill: boolean, signal?: AbortSignal, resolve: (credential: object | null) => void, reject: (error: unknown) => void }
 
 export type Visit = { method: 'get' | 'post', url: string, data: Record<string, any>, options: Record<string, any> }
@@ -27,18 +29,69 @@ export function fakeBrowser(globals: Record<string, unknown> = {}) {
   const prompts: Prompt[] = []
   const requested: string[] = []
   const visits: Visit[] = []
+  const timers = new Set<ReturnType<typeof setTimeout>>()
+  let open = 0
+
+  const browser = {
+    prompts,
+    requested,
+    visits,
+    // A browser has one WebAuthn request open at a time, and takes a moment
+    // to let go of one that was aborted. With this set to that moment in ms,
+    // the stand-in does too, and refuses a request made before then the way
+    // Chrome does, counting it in refused.
+    letsGoAfter: null as number | null,
+    refused: 0,
+    restore() {
+      timers.forEach(clearTimeout)
+      post.mockRestore()
+      get.mockRestore()
+      restoreGlobals()
+    },
+  }
 
   const credentials = {
     get: ({ publicKey, mediation, signal }: { publicKey: object, mediation?: string, signal?: AbortSignal }) => new Promise((resolve, reject) => {
+      if (browser.letsGoAfter !== null && open > 0) {
+        browser.refused++
+
+        return reject(new DOMException('A request is already pending.', 'OperationError'))
+      }
+
+      // A prompt settles once, however it ends: answered by hand, aborted,
+      // or both, as when a passkey is picked just as the request is aborted.
+      let settled = false
+      open++
+      const close = <T>(settle: (value: T) => void) => (value: T) => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        open--
+        settle(value)
+      }
+      const aborted = close(() => reject(new DOMException('Aborted', 'AbortError')))
+
       prompts.push({
         options: publicKey,
         autofill: mediation === 'conditional',
         signal,
         // A browser that hands back no credential at all resolves to null.
-        resolve: credential => resolve(credential && new FakeCredential(credential)),
-        reject,
+        resolve: close((credential: object | null) => resolve(credential && new FakeCredential(credential))),
+        reject: close(reject),
       })
-      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      signal?.addEventListener('abort', () => {
+        if (browser.letsGoAfter === null) {
+          return aborted(undefined)
+        }
+
+        const timer = setTimeout(() => {
+          timers.delete(timer)
+          aborted(undefined)
+        }, browser.letsGoAfter)
+        timers.add(timer)
+      })
     }),
   }
 
@@ -47,6 +100,7 @@ export function fakeBrowser(globals: Record<string, unknown> = {}) {
     PublicKeyCredential: FakeCredential,
     document: { cookie: '' },
     navigator: { credentials },
+    // Answers without a turn of the event loop, as the tests wait one tick.
     fetch: async (url: string) => {
       requested.push(url)
 
@@ -62,16 +116,7 @@ export function fakeBrowser(globals: Record<string, unknown> = {}) {
     visits.push({ method: 'get', url, data, options })
   }) as any)
 
-  return {
-    prompts,
-    requested,
-    visits,
-    restore() {
-      post.mockRestore()
-      get.mockRestore()
-      restoreGlobals()
-    },
-  }
+  return browser
 }
 
 export const tick = () => new Promise(resolve => setTimeout(resolve, 0))
