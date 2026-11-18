@@ -20,7 +20,7 @@
 
 ## Introduction
 
-Keyring is headless, like Fortify. It renders [pages](sign-in-flow.md#pages) with props and answers JSON requests, and your app owns every page. `@keyringjs/keyring` is a small browser package that does the fiddly parts: WebAuthn, enrollment, and Vue and React bindings for Inertia v3.
+Keyring is headless. It renders [pages](sign-in-flow.md#pages) with props and answers JSON requests, and your app owns every page. `@keyringjs/keyring` is a small browser package that does the fiddly parts: WebAuthn, enrollment, and Vue and React bindings for Inertia v3.
 
 ```bash
 npm install @keyringjs/keyring

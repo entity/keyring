@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center">Factor-driven authentication for Laravel. It feels like Fortify, but it's built to be extended.</p>
+<p align="center">Factor-driven authentication for Laravel. Start with a password, then add passkeys, second factors, devices and step-up.</p>
 
 <p align="center">
   <a href="https://packagist.org/packages/keyring/keyring"><img src="https://img.shields.io/packagist/v/keyring/keyring" alt="Latest version"></a>
@@ -13,9 +13,9 @@
   <a href="LICENSE.md"><img src="https://img.shields.io/packagist/l/keyring/keyring" alt="License"></a>
 </p>
 
-Keyring starts as small as Fortify: password sign-in and your own pages. Then you add what your app needs, one feature at a time.
+Keyring handles sign-in, registration, password resets, email verification and the account security around them. It's headless: your app owns the pages, and Keyring handles the requests behind them.
 
-Where Fortify keeps one TOTP secret in columns on `users`, Keyring treats every way of signing in as a **factor** behind one contract. A user can hold as many **authenticators** as they like, and a **policy** decides what they must prove.
+Every way of signing in is a **factor** behind one contract. A user can hold as many **authenticators** as they like, and a **policy** decides what they must prove.
 
 > [!NOTE]
 > Keyring is new and not production-tested yet. Until 1.0, a minor release may change the public API. See [What's stable](#whats-stable).
@@ -60,7 +60,7 @@ For passkeys and the challenge page in the browser:
 npm install @keyringjs/keyring
 ```
 
-The [Quick Start](docs/quick-start.md) walks through the pages to build. Coming from Fortify? `php artisan keyring:import fortify` brings over your users' authenticator apps, recovery codes and passkeys. See [Upgrading From Fortify](docs/upgrading-from-fortify.md).
+The [Quick Start](docs/quick-start.md) walks through the pages to build. Already using Fortify? See [Upgrading From Fortify](docs/upgrading-from-fortify.md).
 
 ## Start small, add what you need
 

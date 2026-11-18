@@ -421,4 +421,4 @@ Keyring dispatches an [event](events.md) for everything it sends a notice about,
 
 ## Laravel's Auth Events
 
-Keyring dispatches Laravel's `Illuminate\Auth\Events\Failed`, `Lockout` and `PasswordReset` next to its own events, as Fortify does, so existing listeners keep working. See [Events](sign-in-flow.md#events).
+Keyring dispatches Laravel's `Illuminate\Auth\Events\Failed`, `Lockout` and `PasswordReset` next to its own events, so existing listeners keep working. See [Events](sign-in-flow.md#events).

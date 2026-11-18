@@ -21,7 +21,7 @@ use Keyring\Login\Requirement;
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
-`keyring:install` adds this line when you pick a second sign-in method. If you never call `Keyring::require()`, the policy is `Requirement::aal2()->ifEnrolled()`, which is how Fortify behaves: a second factor once the user has set one up.
+`keyring:install` adds this line when you pick a second sign-in method. If you never call `Keyring::require()`, the policy is `Requirement::aal2()->ifEnrolled()`: the password alone until a user sets up a second factor, and that factor from then on.
 
 ## Requirements
 

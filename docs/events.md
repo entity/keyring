@@ -119,7 +119,7 @@ Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited',
 
 ## Laravel's Auth Events
 
-Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on, so the verification email it sends doesn't show in how long a new address takes to answer. Like Fortify, it also dispatches these next to its own, so listeners and packages built for them keep working:
+Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`, `Registered` and `Verified` events fire as usual. `Registered` is dispatched once the response has been sent, unless [`registration.reveal_taken`](sign-in-flow.md#registration) is on, so the verification email it sends doesn't show in how long a new address takes to answer. It also dispatches these next to its own, so listeners and packages built for them keep working:
 
 | Laravel event | Dispatched with |
 |---|---|

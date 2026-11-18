@@ -114,7 +114,7 @@ See [Frontend](frontend.md) for what the package provides.
 
 ## Routes Keyring Registers
 
-Keyring registers its routes under the `web` middleware group by default, and every signed-in route checks Keyring's guard (`auth:{guard}`). Some use the same names as Laravel's conventions and Fortify (`login`, `logout`, `register`, `password.request`, `password.reset`, `verification.notice` and so on), so remove any routes of your own with those names. The full list is in [The Sign In Flow](sign-in-flow.md#routes), [Step-Up](step-up.md), [Managing Authenticators](authenticators.md#routes), [Devices & Sessions](devices-and-sessions.md#routes) and [Protected Changes](protected-changes.md#routes).
+Keyring registers its routes under the `web` middleware group by default, and every signed-in route checks Keyring's guard (`auth:{guard}`). Some use the same names as Laravel's conventions (`login`, `logout`, `register`, `password.request`, `password.reset`, `verification.notice` and so on), so remove any routes of your own with those names. The full list is in [The Sign In Flow](sign-in-flow.md#routes), [Step-Up](step-up.md), [Managing Authenticators](authenticators.md#routes), [Devices & Sessions](devices-and-sessions.md#routes) and [Protected Changes](protected-changes.md#routes).
 
 To change the prefix, domain or middleware, or to turn routes off, see [Configuration](configuration.md#routes).
 

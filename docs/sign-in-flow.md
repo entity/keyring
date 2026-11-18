@@ -304,7 +304,7 @@ Three things are still yours to keep quiet. A username of your own that has to b
 
 ### Saying When an Address Is Taken
 
-Many apps would rather tell someone straight away that they already have an account. Set the option, and registration works as it does in Fortify and Laravel's starter kits:
+Many apps would rather tell someone straight away that they already have an account. Set the option, and registration works as it does in Laravel's starter kits:
 
 ```php
 // config/keyring.php
@@ -586,7 +586,7 @@ All in `Keyring\Events`:
 | `LoggedOut` | The user signed out. | `user` |
 | `SessionEnded` | Keyring signed a session out on its own: revoked, timed out, or ended by a risk response. | `user`, `reason` |
 
-Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyring signs users in and out through the guard. Like Fortify, Keyring also dispatches Laravel's other auth events next to its own, so listeners and packages built for them keep working:
+Laravel's own `Login`, `Logout` and `Registered` events still fire, because Keyring signs users in and out through the guard. Keyring also dispatches Laravel's other auth events next to its own, so listeners and packages built for them keep working:
 
 | Laravel event | Dispatched with |
 |---|---|

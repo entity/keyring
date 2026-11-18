@@ -14,9 +14,9 @@ use Keyring\Events\PasswordReset;
 use Keyring\KeyringManager;
 
 /**
- * Raises Laravel's own auth events next to Keyring's, as Fortify does, so
- * listeners and packages built for them keep working. (Signing in and out
- * already fire Laravel's Login and Logout through the guard.)
+ * Raises Laravel's own auth events next to Keyring's, so listeners and
+ * packages built for them keep working. (Signing in and out already fire
+ * Laravel's Login and Logout through the guard.)
  */
 class DispatchLaravelEvents
 {

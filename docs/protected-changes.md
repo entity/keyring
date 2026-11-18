@@ -203,7 +203,7 @@ use Keyring\Rules\CurrentPassword;
 $request->validate(['current_password' => ['required', 'string', new CurrentPassword($request->user())]]);
 ```
 
-Your action doesn't need to check `current_password` again. One that still does, such as an action carried over from Fortify, keeps working: it's given the same input.
+Your action doesn't need to check `current_password` again. One that still does, such as an action carried over from another package, keeps working: it's given the same input.
 
 A user without a password (for example, one who only uses passkeys) can set one with just the fresh verification.
 

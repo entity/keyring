@@ -36,7 +36,7 @@ Without the trait, signing in throws a `Keyring\Exceptions\MissingTrait` excepti
 
 ## Your Pages
 
-Keyring is headless, like Fortify: it handles the requests, and you build the pages. With Inertia, it renders `auth/{page}` components. Without it, it renders Blade views named `auth.{page}`. A missing view throws an error that names the file to create and the data it receives. So does a missing Inertia component, when Inertia's `pages.ensure_pages_exist` option is on.
+Keyring is headless: it handles the requests, and you build the pages. With Inertia, it renders `auth/{page}` components. Without it, it renders Blade views named `auth.{page}`. A missing view throws an error that names the file to create and the data it receives. So does a missing Inertia component, when Inertia's `pages.ensure_pages_exist` option is on.
 
 Keyring renders nine pages. You only need the ones for what you've turned on:
 
@@ -210,7 +210,7 @@ Then:
 2. Build the `challenge` and `confirm` pages, and the part of [your settings page](#your-settings-page) that adds and removes them.
 3. To make everyone set one up, uncomment the `keyring.enrolled` line below them and set `enrollment_url` to that page. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
 
-`Requirement::aal2()->ifEnrolled()` asks for a second factor once a user has set one up, as Fortify does. `noDowngrade()` means a user with a passkey can't be talked into using something weaker. See [Factors](factors.md) and [Policies](policies.md).
+`Requirement::aal2()->ifEnrolled()` asks for a second factor once a user has set one up. `noDowngrade()` means a user with a passkey can't be talked into using something weaker. See [Factors](factors.md) and [Policies](policies.md).
 
 ## What Keyring Does Without Being Asked
 
