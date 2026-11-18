@@ -66,7 +66,11 @@ abstract class TestCase extends Orchestra
 
         // While testing, Laravel drops deprecations without a word. Thrown,
         // they fail the test that hit one, so a removal can't arrive unseen.
-        $this->withoutDeprecationHandling();
+        // Not on the oldest versions allowed, which raise ones only a newer
+        // release of theirs takes away.
+        if (! getenv('KEYRING_TEST_LOWEST')) {
+            $this->withoutDeprecationHandling();
+        }
 
         // A full install: the usual sign-in methods, and the actions
         // registered like the published provider does.
