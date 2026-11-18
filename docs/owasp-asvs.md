@@ -42,11 +42,11 @@ Accepting every default with `php artisan keyring:install`, or running it with `
 - [registration that doesn't reveal who has an account](sign-in-flow.md#without-revealing-who-has-an-account),
 - eleven [security emails](security-log-and-emails.md#security-emails): new device, password changed, sign-in method added, sign-in method removed, second factor failed, recovery code used, new recovery codes, suspicious activity, account locked, email address changed, and email change undone,
 - three [risk signals](risk.md): a session turning up in another browser, repeated failed second factors, and a sign in that follows several failures,
-- rate limits, the timebox, and the session registry. Every session has a two hour inactivity limit, or 14 days for a browser that ticked "remember me". Sessions also have an overall limit of 30 days, and an account can have up to 100 sessions.
+- rate limits, the timebox, the session registry, and on every session a two hour inactivity limit (14 days for a browser that ticked "remember me"), a 30 day limit overall and a limit of 100 sessions per account.
 
 That covers Level 1, apart from what your own pages have to do, and apart from two things below. Passwords are normalised before they're hashed ([6.2.8](#v62-password-security)). An account you disable should be signed out everywhere by your own code ([7.4.2](#v74-session-termination)).
 
-A default install doesn't cover Level 2. Keyring starts with the password and leaves the rest for you to turn on. Nothing in a default install asks for a second factor, because there isn't one to set up. Choosing a second factor is the one thing you have to decide. If you pick a second sign-in method during installation, the installer's next question, "Require a second factor for everyone?", defaults to yes ([6.3.3](#v63-general-authentication-security)). The other sign-in methods are in the published provider, commented out, for an app that adds one later.
+It doesn't cover Level 2. Keyring starts with the password and leaves the rest for you to turn on. Nothing in a default install asks for a second factor, because there isn't one to set up. Choosing a second factor is the one thing you have to decide. If you pick a second sign-in method during installation, the installer's next question, "Require a second factor for everyone?", defaults to yes ([6.3.3](#v63-general-authentication-security)). The other sign-in methods are in the published provider, commented out, for an app that adds one later.
 
 Three of those emails have nothing to announce in a default install. New device needs `Features::devices()`, second factor failed needs a sign-in method besides the password, and email change undone needs `Features::emailChanges()`.
 
