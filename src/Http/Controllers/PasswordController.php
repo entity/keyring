@@ -48,6 +48,7 @@ class PasswordController
             signOutOthers: $request->boolean('sign_out_others', true),
             // Only one that was checked: an account with no password has none.
             current: filled($user->getAuthPassword()) && is_string($current = $request->input('current_password')) ? $current : null,
+            request: $request,
         );
 
         $sessions->rotate($request);

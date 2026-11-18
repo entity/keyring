@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Keyring\Changes;
 
 use Closure;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Keyring\Events\PasswordChanged;
@@ -14,6 +16,7 @@ use Keyring\Events\PasswordReset;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
+use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
 use LogicException;
 use RuntimeException;
@@ -47,13 +50,35 @@ class PasswordChanges
      * Saving it again as the new one is refused: nothing would have changed,
      * and a user held until they change it would be let go.
      *
+     * The save holds the user's row, and only goes ahead over the password
+     * $user was loaded with, the one $current was checked against: a reset
+     * or another change that finished since has stored a different one, and
+     * this is refused rather than saved over it. Given the request, it's
+     * also refused once the request's session has been signed out, as a
+     * reset does.
+     *
      * @param  Closure(): void  $save
      *
      * @throws ValidationException
+     * @throws AuthenticationException
      */
-    public function change(Authenticatable&Model $user, Closure $save, ?string $currentSession, bool $signOutOthers = true, #[\SensitiveParameter] ?string $current = null): void
+    public function change(Authenticatable&Model $user, Closure $save, ?string $currentSession, bool $signOutOthers = true, #[\SensitiveParameter] ?string $current = null, ?Request $request = null): void
     {
-        if (! $this->save($user, $save, old: $current)) {
+        $checked = (string) $user->getAuthPassword();
+
+        $overChecked = function (Authenticatable&Model $stored, Closure $write) use ($checked): void {
+            if (! hash_equals($checked, (string) $stored->getAuthPassword())) {
+                throw ValidationException::withMessages(['current_password' => __('validation.current_password')]);
+            }
+
+            $write();
+        };
+
+        $hold = fn (Closure $write) => $request === null
+            ? RowLock::hold($user, fn (?Model $stored) => $stored instanceof Authenticatable ? $overChecked($stored, $write) : throw new AuthenticationException)
+            : $this->sessions->whileSignedIn($request, $user, fn (Authenticatable&Model $stored) => $overChecked($stored, $write));
+
+        if (! $this->save($user, $save, old: $current, hold: $hold)) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_unchanged')]);
         }
 
@@ -103,13 +128,18 @@ class PasswordChanges
      * password has nothing to be the same as. With $keepHold the rest still
      * happens for a password that didn't change, and only the hold is kept.
      *
+     * $hold, when given, runs the write: it holds the row while it does.
+     * What follows the write takes other rows, and runs once it has let go.
+     *
      * @param  Closure(): void  $save
+     * @param  (Closure(Closure(): void): void)|null  $hold
      */
-    protected function save(Authenticatable&Model $user, Closure $save, #[\SensitiveParameter] ?string $old = null, #[\SensitiveParameter] ?string $new = null, bool $keepHold = false): bool
+    protected function save(Authenticatable&Model $user, Closure $save, #[\SensitiveParameter] ?string $old = null, #[\SensitiveParameter] ?string $new = null, bool $keepHold = false, ?Closure $hold = null): bool
     {
         $before = $user->getAuthPassword();
+        $write = fn () => $this->protection->changing($save, only: [$user->getAuthPasswordName()]);
 
-        $this->protection->changing($save, only: [$user->getAuthPasswordName()]);
+        $hold === null ? $write() : $hold($write);
 
         $after = $user->newQuery()->whereKey($user->getKey())->first()?->getAuthPassword();
 

@@ -89,7 +89,7 @@ final class PasswordRules
 
         return [
             'required', 'string', 'confirmed', $rule,
-            self::notCommon(), self::withoutContext($site, $personal), self::bcryptLimit(),
+            self::notCommon(), self::withoutContext($site, $personal), self::hashable(),
             ...$strict ? [self::notBreached($min)] : [],
         ];
     }
@@ -343,12 +343,20 @@ final class PasswordRules
      * Bcrypt only uses the first 72 bytes. Refuse longer passwords instead of
      * silently ignoring the end of them. That's bytes, not characters, so
      * under bcrypt passwords.max is never reached and 64 characters of
-     * accented or non-Latin text are too many. Argon2 has no such limit.
+     * accented or non-Latin text are too many. It can't hash a NUL byte at
+     * all, so one is refused here rather than failing when it's hashed.
+     * Argon2 has neither limit.
      */
-    private static function bcryptLimit(): Closure
+    public static function hashable(): Closure
     {
         return function (string $attribute, mixed $value, Closure $fail) {
-            if (Hash::getDefaultDriver() === 'bcrypt' && is_string($value) && strlen($value) > 72) {
+            if (Hash::getDefaultDriver() !== 'bcrypt' || ! is_string($value)) {
+                return;
+            }
+
+            if (str_contains($value, "\0")) {
+                $fail(__('keyring::keyring.password_null_byte'));
+            } elseif (strlen($value) > 72) {
                 $fail(__('keyring::keyring.password_too_long'));
             }
         };

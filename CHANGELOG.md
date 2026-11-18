@@ -7,7 +7,7 @@ The first release. Nothing is tagged yet.
 ### Signing In
 
 - Sign in, sign out, registration, password resets and email verification, with your own actions and pages.
-- Registration that doesn't reveal who has an account: the same answer for a free and a taken address, with new users signing in once they've verified theirs. `registration.reveal_taken` says when an address is taken instead.
+- Registration that doesn't reveal who has an account: the same answer for a free and a taken address, even when your action fails to create the user, with new users signing in once they've verified theirs, from the browser that followed the link, which gets a new session ID for it. `registration.reveal_taken` says when an address is taken instead.
 - Factors behind one contract: password, authenticator apps, passkeys, security keys, email codes and recovery codes, plus your own. Many authenticators per user, with a default and "try another way".
 - Passkeys and security keys from one WebAuthn driver: ES256 and EdDSA by default, RS256 when you ask for it, a challenge that is answered once and runs out on the server, and sign in with Laravel's `@laravel/passkeys` client. Like Laravel's passkeys package, the options name the relying party by its ID, so there's no name to set.
 - `WebAuthn::securityKeys()->requireAttestation()` to only add hardware keys whose attestation chains to root certificates you list, and `allowOnly()` to limit them to certain models by AAGUID.
@@ -22,7 +22,7 @@ The first release. Nothing is tagged yet.
 
 - Policies built from assurance levels that follow NIST SP 800-63B-4: AAL2 needs a factor the user has, and AAL3 an attested key that can't leave its device. `ifEnrolled()` and `noDowngrade()` say how a policy treats users who can't meet it yet, or who have a passkey.
 - `keyring.enrolled` to make everyone set up a second factor, which the installer adds when you pick one.
-- Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`, with a shared confirm flow. Changing how an account signs in takes the strongest proof the account can give.
+- Step-up middleware: `keyring:aal2` and `keyring.fresh:15m`, with a shared confirm flow. Changing how an account signs in takes the strongest proof the account can give, and a recovery code only counts there beside another factor.
 
 ### Sessions and Devices
 
@@ -37,8 +37,8 @@ The first release. Nothing is tagged yet.
 
 - Protected `email` and `password` attributes, which only change through Keyring's flows once it handles them.
 - Email changes confirmed from both addresses and revertable from the old one, with the old address reserved while they can be undone.
-- Password changes that take the current password, and resets that sign nobody in, end every session and leave second factors alone.
-- Password rules that follow OWASP ASVS 5.0.0 and NIST SP 800-63B-4: 15 characters alone or 8 with a second factor, no composition rules, a bundled list of the most common passwords, your own context words, a breach check that can refuse what it couldn't check, and Unicode normalised to NFC.
+- Password changes that take the current password and are only saved over the one that was checked, and resets that sign nobody in, end every session and leave second factors alone.
+- Password rules that follow OWASP ASVS 5.0.0 and NIST SP 800-63B-4: 15 characters alone or 8 with a second factor, no composition rules, a bundled list of the most common passwords, your own context words, a breach check that can refuse what it couldn't check, Unicode normalised to NFC, and, with bcrypt, a password it would cut short or can't hash refused.
 - `Keyring::requirePasswordChange()`, and a risk action of the same name, to hold a user until they choose a new password when theirs is known to someone else.
 - Emailed links that only act on a button press, with the token or signature posted in the body, built from `APP_URL` and opened on pages that send no referrer.
 
@@ -50,7 +50,7 @@ The first release. Nothing is tagged yet.
 
 ### Logging and Emails
 
-- A security log with a severity and a request ID on every entry, of sign ins, sessions "remember me" carried on, failures, lockouts, changes and what was refused, capped so a refused request can't fill it. Without the table it goes to your app's log.
+- A security log with a severity and a request ID on every entry, of sign ins, sessions "remember me" carried on, failures, lockouts, changes and what was refused, capped so a refused request can't fill it, and written whatever text an entry is about. Without the table it goes to your app's log.
 - "Was this you?" alerts at the next sign in.
 - Security emails about changes to how an account signs in and about suspicious attempts, sent from the start as far as your features go. Each is a notification you can swap for your own or turn off, and `SecurityNotice::toMailUsing()` writes them all from your own template.
 - `support_contact`, so every notice can say who to contact.
@@ -60,6 +60,7 @@ The first release. Nothing is tagged yet.
 
 - `keyring:install`, which asks which sign-in methods and features you want and publishes a config, a provider and your actions. Its defaults give the password alone, and every other sign-in method is in the provider, commented out, to turn on later. Also `keyring:import fortify`, and `keyring:prune`, scheduled daily.
 - Security headers on Keyring's responses: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin-allow-popups` and a referrer policy.
+- `Keyring::result()`, for a page to read what a form or Inertia response flashed for it, such as new recovery codes, which is kept encrypted in the session.
 - Test helpers, a fake, factories, a virtual WebAuthn authenticator and a conformance suite that checks your setup still keeps Keyring's guarantees.
 - `@entity/keyring`, a browser package for WebAuthn, enrollment, sessions and the challenge page, with Vue and React bindings.
 - Documentation of where Keyring stands on every requirement of OWASP ASVS 5.0.0 and NIST SP 800-63B-4 that bears on it, and of each place it deliberately does something else.

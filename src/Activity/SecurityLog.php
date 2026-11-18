@@ -41,13 +41,25 @@ class SecurityLog
     /**
      * Log an event: in keyring_events with Features::securityLog(), and in
      * the app's log without it, so it's always recorded somewhere. An entry
-     * the table won't take is reported and goes to the app's log instead.
+     * the table won't take is reported and goes to the app's log instead,
+     * and one whose details can't be kept is reported and logged without
+     * them.
      *
      * @param  array<string, mixed>  $meta
      */
     public function record(string $type, ?Authenticatable $user = null, ?string $factor = null, ?string $device = null, array $meta = [], ?Severity $severity = null): ?SecurityEvent
     {
-        return rescue(fn () => $this->keep($this->entry($type, $user, $factor, $device, $meta, $severity), orWrite: true));
+        return rescue(function () use ($type, $user, $factor, $device, $meta, $severity) {
+            try {
+                $event = $this->entry($type, $user, $factor, $device, $meta, $severity);
+            } catch (Throwable $e) {
+                report($e);
+
+                $event = $this->entry($type, $user, $factor, $device, [], $severity);
+            }
+
+            return $this->keep($event, orWrite: true);
+        });
     }
 
     /**
@@ -168,12 +180,14 @@ class SecurityLog
         $event = new ($this->keyring->securityEventModel())([
             'type' => $type,
             'severity' => $severity ?? Severity::of($type),
-            'factor' => $factor,
+            // Taken from the URL for a refused enrollment, so cut to fit the
+            // column, and the entry is still kept.
+            'factor' => $factor === null ? null : mb_substr($factor, 0, 64),
             'device_id' => $device,
             'ip' => $this->keyring->recordedIp(request()),
             'user_agent' => UserAgent::from(request()),
             'request_id' => $this->requestId(),
-            'meta' => $meta === [] ? null : $meta,
+            'meta' => $meta === [] ? null : $this->scrubbed($meta),
             'created_at' => now(),
         ]);
 
@@ -182,6 +196,26 @@ class SecurityLog
         }
 
         return $event;
+    }
+
+    /**
+     * The details with any text in them made valid UTF-8, as the table's JSON
+     * and the log's need it to be. Some of it is chosen by whoever the entry
+     * is about, an authenticator's name say, and must not keep it from
+     * being written.
+     *
+     * @param  array<array-key, mixed>  $meta
+     * @return array<array-key, mixed>
+     */
+    protected function scrubbed(array $meta): array
+    {
+        array_walk_recursive($meta, function (mixed &$value) {
+            if (is_string($value)) {
+                $value = mb_scrub($value, 'UTF-8');
+            }
+        });
+
+        return $meta;
     }
 
     /**

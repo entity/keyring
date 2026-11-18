@@ -14,6 +14,7 @@ use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
+use Keyring\Login\Verification;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\Duration;
 use Keyring\UserKeyring;
@@ -25,8 +26,9 @@ use Symfony\Component\HttpFoundation\Response;
  * signing in would ask of them: both factors for a user with two, and the
  * key for a user with one that can't leave its device. Adding a sign-in
  * method takes proving the best the account already has.
- * Users with a possession factor always use one. The window is fixed from the
- * moment of verification and doesn't slide with activity.
+ * Users with a possession factor always use one, and a recovery code only
+ * counts beside another factor. The window is fixed from the moment of
+ * verification and doesn't slide with activity.
  */
 class RequireFreshVerification
 {
@@ -41,8 +43,13 @@ class RequireFreshVerification
     {
         $since = now()->getTimestamp() - Duration::seconds($window);
         $requirement = $this->requirement($request);
+        $proved = $this->assurance->since($since);
 
-        if ($requirement->isMetBy($this->assurance->since($since))) {
+        if (! $requirement->acceptsRecoveryCodes) {
+            $proved = array_values(array_filter($proved, fn (Verification $verification) => $verification->factor !== RecoveryCodes::KEY));
+        }
+
+        if ($requirement->isMetBy($proved)) {
             return $next($request);
         }
 
@@ -75,9 +82,14 @@ class RequireFreshVerification
         // it could never add anything again.
         $requirement = $keyring->reachable($policy->atLeast($this->strongest($keyring, $policy)));
 
-        return $keyring->has(Category::Possession)
-            ? $requirement->atLeast(Requirement::aal1()->including(Category::Possession))
-            : $requirement;
+        if ($keyring->has(Category::Possession)) {
+            $requirement = $requirement->atLeast(Requirement::aal1()->including(Category::Possession));
+        }
+
+        // A recovery code stands in for a lost factor beside another one. It
+        // is never the whole of a verification: with one factor to prove,
+        // that factor is what's asked for.
+        return $requirement->factors < 2 ? $requirement->withoutRecoveryCodes() : $requirement;
     }
 
     /**

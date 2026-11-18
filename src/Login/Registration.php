@@ -32,6 +32,7 @@ use Keyring\Support\PasswordRules;
 use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 use LogicException;
+use Throwable;
 
 use function Illuminate\Support\defer;
 
@@ -87,15 +88,27 @@ class Registration
      * after the response. Each path makes one password hash, the slowest
      * thing either does.
      *
+     * Anything the action's create() throws is reported and answered like
+     * the rest, with nothing sent. A ValidationException is the action
+     * refusing the form on purpose, and is passed on.
+     *
      * @throws ValidationException
      */
     public function quietly(Request $request, CreatesNewUsers $creator): void
     {
         $this->container->make(Timebox::class)->call(function () use ($request, $creator) {
-            $input = $creator->validate($this->input($request));
+            $input = $this->validate($request, $creator);
             $email = $this->address($request, $input);
 
-            $user = $this->taken($email) ? null : $this->create($creator, $input, $email);
+            try {
+                $user = $this->taken($email) ? null : $this->create($creator, $input, $email);
+            } catch (ValidationException $e) {
+                throw $e;
+            } catch (Throwable $e) {
+                report($e);
+
+                return;
+            }
 
             if ($user !== null) {
                 // Laravel's listener mails the verification link, which would
@@ -128,7 +141,7 @@ class Registration
     public function openly(Request $request, CreatesNewUsers $creator): Authenticatable&Model
     {
         try {
-            $input = $creator->validate($this->input($request));
+            $input = $this->validate($request, $creator);
         } catch (ValidationException $e) {
             if ($this->taken($email = $this->address($request))) {
                 $e->validator->errors()->merge($this->alreadyTaken($email)->errors());
@@ -142,6 +155,25 @@ class Registration
         $user = $this->taken($email) ? null : $this->create($creator, $input, $email);
 
         return $user ?? throw $this->alreadyTaken($email);
+    }
+
+    /**
+     * The action's validation, then Keyring's own check that the password
+     * can be hashed: whatever rules the action has, a password the hasher
+     * would refuse is refused here, the same for every address, rather than
+     * failing only where an account is created.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ValidationException
+     */
+    protected function validate(Request $request, CreatesNewUsers $creator): array
+    {
+        $input = $creator->validate($this->input($request));
+
+        Validator::make($input, ['password' => [PasswordRules::hashable()]])->validate();
+
+        return $input;
     }
 
     /**

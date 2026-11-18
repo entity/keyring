@@ -87,7 +87,7 @@ Adding is always two steps. Nothing is saved until the second one succeeds.
 }
 ```
 
-Authenticator apps and email codes take an optional `name` when beginning or confirming (the one sent when confirming wins); passkeys and security keys take it when confirming. Names default to "Authenticator app", "Email", "Passkey" or "Security key", and are cut to 64 characters.
+Authenticator apps and email codes take an optional `name` when beginning or confirming (the one sent when confirming wins); passkeys and security keys take it when confirming. Names default to "Authenticator app", "Email", "Passkey" or "Security key", and are cut to 64 characters. A name that isn't valid UTF-8, or holds a NUL character, is refused with an error on `name`.
 
 ### Confirming
 
@@ -148,7 +148,7 @@ It loads the user's authenticators, so keep it lazy as above. A session that jus
 
 | Field | |
 |---|---|
-| `name` | Optional, up to 64 characters. |
+| `name` | Optional, up to 64 characters of valid UTF-8. |
 | `default` | Optional boolean. `true` makes this the default and clears the flag on the user's others. Not allowed for recovery codes. |
 
 The default authenticator is offered first when a second factor is needed. Recovery codes are a fallback, so they can't be made the default.
@@ -191,7 +191,7 @@ Every route answers with a [status response](sign-in-flow.md#status-responses). 
 | Update | `authenticator-updated` | `authenticator` |
 | Remove | `authenticator-removed` | |
 
-Other requests are redirected back with the `status` flashed, and the extra data flashed under `keyring.result` (for example `session('keyring.result.enrollment')`). The [browser package](frontend.md#managing-authenticators) uses the JSON form.
+Other requests are redirected back with the `status` flashed, and the extra data flashed, encrypted, for the next request. Read it with `Keyring::result()`, or one key with `Keyring::result('enrollment')`. The [browser package](frontend.md#managing-authenticators) uses the JSON form.
 
 ## From JavaScript
 

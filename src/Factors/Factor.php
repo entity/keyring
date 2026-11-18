@@ -147,7 +147,32 @@ abstract class Factor implements FactorContract
      */
     public function enrollmentRules(): array
     {
-        return [...$this->rules(), 'name' => ['nullable', 'string', 'max:64']];
+        return [...$this->rules(), 'name' => ['nullable', ...self::nameRules()]];
+    }
+
+    /**
+     * What an authenticator's name must be, wherever the user gives one:
+     * text of up to 64 characters, and valid UTF-8, which the log, the
+     * pages and the databases that store it all need.
+     *
+     * @return list<mixed>
+     */
+    public static function nameRules(): array
+    {
+        return ['string', 'max:64', self::validText()];
+    }
+
+    /**
+     * Refuses text that isn't valid UTF-8, or that holds a NUL character no
+     * database keeps, and leaves anything else to the other rules.
+     */
+    public static function validText(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) {
+            if (is_string($value) && (! mb_check_encoding($value, 'UTF-8') || str_contains($value, "\0"))) {
+                $fail(__('keyring::keyring.invalid_name'));
+            }
+        };
     }
 
     /**

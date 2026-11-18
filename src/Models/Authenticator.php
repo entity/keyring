@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -108,6 +109,20 @@ class Authenticator extends Model
     public function isVirtual(): bool
     {
         return ! $this->exists && $this->id === $this->factor;
+    }
+
+    /**
+     * A name is stored as valid UTF-8, without NUL characters, whatever
+     * saves it through the model: an import, your own code, a factor of
+     * your own. Keyring's forms refuse one that isn't, and what's left of
+     * one is kept rather than breaking the pages and the log entries that
+     * show it.
+     *
+     * @return Attribute<string, string>
+     */
+    protected function name(): Attribute
+    {
+        return Attribute::make(set: fn (mixed $value) => is_string($value) ? str_replace("\0", '', mb_scrub($value, 'UTF-8')) : $value);
     }
 
     public function markAsUsed(): void

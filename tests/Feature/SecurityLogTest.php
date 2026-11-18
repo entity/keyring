@@ -6,10 +6,14 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Str;
 use Keyring\Activity\SecurityLog;
+use Keyring\Enums\Assurance;
 use Keyring\Enums\Severity;
+use Keyring\Events\AuthenticatorAdded;
+use Keyring\Events\CloneSuspected;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
@@ -108,6 +112,38 @@ it('writes an entry the table would not take to the app\'s log instead', functio
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
 
     expect(array_column(written($log), 1))->toBe(['factor_failed']);
+    Exceptions::assertReportedCount(1);
+});
+
+// A name stored before Keyring refused ones like it, or straight into the
+// table, is still in the entries about its authenticator.
+it('logs what happens to an authenticator whose stored name isn\'t valid text', function () {
+    if (DB::getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('PostgreSQL and strict MySQL refuse to store text that isn\'t valid UTF-8.');
+    }
+
+    Exceptions::fake();
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    $odd = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    DB::table('keyring_authenticators')->where('id', $odd->id)->update(['name' => "\xff"]);
+
+    AuthenticatorAdded::dispatch($this->user, $odd->fresh());
+    CloneSuspected::dispatch($odd->fresh());
+    $this->deleteJson(route('keyring.authenticators.destroy', $odd->id))->assertOk();
+
+    expect(loggedTypes())->toBe(['authenticator_added', 'clone_suspected', 'authenticator_removed'])
+        ->and(mb_check_encoding((string) json_encode(logEntry('authenticator_removed')->meta), 'UTF-8'))->toBeTrue();
+    Exceptions::assertNothingReported();
+});
+
+it('logs an entry whose details can\'t be kept without them, and reports why', function () {
+    Exceptions::fake();
+
+    app(SecurityLog::class)->record('authenticator_removed', $this->user, meta: ['name' => NAN]);
+
+    expect(loggedTypes())->toBe(['authenticator_removed'])
+        ->and(logEntry('authenticator_removed')->meta)->toBeNull();
     Exceptions::assertReportedCount(1);
 });
 

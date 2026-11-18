@@ -276,6 +276,8 @@ By default (`registration.reveal_taken` is `false`), nobody can use the form to 
 
 - The answer is always the same: a redirect to the login page with the `registration-received` status ("Thanks for registering. We've emailed that address with what to do next."), or that status as JSON. Nobody is signed in.
 - Validation errors from your action are shown as usual. They're the same for every address, because your action never looks at whether it's taken.
+- After your action's `validate()`, Keyring refuses a password the hasher can't take, whatever your rules say: with bcrypt, one over 72 bytes or with a NUL byte. It's refused the same for every address, before Keyring looks at whether the address is taken.
+- **If `create()` throws**, the exception is passed to `report()` and the answer is the usual one. Nothing is created or sent, so the visitor is told to check an inbox that gets nothing, and a `create()` that keeps failing shows in your error tracker rather than as failed requests. A `ValidationException` thrown there is shown like any other validation error, since it's your action refusing the form on purpose.
 - **A free address** gets its account, and Laravel's `Registered` event is dispatched once the response has been sent, which emails the verification link.
 - **A taken address** gets nothing created or changed. Once the response has been sent, Keyring emails it your `already_registered` [notification](security-log-and-emails.md#emails-a-flow-needs), which says someone tried to register and links to the login page and, with `Features::resetPasswords()`, the forgot password page. If the account there was never verified, it's sent another verification link instead, since the first may be lost or expired.
 - An address is mailed five times an hour at most by registration (`limits.notices` every `limits.notices_per`), verification links included, so the form can't be used to fill someone's inbox. Past that the answer stays the same and nothing is sent.
@@ -286,7 +288,7 @@ A new user can't sign in until their address is verified. If they could, anyone 
 
 Verifying takes the emailed link and the password together:
 
-1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session and sends them to the login page with the `sign-in-to-verify` status. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
+1. The user follows the link. Their browser isn't signed in, so Keyring remembers the link in the session, under a new session ID, and sends them to the login page with the `sign-in-to-verify` status. The new ID means only the browser that followed the link holds it, whoever else had the one it came with. It comes with a new CSRF token, so a login page already open in another tab of that browser needs reloading before it can post. Opening the link changes nothing by itself, so a mail scanner that fetches it verifies nothing.
 2. They sign in. From the browser that followed the link, their account may sign in, and doing so verifies the address (Laravel's `Verified` event fires). They're sent back to the link, which has nothing left to do and sends them on to `home`.
 
 From then on they sign in anywhere, like anyone else. A link works until it expires (`auth.verification.expire`, 60 minutes), and registering again with the same address sends a new one. A finished [password reset](protected-changes.md#resetting-the-password) verifies the address too, since its link went to the same inbox. That's the way in for the owner of an address someone else registered first: they can't verify an account whose password they don't know, and whoever registered it never sees the link.
@@ -298,7 +300,7 @@ This needs email verification, and Keyring says so rather than leaking quietly:
 
 It also means an account that isn't verified can't be signed in at all, however it got that way: a session whose user loses `email_verified_at` is signed out on its next request. Mark accounts you create yourself (an import, a seeder, a social login) as verified.
 
-Three things are still yours to keep quiet. A username of your own that has to be unique (a handle, say) will say when it's taken, because your action checks it. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other, but anything your action's `create()` does that takes noticeably longer than the timebox will show. And your mail provider's bounce or delivery reports are outside the request altogether.
+Three things are still yours to keep quiet. A username of your own that has to be unique (a handle, say) will say when it's taken, because your action checks it, and so will a `ValidationException` your `create()` throws for a free address only. Your `Registered` listeners run after the response, so they can't slow down one answer and not the other, but anything your action's `create()` does that takes noticeably longer than the timebox will show. And your mail provider's bounce or delivery reports are outside the request altogether.
 
 ### Saying When an Address Is Taken
 
@@ -314,6 +316,7 @@ Many apps would rather tell someone straight away that they already have an acco
 - A taken address gets Laravel's "has already been taken" error on the email field, next to any other validation errors. Nothing is emailed.
 - A new user is signed in straight away, counting the password they just chose as proved, and `Registered` is dispatched during the request. The policy isn't consulted, since they have no other factors yet. The answer comes from `RegisterResponse`, which by default behaves like `AuthenticatedResponse`. Swap it to send new users somewhere else, like onboarding. See [Responses](#responses).
 - Users can sign in before verifying their address, and email verification is optional.
+- An exception your action's `create()` throws isn't caught: there's nothing left to hide, so it fails like any other request.
 
 This tells anyone who asks whether an address has an account: the error says so, and so does being signed in. It's the trade most consumer apps make, and it doesn't meet ASVS 6.3.8.
 
@@ -512,7 +515,7 @@ JSON clients get the slug, its translated message, the redirect (when there is o
 }
 ```
 
-Other requests are redirected (back, or to `redirect`) with the slug flashed as `status`, and any data flashed as `keyring.result`, for example `session('keyring.result.recoveryCodes')`.
+Other requests are redirected (back, or to `redirect`) with the slug flashed as `status`, and any data flashed for the next request, encrypted with `APP_KEY` since it can hold a secret being set up or new recovery codes. Read it with `Keyring::result()`, or one key of it in dot notation, for example `Keyring::result('recoveryCodes')`. It's null when nothing was flashed. `session('keyring.result')` holds only the ciphertext.
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password` and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 

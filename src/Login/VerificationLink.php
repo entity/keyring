@@ -34,10 +34,13 @@ class VerificationLink
     ) {}
 
     /**
-     * Keep a link whose signature has been checked, for as long as it's good.
+     * Keep a link whose signature has been checked, for as long as it's good,
+     * under a new session ID: one only the browser that followed it holds,
+     * whoever else had the ID it came with.
      */
     public function remember(Request $request, string $id, string $hash): void
     {
+        $request->session()->regenerate(true);
         $request->session()->put(self::KEY, ['id' => $id, 'hash' => $hash, 'expires' => $request->integer('expires')]);
     }
 
