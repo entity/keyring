@@ -29,8 +29,8 @@ npm install @entity/keyring
 > `@entity/keyring` isn't on npm yet. Until the first release, build it from the Composer package and install it from there:
 >
 > ```bash
-> (cd vendor/entity/keyring/js && npm install && npm run build)
-> npm install ./vendor/entity/keyring/js
+> (cd vendor/keyring/keyring/js && npm install && npm run build)
+> npm install ./vendor/keyring/keyring/js
 > ```
 
 It's plain ES modules, so it works with any bundler. The main entry point has no dependencies, so a Blade app without a bundler can copy its `dist` folder into `public/` and import it from a `<script type="module">`. It has four entry points:

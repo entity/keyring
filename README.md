@@ -30,7 +30,7 @@ Every feature and sign-in method beyond the password is opt-in. See [Start Small
 ## Installation
 
 ```bash
-composer require entity/keyring
+composer require keyring/keyring
 php artisan keyring:install
 php artisan migrate
 ```
@@ -39,7 +39,7 @@ php artisan migrate
 >
 > ```bash
 > composer config repositories.keyring vcs https://github.com/entity/keyring
-> composer require entity/keyring:dev-main
+> composer require keyring/keyring:dev-main
 > ```
 
 `keyring:install` asks which sign-in methods and features you want, and sets up what they need. Then add the trait to your user model. Users who register themselves verify their address before they can sign in, so implement `MustVerifyEmail` too:

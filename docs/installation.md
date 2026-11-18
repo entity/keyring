@@ -22,7 +22,7 @@ The [Quick Start](quick-start.md) is the short version. This page has the detail
 Install the package with Composer, then run the install command:
 
 ```bash
-composer require entity/keyring
+composer require keyring/keyring
 
 php artisan keyring:install
 php artisan migrate
@@ -32,7 +32,7 @@ php artisan migrate
 >
 > ```bash
 > composer config repositories.keyring vcs https://github.com/entity/keyring
-> composer require entity/keyring:dev-main
+> composer require keyring/keyring:dev-main
 > ```
 
 The command asks three things:

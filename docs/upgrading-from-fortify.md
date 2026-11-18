@@ -25,7 +25,7 @@ Your users keep their passwords, authenticator apps, recovery codes and `laravel
 1. Install Keyring and publish its files, but don't remove Fortify yet:
 
    ```bash
-   composer require entity/keyring
+   composer require keyring/keyring
    php artisan keyring:install
    php artisan migrate
    ```
