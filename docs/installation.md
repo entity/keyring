@@ -28,13 +28,6 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-> Keyring has no tagged release yet. Until it does, install it from GitHub:
->
-> ```bash
-> composer config repositories.keyring vcs https://github.com/entity/keyring
-> composer require keyring/keyring:dev-main
-> ```
-
 The command asks three things:
 
 1. **Which sign-in methods besides the password?** None by default: a new app starts with the password, and the others stay in your provider, commented out, to add later. Recovery codes come with any of them. Email codes are listed as what they are, an extra step at sign in and not a second factor: a password and an emailed code is still AAL1 (see [Email Codes](factors.md#what-turning-email-codes-on-means)), and the provider says so above their line.
@@ -111,10 +104,10 @@ Keyring looks users up by the `email` attribute by default (see `username` in [C
 
 ## Frontend
 
-Your pages can use `@entity/keyring`, Keyring's browser package, for WebAuthn and the challenge page (see [Frontend](frontend.md)):
+Your pages can use `@keyringjs/keyring`, Keyring's browser package, for WebAuthn and the challenge page (see [Frontend](frontend.md)):
 
 ```bash
-npm install @entity/keyring
+npm install @keyringjs/keyring
 ```
 
 See [Frontend](frontend.md) for what the package provides.
