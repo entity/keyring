@@ -230,6 +230,28 @@ describe('passkeyLogin', () => {
     login.stop()
   })
 
+  test('drops a passkey autofill hands over just as the button takes over', async () => {
+    letsGoAfter = 10
+    const login = passkeyLogin({ autofill: true }, () => {})
+    await login.start()
+    await tick()
+
+    // The browser picks a passkey from autofill before it lets go of the request.
+    login.signIn()
+    prompts[0].resolve({ id: 'autofill' })
+    await tick()
+    await tick()
+
+    expect(posted).toHaveLength(0)
+    expect(prompts.map(prompt => prompt.autofill)).toEqual([true, false])
+
+    prompts[1].resolve({ id: 'button' })
+    await tick()
+
+    expect(posted).toHaveLength(1)
+    login.stop()
+  })
+
   test('shows the server error and offers autofill again when a passkey is refused', async () => {
     const states: Array<{ processing: boolean, error: string | null }> = []
     const login = passkeyLogin({ autofill: true }, state => states.push(state))
