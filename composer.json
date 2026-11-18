@@ -11,6 +11,13 @@
         "totp"
     ],
     "license": "MIT",
+    "homepage": "https://github.com/entity/keyring",
+    "support": {
+        "issues": "https://github.com/entity/keyring/issues",
+        "source": "https://github.com/entity/keyring",
+        "docs": "https://github.com/entity/keyring/tree/main/docs",
+        "security": "https://github.com/entity/keyring/security/policy"
+    },
     "type": "library",
     "require": {
         "php": "^8.5",
