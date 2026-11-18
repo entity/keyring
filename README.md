@@ -1,6 +1,11 @@
-# Keyring
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="art/logo-dark.svg">
+    <img src="art/logo-light.svg" alt="Keyring" width="320">
+  </picture>
+</p>
 
-Factor-driven authentication for Laravel. It feels like Fortify, but it's built to be extended.
+<p align="center">Factor-driven authentication for Laravel. It feels like Fortify, but it's built to be extended.</p>
 
 It starts as small as Fortify: password sign-in, sign-out, and your own actions and pages. Then you add what your app needs, one feature or sign-in method at a time.
 
