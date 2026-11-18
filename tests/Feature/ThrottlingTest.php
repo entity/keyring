@@ -1661,8 +1661,13 @@ describe('how long the defaults give someone guessing from elsewhere', function 
         $started = now();
         $wrong = 0;
 
-        while (true) {
+        // Far more guesses than any lock takes, so one that never comes
+        // fails the test instead of going round forever.
+        foreach (range(1, 1000) as $_) {
             $response = test()->withCookie('known_device', 'a browser nobody has seen')->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'nope']);
+
+            // A wrong guess or a lock, and nothing else.
+            expect($response->status())->toBeIn([422, 429]);
 
             if ($response->json('errors.email.0') === __('keyring::keyring.locked')) {
                 return [$wrong, (int) $started->diffInMinutes(now())];
@@ -1672,6 +1677,8 @@ describe('how long the defaults give someone guessing from elsewhere', function 
 
             $pace($response);
         }
+
+        test()->fail('A thousand guesses and still no lock.');
     }
 
     it('is twenty minutes at four guesses a minute, which never meets a lock', function () {

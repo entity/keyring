@@ -29,6 +29,7 @@ use Keyring\Tests\Fixtures\Staff;
 use Keyring\WebAuthn\Ceremonies;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\CredentialRecord;
+use Webauthn\PublicKeyCredentialCreationOptions;
 
 beforeEach(function () {
     Keyring::factors([
@@ -90,6 +91,24 @@ it('keeps the user handle a user\'s keys already have when app_key changes', fun
     $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
 
     expect(Base64UrlSafe::decodeNoPadding($options['user']['id']))->toBe($handle);
+});
+
+it('names the relying party by its id, whatever the app is called', function () {
+    config(['app.name' => 'Acme', 'keyring.webauthn.relying_party.id' => 'acme.example']);
+    provedEveryKey();
+
+    expect($this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.rp'))
+        ->toBe(['id' => 'acme.example', 'name' => 'acme.example']);
+});
+
+it('reads back options that name the relying party, as ones stored before did', function () {
+    provedEveryKey();
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+
+    $read = app(Ceremonies::class)->fromJson(json_encode([...$options, 'rp' => ['id' => 'localhost', 'name' => 'Acme']]), PublicKeyCredentialCreationOptions::class);
+
+    expect($read->rp->id)->toBe('localhost')
+        ->and($read->challenge)->toBe(Base64UrlSafe::decodeNoPadding($options['challenge']));
 });
 
 it('gives two kinds of account that share an id their own user handles', function () {

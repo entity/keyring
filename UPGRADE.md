@@ -14,3 +14,4 @@ Changes made since the first installs from `dev-main`, for anyone already runnin
 - **Rate limits, locks and risk locks are kept under new keys.** Ones in place when this is deployed are left behind: an account locked then is unlocked early, once.
 - **Saving the current password as the new one is refused** on `PUT /user/password`, with a validation error on `password`.
 - **A mid-session risk step-up signs the session out when `sessions.end_on_lapse` is on**, where it used to carry on with nothing proved.
+- **`webauthn.relying_party.name` is gone.** WebAuthn deprecates the relying party name and most browsers don't show it, so the options now carry the relying party ID in its place, as Laravel's passkeys package does. Remove the key and `KEYRING_WEBAUTHN_RP_NAME` from your config, and any call to or override of `Ceremonies::relyingPartyName()`, which is gone too. Keys registered before keep working.

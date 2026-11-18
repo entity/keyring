@@ -9,7 +9,7 @@ The first release. Nothing is tagged yet.
 - Sign in, sign out, registration, password resets and email verification, with your own actions and pages.
 - Registration that doesn't reveal who has an account: the same answer for a free and a taken address, with new users signing in once they've verified theirs. `registration.reveal_taken` says when an address is taken instead.
 - Factors behind one contract: password, authenticator apps, passkeys, security keys, email codes and recovery codes, plus your own. Many authenticators per user, with a default and "try another way".
-- Passkeys and security keys from one WebAuthn driver: ES256 and EdDSA by default, RS256 when you ask for it, a challenge that is answered once and runs out on the server, and sign in with Laravel's `@laravel/passkeys` client.
+- Passkeys and security keys from one WebAuthn driver: ES256 and EdDSA by default, RS256 when you ask for it, a challenge that is answered once and runs out on the server, and sign in with Laravel's `@laravel/passkeys` client. Like Laravel's passkeys package, the options name the relying party by its ID, so there's no name to set.
 - `WebAuthn::securityKeys()->requireAttestation()` to only add hardware keys whose attestation chains to root certificates you list, and `allowOnly()` to limit them to certain models by AAGUID.
 - Authenticator app codes that work once, with SHA-1, SHA-256 or SHA-512, and a window of one time step or none.
 - Email codes as an extra step at sign in. They are opt-in and never count as a second factor.

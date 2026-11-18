@@ -58,7 +58,10 @@ jobs:
       # Without the analyser, which needs a newer Laravel than Keyring does.
       - run: composer remove --dev calebdw/phpstan-laravel --no-update --no-interaction
       - run: composer update --prefer-lowest --prefer-stable --no-interaction --prefer-dist
+      # Deprecations aren't failures here: the old versions raise them.
       - run: vendor/bin/pest --parallel
+        env:
+          KEYRING_TEST_LOWEST: 1
 
   databases:
     runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.

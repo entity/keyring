@@ -23,6 +23,7 @@ use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use LogicException;
 use ParagonIE\ConstantTime\Base64UrlSafe;
+use stdClass;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
 use Symfony\Component\Serializer\Normalizer\AbstractObjectNormalizer;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
@@ -81,7 +82,9 @@ class Ceremonies
     public function creationOptions(Authenticatable&Model $user, Profile $profile, array $exclude): PublicKeyCredentialCreationOptions
     {
         return PublicKeyCredentialCreationOptions::create(
-            rp: PublicKeyCredentialRpEntity::create($this->relyingPartyName(), $this->relyingPartyId()),
+            // No name: WebAuthn deprecates it and most browsers don't show
+            // it, so the options carry the relying party ID in its place.
+            rp: PublicKeyCredentialRpEntity::create(id: $this->relyingPartyId()),
             user: PublicKeyCredentialUserEntity::create(
                 name: (string) $user->getAttribute($this->keyring->username()),
                 id: $this->userHandle($user),
@@ -262,11 +265,6 @@ class Ceremonies
             ?? 'localhost';
     }
 
-    public function relyingPartyName(): string
-    {
-        return config('keyring.webauthn.relying_party.name') ?? config('app.name');
-    }
-
     /**
      * Origins allowed to complete ceremonies, normalised to scheme://host[:port].
      * Empty when none of them is a full URL, and then every ceremony is
@@ -319,7 +317,28 @@ class Ceremonies
      */
     public function fromJson(string $json, string $class, bool $attested = false): object
     {
+        if ($class === PublicKeyCredentialCreationOptions::class) {
+            $json = $this->withoutRelyingPartyName($json);
+        }
+
         return $this->serializer($attested)->deserialize($json, $class, 'json');
+    }
+
+    /**
+     * The library writes the relying party ID out as its name, then warns
+     * about a name when it reads one back. Keyring never sets one, so it's
+     * dropped first, along with the one in options stored before that.
+     */
+    protected function withoutRelyingPartyName(string $json): string
+    {
+        // Objects, not arrays, so an empty {} is written back as one.
+        $options = json_decode($json, flags: JSON_THROW_ON_ERROR);
+
+        if ($options instanceof stdClass && ($options->rp ?? null) instanceof stdClass) {
+            unset($options->rp->name);
+        }
+
+        return json_encode($options, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     /**

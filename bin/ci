@@ -48,7 +48,7 @@ lowest() {
         cd "$copy" &&
         step composer remove --dev calebdw/phpstan-laravel --no-update --no-interaction --quiet &&
         step composer update --prefer-lowest --prefer-stable --no-interaction --prefer-dist --quiet &&
-        step vendor/bin/pest --compact --parallel
+        KEYRING_TEST_LOWEST=1 step vendor/bin/pest --compact --parallel
     )
     local status=$?
 
