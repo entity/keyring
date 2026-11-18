@@ -112,10 +112,11 @@ class Authenticator extends Model
     }
 
     /**
-     * A name is stored as valid UTF-8, without NUL characters, however it got here: an import, your
-     * own code, a factor of your own. Keyring's forms refuse one that isn't,
-     * and what's left of one is kept rather than breaking the pages and the
-     * log entries that show it.
+     * A name is stored as valid UTF-8, without NUL characters, whatever
+     * saves it through the model: an import, your own code, a factor of
+     * your own. Keyring's forms refuse one that isn't, and what's left of
+     * one is kept rather than breaking the pages and the log entries that
+     * show it.
      *
      * @return Attribute<string, string>
      */
