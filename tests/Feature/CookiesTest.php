@@ -185,6 +185,8 @@ describe('a browser holding the cookies from before the app was served over HTTP
     });
 
     it('is still remembered, and gets that cookie under the new name too', function () {
+        // Frozen, so the cookie and the record expire in the same second.
+        $this->freezeSecond();
         $this->travel(3)->hours();
 
         $response = browserHolding([...$this->recaller, 'remembered_session' => $this->remembered, 'known_device' => $this->device])

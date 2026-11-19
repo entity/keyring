@@ -38,6 +38,7 @@ use Keyring\Notifications\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Support\PasswordRules;
 use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\SingleSignOn;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -341,6 +342,19 @@ it('limits password guesses when removing the last second factor', function () {
     }
 
     $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])->assertTooManyRequests();
+});
+
+it('asks a user without a password for none when removing the last second factor', function () {
+    Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SingleSignOn::class]);
+    $this->user->forceFill(['password' => null])->saveQuietly();
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)
+        ->deleteJson(route('keyring.authenticators.destroy', $totp->id))
+        ->assertOk();
+
+    expect(Authenticator::find($totp->id))->toBeNull()
+        ->and($this->user->keyring->refresh()->all()->pluck('factor')->all())->toBe(['sso']);
 });
 
 it('refuses to remove the last factor the policy needs', function () {

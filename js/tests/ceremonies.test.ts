@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { enroll, removeAuthenticator } from '../src/enroll'
+import { enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '../src/enroll'
 import { KeyringRequestError } from '../src/http'
 import { endOtherSessions, endSession, listSessions } from '../src/sessions'
 import { createCredential, fromBase64Url, getCredential, toBase64Url } from '../src/webauthn'
@@ -91,6 +91,28 @@ describe('creating a credential', () => {
     })
   })
 
+  test('lets a browser with the json helpers read the options itself', async () => {
+    const options = { challenge: 'AQI', user: { id: 'Aw', name: 'taylor@example.com' } }
+    const parsed = { parsed: true }
+    const parsing: unknown[] = []
+    // On the shared class, since what the browser hands back must be one,
+    // and taken off again whatever happens.
+    ;(FakeCredential as any).parseCreationOptionsFromJSON = (json: unknown) => {
+      parsing.push(json)
+
+      return parsed
+    }
+
+    try {
+      await createCredential(options)
+    } finally {
+      delete (FakeCredential as any).parseCreationOptionsFromJSON
+    }
+
+    expect(parsing).toEqual([options])
+    expect(calls[0].options.publicKey).toBe(parsed)
+  })
+
   test('says so when the browser has no webauthn', async () => {
     delete (globalThis as any).PublicKeyCredential
 
@@ -108,6 +130,12 @@ describe('getting a credential', () => {
     expect(calls[0].options.mediation).toBe('conditional')
     expect(new Uint8Array(calls[0].options.publicKey.allowCredentials[0].id)).toEqual(Uint8Array.from([6]))
     expect(credential.response).toEqual({ clientDataJSON: 'CQ', authenticatorData: 'Bw', signature: 'Bg', userHandle: null })
+  })
+
+  test('says so when the browser hands back no credential', async () => {
+    ;(navigator.credentials as any).get = async () => null
+
+    await expect(getCredential({ challenge: toBase64Url(bytes(5)) })).rejects.toThrow('No passkey or security key was used.')
   })
 
   test('asks in a modal by default', async () => {
@@ -167,6 +195,29 @@ describe('enrolling', () => {
       { password: 'secret', sign_out_others: false },
       { password: 'secret' },
     ])
+  })
+
+  test('renames an authenticator and makes one the default', async () => {
+    answers.push({ status: 200, body: { authenticator: { id: 'a1', name: 'Work laptop' } } }, { status: 200, body: { authenticator: { id: 'a1', default: true } } })
+
+    await renameAuthenticator('a1', 'Work laptop')
+    await makeDefault('a1')
+
+    expect(requests).toMatchObject([
+      { method: 'PATCH', url: '/user/authenticators/a1', body: { name: 'Work laptop' } },
+      { method: 'PATCH', url: '/user/authenticators/a1', body: { default: true } },
+    ])
+  })
+
+  test('still throws with the status when the error page is not json', async () => {
+    globalThis.fetch = (async () => new Response('<h1>Server Error</h1>', { status: 500 })) as any
+
+    const error = await renameAuthenticator('a1', 'Work laptop').catch(error => error)
+
+    expect(error).toBeInstanceOf(KeyringRequestError)
+    expect(error.status).toBe(500)
+    expect(error.message).toBe('Request failed')
+    expect(error.errors).toEqual({})
   })
 
   test('asks for the other sessions to end when adding', async () => {

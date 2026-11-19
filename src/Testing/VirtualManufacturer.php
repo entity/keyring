@@ -109,9 +109,10 @@ class VirtualManufacturer
                 'commonName' => $name,
             ], $key, $options);
 
+            // False only when OpenSSL couldn't make the request.
             $certificate = $request instanceof \OpenSSLCertificateSigningRequest
                 ? openssl_csr_sign($request, $issuer, $issuerKey, $this->days, $options, random_int(1, PHP_INT_MAX))
-                : false;
+                : false; // @codeCoverageIgnore
 
             return $certificate ?: throw new RuntimeException('OpenSSL could not make a certificate: '.openssl_error_string());
         } finally {

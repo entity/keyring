@@ -55,11 +55,14 @@ trait RendersPages
             }
         }
 
+        // The tests always have Inertia installed, so they never get here.
+        // @codeCoverageIgnoreStart
         $view = str_replace('/', '.', $component);
 
         throw_unless(view()->exists($view), MissingPage::forBlade($name, $view, array_keys($props)));
 
         return view($view, $props);
+        // @codeCoverageIgnoreEnd
     }
 
     /**

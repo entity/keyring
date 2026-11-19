@@ -430,6 +430,71 @@ it('only counts inherence when the key verified the user', function () {
     $this->assertGuest();
 });
 
+it('makes a security key verify its user when the factor requires it', function () {
+    Keyring::factors([Password::class, WebAuthn::passkeys()->requireUserVerification(false), WebAuthn::securityKeys()->requireUserVerification()]);
+    provedEveryKey();
+
+    $options = fn (string $factor) => test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
+
+    expect($options('passkey')['authenticatorSelection']['userVerification'])->toBe('preferred')
+        ->and($options('security-key')['authenticatorSelection']['userVerification'])->toBe('required');
+
+    $this->postJson(route('keyring.authenticators.confirm', 'security-key'), [
+        'credential' => new VirtualAuthenticator(userVerification: false)->register($options('security-key')),
+    ])->assertJsonValidationErrors('credential');
+
+    expect(Authenticator::query()->exists())->toBeFalse();
+
+    $key = new VirtualAuthenticator;
+    enroll('security-key', $key);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $options = $this->inertia()->get(route('keyring.login.challenge'))->json('props.challenge.options');
+
+    expect($options['userVerification'])->toBe('required');
+
+    $this->post(route('keyring.login.verify', 'security-key'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+});
+
+it('adds a second kind of security key under its own name', function () {
+    Keyring::factors([Password::class, WebAuthn::securityKeys(), WebAuthn::securityKeys()->as('staff-key')]);
+
+    $key = new VirtualAuthenticator(userVerification: false);
+    enroll('staff-key', $key);
+
+    expect(Authenticator::query()->sole()->factor)->toBe('staff-key');
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $options = $this->inertia()->get(route('keyring.login.challenge'))
+        ->assertJsonPath('props.factor', 'staff-key')
+        ->json('props.challenge.options');
+
+    $this->post(route('keyring.login.verify', 'staff-key'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+});
+
+it('refuses a sign in answered with a registration, and a registration answered with a sign in', function () {
+    Exceptions::fake();
+    $key = new VirtualAuthenticator;
+    enroll('passkey', $key);
+
+    $options = $this->getJson('/login/passkey/options')->assertOk()->json('options');
+    $registration = $key->register(['challenge' => $options['challenge'], 'rp' => ['id' => $options['rpId']], 'user' => ['id' => Base64UrlSafe::encodeUnpadded('someone')]]);
+
+    $this->postJson('/login/passkey', ['credential' => $registration])->assertJsonValidationErrors('credential');
+    $this->assertGuest();
+
+    provedEveryKey();
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+
+    $this->postJson(route('keyring.authenticators.confirm', 'passkey'), [
+        'credential' => new VirtualAuthenticator()->assert(['challenge' => $options['challenge'], 'rpId' => $options['rp']['id']]),
+    ])->assertJsonValidationErrors('credential');
+
+    expect(Authenticator::where('factor', 'passkey')->count())->toBe(1);
+    Exceptions::assertNothingReported();
+});
+
 it('accepts any of the user\'s keys, not just the one shown', function () {
     $first = new VirtualAuthenticator(userVerification: false);
     $second = new VirtualAuthenticator(userVerification: false);
