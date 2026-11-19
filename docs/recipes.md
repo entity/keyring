@@ -14,18 +14,22 @@
 
 ## Introduction
 
-Worked examples of the hooks in [Extending Keyring](extending.md), with the packages people usually reach for. Each one was run against a real app before it was written down.
+This page contains worked examples of the hooks described in [Extending Keyring](extending.md), using the packages developers most often reach for. Each example was run against a real application before it was written down.
 
-The ones that use another package were written against `stevebauman/location` 7.8, `laravel/socialite` 5.31, `laravel/vonage-notification-channel` 3.3 and `@maizzle/framework` 6.3, on Laravel 13. Check their own docs if you're on something newer.
+The examples that use another package were written against `stevebauman/location` 7.8, `laravel/socialite` 5.31, `laravel/vonage-notification-channel` 3.3, and `@maizzle/framework` 6.3, on Laravel 13. If you're using a newer version, check that package's own documentation.
 
 ## Locations With stevebauman/location
 
-Keyring shows where a device signed in from, and the [`NewCountry` and `ImpossibleTravel` signals](risk.md) need a location to work. It asks a locator class for one, and [`stevebauman/location`](https://github.com/stevebauman/location) can be that class.
+Keyring shows where a device signed in from, and the [`NewCountry` and `ImpossibleTravel` signals](risk.md) need a location to work. Keyring asks a locator class for that location, and [`stevebauman/location`](https://github.com/stevebauman/location) can serve as that class.
+
+To install it, run these commands:
 
 ```bash
 composer require stevebauman/location
 php artisan vendor:publish --provider="Stevebauman\Location\LocationServiceProvider"
 ```
+
+Next, create a locator class that implements the `LocatesIps` contract. It uses the package to look up the request's IP address:
 
 ```php
 namespace App\Keyring;
@@ -55,10 +59,15 @@ class IpLocator implements LocatesIps
 }
 ```
 
-Point Keyring at it, turn on devices, and pick the signals:
+Next, point Keyring at your locator, turn on devices, and choose the signals you want:
 
 ```php
 // config/keyring.php
+'features' => [
+    // ...
+    Features::devices(),
+],
+
 'devices' => [
     'locator' => App\Keyring\IpLocator::class,
 ],
@@ -69,15 +78,15 @@ Point Keyring at it, turn on devices, and pick the signals:
 Keyring::risk()->signals([NewDevice::class, NewCountry::class, ImpossibleTravel::class]);
 ```
 
-Three things to know:
+There are three things you should know about this setup:
 
-- **Its default driver calls an API.** Keyring asks the locator at most once per request, and only on requests that need a location, but a sign in then waits on that call. For production, set `location.driver` to its MaxMind driver with a local database file, which answers from disk.
-- **It returns a fixed test location until you turn that off.** `LOCATION_TESTING` defaults to `true`, which locates every request at a Google address in the United States. Set `LOCATION_TESTING=false` outside local development.
-- **If it throws, the sign in still works.** Keyring treats the location as unknown for that request and reports the exception.
+- **The default driver calls an API.** Keyring asks the locator at most once per request, and only for requests that need a location. A sign in still waits on that call, though. For production, set `location.driver` to the MaxMind driver with a local database file, which answers from disk.
+- **The package returns a fixed test location until you turn that off.** `LOCATION_TESTING` defaults to `true`, which locates every request at a Google address in the United States. Set `LOCATION_TESTING=false` outside local development.
+- **A failed lookup doesn't stop the sign in.** If the locator throws, Keyring treats the location as unknown for that request and reports the exception.
 
-Behind a load balancer, configure Laravel's [trusted proxies](https://laravel.com/docs/requests#configuring-trusted-proxies), or every request has the balancer's address and so the same location.
+If your application runs behind a load balancer, configure Laravel's [trusted proxies](https://laravel.com/docs/requests#configuring-trusted-proxies). Otherwise, every request carries the balancer's address and therefore the same location.
 
-In tests, `Location::fake()` gives a location without a lookup:
+In your tests, the `Location::fake` method gives you a location without performing a lookup:
 
 ```php
 use Stevebauman\Location\Facades\Location;
@@ -88,7 +97,7 @@ Location::fake(['*' => Position::make(['countryCode' => 'NL', 'cityName' => 'Ams
 
 ## Locations From Cloudflare
 
-If your app is only reachable through Cloudflare, it can tell you where each request came from, with no lookup at all. `Keyring\Devices\HeaderLocator` reads its headers:
+If your application can only be reached through Cloudflare, Cloudflare can tell you where each request came from, without any lookup at all. The `Keyring\Devices\HeaderLocator` class reads those headers for you:
 
 ```php
 // config/keyring.php
@@ -97,19 +106,24 @@ If your app is only reachable through Cloudflare, it can tell you where each req
 ],
 ```
 
-Cloudflare sends `CF-IPCountry` by default. The city, region and coordinates, which impossible travel needs, come with its "Add visitor location headers" managed transform.
+Cloudflare sends `CF-IPCountry` by default. The city, region, and coordinates, which impossible travel needs, are provided by its "Add visitor location headers" managed transform.
 
-Only use this when requests can't reach your app without going through the proxy. Anyone who can reach it directly can send these headers themselves and choose their own location.
+> [!WARNING]
+> Only use this approach when requests can't reach your application without going through the proxy. Anyone who can reach your application directly can send these headers themselves and choose their own location.
 
 For another proxy or CDN, bind the locator with your own header names. See [Locations](devices-and-sessions.md#locations).
 
 ## Emails With Maizzle
 
-Every email Keyring sends is a [notification class in your app](security-log-and-emails.md#security-emails), so it can render any template. [Maizzle](https://maizzle.com) builds email-safe HTML from Vue and Tailwind, and can write Blade views.
+Every email Keyring sends is a [notification class in your application](security-log-and-emails.md#security-emails), so you can render it with any template you like. [Maizzle](https://maizzle.com) builds email-safe HTML from Vue and Tailwind, and it can write Blade views.
+
+To install it, run:
 
 ```bash
 npm install -D @maizzle/framework
 ```
+
+Next, configure Maizzle to write Blade views:
 
 ```js
 // maizzle.config.js
@@ -133,12 +147,14 @@ export default defineConfig({
 });
 ```
 
+Then import Tailwind in a stylesheet:
+
 ```css
 /* resources/emails/tailwind.css */
 @import "@maizzle/tailwindcss";
 ```
 
-A template is a Vue file. Whatever changes per email is a Blade variable inside `<Raw>`, which Maizzle passes through untouched:
+A template is a Vue file. Anything that changes from one email to the next is a Blade variable inside `<Raw>`, which Maizzle passes through untouched:
 
 ```vue
 <!-- resources/emails/keyring/notice.vue -->
@@ -155,12 +171,16 @@ A template is a Vue file. Whatever changes per email is a Blade variable inside 
       <Raw>@isset($actionUrl)</Raw>
       <Button href="{{ $actionUrl }}" class="bg-slate-900 text-white"><Raw>{{ $actionText }}</Raw></Button>
       <Raw>@endisset</Raw>
+
+      <Raw>@isset($contact)</Raw>
+      <Text class="text-sm text-slate-500"><Raw>{{ __("If this wasn't you and you need help, contact us:") }} {{ $contact }}</Raw></Text>
+      <Raw>@endisset</Raw>
     </Container>
   </Layout>
 </template>
 ```
 
-`npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. Tell `SecurityNotice` to return them, and every notice uses the one template:
+Running `npx maizzle build` writes `notice.blade.php` and `text/notice.blade.php`. Tell `SecurityNotice` to return those views, and every notice will use the same template:
 
 ```php
 // app/Providers/KeyringServiceProvider.php
@@ -184,24 +204,28 @@ SecurityNotice::toMailUsing(function (SecurityNotice $notice, object $notifiable
 });
 ```
 
-`$notice->contact` is your [support contact](security-log-and-emails.md#a-support-contact), `null` until you set one. A template of your own has to show it itself: Keyring's does so in the `toMail()` this replaces.
+The `$notice->contact` property holds your [support contact](security-log-and-emails.md#a-support-contact), which is `null` until you set one. A template of your own must display it itself, as the one above does. Keyring's own template does so in the `toMail` method that this callback replaces, and also turns a URL or an address into a link, where this version prints it as plain text.
 
-The [emails a flow needs](security-log-and-emails.md#emails-a-flow-needs), like the emailed code, each have their own shape. Give those a template by extending Keyring's class and registering yours, as [Your Own Templates](security-log-and-emails.md#your-own-templates) shows.
+Each of the [emails a flow needs](security-log-and-emails.md#emails-a-flow-needs), such as the emailed code, has its own shape. To give one of those a template, extend Keyring's class and register yours, as [Your Own Templates](security-log-and-emails.md#your-own-templates) shows.
 
-Two things that catch people out:
+There are two things that often catch people out:
 
-- **Keep `=>` and `>` out of the Blade inside `<Raw>`.** Maizzle writes them as HTML entities, which breaks the directive. Pass a list of `['label' => ..., 'value' => ...]` rather than looping over keys and values, and write `@if ($details !== [])` rather than a count.
-- **Blade's `{{ }}` is what keeps the HTML safe.** A key's name is whatever the user typed, and the escaping stops it adding a link to a genuine security email. Don't swap it for `{!! !!}` in the HTML views.
+- **Keep `=>` and `>` out of the Blade inside `<Raw>`.** Maizzle writes them as HTML entities, which breaks the directive. Pass a list of `['label' => ..., 'value' => ...]` rather than looping over keys and values, and write `@if ($details !== [])` rather than counting the items.
+- **Blade's `{{ }}` is what keeps the HTML safe.** A key's name is whatever the user typed, and escaping stops it from adding a link to a genuine security email. Don't swap it for `{!! !!}` in the HTML views.
 
-The [example app](https://github.com/entity/keyring-example#emails) has the whole thing: five templates, a shared frame, the four emails a flow needs, and a local page that previews each one.
+The [example application](https://github.com/entity/keyring-example#emails) has the whole setup: five templates, a shared frame, the four emails a flow needs, and a local page that previews each one.
 
 ## SMS Codes
 
-A factor that sends a code extends `Keyring\Factors\CodeFactor`, which handles expiry, guess limits, resending and enrollment. This one sends it by SMS with Laravel's Vonage channel.
+A factor that sends a code extends `Keyring\Factors\CodeFactor`, which handles expiry, guess limits, resending, and enrollment. The factor in this example sends its code by SMS, using Laravel's Vonage channel.
+
+To install the channel, run:
 
 ```bash
 composer require laravel/vonage-notification-channel
 ```
+
+Next, create the factor. It asks for the user's phone number when they add the factor, and sends each code to that number:
 
 ```php
 namespace App\Keyring;
@@ -260,6 +284,8 @@ class SmsCode extends CodeFactor
 }
 ```
 
+The factor sends its messages with a notification class of its own:
+
 ```php
 namespace App\Notifications;
 
@@ -282,27 +308,40 @@ class SmsVerificationCode extends Notification
 }
 ```
 
-Register it, and users can add it like any other sign-in method. Your form posts `phone` to `POST /user/authenticators/sms`, then the code to `POST /user/authenticators/sms/confirm`:
+Register the factor alongside your others:
 
 ```php
 Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SmsCode::class]);
 ```
 
-Don't queue the notification, so the code arrives while the user waits. Confirming the enrollment proves the number receives codes, and a code only verifies the phone it was sent to.
+Users can then add it like any other sign-in method. Your form posts `phone` to `POST /user/authenticators/sms`, and then posts the code to `POST /user/authenticators/sms/confirm`.
 
-SMS is a weak second factor: numbers get moved to a new SIM by someone who talks the carrier into it. Unlike email, NIST SP 800-63B-4 still accepts it as an authenticator, so the factor keeps `CodeFactor`'s possession category and a password with a texted code is an AAL2 session. It's the one authenticator NIST calls restricted (Sec. 3.1.3.3 and 3.2.9), which puts conditions on your app that Keyring can't meet for you: every user has to be offered another second factor that isn't restricted, be told what the risk of text messages is, and you have to plan for the day they're no longer accepted. Codes may last ten minutes at most. So register it next to an authenticator app or passkeys, never in their place, and say so on the page where users choose. Each account can be sent [three codes every ten minutes](configuration.md#pending-logins-timebox-and-rate-limits) by default, which also caps what a stranger can make you spend.
+Don't queue the notification, so the code arrives while the user is still waiting. Confirming the enrollment proves that the number can receive codes, and a code only verifies the phone it was sent to.
 
-For another provider, only `deliver()` changes: call its SDK there, or route the notification to its channel.
+> [!WARNING]
+> SMS is a weak second factor. Numbers can be moved to a new SIM by someone who talks the carrier into it.
+
+Unlike email, NIST SP 800-63B-4 still accepts SMS as an authenticator, so this factor keeps `CodeFactor`'s possession category, and a password with a texted code counts as an AAL2 session. It's the one authenticator NIST calls restricted (Sec. 3.1.3.3 and 3.2.9), which places conditions on your application that Keyring can't meet for you:
+
+- Every user has to be offered another second factor that isn't restricted.
+- Every user has to be told about the risks of text messages.
+- You have to plan for the day when text messages are no longer accepted.
+
+Codes may last ten minutes at most. For these reasons, register SMS alongside an authenticator app or passkeys, never in their place, and say so on the page where users choose a factor. By default, each account can be sent [three codes every ten minutes](configuration.md#pending-logins-timebox-and-rate-limits), which also caps how much a stranger can make you spend.
+
+To use a different provider, only the `deliver` method needs to change. Call that provider's SDK there, or route the notification to its channel.
 
 ## Social Login With Socialite
 
-A social login is a way to sign in, so in Keyring it's a [factor](factors.md#writing-any-other-factor) that can start a login. Writing it as one means a "Sign in with GitHub" goes through the same pipeline as the login form: rate limits, your policy, risk, devices and sessions. A user with a second factor is still asked for it.
+A social login is a way to sign in, so in Keyring it's a [factor](factors.md#writing-any-other-factor) that can start a login. When you write it as one, a "Sign in with GitHub" button goes through the same pipeline as the login form. That means rate limits, your policy, risk checks, devices, and sessions all apply. A user with a second factor is still asked for it.
+
+To install Socialite, run:
 
 ```bash
 composer require laravel/socialite
 ```
 
-Add a `github_id` column to your users (nullable and unique), then the factor:
+Next, add a `github_id` column to your `users` table. The column should be nullable and unique. Then create the factor:
 
 ```php
 namespace App\Keyring;
@@ -407,7 +446,13 @@ class GitHub extends Factor implements PrimaryFactor
 }
 ```
 
-Register it with your other factors, and add the two routes. `Keyring::attempt()` starts a sign in with a factor from a route of your own, and answers as the login form would:
+Register the factor with your other factors:
+
+```php
+Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, GitHub::class]);
+```
+
+Next, add the two routes. The `Keyring::attempt` method starts a sign in with a factor from a route of your own, and it responds the same way the login form does:
 
 ```php
 use Illuminate\Http\Request;
@@ -430,31 +475,45 @@ Route::middleware('guest')->group(function () {
 });
 ```
 
-`->block()` takes the session lock, as Keyring's own sign-in routes do.
+The `block` method takes the session lock, as Keyring's own sign-in routes do.
 
-What this gives you:
+With this setup:
 
-- A linked user with no second factor is signed in and sent to `home`.
+- A linked user with no second factor is signed in and sent to the `home` path (`/dashboard` by default).
 - A linked user with an authenticator app or passkey is sent to the challenge page first.
-- A GitHub account that isn't linked gets the same "these credentials don't match" as a wrong password.
+- A GitHub account that isn't linked gets the same "these credentials don't match" message as a wrong password.
 - Attempts count against the per-IP limit, and a [risk lock](risk.md#actions) refuses them, like any other sign in.
-- GitHub is never offered on the confirm page. A user is asked for their password or another sign-in method there, and one who only has GitHub signs in again to do anything behind [`keyring.fresh`](step-up.md).
+- GitHub is never offered on the confirm page. A user is asked for their password or another sign-in method there. A user who only has GitHub signs in again to do anything behind [`keyring.fresh`](step-up.md).
 
-**Match on the provider's ID, never on the email address.** Some providers let an account carry an address its owner hasn't proven, so matching on it would let someone sign in to whoever has that address in your app.
+> [!WARNING]
+> Match on the provider's ID, never on the email address. Some providers let an account carry an address its owner hasn't proven, so matching on the address would let someone sign in to whoever has that address in your application.
 
-To link an account, send a signed-in user through the same redirect to a second callback that saves the ID. It adds a way to sign in, so give it what Keyring's own routes for that have: `keyring.fresh`, and the rule that [the account's address is verified first](authenticators.md#who-may-enroll). Without the second, someone who registers an address that isn't theirs could link their own GitHub account to it, and still sign in after the real owner had reset the password:
+To link an account, send a signed-in user to GitHub with a callback of its own that saves the ID. Linking adds a way to sign in, so this callback should have what Keyring's own routes for that purpose have: `keyring.fresh`, and the rule that [the account's address is verified first](authenticators.md#who-may-enroll). Without the second, someone who registers an address that isn't theirs could link their own GitHub account to it, and still sign in after the real owner had reset the password:
 
 ```php
-Route::get('/settings/github/callback', function (Request $request) {
-    abort_unless(Keyring::allowsEnrollment($request->user()), 403);
+Route::middleware(['auth', 'keyring.fresh:15m'])->group(function () {
+    Route::get('/settings/github', fn () => Socialite::driver('github')
+        ->redirectUrl(url('/settings/github/callback'))
+        ->redirect());
 
-    $request->user()->forceFill(['github_id' => Socialite::driver('github')->user()->getId()])->save();
+    Route::get('/settings/github/callback', function (Request $request) {
+        abort_unless(Keyring::allowsEnrollment($request->user()), 403);
 
-    return to_route('security.edit');
-})->middleware(['auth', 'keyring.fresh:15m']);
+        $githubId = Socialite::driver('github')
+            ->redirectUrl(url('/settings/github/callback'))
+            ->user()
+            ->getId();
+
+        $request->user()->forceFill(['github_id' => $githubId])->save();
+
+        return to_route('security.edit');
+    });
+});
 ```
 
-Keyring doesn't know about the link, so nothing of Keyring's removes it. A password reset and an [undone email change](protected-changes.md#changing-the-email-address) take away the sign-in methods Keyring holds and leave `github_id` where it is. Clear it when the account is recovered, by listening for `PasswordReset` and `EmailChangeReverted`:
+Socialite sends GitHub the callback from `config/services.php` unless you pass another with `redirectUrl`, so both routes pass this one. Make sure your GitHub OAuth app accepts that URL as a callback too.
+
+Keyring doesn't know about this link, so none of Keyring's own features removes it. A password reset and an [undone email change](protected-changes.md#changing-the-email-address) remove the sign-in methods Keyring holds, but they leave `github_id` where it is. Clear the link when the account is recovered by listening for the `PasswordReset` and `EmailChangeReverted` events:
 
 ```php
 use Keyring\Events\EmailChangeReverted;
@@ -465,9 +524,9 @@ Event::listen([PasswordReset::class, EmailChangeReverted::class], function (Pass
 });
 ```
 
-To let people sign up with GitHub, create and link the user in the login callback before calling `Keyring::attempt()`, when no user has that ID yet.
+If you want people to sign up with GitHub, create and link the user in the login callback before calling `Keyring::attempt`, for the case where no user has that ID yet.
 
-In tests, `Socialite::fake()` stands in for GitHub:
+In your tests, the `Socialite::fake` method stands in for GitHub:
 
 ```php
 use Laravel\Socialite\Facades\Socialite;
@@ -480,7 +539,7 @@ $this->get('/auth/github/callback')->assertRedirect('/dashboard');
 
 ## Usernames Instead of Email Addresses
 
-When users sign in with a handle and have an email address too, tell Keyring which attribute is which:
+If users sign in with a handle and also have an email address, tell Keyring which attribute is which:
 
 ```php
 // config/keyring.php
@@ -489,11 +548,11 @@ When users sign in with a handle and have an email address too, tell Keyring whi
 'email' => 'email',
 ```
 
-The login form then posts `handle` and `password`. Password resets, email changes and email codes keep using the address.
+The login form then posts `handle` and `password`. Password resets, email changes, and email codes continue to use the email address.
 
-Keyring lowercases what's typed before looking the user up, so store handles lowercased, or keep their case with `Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username))`.
+Keyring lowercases what the user types before it looks them up. Store handles in lowercase, or keep their case by returning the trimmed value from `Keyring::normalizeUsernamesUsing`, like this: `Keyring::normalizeUsernamesUsing(fn (string $username) => trim($username))`.
 
-To accept either on one field, leave `username` as `email` and find the user yourself:
+If you want to accept either one in the same field, leave `username` set to `email` and find the user yourself:
 
 ```php
 use App\Models\User;
@@ -505,27 +564,27 @@ Keyring::findUsersUsing(fn (Request $request) => User::query()
     ->first());
 ```
 
-Guesses at either one count against the same account, without the sign-in form showing that the two belong together. See [Rate Limiting](security.md#rate-limiting) and [Finding the User](sign-in-flow.md#finding-the-user).
+Guesses at either one count against the same account, and the sign-in form doesn't reveal that the two belong together. See [Rate Limiting](security.md#rate-limiting) and [Finding the User](sign-in-flow.md#finding-the-user).
 
 ## Links for Apps on Several Domains
 
-Keyring builds every emailed link from `APP_URL`. When each tenant has its own domain, start the links there:
+Keyring builds every emailed link from `APP_URL`. When each tenant has its own domain, start the links from that domain instead:
 
 ```php
 Keyring::linkRootUsing(fn () => tenant()?->url ?? config('app.url'));
 ```
 
-The callback runs when a link is built, which is while handling the request or in the queued job that sends the email, so read the tenant from wherever your tenancy package keeps it in both.
+The callback runs whenever a link is built. That happens while handling a request, or in the queued job that sends the email. Read the tenant from wherever your tenancy package stores it in both places.
 
-Return something the server knows. The request's `Host` header is whatever the sender wrote, and a reset link built from it would deliver a real token to their site.
+Return a value that your server already knows. The request's `Host` header is whatever the sender wrote, and a reset link built from it would deliver a real token to their site.
 
-If a tenant scope on your user model hides every user on the central domain, this matters more: a confirmation link opened there finds no account and answers as invalid, so each tenant's links have to open on that tenant's domain.
+If a tenant scope on your user model hides every user on the central domain, this matters even more. A confirmation link opened there finds no account and reports that it's invalid, so each tenant's links have to open on that tenant's own domain.
 
-Passkeys are tied to a domain too. Set `webauthn.relying_party.id` and `webauthn.origins` per tenant if each one registers its own. See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
+Passkeys are tied to a domain as well. If each tenant registers its own passkeys, set `webauthn.relying_party.id` and `webauthn.origins` for each tenant. See [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
 
 ## Storing Less About Requests
 
-Keyring keeps the request's IP address on devices, sessions and security log entries, and passes it to security notices. To keep only the network:
+Keyring stores the request's IP address on devices, sessions, and security log entries, and it passes that address to security notices. To store only the network instead, anonymize the address:
 
 ```php
 use Illuminate\Http\Request;
@@ -535,9 +594,9 @@ use Symfony\Component\HttpFoundation\IpUtils;
 Keyring::recordIpsUsing(fn (Request $request) => IpUtils::anonymize((string) $request->ip()));
 ```
 
-Or return `null` to keep none. Rate limits and the locator still see the real address, since neither stores it.
+Alternatively, return `null` to store no address at all. Rate limits and the locator still see the real address, since neither one stores it.
 
-How long things are kept is config too:
+You can also configure how long Keyring keeps records:
 
 ```php
 // config/keyring.php
@@ -548,11 +607,13 @@ How long things are kept is config too:
 'email_changes' => ['keep_ended_for' => '7d'],
 ```
 
-`keyring:prune` deletes what's past those, and Keyring [schedules it daily](devices-and-sessions.md#pruning) for you. Force deleting a user deletes their devices, sign-in methods, pending changes and log entries at once. To keep no devices, leave `Features::devices()` off. Without `Features::securityLog()` there's no log table, and the events go to [your app's log](security-log-and-emails.md#without-the-table) instead, where what's kept is up to that channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists it all.
+The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, and log entries at the same time.
+
+You can also keep less by leaving features off. To keep no devices at all, leave `Features::devices()` off. Without `Features::securityLog()`, there's no log table, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
 
 ## Accounts an Admin Approves
 
-For an app where someone reviews each sign-up, don't let anyone sign in until they're approved:
+If someone reviews each sign-up in your application, you may prevent anyone from signing in until they've been approved:
 
 ```php
 use App\Models\User;
@@ -563,7 +624,7 @@ use App\Models\User;
 Keyring::allowSignInWhen(fn (User $user) => $user->approved_at !== null);
 ```
 
-Withdrawing an approval signs the account out on its next request, and that request ends its other sessions too. To end them all as you withdraw it, without waiting for a request, sign the account out yourself:
+Withdrawing an approval signs the account out on its next request, and that request also ends the account's other sessions. To end every session as soon as you withdraw the approval, without waiting for a request, sign the account out yourself:
 
 ```php
 use Keyring\Sessions\Sessions;
@@ -575,19 +636,19 @@ app(Sessions::class)->signOutEverywhere($user);
 
 See [Who May Sign In](sign-in-flow.md#who-may-sign-in).
 
-Approval can also be what lets a user add a sign-in method, in place of verifying their email address:
+Approval can also decide whether a user may add a sign-in method, in place of verifying their email address:
 
 ```php
 Keyring::allowEnrollmentWhen(fn (User $user) => $user->approved_at !== null);
 ```
 
-That replaces Keyring's own rule, so only use it when approving an account means you know it's its owner's. See [Who May Enroll](authenticators.md#who-may-enroll).
+This replaces Keyring's own rule, so only use it when approving an account means you know it belongs to its owner. See [Who May Enroll](authenticators.md#who-may-enroll).
 
 ## An App Whose Every Page Needs AAL2
 
-Some apps can't show anything to a session that hasn't proved two factors: NIST SP 800-63B-4 (Sec. 2) has federal agencies choose at least AAL2 wherever personal information is made available online, for one. By default Keyring signs users in with what they have and lets a level lapse without ending the session, so three settings make AAL2 the floor.
+Some applications can't show anything to a session that hasn't proved two factors. For example, NIST SP 800-63B-4 (Sec. 2) asks federal agencies to choose at least AAL2 wherever personal information is made available online. By default, Keyring signs users in with whatever they have and lets an assurance level lapse without ending the session. To make AAL2 the minimum, you need to make three changes.
 
-First, the policy and the factors. Don't register email codes, which [aren't a factor](factors.md#what-turning-email-codes-on-means):
+First, update the policy and the factors. Don't register email codes, which [aren't a factor](factors.md#what-turning-email-codes-on-means):
 
 ```php
 // app/Providers/KeyringServiceProvider.php
@@ -596,7 +657,7 @@ Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, WebAuthn::
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
-`ifEnrolled()` stays, so a new user can sign in once with their password to set a second factor up. The middleware keeps them from anything else until they have, and asks every other session for AAL2:
+The `ifEnrolled` condition stays in place, so a new user can sign in once with their password to set up a second factor. Next, add the `keyring.enrolled` middleware, which keeps that user from reaching anything else until they've done so, and put your pages in a `keyring:aal2` group, which asks every other session for AAL2. Tell Keyring where the enrollment page is with `enrollment_url`:
 
 ```php
 // bootstrap/app.php
@@ -619,7 +680,7 @@ Route::get('/settings/security', [SecurityController::class, 'edit'])->middlewar
 'enrollment_url' => '/settings/security',
 ```
 
-Last, end the session when AAL2 runs out, where it would otherwise carry on as AAL1:
+Last, end the session when AAL2 runs out. Otherwise, the session would carry on as AAL1:
 
 ```php
 // config/keyring.php
@@ -628,11 +689,11 @@ Last, end the session when AAL2 runs out, where it would otherwise carry on as A
 ],
 ```
 
-With that:
+With these settings in place:
 
-- A session that signed in with two factors ends after an hour without a request, or 24 hours after they were proved, and the user signs in again with both. Change the numbers in `sessions.levels.aal2`.
-- A new user's first session signed in with one factor, so it isn't ended. It reaches the enrollment page and Keyring's own routes, and nothing in the group above. Adding the second factor proves it, which takes that session to AAL2 for as long as the level lasts, and then `keyring:aal2` asks for both again.
-- "Remember me" brings no session back, so leave it off your login form.
+- A session that signed in with two factors ends after an hour without a request, or 24 hours after those factors were proved, and the user signs in again with both. To change those numbers, edit `sessions.levels.aal2`.
+- A new user's first session is signed in with one factor, so it isn't ended. That session can reach the enrollment page and Keyring's own routes, but nothing in the group above. Adding the second factor proves it, which takes the session to AAL2 for as long as that level lasts. After that, `keyring:aal2` asks for both factors again.
+- "Remember me" doesn't bring a session back, so leave it off your login form.
 - Laravel's own `session.lifetime` still ends an idle session sooner if it's shorter than an hour. Set it to 60 or more.
 
-What Keyring can't do for you is the rest of what NIST asks at AAL2: phishing-resistant sign in has to be on offer (register passkeys, as above), and a federal agency's server cryptography has to be validated.
+What Keyring can't do for you is the rest of what NIST asks at AAL2. Phishing-resistant sign in has to be on offer, which means registering passkeys as shown above. A federal agency's server cryptography also has to be validated.

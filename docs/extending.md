@@ -8,16 +8,16 @@
 
 ## Introduction
 
-Keyring works after `keyring:install` and a migration, and nearly everything it does from there is yours to change. The code an app is expected to own is published into it: the config, the migrations, a service provider, the [actions](protected-changes.md) and the [notifications](security-log-and-emails.md#security-emails). The rest stays in the package, where it keeps getting fixes, behind options and hooks.
+Once you've run `keyring:install` and a migration, Keyring works. From there, nearly everything it does is yours to change. The code that an application is expected to own is published into your application. That includes the config, the migrations, a service provider, the [actions](protected-changes.md), and the [notifications](security-log-and-emails.md#security-emails). The rest stays in the package, where it keeps receiving fixes. You change it through options and hooks.
 
-This page lists them all, with where each is explained. [Recipes](recipes.md) has worked examples of the common ones.
+This page lists all of them, along with where each one is explained. The [Recipes](recipes.md) page has worked examples of the most common ones.
 
 ## What You Can Change
 
 | To change | Use | See |
 |---|---|---|
 | Which features are on | The `features` list | [Adding Features](quick-start.md#adding-features) |
-| Any number, lifetime or limit | `config/keyring.php` | [Configuration](configuration.md) |
+| Any number, lifetime, or limit | `config/keyring.php` | [Configuration](configuration.md) |
 | How users sign in | `Keyring::factors()`, `Keyring::extend()`, your own `Factor` | [Factors](factors.md) |
 | What they must prove | `Keyring::require()` | [Policies](policies.md) |
 | The steps a verification runs | `Keyring::pipeline()` | [The Pipeline](sign-in-flow.md#the-verification-pipeline) |
@@ -29,9 +29,9 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | What a page renders | `Keyring::page()` | [Pages](sign-in-flow.md#pages) |
 | What Keyring answers with | `Keyring::respondWith()` and the contracts in `Keyring\Contracts\Responses` | [Responses](sign-in-flow.md#responses) |
 | Validation and status messages | The `keyring-lang` translation files | [Messages and Translations](configuration.md#messages-and-translations) |
-| The route prefix, domain and middleware | `prefix`, `domain` and `middleware` | [Routes](configuration.md#routes) |
+| The route prefix, domain, and middleware | `prefix`, `domain`, and `middleware` | [Routes](configuration.md#routes) |
 | The middleware on account changes | `changes_middleware` | [Account Changes and Enrollment](configuration.md#account-changes-and-enrollment) |
-| The form rate limits | The `keyring`, `keyring-pages` and `keyring-login-options` rate limiters | [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits) |
+| The form rate limits | The `keyring`, `keyring-pages`, and `keyring-login-options` rate limiters | [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Who may sign in at all | `Keyring::allowSignInWhen()` | [Who May Sign In](sign-in-flow.md#who-may-sign-in) |
 | Who may add a sign-in method | `Keyring::allowEnrollmentWhen()` | [Who May Enroll](authenticators.md#who-may-enroll) |
 | Whether registration says when an address is taken | `registration.reveal_taken` | [Registration](sign-in-flow.md#registration) |
@@ -47,11 +47,11 @@ This page lists them all, with where each is explained. [Recipes](recipes.md) ha
 | The models | `Keyring::useAuthenticatorModel()` and the other four | [The Keyring Facade](configuration.md#the-keyring-facade) |
 | Which attributes are protected | `protected`, `Keyring::withoutProtection()` | [Protected Changes](protected-changes.md) |
 
-Devices, email changes and every sign-in method but the password are off until you turn them on. [Risk signals](risk.md) and [security notices](security-log-and-emails.md#security-emails) are whatever your `KeyringServiceProvider` lists: the one `keyring:install` publishes starts with a set of each, and an app without it has none.
+Devices, email changes, and every sign-in method except the password are off until you turn them on. The [risk signals](risk.md) and [security notices](security-log-and-emails.md#security-emails) come from whatever your `KeyringServiceProvider` lists. The provider that `keyring:install` publishes starts with a set of each. An application without that provider has none.
 
 ## Replacing a Controller or Service
 
-Keyring's controllers and services are resolved from the container, so binding your own class in a service provider's `register()` method swaps one. Extend Keyring's and override what you need:
+Keyring's controllers and services are resolved from the container. That means you can swap one out by binding your own class in the `register()` method of a service provider. Extend Keyring's class, and override whatever you need:
 
 ```php
 use App\Http\Controllers\AuthenticatorController;
@@ -60,25 +60,25 @@ use Keyring\Http\Controllers\AuthenticatorController as KeyringAuthenticatorCont
 $this->app->bind(KeyringAuthenticatorController::class, AuthenticatorController::class);
 ```
 
-The services behind them work the same way: `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager`, `Keyring\Support\Throttle` and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
+The services behind them work the same way. They include `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager`, `Keyring\Support\Throttle`, and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
 
-This is the last resort. A class you've replaced stops getting Keyring's fixes for whatever you overrode, so prefer an option or hook above when one does the job, and call the parent for the rest.
+Think of this as a last resort. A class you've replaced stops receiving Keyring's fixes for whatever you override. So prefer an option or hook from the table above when one does the job, and in a method you do override, call the parent's method for everything you aren't changing.
 
 ## Changing the Routes
 
-Set `routes` to `false` and call `Keyring::routes()` inside your own group to change the prefix or middleware. To change a route itself, copy `vendor/keyring/keyring/routes/keyring.php` into your app and load that instead. Keep the route names: Keyring's controllers, responses and emailed links find routes by name. See [Routes](configuration.md#routes).
+The `prefix`, `domain`, and `middleware` options cover most changes. To register the routes inside a group of your own, set `routes` to `false`, and call `Keyring::routes()` in that group. Your group then decides the prefix and domain, and Keyring still adds the `middleware` option. If you need to change a route itself, you may copy `vendor/keyring/keyring/routes/keyring.php` into your application, and load that copy instead. Keep the route names, though. Keyring's controllers, responses, and emailed links find routes by name. See [Routes](configuration.md#routes).
 
 ## What Stays Fixed
 
-A few things have no switch, because turning them off would quietly remove a protection:
+A few things have no switch. Turning them off would quietly remove a protection:
 
-- Plain `EmailCode::class` is refused. `EmailCode::asExtraStep()` is the switch, and it says what you're accepting.
-- A user can't remove their last way to sign in, and removing the last second factor takes the password, typed again and long enough to stand alone.
-- An email change is confirmed from the new address, announced to the old one, and can be undone from there.
-- Trusting a device takes a real second factor, and a confirm page opened without a step-up behind it never accepts recovery codes.
-- The steps that check rate limits, the policy and risk can't be dropped from the pipeline by accident. `dangerouslyReplace()` is there when you mean it.
+- Email codes can't be registered as a factor with plain `EmailCode::class`. Keyring refuses it. Register `EmailCode::asExtraStep()` instead, whose name says what you're accepting. See [What Turning Email Codes On Means](factors.md#what-turning-email-codes-on-means).
+- A user can't remove their last way to sign in. Removing the last second factor also requires the password, typed again, and that password must be long enough to stand alone.
+- An email change is confirmed from the new address and announced to the old one. The old address can undo it.
+- Trusting a device takes a real second factor. A confirm page opened without a step-up behind it never accepts recovery codes.
+- You can't drop the steps that check rate limits, the policy, and risk from the pipeline by accident. The `dangerouslyReplace()` method is there for when you mean it.
 - Emailed links are never built from the request's `Host` header.
 
-Keyring also needs Eloquent user models with the `HasKeyring` trait and a session guard. It doesn't sign users in to token guards.
+Keyring also needs Eloquent user models that use the `HasKeyring` trait, and a session guard. It doesn't sign users in with token guards.
 
-The field names forms post (`remember`, `trust`, `code`, `credential`, `authenticator`), the route names and the status slugs are fixed too, since the [browser package](frontend.md) and your pages rely on them.
+The field names that forms post (`remember`, `trust`, `code`, `credential`, and `authenticator`), the route names, and the status slugs are fixed too. The [browser package](frontend.md) and your pages rely on them.

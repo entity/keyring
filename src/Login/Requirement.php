@@ -206,8 +206,7 @@ final readonly class Requirement
 
     /**
      * Apply this requirement as far as the user's authenticators can meet it.
-     * A user with nothing beyond one factor signs in with that, which is
-     * Fortify's behaviour.
+     * A user with nothing beyond one factor signs in with that.
      */
     #[\NoDiscard]
     public function ifEnrolled(): static

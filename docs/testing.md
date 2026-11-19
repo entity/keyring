@@ -11,11 +11,11 @@
 
 ## Introduction
 
-Keyring ships helpers in `Keyring\Testing` so your tests can exercise your app's rules (who needs what, which routes need step-up) without real codes, signatures or waiting.
+Keyring ships helpers in the `Keyring\Testing` namespace, so your tests can exercise your application's rules, such as who needs which factors and which routes require step-up. You don't need real codes, signatures, or any waiting to do it.
 
 ## Setting Up
 
-A few settings keep tests fast and offline. In your base `TestCase`:
+To keep your tests fast and offline, add the `InteractsWithKeyring` trait to your base `TestCase` class:
 
 ```php
 use Keyring\Testing\InteractsWithKeyring;
@@ -26,13 +26,13 @@ abstract class TestCase extends BaseTestCase
 }
 ```
 
-New passwords are only checked against Have I Been Pwned in production, so tests make no network calls. See [Passwords](configuration.md#passwords).
+New passwords are only checked against Have I Been Pwned in production, so your tests don't make any network calls. See [Passwords](configuration.md#passwords).
 
-`InteractsWithKeyring` also swaps in an instant timebox for every test that uses it, so failed factor checks don't wait the usual 500ms. Tests without the trait wait the full `timebox` on every failed verification.
+The trait also swaps in an instant timebox for every test that uses it, so failed factor checks don't wait the usual 500ms. Tests without the trait wait the full `timebox` on every failed verification.
 
 ## Acting at an Assurance Level
 
-`InteractsWithKeyring` adds methods for signed-in tests, and one for reading errors:
+The `InteractsWithKeyring` trait adds methods for tests where a user is signed in, along with one for reading errors:
 
 ```php
 use Keyring\Enums\Assurance;
@@ -42,12 +42,14 @@ $this->actingAs($user)->withAssurance(Assurance::AAL2)->get('/billing')->assertO
 $this->actingAs($user)->freshAt(now()->subHour())->deleteJson('/account')->assertStatus(423);
 ```
 
-- `withAssurance($level)` pretends the session proved enough to reach that level: a password for AAL1, a password and a TOTP code for AAL2, an attested security key that verified the user for AAL3. `Assurance::None` proves nothing.
-- `freshAt($time)` pretends those verifications happened at that time, for [`keyring.fresh`](step-up.md#fresh-verification). Without it, they happen now.
+Here, `/billing` and `/account` stand for routes of your own, behind `keyring:aal2` and `keyring.fresh`.
 
-You can chain both, in either order. The level defaults to AAL1, so `freshAt()` alone gives a password verification at that time.
+- The `withAssurance` method pretends the session proved enough to reach the level you pass. For example, a password is enough for AAL1, a password and a TOTP code reach AAL2, and an attested security key that verified the user reaches AAL3. `Assurance::None` proves nothing.
+- The `freshAt` method pretends those verifications happened at the time you pass, which matters for [`keyring.fresh`](step-up.md#fresh-verification). Without it, they happen now.
 
-A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, answer `423`. Add `withAssurance()` for those:
+You may chain both methods, in either order. The level defaults to AAL1, so calling `freshAt` on its own gives the user a password verification at that time.
+
+A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, ask for step-up. A JSON request gets a `423` status, and any other request is redirected to the confirm page. For those routes, add `withAssurance`:
 
 ```php
 $this->actingAs($user)->withAssurance(Assurance::AAL1)
@@ -55,15 +57,7 @@ $this->actingAs($user)->withAssurance(Assurance::AAL1)
     ->assertOk();
 ```
 
-`sessionErrors()` returns the validation errors the last request flashed, as a `MessageBag`. Use it rather than `session('errors')`, which is a plain array right after a request when the session is serialized as JSON, the default in new Laravel apps:
-
-```php
-$this->post('/login', ['email' => $user->email, 'password' => 'wrong']);
-
-expect($this->sessionErrors()->first('email'))->toBe(__('auth.failed'));
-```
-
-The `423` only comes back for JSON requests. A plain `delete()` that needs step-up is redirected to the confirm page instead:
+A plain request that needs step-up, such as a `delete` instead of a `deleteJson`, is redirected rather than answered with a `423`:
 
 ```php
 $this->actingAs($user)->freshAt(now()->subHour())
@@ -71,9 +65,17 @@ $this->actingAs($user)->freshAt(now()->subHour())
     ->assertRedirect(route('keyring.confirm.challenge'));
 ```
 
+The `sessionErrors` method returns the validation errors the last request flashed, as a `MessageBag`. Prefer it over `session('errors')`. Right after a request, `session('errors')` is a plain array when the session is serialized as JSON, which is the default in new Laravel applications:
+
+```php
+$this->post('/login', ['email' => $user->email, 'password' => 'wrong']);
+
+expect($this->sessionErrors()->first('email'))->toBe(__('auth.failed'));
+```
+
 ## Acting With Real Authenticators
 
-`withAssurance()` pretends, so its verifications aren't tied to any authenticator. Code that looks up the authenticator behind a verification, such as the [email change](protected-changes.md#confirming) check for an established second factor, won't find one. For that, say which of the user's authenticators the session verified:
+The `withAssurance` method only pretends, so its verifications aren't tied to any authenticator. Code that looks up the authenticator behind a verification, such as the [email change](protected-changes.md#confirming) check for an established second factor, won't find one. In that case, tell the test which of the user's authenticators the session verified:
 
 ```php
 use Keyring\Models\Authenticator;
@@ -84,11 +86,11 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
 ```
 
-`verifiedWith(...$authenticators)` pretends the session verified the password and each authenticator you pass. The level is whatever those reach (a password and an authenticator app is AAL2), so it replaces `withAssurance()`. `freshAt()` chains with it as before. Reach for it when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method: that route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
+The `verifiedWith` method accepts any number of authenticators and pretends the session verified the password and each one you pass. The level is whatever those reach, so a password and an authenticator app give AAL2. This means `verifiedWith` takes the place of `withAssurance`, and you may still chain `freshAt` with it, as before. Reach for `verifiedWith` when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method. That route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
 
 ## Faking Factors
 
-`Keyring::fake()` decides factor checks without real proofs:
+The `Keyring::fake` method decides factor checks without any real proofs. For example, to pass the `passkey` and `totp` factors and fail `email-code`, you may write:
 
 ```php
 use Keyring\Facades\Keyring;
@@ -96,11 +98,13 @@ use Keyring\Facades\Keyring;
 Keyring::fake()->pass('passkey', 'totp')->fail('email-code');
 ```
 
-- Passed factors verify with whatever is posted, even nothing. Their validation rules are skipped.
+- Passed factors verify with whatever is posted, even nothing at all. Their validation rules are skipped.
 - Failed factors always fail.
-- Factors you don't name are checked for real.
+- Any factor you don't name is checked for real.
 
-Identifying the user still happens for real: posting an unknown email to `/login` fails even when `password` passes. Rate limiting, devices, risk and the policy all run as normal.
+Identifying the user still happens for real. For example, posting an unknown email to `/login` fails even when `password` passes. Rate limiting, devices, risk, and your policy all run as normal.
+
+To sign in with a faked factor, your test might look like this:
 
 ```php
 Keyring::fake()->pass('totp');
@@ -111,7 +115,7 @@ $this->post('/login', ['email' => $user->email, 'password' => 'password'])
 $this->post(route('keyring.login.verify', 'totp'))->assertRedirect('/dashboard');
 ```
 
-The fake also notes every factor check made once the account is known, faked or real, so a test can assert what a request asked for:
+The fake also records every factor check made once the account is known, whether faked or real. This lets a test assert what a request asked for:
 
 ```php
 $fake = Keyring::fake()->pass('totp');
@@ -130,11 +134,11 @@ $fake->assertNotChecked('recovery');
 | `assertNotChecked($factor)` | The factor was never checked. |
 | `assertNothingChecked()` | No factor was checked. |
 
-`Keyring::fake()` throws a `LogicException` when the app environment is `production`, and nothing bound in the container by hand fakes a check there. Other environments can use it, so a browser suite running against `local` or `staging` keeps working.
+The `Keyring::fake` method throws a `LogicException` when the app environment is `production`, and nothing you bind by hand in the container can fake a check there. Other environments may use it, so a browser suite running against `local` or `staging` keeps working.
 
 ## Factories
 
-`Keyring\Models\Authenticator` has a factory. Attach authenticators to a user through the `authenticatable` relationship:
+The `Keyring\Models\Authenticator` model has a factory. To attach authenticators to a user, use the `authenticatable` relationship:
 
 ```php
 use Keyring\Models\Authenticator;
@@ -145,16 +149,16 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 
 | State | Creates |
 |---|---|
-| `totp($secret = null)` | An authenticator app with a random (or the given) secret. This is also the default state. |
-| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the given codes. Each must be in the form Keyring makes them, 24 base32 characters (`a`-`z` and `2`-`7`), with or without dashes: anything else throws an `InvalidArgumentException`. |
+| `totp($secret = null)` | An authenticator app with a random secret, or the one you give. This is also the default state. |
+| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the codes you give. Each must be in the form Keyring makes them, 26 base32 characters (`a`-`z` and `2`-`7`), with or without dashes. Anything else throws an `InvalidArgumentException`. |
 | `emailCode()` | Email codes. |
-| `passkey($synced = true)` | A user-verified passkey, synced unless you pass `false`. One that isn't synced is device bound, and reaches AAL3 when it's `attested()` and its factor requires attestation. |
+| `passkey($synced = true)` | A user-verified passkey, which is synced unless you pass `false`. One that isn't synced is device bound, and it reaches AAL3 when it's `attested()` and its factor requires attestation. |
 | `securityKey($userVerified = false)` | A security key. |
-| `attested($aaguid, $type = 'basic')` | Add to either of those: a key whose model was checked by attestation. |
+| `attested($aaguid, $type = 'basic')` | Chain it onto either of those, for a key whose model was checked by attestation. |
 | `default()` | Marks it as the default. |
 | `unconfirmed()` | Not yet confirmed, so it doesn't count. |
 
-`totpCode()`, from `InteractsWithKeyring`, gives the code an authenticator app would show right now. It takes a TOTP authenticator or a secret:
+The `totpCode` method, which comes from `InteractsWithKeyring`, gives you the code an authenticator app would show right now. It accepts a TOTP authenticator or a secret:
 
 ```php
 $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
@@ -162,13 +166,13 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->post(route('keyring.login.verify', 'totp'), ['code' => $this->totpCode($totp)]);
 ```
 
-Each code works once, as in real life, so enrolling an app and then signing in with it in the same 30 seconds fails. Keyring keeps TOTP time on Laravel's clock, so `$this->travel(30)->seconds()` moves on to the next code, or pass a later step: `$this->totpCode($totp, step: 1)`. An authenticator's code is made with the digest it was set up with; for a bare secret that's SHA-1 unless you pass `algorithm: 'sha256'`.
+Each code works once, as in real life, so enrolling an app and then signing in with it within the same 30 seconds fails. Keyring keeps TOTP time on Laravel's clock. To move on to the next code, call `$this->travel(30)->seconds()`, or pass a later step, such as `$this->totpCode($totp, step: 1)`. An authenticator's code uses the digest it was set up with. For a bare secret, that's SHA-1 unless you pass `algorithm: 'sha256'`.
 
-The `passkey()` and `securityKey()` states have no real public key, so they only verify with `Keyring::fake()`. For real WebAuthn responses, enroll a virtual authenticator instead.
+The `passkey` and `securityKey` states have no real public key, so they only verify with `Keyring::fake`. For real WebAuthn responses, enroll a virtual authenticator instead.
 
 ## Virtual Authenticators
 
-`Keyring\Testing\VirtualAuthenticator` is a software WebAuthn key. It answers the options Keyring gives the browser with real, signed responses, so the whole ceremony runs without a browser or hardware key:
+The `Keyring\Testing\VirtualAuthenticator` class is a software WebAuthn key. It answers the options Keyring gives the browser with real, signed responses, so the whole ceremony runs without a browser or a hardware key. In a test, that looks like this:
 
 ```php
 use Keyring\Testing\VirtualAuthenticator;
@@ -187,7 +191,7 @@ $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->ass
     ->assertRedirect('/dashboard');
 ```
 
-For a key used on the challenge page, read the options from the page props. With Inertia, send the `X-Inertia` header to get the page as JSON:
+If the key is used on the challenge page, read the options from the page props instead. With Inertia, send the `X-Inertia` header to receive the page as JSON:
 
 ```php
 $options = $this->withHeaders(['X-Inertia' => 'true'])
@@ -199,26 +203,26 @@ $this->flushHeaders();
 $this->post(route('keyring.login.verify', 'security-key'), ['credential' => $key->assert($options)]);
 ```
 
-The constructor options:
+The constructor accepts these options:
 
 | Option | Default | |
 |---|---|---|
-| `origin` | Your `APP_URL`'s origin | The origin it claims to be on. By default, the first origin Keyring accepts. |
-| `userVerification` | `true` | Whether it reports verifying the user. Use `false` for a basic security key. |
-| `aaguid` | 16 zero bytes | The AAGUID it reports, as raw bytes. |
-| `algorithm` | `ES256` | `ES256`, `EdDSA` or `RS256`. |
+| `origin` | The first origin Keyring accepts | The origin the key claims to be on. Unless you set `webauthn.origins`, that's your `APP_URL`'s origin. |
+| `userVerification` | `true` | Whether the key reports that it verified the user. Use `false` for a basic security key. |
+| `aaguid` | 16 zero bytes | The AAGUID the key reports, as raw bytes. |
+| `algorithm` | `ES256` | `ES256`, `EdDSA`, or `RS256`. |
 | `bits` | `2048` | How long an `RS256` key is. |
-| `backedUp` | `null` | Whether a `synced` key reports having been backed up yet. `null` means it has. |
-| `synced` | `false` | Whether it reports being a passkey that syncs between devices. |
-| `counts` | `true` | Whether it counts its signatures. Pass `false` for a key whose counter stays at zero, as a synced passkey's usually does, so nothing but the challenge tells its answer from the same answer sent again. |
+| `backedUp` | `null` | Whether a `synced` key reports that it has been backed up yet. `null` means it has. |
+| `synced` | `false` | Whether the key reports that it is a passkey that syncs between devices. |
+| `counts` | `true` | Whether the key counts its signatures. Pass `false` for a key whose counter stays at zero, as a synced passkey's usually does. Then only the challenge tells its answer apart from the same answer sent again. |
 
-`VirtualAuthenticator::eddsa()` makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys. `VirtualAuthenticator::rsa()` makes one that signs with RS256, which Keyring only takes once [`webauthn.algorithms`](passkeys.md#signature-algorithms) lists it; `rsa(1024)` makes a key too short to be accepted.
+The `VirtualAuthenticator::eddsa` method makes a key that signs with Ed25519 instead of P-256. It needs PHP's `sodium` extension, as does Keyring's support for Ed25519 keys. The `VirtualAuthenticator::rsa` method makes a key that signs with RS256. Keyring only accepts that algorithm once [`webauthn.algorithms`](passkeys.md#signature-algorithms) lists it. Calling `rsa(1024)` makes a key too short to be accepted.
 
-`$key->assert($options, $origin)` can answer from another origin, to test that Keyring rejects it. `$key->rewindCounter()` makes the next response reuse an old counter, as a cloned key would.
+You may call `$key->assert($options, $origin)` to answer from another origin, which lets you test that Keyring rejects it. The `$key->rewindCounter` method makes the next response reuse an old counter, as a cloned key would.
 
 ### Keys That Attest
 
-A factor that [requires attestation](passkeys.md#requiring-attestation) refuses a plain virtual authenticator, as it would any key that doesn't say who made it. `Keyring\Testing\VirtualManufacturer` is a maker of keys with a throwaway root certificate. Trust its root, and its keys attest the way hardware does:
+A factor that [requires attestation](passkeys.md#requiring-attestation) refuses a plain virtual authenticator, the same as it would refuse any key that doesn't say who made it. The `Keyring\Testing\VirtualManufacturer` class makes keys with a throwaway root certificate. Trust its root, and its keys attest the way hardware does:
 
 ```php
 use Keyring\Testing\VirtualManufacturer;
@@ -232,13 +236,13 @@ $options = $this->postJson(route('keyring.authenticators.store', 'security-key')
 $this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $key->register($options)])->assertOk();
 ```
 
-`key()` takes the model's AAGUID, the format (`packed` by default, or `fido-u2f`, which has no AAGUID) and whether the key verifies the user. `new VirtualManufacturer(intermediate: true)` signs its keys' certificates with an intermediate certificate instead of the root, and `days:` sets how long its certificates last.
+The `key` method takes the model's AAGUID, the format (`packed` by default, or `fido-u2f`, which has no AAGUID), and whether the key verifies the user. Create the manufacturer with `new VirtualManufacturer(intermediate: true)` to sign its keys' certificates with an intermediate certificate instead of the root. The `days:` argument sets how long its certificates last.
 
-To check that your app turns keys away, use a key from a second `VirtualManufacturer` you don't trust, or `new VirtualAuthenticator()->selfAttested()`, which attests with its own key pair.
+To check that your application turns keys away, use a key from a second `VirtualManufacturer` that you don't trust, or `new VirtualAuthenticator()->selfAttested()`, which attests with its own key pair.
 
 ## The Conformance Suite
 
-`Keyring\Testing\KeyringConformance` is a set of tests that check your setup (policy, factors, swapped responses, pipeline changes) still keeps Keyring's guarantees. Checks for features that are off are skipped, with the reason, so a skipped check is something your setup doesn't use, not a pass. Add it to a test class and tell it how to make a user:
+The `Keyring\Testing\KeyringConformance` trait provides a set of tests that check your setup still keeps Keyring's guarantees. The tests cover your policy, your factors, swapped responses, and pipeline changes. Checks for features that are turned off are skipped, along with the reason, so a skipped check means your setup doesn't use that feature. It doesn't count as a pass. To get started, add the trait to a test class and tell it how to make a user:
 
 ```php
 namespace Tests\Feature;
@@ -267,26 +271,28 @@ class KeyringConformanceTest extends TestCase
 }
 ```
 
-`keyringUser()` must return a user whose password is `password` (override `keyringPassword()` to change it), whose email is verified, and who has no extra factors. Faking notifications stops the email code factor from sending real mail when the suite begins enrolling it.
+The `keyringUser` method must return a user whose password is `password`. To use a different password, override the `keyringPassword` method. The user's email must be verified, and the user must have no extra factors. Faking notifications stops the email code factor from sending real mail when the suite begins enrolling it.
 
 The suite checks that:
 
-- a correct password either signs in or leads to the challenge page,
+- a correct password either signs the user in or leads to the challenge page,
 - a wrong password and an unknown account give the same error,
-- registering with an address that has an account is answered like one that hasn't, and signs nobody in (skipped with `registration.reveal_taken`),
+- registering with an address that has an account is answered the same way as one that hasn't, and signs nobody in (skipped with `registration.reveal_taken`),
 - protected attributes can't change outside Keyring's flows,
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
-- every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out doesn't keep working there,
+- every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out stops working there,
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,
 - the password broker Keyring uses has a `throttle`, so one account can't be sent [a reset link](protected-changes.md#resetting-the-password) as often as anyone asks (skipped without `Features::resetPasswords()`),
-- one password hash takes less time than [`timebox`](configuration.md#pending-logins-timebox-and-rate-limits), which is what keeps a refusal that hashes from taking longer than one that doesn't. It times a hash where the tests run, so it's a guide to your servers and not a measurement of them. Bcrypt is timed at 12 rounds, or yours if higher, since a test suite usually runs with fewer: return what production hashes with from `keyringProductionHashOptions()` if that isn't it,
-- no mandatory pipeline step was removed or replaced with `dangerouslyRemove()` or `dangerouslyReplace()`.
+- one password hash takes less time than [`timebox`](configuration.md#pending-logins-timebox-and-rate-limits), which is what keeps a refusal that hashes from taking longer than one that doesn't,
+- no mandatory pipeline step was removed or replaced with `dangerouslyRemove` or `dangerouslyReplace`.
 
-If you take out a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from `keyringAcknowledgedDangerousSteps()` in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password` and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.
+The timing check times a hash where the tests run, so it's a guide to your servers, not a measurement of them. Bcrypt is timed at 12 rounds, or at your own setting if that's higher, since a test suite usually runs with fewer. If production hashes with different options, return those from `keyringProductionHashOptions`.
 
-The route check reads your app's routes as they're registered: `auth:{guard}` by name, plain `auth` when Keyring's guard is the default, and `auth:sanctum` on routes with Sanctum's `statefulApi()`, where a single-page app is signed in by its session. It fails with the URIs that are missing the middleware. Add `keyring.session` to their group, or, for a route you leave unchecked on purpose, return its URI from `keyringAcknowledgedUncheckedRoutes()`:
+If you remove a [mandatory step](sign-in-flow.md#mandatory-steps) on purpose, return its class from the `keyringAcknowledgedDangerousSteps` method in your test class. If your `CreatesNewUsers` action validates fields other than `name`, `email`, `password`, and `password_confirmation`, return a form it accepts from `keyringRegistration(string $email)`.
+
+The route check reads your application's routes as they're registered. It looks for `auth:{guard}` by name, plain `auth` when Keyring's guard is the default, and `auth:sanctum` on routes with Sanctum's `statefulApi()`, where a single-page app is signed in by its session. The check fails and lists the URIs that are missing the middleware. Add `keyring.session` to their group. For a route you leave unchecked on purpose, return its URI from the `keyringAcknowledgedUncheckedRoutes` method:
 
 ```php
 protected function keyringAcknowledgedUncheckedRoutes(): array
@@ -295,7 +301,7 @@ protected function keyringAcknowledgedUncheckedRoutes(): array
 }
 ```
 
-A new Laravel app hashes with bcrypt, so the password length check fails until you set `HASH_DRIVER=argon2id` (see [Passwords](configuration.md#passwords)). If your tests run on bcrypt for speed and production doesn't, set the driver for this test class. To keep bcrypt and its limit, say so:
+A new Laravel application hashes with bcrypt, so the password length check fails until you set `HASH_DRIVER=argon2id` (see [Passwords](configuration.md#passwords)). If your tests run on bcrypt for speed but production doesn't, set the driver for this test class. To keep bcrypt and its limit, say so:
 
 ```php
 protected function keyringAcknowledgesBcryptLimit(): bool
@@ -304,4 +310,4 @@ protected function keyringAcknowledgesBcryptLimit(): bool
 }
 ```
 
-`KeyringConformance` includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.
+The `KeyringConformance` trait includes `InteractsWithKeyring`, and its tests are ordinary `test_*` methods.

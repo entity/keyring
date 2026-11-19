@@ -101,7 +101,7 @@ class Ceremonies
                 residentKey: $profile->residentKey,
             ),
             // No attestation unless the profile wants it: any authenticator
-            // is accepted, like Fortify.
+            // is accepted.
             attestation: $this->attests($profile)
                 ? PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_DIRECT
                 : PublicKeyCredentialCreationOptions::ATTESTATION_CONVEYANCE_PREFERENCE_NONE,

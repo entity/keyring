@@ -19,7 +19,7 @@ use Keyring\Exceptions\UnknownFactor;
 class FactorRegistry
 {
     /**
-     * Until the app chooses its own: the password alone, like Fortify.
+     * Until the app chooses its own: the password alone.
      *
      * @var list<class-string<Factor>|Factor|Closure(Container): Factor>
      */
