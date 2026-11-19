@@ -33,7 +33,7 @@ tests() {
     step vendor/bin/pint --test &&
     step vendor/bin/phpstan analyse --no-progress &&
     step vendor/bin/phpstan analyse -c phpstan.stubs.neon --no-progress &&
-    step vendor/bin/pest --compact --parallel
+    step vendor/bin/pest --compact --parallel --passthru-php="-d zend.assertions=1" --coverage --min=100
 }
 
 # The oldest versions composer.json allows, in a copy, so this checkout's
@@ -94,7 +94,7 @@ js() {
         step bun install --frozen-lockfile &&
         step bun audit &&
         step bun run typecheck &&
-        step bun test --randomize
+        step bun test --randomize --coverage
     )
 }
 
