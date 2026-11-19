@@ -33,7 +33,9 @@ class WrappedUserProvider implements UserProvider
 
     public function retrieveById($identifier): ?Authenticatable
     {
-        return $this->users->retrieveById($identifier);
+        // Like any provider of an app's own, it knows what its IDs look like:
+        // PostgreSQL refuses to compare an email address with a number.
+        return is_numeric($identifier) ? $this->users->retrieveById($identifier) : null;
     }
 
     public function retrieveByToken($identifier, #[\SensitiveParameter] $token): ?Authenticatable
