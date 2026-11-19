@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### Rate Limits and Risk
+
+- A `CredentialStuffing` risk signal, off until you turn it on: a sign in from an IP address where five or more other accounts failed a factor in the last hour. It reads the security log, and the published provider lists it commented out. Keyring's own response emails the user whenever it fires, as it does for a sign in after several failures.
+
 ## v0.1.0 - 2026-11-18
 
 The first release.

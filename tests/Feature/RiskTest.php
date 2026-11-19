@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,7 @@ use Keyring\Risk\Finding;
 use Keyring\Risk\Risk;
 use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
+use Keyring\Risk\Signals\CredentialStuffing;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\NewCountry;
@@ -870,6 +872,187 @@ describe('a sign in that follows several failed attempts', function () {
         }
 
         signInAs()->assertRedirect('/dashboard');
+    });
+});
+
+describe('a sign in from an address that has been failing on other accounts', function () {
+    /**
+     * Failed sign ins from an address, one for each of these accounts. Null
+     * is a name nobody has.
+     *
+     * @param  list<Model|null>  $accounts
+     */
+    function failedFrom(array $accounts, string $ip = '127.0.0.1', int $minutesAgo = 0): void
+    {
+        foreach ($accounts as $account) {
+            $event = new SecurityEvent(['type' => 'factor_failed', 'factor' => 'password', 'ip' => $ip, 'created_at' => now()->subMinutes($minutesAgo)]);
+
+            if ($account !== null) {
+                $event->authenticatable()->associate($account);
+            }
+
+            $event->save();
+        }
+    }
+
+    /**
+     * Accounts besides Taylor's.
+     *
+     * @return list<User>
+     */
+    function otherAccounts(int $count): array
+    {
+        return array_map(fn (int $n) => taylor(['email' => "other-{$n}@example.com"]), range(1, $count));
+    }
+
+    /**
+     * What CredentialStuffing finds for Taylor's sign in, with these options.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    function stuffing(array $options = []): ?Finding
+    {
+        return app()->make(CredentialStuffing::class, $options)->assess(new Assessment(Checkpoint::Login, request(), test()->user));
+    }
+
+    it('is found when five other accounts failed from the same address', function () {
+        Keyring::risk()->signals([CredentialStuffing::class]);
+        otherAccounts(5);
+
+        Event::listen(RiskAssessed::class, function (RiskAssessed $event) use (&$assessed) {
+            $assessed = $event;
+        });
+
+        foreach (range(1, 5) as $n) {
+            $this->post('/login', ['email' => "other-{$n}@example.com", 'password' => 'nope'])->assertSessionHasErrors('email');
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+
+        expect($assessed->risk->has(CredentialStuffing::FINDING))->toBeTrue()
+            ->and($assessed->risk->score)->toBe(40)
+            ->and($assessed->risk->reasons())->toBe(['Failed attempts on 5 other accounts from this IP address in the last 1h.']);
+    });
+
+    it('is not found after fewer', function () {
+        failedFrom(otherAccounts(4));
+
+        expect(stuffing())->toBeNull();
+    });
+
+    it('counts an account that failed many times once', function () {
+        [$other] = otherAccounts(1);
+        failedFrom(array_fill(0, 10, $other));
+
+        expect(stuffing())->toBeNull()
+            ->and(stuffing(['threshold' => 1]))->not->toBeNull();
+    });
+
+    it('counts an account of another model as another account, even with the user\'s ID', function () {
+        $staff = staff();
+        failedFrom([...otherAccounts(4), $staff]);
+
+        expect($staff->getKey())->toBe($this->user->getKey())
+            ->and(stuffing()?->signal)->toBe(CredentialStuffing::FINDING);
+    });
+
+    it('counts every account, the user\'s own too, when asked to leave none out', function () {
+        failedFrom([...otherAccounts(2), $this->user, null, null]);
+
+        expect(app(SecurityLog::class)->accountsFrom(request(), 'factor_failed', 3600))->toBe(4)
+            ->and(app(SecurityLog::class)->accountsFrom(request(), 'factor_failed', 3600, except: $this->user))->toBe(3);
+    });
+
+    // OWASP ASVS 5.0.0, 6.3.5: a user with nothing more to prove gets in at
+    // that level, so they're told.
+    it('is told to the owner, who may have nothing more to prove', function () {
+        Keyring::risk()->signals([CredentialStuffing::class]);
+        failedFrom(otherAccounts(5));
+
+        signInAs()->assertRedirect('/dashboard');
+
+        $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
+
+        expect($notice->reasons)->toBe('Failed attempts on 5 other accounts from this IP address in the last 1h.');
+    });
+
+    it('leaves out the user\'s own failures', function () {
+        failedFrom([...otherAccounts(4), $this->user, $this->user]);
+
+        expect(stuffing())->toBeNull();
+    });
+
+    it('counts names nobody has as one account between them, since it cannot tell them apart', function () {
+        failedFrom([...otherAccounts(3), null, null, null]);
+
+        expect(stuffing())->toBeNull();
+
+        failedFrom([taylor(['email' => 'one-more@example.com'])]);
+
+        expect(stuffing()?->reason)->toBe('Failed attempts on 5 other accounts from this IP address in the last 1h.');
+    });
+
+    it('counts names nobody has that were refused at the form', function () {
+        foreach (range(1, 4) as $n) {
+            taylor(['email' => "other-{$n}@example.com"]);
+            $this->post('/login', ['email' => "other-{$n}@example.com", 'password' => 'nope']);
+        }
+
+        $this->post('/login', ['email' => 'nobody@example.com', 'password' => 'nope']);
+        $this->post('/login', ['email' => 'nobody-else@example.com', 'password' => 'nope']);
+
+        expect(stuffing()?->reason)->toBe('Failed attempts on 5 other accounts from this IP address in the last 1h.');
+    });
+
+    it('leaves out failures from other addresses', function () {
+        failedFrom(otherAccounts(5), ip: '203.0.113.9');
+
+        expect(stuffing())->toBeNull();
+    });
+
+    it('compares the address Keyring records, not the one the request came from', function () {
+        Keyring::recordIpsUsing(fn (Request $request) => '127.0.0.0');
+        failedFrom(otherAccounts(5), ip: '127.0.0.0');
+
+        expect(stuffing())->not->toBeNull();
+
+        Keyring::recordIpsUsing(fn (Request $request) => null);
+
+        expect(stuffing())->toBeNull();
+    });
+
+    it('forgets failures older than the time it looks back', function () {
+        failedFrom(otherAccounts(5), minutesAgo: 61);
+
+        expect(stuffing())->toBeNull()
+            ->and(stuffing(['within' => '2h']))->not->toBeNull();
+    });
+
+    it('takes a threshold and a score', function () {
+        failedFrom(otherAccounts(3));
+
+        expect(stuffing())->toBeNull()
+            ->and(stuffing(['threshold' => 3, 'score' => 20])?->score)->toBe(20);
+    });
+
+    it('does nothing without the security log, which is where it reads the failures', function () {
+        withFeatures([Features::devices()]);
+        Keyring::risk()->signals([app()->make(CredentialStuffing::class, ['score' => 95])]);
+        otherAccounts(5);
+
+        foreach (range(1, 5) as $n) {
+            $this->post('/login', ['email' => "other-{$n}@example.com", 'password' => 'nope']);
+        }
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+
+    it('finds nothing in a security log it cannot read', function () {
+        Exceptions::fake();
+        Keyring::useSecurityEventModel(UnavailableSecurityEvent::class);
+
+        expect(stuffing(['threshold' => 1]))->toBeNull();
+        Exceptions::assertReported(QueryException::class);
     });
 });
 

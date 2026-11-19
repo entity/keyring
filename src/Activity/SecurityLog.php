@@ -10,6 +10,8 @@ use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
@@ -167,6 +169,42 @@ class SecurityLog
                 ->where('created_at', '>=', now()->subSeconds($withinSeconds))
                 ->when($last !== null, fn (Builder $query) => $query->where('id', '>', $last))
                 ->count();
+        }, 0);
+    }
+
+    /**
+     * How many accounts had events of a type recently from the IP address
+     * Keyring records for this request, leaving out $except's own. Entries
+     * that name nobody can't be told apart, so together they count as one.
+     * With no recorded address there's nothing to match, and it's 0.
+     */
+    public function accountsFrom(Request $request, string $type, int $withinSeconds, ?Model $except = null): int
+    {
+        $ip = $this->keyring->recordedIp($request);
+
+        if ($ip === null) {
+            return 0;
+        }
+
+        return $this->safely(function () use ($ip, $type, $withinSeconds, $except) {
+            $accounts = $this->keyring->securityEventModel()::query()
+                ->toBase()
+                ->select(['authenticatable_type', 'authenticatable_id'])
+                ->distinct()
+                ->where('type', $type)
+                ->where('ip', $ip)
+                ->where('created_at', '>=', now()->subSeconds($withinSeconds));
+
+            // Spelled out for entries with no user: NOT on a comparison with
+            // NULL is NULL, which would leave them out too.
+            if ($except !== null) {
+                $accounts->where(fn (QueryBuilder $query) => $query
+                    ->whereNull('authenticatable_id')
+                    ->orWhere('authenticatable_type', '!=', $except->getMorphClass())
+                    ->orWhere('authenticatable_id', '!=', $except->getKey()));
+            }
+
+            return $accounts->newQuery()->fromSub($accounts, 'accounts')->count();
         }, 0);
     }
 

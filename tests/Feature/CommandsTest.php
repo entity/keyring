@@ -101,6 +101,7 @@ describe('keyring:install', function () {
             ->toContain("            Signals\SuccessAfterFailures::class,\n")
             ->toContain("            // Signals\NewDevice::class,\n")
             ->toContain("            // Signals\BreachedPassword::class,\n")
+            ->toContain("            // Signals\CredentialStuffing::class,\n")
             // The other sign-in methods are there to uncomment, and the
             // policy that asks for one a user has set up is already on.
             ->toContain("        Keyring::factors([\n            Factors\Password::class,\n            // Factors\Totp::class,\n")
@@ -366,7 +367,7 @@ describe('the risk signals a new provider starts with', function () {
     }
 
     it('turns on the ones a feature that is on can feed, and leaves the rest there commented out', function (array $features, array $on, array $off) {
-        expect(publishedSignals($features))->toBe([$on, [...$off, 'RecentlyChangedRecovery', 'BreachedPassword', 'NewCountry', 'ImpossibleTravel']]);
+        expect(publishedSignals($features))->toBe([$on, [...$off, 'RecentlyChangedRecovery', 'CredentialStuffing', 'BreachedPassword', 'NewCountry', 'ImpossibleTravel']]);
     })->with([
         'the default features' => [
             ['registration', 'reset-passwords', 'email-verification', 'update-passwords', 'security-log'],

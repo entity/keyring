@@ -45,7 +45,7 @@ The security log is turned on by default. The `Features::securityLog()` feature 
 ],
 ```
 
-The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report`, writes the entry to [your application's log](#without-the-table) instead, and carries on, so the sign in, refusal, or email still goes ahead. If the log can't be read, there are no alerts, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals find nothing.
+The log never gets in the way of a sign in. If a write fails, Keyring passes the error to `report`, writes the entry to [your application's log](#without-the-table) instead, and carries on, so the sign in, refusal, or email still goes ahead. If the log can't be read, there are no alerts, and the `RepeatedFactorFailures`, `SuccessAfterFailures`, and `CredentialStuffing` risk signals find nothing.
 
 There is one exception. If the `protection_bypassed` entry can't be written, [`Keyring::withoutProtection()`](protected-changes.md#bypassing-protection) throws an exception before it runs your callback. So a bypass never happens without being logged.
 
@@ -62,7 +62,7 @@ If you remove `Features::securityLog()` from your features, nothing is written t
 KEYRING_LOG_CHANNEL=security
 ```
 
-How long those lines are kept, and who can read them, is up to that channel. The ["was this you?" alerts](#was-this-you-alerts), the [`Keyring::activity`](#showing-recent-activity) method, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals all read from the table, so they require the feature to be turned on.
+How long those lines are kept, and who can read them, is up to that channel. The ["was this you?" alerts](#was-this-you-alerts), the [`Keyring::activity`](#showing-recent-activity) method, and the `RepeatedFactorFailures`, `SuccessAfterFailures`, and `CredentialStuffing` risk signals all read from the table, so they require the feature to be turned on.
 
 ### Entry Types
 
@@ -163,7 +163,7 @@ Anyone who is refused can ask again as often as they like, and entries are kept 
 - **Refusals are counted.** `locked_out`, `rate_limited`, `access_refused`, `enrollment_refused`, `authenticator_removal_refused`, `link_refused`, `verification_refused`, and `factor_failed` for a name nobody has are each written at most `security_log.refusals` times every `refusals_per` period, which is 20 an hour by default. These counts are kept for the account the entry is linked to, or for the IP address when the entry isn't linked to anyone.
 - **The log says where it stopped.** The first entry left out is replaced by one `refusals_limited` entry that names its type, so a gap in the log is never silent.
 
-A failed factor for a real account isn't counted this way. The account's own [rate limits](security.md#rate-limiting) already bound how often it can fail, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals count those entries. To write every refusal, set `refusals` to `null`. The counts are stored in the rate limiter's cache store, the same as the limits themselves.
+A failed factor for a real account isn't counted this way. The account's own [rate limits](security.md#rate-limiting) already bound how often it can fail, and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals count those entries. The `CredentialStuffing` signal also reads `factor_failed` for names nobody has. This limit counts by the request's real IP address, while the signal matches the address Keyring records, and `refusals => null` removes the limit. Either way, the signal counts all of those entries as one account, so the limit changes little for it. To write every refusal, set `refusals` to `null`. The counts are stored in the rate limiter's cache store, the same as the limits themselves.
 
 ### Refused Links
 
@@ -267,7 +267,7 @@ Types you leave out keep Keyring's own notification. Every security notice is tu
 
 NIST SP 800-63B-4 requires a notice when an authenticator is bound to an account (Sec. 4.1.2.1: `authenticator_added`, and `password_changed` for a new password). It also requires one when an account is recovered (Sec. 4.2.3: `password_changed` after a reset, and `recovery_code_used`), and when recovery codes are replaced (Sec. 4.2.1.1: `recovery_codes_generated`). NIST recommends a notice when an authenticator is removed (Sec. 4.5: `authenticator_removed`).
 
-OWASP ASVS 5.0.0 asks for two kinds of notice. Requirement 6.3.7 covers a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated`, `email_changed`, and `email_change_reverted`. Requirement 6.3.5 covers a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` for what the [risk signals](risk.md#built-in-signals) find. Keyring's own emails cover both requirements, as far as your features go. A sign in after a long quiet period, or after several failures, is announced by [Keyring's own risk response](risk.md#telling-the-user). A responder of yours has to do the same. The [OWASP ASVS](owasp-asvs.md) page has the whole list for each level.
+OWASP ASVS 5.0.0 asks for two kinds of notice. Requirement 6.3.7 covers a notice after a change to how someone signs in: `password_changed`, `authenticator_added`, `authenticator_removed`, `recovery_codes_generated`, `email_changed`, and `email_change_reverted`. Requirement 6.3.5 covers a notice of a suspicious attempt: `new_device`, `second_factor_failed`, `account_locked`, and `suspicious_activity` for what the [risk signals](risk.md#built-in-signals) find. Keyring's own emails cover both requirements, as far as your features go. A sign in after a long quiet period, or after several failures, is announced by [Keyring's own risk response](risk.md#telling-the-user). So is one from an address where many other accounts have failed, when the `CredentialStuffing` signal is on. A responder of yours has to do the same. The [OWASP ASVS](owasp-asvs.md) page has the whole list for each level.
 
 Calling `Keyring::notifications` again adds to the notifications you gave it before. An unknown type throws an `InvalidArgumentException`, so a typo doesn't quietly leave an email as it was.
 

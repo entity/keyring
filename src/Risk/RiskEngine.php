@@ -12,6 +12,7 @@ use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Signal;
 use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\BreachedPassword;
+use Keyring\Risk\Signals\CredentialStuffing;
 use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\NewDevice;
@@ -97,11 +98,13 @@ class RiskEngine
 
     /**
      * Keyring's own answer, until the app gives one with respond(): by
-     * level, with two findings answered whatever they scored.
+     * level, with some findings answered whatever they scored.
      *
      * A sign in that follows several failures, or a long quiet period, is
      * told to the owner: OWASP ASVS 5.0.0 (6.3.5) names both, and on its own
-     * each only reaches the level that asks for a second factor.
+     * each only reaches the level that asks for a second factor. So is one
+     * from an address where many other accounts have failed, which a user
+     * with only a password would otherwise get through untold.
      *
      * A password found in a breach is held for a new one. A step-up or a
      * notice leaves a password someone else knows as the password, and NIST
@@ -117,7 +120,7 @@ class RiskEngine
             Level::Critical => Action::deny()->revokeAllSessions()->notify(),
         };
 
-        if ($risk->has(SuccessAfterFailures::FINDING) || $risk->has(InactiveAccount::FINDING)) {
+        if ($risk->has(SuccessAfterFailures::FINDING) || $risk->has(InactiveAccount::FINDING) || $risk->has(CredentialStuffing::FINDING)) {
             $action = $action->notify();
         }
 
