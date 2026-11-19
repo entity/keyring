@@ -1,5 +1,6 @@
 # Quick Start
 
+- [Introduction](#introduction)
 - [Installing](#installing)
 - [Your Pages](#your-pages)
 - [Your Settings Page](#your-settings-page)
@@ -8,19 +9,27 @@
 - [Adding Sign-In Methods](#adding-sign-in-methods)
 - [What Keyring Does Without Being Asked](#what-keyring-does-without-being-asked)
 
-Keyring starts as a small foundation: signing in with a password, signing out, and the challenge and confirm pages. Everything else is a feature or a sign-in method you add when your app needs it.
+## Introduction
+
+Signing in with a password, signing out, challenges, and step-up are always on. A default installation adds registration, password resets, email verification, password changes, and the security log. Everything else is a feature or sign-in method that you may add whenever your application needs it.
 
 ## Installing
 
+To get started, install Keyring using Composer, then run the `keyring:install` Artisan command and your database migrations:
+
 ```bash
 composer require keyring/keyring
+
 php artisan keyring:install
+
 php artisan migrate
 ```
 
-`keyring:install` asks which sign-in methods you want besides the password, whether everyone must set up a second factor (when you picked one they can), and which features to turn on. Recovery codes come with any second sign-in method, so losing it isn't the end of an account. Accepting every default, or running with `--no-interaction`, gives you the password, registration, password resets, email verification, password changes and the security log. You can add the rest later by uncommenting a line: every sign-in method is in your provider, every feature is in the config, and every action is published, so each works as soon as it's on.
+The `keyring:install` command will ask which sign-in methods you would like besides the password, whether everyone must set up a second factor (if you picked a sign-in method that can be one), and which features to enable. Recovery codes are included with any second sign-in method, so losing it isn't the end of an account.
 
-Add the trait to your user model, and keep Laravel's `hashed` cast on the password. Registration leaves a new user signed out until they've verified their address, so nobody can use the form to find out who has an account. That needs `MustVerifyEmail` (the installer turns on email verification for you):
+If you accept every default, or run the command with `--no-interaction`, you'll get the password, registration, password resets, email verification, password changes, and the security log. Everything else can be added later by uncommenting a line. Every sign-in method is already in your service provider, every feature is in the configuration file, and every action is published, so each one works as soon as you enable it.
+
+Next, add the `HasKeyring` trait to your `User` model, implement `MustVerifyEmail`, and keep Laravel's `hashed` cast on the `password` attribute. The interface is needed because registration leaves a new user signed out until they've verified their email address, so nobody can use the registration form to discover who has an account. The installer has already enabled email verification:
 
 ```php
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -32,27 +41,31 @@ class User extends Authenticatable implements MustVerifyEmail
 }
 ```
 
-Without the trait, signing in throws a `Keyring\Exceptions\MissingTrait` exception naming the model, rather than working without the protection it adds.
+If the trait is missing, signing in will throw a `Keyring\Exceptions\MissingTrait` exception naming the model, rather than quietly working without the protection the trait adds.
+
+A new user can't sign in until they've followed the verification link, so make sure your application can send mail. In a new Laravel application, the default `log` mailer writes each email, link included, to `storage/logs/laravel.log`.
 
 ## Your Pages
 
-Keyring is headless, like Fortify: it handles the requests, and you build the pages. With Inertia, it renders `auth/{page}` components. Without it, it renders Blade views named `auth.{page}`. A missing view throws an error that names the file to create and the data it receives. So does a missing Inertia component, when Inertia's `pages.ensure_pages_exist` option is on.
+Keyring is headless, meaning it handles the requests while you build the pages. When using Inertia, Keyring renders `auth/{page}` components. Otherwise, it renders Blade views named `auth.{page}`.
 
-Keyring renders nine pages. You only need the ones for what you've turned on:
+If a view is missing, Keyring throws an error that names the file you need to create and the data it receives. The same is true of a missing Inertia component when Inertia's `pages.ensure_pages_exist` option is enabled.
 
-| Page | When |
+Keyring renders ten pages, though you only need the ones for the features you've enabled:
+
+| Page | When It's Needed |
 |---|---|
 | `login` | Always. |
-| `challenge` | When you add a second sign-in method. It asks for the next factor. |
-| `confirm` | When you use step-up, which changing the password and adding sign-in methods do: a user who signed in more than 15 minutes ago confirms it's them first. It's the challenge page for confirming, and can render the same component. |
-| `register` | With `Features::registration()`. It posts `name`, `email`, `password` and `password_confirmation` to `/register`. The answer sends the user to your `login` page with a status to show: check your inbox. See [Registration](sign-in-flow.md#registration). |
+| `challenge` | When you add a second sign-in method. This page asks for the user's next factor. |
+| `confirm` | When you use step-up, which changing the password and adding sign-in methods both do. A user who signed in more than 15 minutes ago confirms it's them first. This is the challenge page for confirming, so it may render the same component. |
+| `register` | With `Features::registration()`. It posts `name`, `email`, `password`, and `password_confirmation` to `/register`. The response sends the user to your `login` page with a status asking them to check their inbox. See [Registration](sign-in-flow.md#registration). |
 | `forgot-password`, `reset-password` | With `Features::resetPasswords()`. |
-| `verify-email` | With `Features::emailVerification()`, for a signed-in user who hasn't verified yet. It asks them to click the link they were sent, with a button to send another. With the default registration nobody is signed in before verifying, so you only need it if you set `registration.reveal_taken`. |
-| `email-verification` | With `Features::emailVerification()`. The emailed verification link lands here for a signed-in user, on a page with one button. With the default registration the link sends a new user to sign in instead, and signing in verifies their address, so this page is only needed with `registration.reveal_taken` too. |
-| `email-change` | With `Features::emailChanges()`. The emailed confirm and undo links land here, on a page with one button. |
-| `device-report` | With `Features::devices()`. The "this wasn't me" link lands here, on a page with one button. |
+| `verify-email` | With `Features::emailVerification()`, for a signed in user who hasn't verified their address yet. It asks them to click the link they were sent, with a button to send another. With the default registration flow, nobody is signed in before verifying, so you only need this page if you set `registration.reveal_taken`. |
+| `email-verification` | With `Features::emailVerification()`. The emailed verification link lands here for a signed in user, on a page with a single button. With the default registration flow, the link sends a new user to sign in instead, and signing in verifies their address, so this page is also only needed with `registration.reveal_taken`. |
+| `email-change` | With `Features::emailChanges()`. The emailed confirm and undo links land here, on a page with a single button. |
+| `device-report` | With `Features::devices()`. The "this wasn't me" link lands here, on a page with a single button. |
 
-A login page posts `email`, `password` and, optionally, `remember` to `/login`:
+A login page posts `email`, `password`, and an optional `remember` field to `/login`:
 
 ```blade
 {{-- resources/views/auth/login.blade.php --}}
@@ -66,11 +79,13 @@ A login page posts `email`, `password` and, optionally, `remember` to `/login`:
 </form>
 ```
 
-Users land on `home` from `config/keyring.php` once they're in, `/dashboard` unless you change it. A new Laravel app has no `/dashboard` route, so add one or point `home` somewhere that exists. Every page and its data is listed in [Pages](sign-in-flow.md#pages). The [example app](https://github.com/entity/keyring-example) has all of them in React.
+Once signed in, users are sent to the `home` path in your `config/keyring.php` configuration file, which is `/dashboard` by default. A new Laravel application doesn't have a `/dashboard` route, so you should either add one or point `home` somewhere that exists.
+
+Every page and the data it receives is listed in the [Pages](sign-in-flow.md#pages) documentation, and the [example application](https://github.com/entity/keyring-example) includes all of them in React.
 
 ## Your Settings Page
 
-The page where users manage their sign-in methods is yours too, at whatever URL you like. Keyring has no route that renders it. Your controller reads what to show, and the page calls Keyring's routes to change it:
+The page where users manage their sign-in methods belongs to your application too, and may live at whatever URL you like. Keyring doesn't register a route that renders it. Instead, your controller reads what to show, and the page calls Keyring's routes to make changes:
 
 ```php
 use Illuminate\Http\Request;
@@ -110,33 +125,33 @@ class SecurityController
 }
 ```
 
-| Prop | What it holds |
+| Prop | Contents |
 |---|---|
-| `authenticators` | What the user has set up. `present()` gives each one's `factor`, `id`, `name`, and `createdAt` and `lastUsedAt` (when it was added and last used, as ISO 8601 dates), plus `hint` (a masked address) for email codes, and `remaining` and `replace` for recovery codes. The password is a virtual authenticator with no row of its own, so it's left out. |
-| `enrollable` | The keys of the factors a user can add, such as `totp` and `passkey`, for your "add" buttons. It includes `recovery`, which only works once the user has another second factor, so show it as "generate recovery codes" next to those rather than as a way to sign in. |
-| `devices` | Where the user is signed in, with `Features::devices()`. The same list as [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
-| `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, with `Features::securityLog()`. |
+| `authenticators` | The sign-in methods the user has set up. The `present` method gives each one's `factor`, `id`, `name`, `createdAt`, and `lastUsedAt` (as ISO 8601 dates), along with a masked `hint` for email codes, and `remaining` and `replace` for recovery codes. The password is a virtual authenticator with no database row of its own, so it's left out. |
+| `enrollable` | The keys of the factors a user may add, such as `totp` and `passkey`, for your "add" buttons. This includes `recovery`, which only works once the user has another second factor, so you should present it as "generate recovery codes" next to those rather than as a way to sign in. |
+| `devices` | Where the user is signed in, when `Features::devices()` is enabled. This is the same list returned by [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
+| `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, when `Features::securityLog()` is enabled. |
 
-From there the page uses Keyring's routes: [`/user/authenticators`](authenticators.md#routes) to add, rename and remove sign-in methods, [`/user/devices`](devices-and-sessions.md#routes) to sign devices out, [`/user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) to list sessions and end one, [`PUT /user/password`](protected-changes.md#changing-the-password) and [`POST /user/email`](protected-changes.md#changing-the-email-address). The [browser package](frontend.md#managing-authenticators) wraps the authenticator routes, including the passkey ceremony.
+From there, the page uses Keyring's routes: [`/user/authenticators`](authenticators.md#routes) to add, rename, and remove sign-in methods, [`/user/devices`](devices-and-sessions.md#routes) to sign devices out, [`/user/sessions`](devices-and-sessions.md#listing-and-ending-sessions) to list sessions and end one, [`PUT /user/password`](protected-changes.md#changing-the-password), and [`POST /user/email`](protected-changes.md#changing-the-email-address). The [browser package](frontend.md#managing-authenticators) wraps the authenticator routes for you, including the passkey ceremony.
 
-Those routes need a [fresh verification](step-up.md#fresh-verification), 15 minutes by default. Put the same middleware on the page, after `auth`, so users confirm once when they open it rather than halfway through adding a passkey:
+The routes that change something require a [fresh verification](step-up.md#fresh-verification), which lasts 15 minutes by default. The two that only list sessions and devices don't. You should place the same middleware on your settings page, after `auth`, so users confirm once when they open the page rather than halfway through adding a passkey:
 
 ```php
 Route::get('/settings/security', [SecurityController::class, 'edit'])
     ->middleware(['auth', 'verified', 'keyring.fresh:15m']);
 ```
 
-Signing in counts as a verification, so right afterwards the page opens without asking. A user who leaves the page open longer than that gets a `423` from the next JSON call, with a `redirect` to the confirm page:
+Signing in counts as a verification, so the page opens without asking right after a user signs in. If a user leaves the page open for longer than that, their next JSON request will receive a `423` response containing a `redirect` to the confirm page:
 
-1. Catch the `423` and send the browser to `redirect`.
-2. The user confirms on your `confirm` page.
+1. Catch the `423` response and send the browser to `redirect`.
+2. The user confirms it's them on your `confirm` page.
 3. Keyring sends them back to the page they were on, and they try again.
 
-[Handling Step-Up in JavaScript](frontend.md#handling-step-up-in-javascript) has the code for the first step.
+The [Handling Step-Up in JavaScript](frontend.md#handling-step-up-in-javascript) documentation contains the code for the first step.
 
 ## Testing
 
-Use `InteractsWithKeyring` in your base test case. It adds `withAssurance()`, `verifiedWith()`, `freshAt()`, `totpCode()` and `sessionErrors()`, and skips the timing delay on failed checks:
+Keyring ships with an `InteractsWithKeyring` trait for your base test case. It provides the `withAssurance`, `verifiedWith`, `freshAt`, `totpCode`, and `sessionErrors` methods, and skips the timing delay on failed checks:
 
 ```php
 use Keyring\Testing\InteractsWithKeyring;
@@ -147,11 +162,11 @@ abstract class TestCase extends BaseTestCase
 }
 ```
 
-Add `KeyringConformance` to a test class to check that your setup keeps Keyring's guarantees. See [Testing](testing.md).
+You may also add `KeyringConformance` to a test class to verify that your setup keeps Keyring's guarantees. For more information, see the [Testing](testing.md) documentation.
 
 ## Adding Features
 
-Turn features on in `config/keyring.php`. Each one brings its routes, and anything else it needs, only once it's in the list:
+Features are enabled in your `config/keyring.php` configuration file. Each feature only registers its routes, and anything else it needs, once it's in the list. This is the list as the installer writes it:
 
 ```php
 use Keyring\Features;
@@ -161,31 +176,34 @@ use Keyring\Features;
     Features::resetPasswords(),
     Features::emailVerification(),
     Features::updatePasswords(),
-    Features::manageAuthenticators(),
+    Features::securityLog(),
+    // Features::manageAuthenticators(),
+    // Features::devices(),
+    // Features::emailChanges(),
 ],
 ```
 
-| Feature | What it adds | Docs |
+| Feature | What It Adds | Documentation |
 |---|---|---|
-| `registration()` | `/register`, through your `CreateNewUser` action. Needs `emailVerification()` unless you set `registration.reveal_taken`. | [Registration](sign-in-flow.md#registration) |
+| `registration()` | `/register`, through your `CreateNewUser` action. Requires `emailVerification()` unless you set `registration.reveal_taken`. | [Registration](sign-in-flow.md#registration) |
 | `resetPasswords()` | Forgot and reset password, through your `ResetUserPassword` action. | [Resetting the Password](protected-changes.md#resetting-the-password) |
-| `emailVerification()` | Laravel's email verification routes, the `verify-email` page and the `email-verification` page its link opens. | [Email Verification](protected-changes.md#email-verification) |
-| `updatePasswords()` | `PUT /user/password`. Changing the password elsewhere then throws. | [Changing the Password](protected-changes.md#changing-the-password) |
-| `manageAuthenticators()` | Adding, renaming and removing sign-in methods. Needed for users to set any up. | [Managing Authenticators](authenticators.md) |
+| `emailVerification()` | Laravel's email verification routes, the `verify-email` page, and the `email-verification` page its link opens. | [Email Verification](protected-changes.md#email-verification) |
+| `updatePasswords()` | `PUT /user/password`. Changing the password anywhere else will then throw an exception. | [Changing the Password](protected-changes.md#changing-the-password) |
+| `manageAuthenticators()` | Adding, renaming, and removing sign-in methods. This is required for users to set any up. | [Managing Authenticators](authenticators.md) |
 | `devices()` | A device cookie, "trust this device", a list of where users are signed in, and "this wasn't me" links. | [Devices & Sessions](devices-and-sessions.md) |
-| `emailChanges()` | Email changes confirmed by the new address and undoable from the old one. Changing the email elsewhere then throws. | [Protected Changes](protected-changes.md#changing-the-email-address) |
-| `securityLog()` | A log of sign ins, failures, refusals and changes in `keyring_events`, and "was this you?" alerts. On unless you take it out, and then the events go to your app's log instead. | [Security Log & Emails](security-log-and-emails.md) |
+| `emailChanges()` | Email changes that are confirmed by the new address and may be undone from the old one. Changing the email anywhere else will then throw an exception. | [Protected Changes](protected-changes.md#changing-the-email-address) |
+| `securityLog()` | A log of sign ins, failures, refusals, and changes in the `keyring_events` table, along with "was this you?" alerts. It's enabled unless you remove it, in which case the events are written to your application's log instead. | [Security Log & Emails](security-log-and-emails.md) |
 
-A few more things aren't in the features list:
+A few more things live outside the features list:
 
-- [Security emails](security-log-and-emails.md#security-emails): Keyring sends its own from the start, each once its feature is on. `Keyring::notifications([...])` in your `KeyringServiceProvider` swaps one for your own class or turns it off.
-- [Risk signals](risk.md): the `Keyring::risk()->signals([...])` list in your `KeyringServiceProvider`, where `keyring:install` wrote a starting set. Turning on devices is when to uncomment `NewDevice` and `InactiveAccount`.
-- A [support contact](security-log-and-emails.md#a-support-contact) for those emails to name: `support_contact` in `config/keyring.php`.
-- [Requiring a second factor](policies.md#requiring-a-second-factor): the `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. `keyring:install` sets both up when you answer yes to requiring one. Step-up sends users there too when they don't have what a route needs.
+- **[Security emails](security-log-and-emails.md#security-emails):** Keyring sends its own from the start, each one once its feature is enabled. You may call `Keyring::notifications([...])` in your `KeyringServiceProvider` to replace one with your own class or turn it off.
+- **[Risk signals](risk.md):** These are listed in `Keyring::risk()->signals([...])` in your `KeyringServiceProvider`, where `keyring:install` wrote a starting set. When you enable devices, you should also uncomment `NewDevice` and `InactiveAccount`.
+- **A [support contact](security-log-and-emails.md#a-support-contact):** The `support_contact` option in `config/keyring.php` sets who those emails tell users to contact.
+- **[Requiring a second factor](policies.md#requiring-a-second-factor):** The `keyring.enrolled` middleware, with `enrollment_url` set to your page for adding one. The `keyring:install` command sets up both when you choose to require one. Step-up also sends users to this page when they don't have what a route needs.
 
 ## Adding Sign-In Methods
 
-They're all in `app/Providers/KeyringServiceProvider.php`, and the ones you didn't pick when installing are commented out. Uncomment the ones you want, and recovery codes with them:
+Every sign-in method lives in your `app/Providers/KeyringServiceProvider.php` file, and the ones you didn't pick during installation are commented out. Uncomment the ones you would like, along with recovery codes:
 
 ```php
 use Keyring\Facades\Keyring;
@@ -204,25 +222,27 @@ Keyring::factors([
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
-Then:
+AAL stands for authenticator assurance level, NIST's scale for how strongly a session has been proved. AAL1 is a single factor, such as a password. AAL2 adds something the user has, such as an authenticator app, or comes from a passkey on its own. See [Assurance Levels](policies.md#assurance-levels).
 
-1. Turn on `Features::manageAuthenticators()` in `config/keyring.php`, so users can set them up.
-2. Build the `challenge` and `confirm` pages, and the part of [your settings page](#your-settings-page) that adds and removes them.
-3. To make everyone set one up, uncomment the `keyring.enrolled` line below them and set `enrollment_url` to that page. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
+Next:
 
-`Requirement::aal2()->ifEnrolled()` asks for a second factor once a user has set one up, as Fortify does. `noDowngrade()` means a user with a passkey can't be talked into using something weaker. See [Factors](factors.md) and [Policies](policies.md).
+1. Enable `Features::manageAuthenticators()` in your `config/keyring.php` file so users can set them up.
+2. Build the `challenge` and `confirm` pages, and the part of [your settings page](#your-settings-page) that adds and removes sign-in methods.
+3. If everyone should set one up, uncomment the `keyring.enrolled` line below them and set `enrollment_url` to that page. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
+
+The `Requirement::aal2()->ifEnrolled()` policy asks for a second factor once a user has set one up. Adding `noDowngrade()` ensures a user with a passkey can't be talked into using something weaker. To learn more, see the [Factors](factors.md) and [Policies](policies.md) documentation.
 
 ## What Keyring Does Without Being Asked
 
-These are part of the foundation. You don't need to set them up, but you can change them:
+The following protections are part of the foundation. You don't need to set any of them up, but you're free to change them:
 
-| What | Default | Change it with |
+| Protection | Default | How to Change It |
 |---|---|---|
-| Rate limits on signing in | 5 a minute per account, 20 per IP, and an authenticator refused after 100 failures in a row until it's set up again | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
-| Failed checks take the same time, and so does every registration and refused password reset | 500ms | `timebox` |
-| Registration answers the same whether or not an address has an account | On | [`registration.reveal_taken`](sign-in-flow.md#registration) |
-| Password rules | 15 characters without a second factor, 8 with one. Common passwords and ones containing the user's or site's name are refused, and breached ones in production | [Password Rules](protected-changes.md#password-rules) |
-| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after two hours unused and 30 days after sign in. "Remember me" brings a browser back for up to 14 days away, with nothing proved, and only to a session that hasn't ended | `sessions` in [Configuration](configuration.md#sessions) |
-| Assurance levels lapse, as NIST asks | AAL2 after an hour idle or 24 hours, AAL3 after 15 minutes or 12 hours. The session stays signed in at the level that's left, unless `sessions.end_on_lapse` ends it | `sessions.levels` |
-| Browsers are told to clear their cache and storage on sign out | On | A custom [`LogoutResponse`](sign-in-flow.md#responses) |
-| Step-up middleware | `keyring:aal2` and `keyring.fresh:15m`, for your routes | [Step-Up](step-up.md) |
+| Rate limits on signing in | 5 a minute per account and 20 per IP address. After 100 failures in a row, an authenticator is refused until a password reset or `Keyring::unlock()` clears it, or until the second factor is removed and added again. | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
+| Failed checks take the same amount of time, as does every registration and refused password reset | 500ms | `timebox` |
+| Registration gives the same response whether or not an address has an account | Enabled | [`registration.reveal_taken`](sign-in-flow.md#registration) |
+| Password rules | 15 characters without a second factor, and 8 with one. Common passwords and ones containing the user's or site's name are refused, as are breached passwords in production. | [Password Rules](protected-changes.md#password-rules) |
+| A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after two hours unused, and 30 days after signing in. "Remember me" brings a browser back for up to 14 days away, with nothing proved, and only to a session that hasn't ended. | `sessions` in [Configuration](configuration.md#sessions) |
+| Assurance levels lapse, as NIST recommends | AAL2 after an hour idle or 24 hours, and AAL3 after 15 minutes idle or 12 hours. The session stays signed in at whatever level remains, unless `sessions.end_on_lapse` ends it. | `sessions.levels` |
+| Browsers are told to clear their cache and storage on sign out | Enabled | A custom [`LogoutResponse`](sign-in-flow.md#responses) |
+| Step-up middleware | `keyring:aal2` and `keyring.fresh:15m`, for your own routes | [Step-Up](step-up.md) |

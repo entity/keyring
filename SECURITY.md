@@ -6,9 +6,9 @@ Security fixes go into the latest release.
 
 ## Reporting a Vulnerability
 
-Please don't report a security problem in a public issue, pull request or discussion.
+Please don't report a security problem in a public issue, pull request, or discussion.
 
-Report it privately through GitHub instead: open the repository's **Security** tab and choose **Report a vulnerability**, or go straight to [the form](https://github.com/entity/keyring/security/advisories/new). Only the maintainers see the report.
+Report it privately through GitHub instead. Open the repository's **Security** tab and choose **Report a vulnerability**, or go straight to [the form](https://github.com/entity/keyring/security/advisories/new). Only the maintainers can see the report.
 
 It helps to include:
 
@@ -19,7 +19,7 @@ It helps to include:
 
 ## How Soon We Act
 
-Keyring is a small project, and these are the targets its maintainers hold themselves to, counted from when they learn of the problem:
+Keyring is a small project. The table below lists the targets its maintainers hold themselves to, counted from when they learn of the problem.
 
 | | Target |
 |---|---|
@@ -30,24 +30,24 @@ Keyring is a small project, and these are the targets its maintainers hold thems
 | Acting on a medium or low advisory in a dependency | 30 days |
 | Moving off a dependency version that no longer gets security fixes | 30 days after its support ends |
 
-A fix ships in a new release, with a GitHub security advisory naming the versions affected.
+A fix ships in a new release, along with a GitHub security advisory that names the affected versions.
 
 ## Dependencies
 
-Every pull request and every push to `main` runs `composer audit` on the PHP dependencies and `bun audit` on the browser package's, and both run again every week, since advisories come out between pushes. A known vulnerability fails the build.
+Every pull request and every push to `main` runs `composer audit` on the PHP dependencies and `bun audit` on the browser package's dependencies. Both checks run again every week, because advisories come out between pushes. A known vulnerability fails the build.
 
-Acting on an advisory means one of:
+Acting on an advisory means one of the following:
 
-- raising the version Keyring requires, so the vulnerable ones can no longer be installed with it, and releasing that,
+- raising the version Keyring requires, so the vulnerable versions can no longer be installed with it, and releasing that,
 - replacing the dependency, when no fixed version is coming,
 - saying in a security advisory why Keyring isn't affected, when the vulnerable code is something it never calls.
 
-You don't have to wait for that. Keyring requires its dependencies by version range and ships no lock file, so `composer update` brings in a dependency's fixed release as soon as it's out. Run `composer audit` in your own app too: it covers Keyring's dependencies along with yours.
+You don't have to wait for that. Keyring requires its dependencies by version range and ships no lock file, so `composer update` brings in a dependency's fixed release as soon as it's out. Run `composer audit` in your own app too. It covers Keyring's dependencies along with yours.
 
-An abandoned package is listed by the audit without failing it. One that Keyring requires directly is replaced when a maintained alternative exists.
+An abandoned package is listed by the audit without failing it. When Keyring requires one directly, it's replaced once a maintained alternative exists.
 
 ## What Counts
 
-[Security](docs/security.md) lists what Keyring guarantees. A way around one of those guarantees is a vulnerability, and so is anything that lets someone sign in, stay signed in or change an account when they shouldn't be able to.
+[Security](docs/security.md) lists what Keyring guarantees. A way around one of those guarantees is a vulnerability. So is anything that lets someone sign in, stay signed in, or change an account when they shouldn't be able to.
 
-The same page lists the [known limitations](docs/security.md#known-limitations). Those are documented behaviour, so an ordinary issue is the place for them.
+The same page lists the [known limitations](docs/security.md#known-limitations). Those are documented behaviour, so an ordinary issue is the right place for them.
