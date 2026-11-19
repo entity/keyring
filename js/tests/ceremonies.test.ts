@@ -91,6 +91,28 @@ describe('creating a credential', () => {
     })
   })
 
+  test('lets a browser with the json helpers read the options itself', async () => {
+    const options = { challenge: 'AQI', user: { id: 'Aw', name: 'taylor@example.com' } }
+    const parsed = { parsed: true }
+    const parsing: unknown[] = []
+    // On the shared class, since what the browser hands back must be one,
+    // and taken off again whatever happens.
+    ;(FakeCredential as any).parseCreationOptionsFromJSON = (json: unknown) => {
+      parsing.push(json)
+
+      return parsed
+    }
+
+    try {
+      await createCredential(options)
+    } finally {
+      delete (FakeCredential as any).parseCreationOptionsFromJSON
+    }
+
+    expect(parsing).toEqual([options])
+    expect(calls[0].options.publicKey).toBe(parsed)
+  })
+
   test('says so when the browser has no webauthn', async () => {
     delete (globalThis as any).PublicKeyCredential
 
