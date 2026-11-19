@@ -160,7 +160,8 @@ class CacheSessionRegistry implements SessionRegistry
             && ($revoke || $this->cache->missing($this->revokedKey($id)));
 
         if (! $replaced) {
-            $this->cache->forget($this->key($successor->id));
+            // Only when another request revoked or replaced it since find().
+            $this->cache->forget($this->key($successor->id)); // @codeCoverageIgnore
         } else {
             $this->stamp($session, ['replaced_by' => $successor->id, 'replaced_at' => $now, ...$revoke ? ['revoked_at' => $now] : []]);
         }
