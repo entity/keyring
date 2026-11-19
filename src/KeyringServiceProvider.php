@@ -288,10 +288,6 @@ class KeyringServiceProvider extends ServiceProvider
      */
     protected function registerAboutSection(): void
     {
-        if (! class_exists(AboutCommand::class)) {
-            return;
-        }
-
         AboutCommand::add('Keyring', fn () => [
             'Guard' => config('keyring.guard'),
             'Factors' => $this->app->make(KeyringManager::class)->registered()->keys()->implode(', '),
