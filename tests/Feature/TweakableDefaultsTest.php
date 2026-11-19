@@ -10,6 +10,7 @@ use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Devices\UserAgent;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
@@ -89,6 +90,12 @@ it('names devices the way the app says', function () {
     expect(Keyring::describeDevice(FIREFOX))->toBe('A fox')
         ->and(Keyring::describeDevice(CHROME))->toBeNull()
         ->and(Keyring::describeDevice(''))->toBeNull();
+});
+
+it('describes no device for a missing or empty user agent', function () {
+    expect(UserAgent::describe(null))->toBeNull()
+        ->and(UserAgent::describe(''))->toBeNull()
+        ->and(UserAgent::describe(FIREFOX))->toBe('Firefox on Windows');
 });
 
 it('keeps the ip address the app wants kept', function () {

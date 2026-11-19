@@ -1007,6 +1007,44 @@ describe('applying a change', function () {
     });
 });
 
+it('asks for nothing when the address typed is the one the account already has', function () {
+    $change = requestChange($this->user, 'new@example.com');
+    Notification::fake();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.email.store'), ['email' => 'Taylor@Example.com'])->assertOk();
+
+    // The change already asked for stands, and nobody is mailed.
+    expect(app(EmailChanges::class)->pending($this->user)?->is($change))->toBeTrue();
+    Notification::assertNothingSent();
+});
+
+it('saves nothing when the address already moved to the one asked for after the user was loaded', function () {
+    $loaded = User::find($this->user->id);
+    User::query()->whereKey($this->user->id)->update(['email' => 'new@example.com']);
+
+    $request = Request::create('/');
+    $request->setLaravelSession(session()->driver());
+
+    expect(app(EmailChanges::class)->request($loaded, 'new@example.com', $request))->toBeNull()
+        ->and(PendingChange::query()->count())->toBe(0);
+});
+
+it('asks the current address too when the request comes from a session keyring never signed in', function () {
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+
+    // It proved an established second factor, but there's no record of when it signed in.
+    $this->verifiedWith($totp);
+    expect(session()->has(Sessions::KEY))->toBeFalse();
+
+    $request = Request::create('/');
+    $request->setLaravelSession(session()->driver());
+
+    $change = app(EmailChanges::class)->request($this->user, 'new@example.com', $request);
+
+    expect($change->current_token)->not->toBeNull();
+});
+
 /**
  * An app's own notification, nothing to do with Keyring's.
  */

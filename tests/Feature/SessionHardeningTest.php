@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Cache\ApcStore;
+use Illuminate\Cache\ApcWrapper;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
@@ -137,6 +140,62 @@ function sessionCookies(TestResponse $response): array
 
     return [config('session.cookie') => $id, $id => $response->getCookie($id)->getValue()];
 }
+
+it('gives a guest\'s cookie session a new id without registering it', function () {
+    config(['session.driver' => 'cookie']);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+    Route::middleware('web')->post('/rotate', fn (Request $request) => tap(response('rotated'), fn () => app(Sessions::class)->rotate($request)));
+
+    $this->get('/login');
+    $before = session()->getId();
+
+    $this->post('/rotate')->assertOk();
+
+    expect(session()->getId())->not->toBe($before)
+        ->and(session()->has(Sessions::KEY))->toBeFalse()
+        ->and(DB::table('keyring_sessions')->count())->toBe(0);
+    $this->assertGuest();
+});
+
+it('gives a cookie session a new id without registering it when it has no record, or no one signed in', function () {
+    config(['session.driver' => 'cookie']);
+    app('session')->forgetDrivers();
+    app()->forgetInstance('session.store');
+    Route::middleware('web')->post('/rotate', fn (Request $request) => tap(response('rotated'), fn () => app(Sessions::class)->rotate($request)));
+    Route::middleware('web')->post('/forget-and-rotate', function (Request $request) {
+        $request->session()->forget(Sessions::KEY);
+        app(Sessions::class)->rotate($request);
+
+        return 'rotated';
+    });
+
+    // Signed in, but the session no longer holds its record by the time it rotates.
+    $this->actingAs($this->user)->get('/home')->assertOk();
+    $registered = session(Sessions::KEY);
+    $before = session()->getId();
+
+    $this->post('/forget-and-rotate')->assertOk();
+
+    expect(session()->getId())->not->toBe($before)
+        ->and(session()->has(Sessions::KEY))->toBeFalse()
+        ->and(DB::table('keyring_sessions')->count())->toBe(1)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+    $this->assertAuthenticatedAs($this->user);
+
+    // A record, but no one signed in.
+    session()->put(Sessions::KEY, $registered);
+    app('auth')->forgetGuards();
+    $before = session()->getId();
+
+    $this->post('/rotate')->assertOk();
+
+    expect(session()->getId())->not->toBe($before)
+        ->and(session(Sessions::KEY))->toBe($registered)
+        ->and(DB::table('keyring_sessions')->count())->toBe(1)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+    $this->assertGuest();
+});
 
 it('signs out a copy of a cookie session after :dataset, and keeps the user signed in', function (string $method, string $uri, array $data) {
     config(['session.driver' => 'cookie']);
@@ -360,6 +419,66 @@ it('keeps a session ended when the cache store loses one of the keys that say so
     $this->get('/home')->assertRedirect('/login');
 })->with(['its revoked marker' => ':revoked', 'its replaced marker' => ':replaced']);
 
+// A revoked record saved again (a request updating it as another revokes
+// it) puts back the key that says so, should the store have dropped it.
+it('keeps a session revoked when its record is saved again after the store lost its revoked marker', function () {
+    config(['keyring.sessions.driver' => 'cache']);
+    signInWith();
+    $registry = app(SessionRegistry::class);
+    $id = session(Sessions::KEY);
+
+    $registry->revoke($id);
+    Cache::forget('keyring:sessions:'.$id.':revoked');
+    $registry->update($id, ['lastActivityAt' => now()->getTimestamp()]);
+
+    expect(Cache::get('keyring:sessions:'.$id.':revoked'))->not->toBeNull()
+        ->and($registry->find($id)->revokedAt)->not->toBeNull();
+
+    $this->get('/home')->assertRedirect('/login');
+});
+
+// APCu, say, which has no locks: the list of a user's sessions is then
+// changed without one.
+it('keeps the registry in a cache store that can\'t lock', function () {
+    Cache::extend('no-locks', fn () => Cache::repository(new ApcStore(new class extends ApcWrapper
+    {
+        /** @var array<string, mixed> */
+        private array $values = [];
+
+        public function get($key)
+        {
+            return $this->values[$key] ?? null;
+        }
+
+        public function put($key, $value, $seconds)
+        {
+            $this->values[$key] = $value;
+
+            return true;
+        }
+
+        public function delete($key)
+        {
+            unset($this->values[$key]);
+
+            return true;
+        }
+    })));
+    config(['cache.stores.no-locks' => ['driver' => 'no-locks'], 'keyring.sessions.driver' => 'cache', 'keyring.sessions.store' => 'no-locks']);
+
+    signInWith();
+    $first = session(Sessions::KEY);
+    $this->post('/logout');
+    signInWith(CHROME);
+    $registry = app(SessionRegistry::class);
+
+    expect(Cache::store('no-locks')->getStore())->not->toBeInstanceOf(LockProvider::class)
+        ->and($registry->forUser($this->user)->map->id->all())->toBe([session(Sessions::KEY)])
+        ->and($registry->find($first)->revokedAt)->not->toBeNull();
+
+    $this->get('/home')->assertOk();
+});
+
 // A record kept before records said whose table their ID is one of. It can't
 // be told from another model's, so its browser signs in again.
 it('signs out a session whose cache record is from before records said whose they are', function () {
@@ -375,6 +494,17 @@ it('signs out a session whose cache record is from before records said whose the
 
 // A session with a record that has gone is an ended one, to a request under
 // way as it is to the session middleware.
+it('refuses a change for a user who has gone by the time it\'s made', function () {
+    signInWith();
+    $request = request();
+    $request->setLaravelSession(session()->driver());
+
+    DB::table('users')->where('id', $this->user->id)->delete();
+
+    expect(fn () => app(Sessions::class)->whileSignedIn($request, $this->user, fn () => 'saved'))
+        ->toThrow(AuthenticationException::class);
+});
+
 it('refuses a change from a session whose record has gone', function (string $driver) {
     config(['keyring.sessions.driver' => $driver]);
     signInWith();
@@ -431,6 +561,16 @@ it('asks again for laravel password confirmation after a mid-session step-up', f
     $this->withHeader('User-Agent', CHROME)->get('/home')->assertOk();
 
     $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect('/password-confirm');
+});
+
+it('leaves a signed in request without a session alone, as on a stateless api route', function () {
+    Route::middleware('keyring.session')->get('/api/ping', fn () => 'pong');
+
+    $this->actingAs($this->user)->get('/api/ping')
+        ->assertOk()
+        ->assertSee('pong')
+        ->assertCookieMissing(config('session.cookie'))
+        ->assertCookieMissing('known_device');
 });
 
 // A step-up is only forgotten in the copy of the session that saw it. Any

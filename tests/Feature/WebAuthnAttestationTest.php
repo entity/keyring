@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use CBOR\ByteStringObject;
 use CBOR\Decoder;
+use CBOR\ListObject;
 use CBOR\MapObject;
 use CBOR\StringStream;
 use CBOR\TextStringObject;
@@ -28,7 +29,9 @@ use Keyring\WebAuthn\Profile;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Symfony\Component\Uid\Uuid;
 use Webauthn\AttestationStatement\AttestationStatement;
+use Webauthn\AttestationStatement\PackedAttestationStatementSupport;
 use Webauthn\MetadataService\CertificateChain\CertificateToolbox;
+use Webauthn\PublicKeyCredential;
 use Webauthn\TrustPath\CertificateTrustPath;
 
 const YUBIKEY = '2fc0579f-8113-47ea-b116-bb5a8db9202a';
@@ -87,7 +90,12 @@ function tamper(array $credential, Closure $change): array
     $statement = MapObject::create();
 
     foreach ($attestation['attStmt'] as $key => $value) {
-        $statement->add(TextStringObject::create($key), $object['attStmt'][$key]::class === ByteStringObject::class ? ByteStringObject::create($value) : $object['attStmt'][$key]);
+        $statement->add(TextStringObject::create($key), match ($object['attStmt'][$key]::class) {
+            ByteStringObject::class => ByteStringObject::create($value),
+            // The certificates, x5c.
+            ListObject::class => ListObject::create(array_map(ByteStringObject::create(...), $value)),
+            default => $object['attStmt'][$key],
+        });
     }
 
     $credential['response']['attestationObject'] = Base64UrlSafe::encodeUnpadded((string) MapObject::create()
@@ -236,6 +244,65 @@ it('refuses a key that attests for itself', function (string $aaguid) {
     'with an aaguid' => YUBIKEY,
     'without one' => '00000000-0000-0000-0000-000000000000',
 ]);
+
+it('refuses a key that attests for itself even with a genuine statement, whatever it signs with', function (Closure $key) {
+    config(['keyring.webauthn.algorithms' => ['ES256', 'EdDSA', 'RS256']]);
+    $ceremonies = app(Ceremonies::class);
+
+    $credential = $key()->selfAttested()->register(attestationOptions());
+    $response = $ceremonies->fromJson(json_encode($credential), PublicKeyCredential::class, attested: true)->response;
+
+    expect($response->attestationObject->attStmt->type)->toBe(AttestationStatement::TYPE_SELF)
+        ->and(PackedAttestationStatementSupport::create($ceremonies->algorithms())->isValid(
+            hash('sha256', $response->clientDataJSON->rawData, true),
+            $response->attestationObject->attStmt,
+            $response->attestationObject->authData,
+        ))->toBeTrue();
+
+    refused($this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $credential]));
+})->with([
+    'ES256' => [fn () => new VirtualAuthenticator],
+    'EdDSA' => [fn () => VirtualAuthenticator::eddsa()],
+    'RS256' => [fn () => VirtualAuthenticator::rsa()],
+]);
+
+it('only makes fido-u2f keys that sign with p-256, as u2f keys all do', function (Closure $key) {
+    $key = $key()->attestedBy($this->maker, 'fido-u2f');
+
+    expect(fn () => $key->register(attestationOptions()))->toThrow(RuntimeException::class, 'Only a P-256 key');
+})->with([
+    'EdDSA' => [fn () => VirtualAuthenticator::eddsa()],
+    'RS256' => [fn () => VirtualAuthenticator::rsa()],
+]);
+
+it('refuses a certificate that can not be read, without reporting it', function () {
+    Exceptions::fake();
+
+    refused(attest($this->maker->key(YUBIKEY), answer: fn (array $credential) => tamper($credential, fn (array $attestation) => [
+        ...$attestation, 'attStmt' => [...$attestation['attStmt'], 'x5c' => ['not a certificate']],
+    ])));
+
+    Exceptions::assertNothingReported();
+});
+
+// FIDO metadata lists some models' own attestation certificate as the root.
+it('takes a key whose own certificate the app trusts as the root, and only when that key signed', function () {
+    $key = $this->maker->key(YUBIKEY);
+    $genuine = $key->register(attestationOptions());
+    [$own] = Decoder::create()->decode(StringStream::create(Base64UrlSafe::decodeNoPadding($genuine['response']['attestationObject'])))->normalize()['attStmt']['x5c'];
+
+    config(['keyring.webauthn.attestation_roots' => [CertificateToolbox::convertDERToPEM($own)]]);
+
+    refused(attest(new VirtualManufacturer()->key(YUBIKEY), answer: fn (array $credential) => tamper($credential, fn (array $attestation) => [
+        ...$attestation, 'attStmt' => [...$attestation['attStmt'], 'x5c' => [$own]],
+    ])));
+
+    attest($key)->assertOk();
+
+    expect(Authenticator::query()->sole())
+        ->aaguid->toBe(YUBIKEY)
+        ->attestation->toBe('basic');
+});
 
 it('refuses a key whose attestation chains to a root that is not trusted', function (string $format) {
     refused(attest(new VirtualManufacturer()->key(format: $format)));

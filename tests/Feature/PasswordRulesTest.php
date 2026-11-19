@@ -151,6 +151,17 @@ it('checks the words it\'s given before there\'s a user, ignoring short ones', f
         ->and(passes('jr jo jr jo jr jo jr jo', context: ['Jo', 'jr@example.com']))->toBeTrue();
 });
 
+it('refuses a password that isn\'t text without reading it for the user\'s words', function (mixed $password) {
+    $errors = Validator::make(['password' => $password, 'password_confirmation' => $password], ['password' => PasswordRules::for(taylor())])->errors()->all();
+
+    expect($errors)->toContain(__('validation.string', ['attribute' => 'password']))
+        ->not->toContain(__('keyring::keyring.password_context'))
+        ->not->toContain(__('keyring::keyring.password_common'));
+})->with([
+    'a list of the user\'s words' => [['taylor', 'taylor']],
+    'a number' => [12345678],
+]);
+
 it('refuses the words the app lists as its own', function () {
     expect(passes('falcon project acme'))->toBeTrue();
 

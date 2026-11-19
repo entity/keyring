@@ -6,6 +6,7 @@ use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\RateLimiter as Limiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
@@ -135,6 +136,25 @@ it('merges the app\'s config over its defaults key by key, but replaces lists wh
         ->and(config('keyring.sessions.levels.aal3'))->toBe(['idle' => '15m', 'absolute' => '12h'])
         ->and(config('keyring.features'))->toBe([Features::devices()])
         ->and(config('keyring.limits.per_ip'))->toBe(20);
+});
+
+it('leaves a cached config as config:cache saved it, already merged', function () {
+    $this->app->instance('config_loaded_from_cache', true);
+    config(['keyring' => ['sessions' => ['absolute' => '7d']]]);
+
+    new KeyringServiceProvider($this->app)->register();
+
+    expect(config('keyring'))->toBe(['sessions' => ['absolute' => '7d']]);
+});
+
+it('leaves its routes to the route cache once routes are cached', function () {
+    $this->app->instance('routes.cached', true);
+    Route::setRoutes(new RouteCollection);
+
+    new KeyringServiceProvider($this->app)->boot();
+
+    expect(Route::has('login'))->toBeFalse()
+        ->and(Route::getRoutes()->count())->toBe(0);
 });
 
 it('refuses a feature it doesn\'t know, rather than leaving it off', function () {

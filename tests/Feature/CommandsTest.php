@@ -16,6 +16,7 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event as Events;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
@@ -51,6 +52,8 @@ use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\SoftDeletingUser;
 use Keyring\Tests\Fixtures\User;
+use Keyring\Tests\Fixtures\WrappedUserProvider;
+use ParagonIE\ConstantTime\Base64UrlSafe;
 use PragmaRX\Google2FA\Google2FA;
 use Symfony\Component\Console\Output\BufferedOutput;
 
@@ -141,6 +144,33 @@ describe('keyring:install', function () {
 
         expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
         expectValidPhp(config_path('keyring.php'));
+    });
+
+    it('turns on every sign-in method and starting signal when all of them are picked', function () {
+        $this->artisan('keyring:install', [
+            '--factor' => ['totp', 'passkeys', 'security-keys', 'email-codes'],
+            '--feature' => [Features::securityLog(), Features::devices()],
+            '--no-interaction' => true,
+        ])->assertSuccessful();
+
+        $provider = file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
+
+        expect($provider)
+            ->not->toContain('// Factors\\')
+            ->toContain("\n            Factors\Totp::class,\n")
+            ->toContain("\n            Factors\RecoveryCodes::class,\n")
+            ->toContain("\n            Factors\WebAuthn::passkeys(),\n")
+            ->toContain("\n            Factors\WebAuthn::securityKeys(),\n")
+            ->toContain("\n            Factors\EmailCode::asExtraStep(),\n")
+            ->toContain("            Signals\SessionFingerprintChanged::class,\n")
+            ->toContain("            Signals\RepeatedFactorFailures::class,\n")
+            ->toContain("            Signals\SuccessAfterFailures::class,\n")
+            ->toContain("            Signals\NewDevice::class,\n")
+            ->toContain("            Signals\InactiveAccount::class,\n")
+            // The ones that need more than Keyring has are still there to turn on.
+            ->toContain("            // Signals\BreachedPassword::class,\n");
+
+        expectValidPhp($this->sandbox.'/app/Providers/KeyringServiceProvider.php');
     });
 
     it('adds recovery codes to any second sign-in method, so losing it isn\'t the end of the account', function (string $factor) {
@@ -497,6 +527,27 @@ describe('keyring:import fortify', function () {
 
         $this->artisan('keyring:import', ['source' => 'fortify'])
             ->expectsOutputToContain('Register totp, recovery in Keyring::factors() first')
+            ->assertFailed();
+
+        expect(Authenticator::count())->toBe(0);
+    });
+
+    it('refuses to import from anything but fortify', function () {
+        DB::table('users')->update(['two_factor_secret' => encrypt('secret'), 'two_factor_confirmed_at' => now()]);
+
+        $this->artisan('keyring:import', ['source' => 'breeze'])
+            ->expectsOutputToContain('Only "fortify" can be imported for now.')
+            ->assertFailed();
+
+        expect(Authenticator::count())->toBe(0);
+    });
+
+    it('refuses to import without an eloquent user provider to find the users with', function () {
+        WrappedUserProvider::use();
+        DB::table('users')->update(['two_factor_secret' => encrypt('secret'), 'two_factor_confirmed_at' => now()]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain('Importing needs an Eloquent user provider.')
             ->assertFailed();
 
         expect(Authenticator::count())->toBe(0);
@@ -867,6 +918,25 @@ describe('keyring:import fortify', function () {
         expect(Authenticator::query()->where('factor', 'passkey')->count())->toBe(2);
     });
 
+    it('imports a passkey whose public key can not be read, and says it will be refused', function (string $publicKey) {
+        passkeysTable();
+        $row = passkeyRow($this->user);
+        $row['credential'] = json_encode([...json_decode($row['credential'], true), 'credentialPublicKey' => Base64UrlSafe::encodeUnpadded($publicKey)]);
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'MacBook', ...$row]);
+        Exceptions::fake();
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])
+            ->expectsOutputToContain("1 imported passkey signing with a key that can't be read will be refused at sign in: this server can't check those signatures, so their users will need to add a new passkey. User {$this->user->id}.")
+            ->assertSuccessful();
+
+        expect(Authenticator::query()->where('factor', 'passkey')->count())->toBe(1);
+        Exceptions::assertNothingReported();
+    })->with([
+        'not cbor' => "\xff\x00",
+        'cbor that is not a key' => "\x01",
+        'a key that names no algorithm' => "\xa1\x01\x02",
+    ]);
+
     it('says when an imported rsa key is shorter than the app allows', function () {
         passkeysTable();
         config(['keyring.webauthn.algorithms' => ['ES256', 'RS256']]);
@@ -928,6 +998,22 @@ it('prunes old devices, email changes, security events and ended sessions', func
         ->and($registry->find('live'))->not->toBeNull();
 });
 
+it('leaves sessions kept in the cache to run out on their own', function () {
+    config(['keyring.sessions.driver' => 'cache']);
+    $user = taylor();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('live', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp()));
+
+    $this->artisan('keyring:prune')->expectsOutputToContain('Pruned 0 ended sessions.')->assertSuccessful();
+
+    expect($registry->find('live'))->not->toBeNull();
+
+    // Its record goes with the time it was kept for.
+    $this->travel(2)->hours();
+
+    expect($registry->find('live'))->toBeNull();
+});
+
 describe('keyring:sign-out', function () {
     beforeEach(function () {
         $this->user = taylor();
@@ -977,6 +1063,19 @@ describe('keyring:sign-out', function () {
 
         expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
     });
+
+    it('finds a user by ID or username through a user provider of the app\'s own', function (string $name) {
+        WrappedUserProvider::use();
+        ($this->session)($this->user, 'laptop');
+        ($this->session)($this->other, 'theirs');
+
+        $this->artisan('keyring:sign-out', ['user' => $name === 'id' ? (string) $this->user->id : 'taylor@example.com'])
+            ->expectsOutputToContain("Signed out taylor@example.com (ID {$this->user->id}): 1 session ended.")
+            ->assertSuccessful();
+
+        expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+            ->and(app(SessionRegistry::class)->forUser($this->other))->toHaveCount(1);
+    })->with(['id', 'username']);
 
     it('signs out nobody when the name is one user\'s ID and another\'s username', function () {
         config(['keyring.username' => 'name']);
