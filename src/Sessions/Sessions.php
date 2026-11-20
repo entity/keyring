@@ -432,12 +432,14 @@ class Sessions
     {
         $id = $request->session()->pull(self::KEY);
 
-        if (is_string($id)) {
-            $this->registry->revoke($id);
+        try {
+            if (is_string($id)) {
+                $this->registry->revoke($id);
+            }
+        } finally {
+            $request->session()->forget(self::REMEMBERED);
+            $this->forgetRememberCookie($request);
         }
-
-        $request->session()->forget(self::REMEMBERED);
-        $this->forgetRememberCookie($request);
     }
 
     /**
