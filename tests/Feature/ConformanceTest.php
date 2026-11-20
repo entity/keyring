@@ -8,9 +8,12 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User as PlainAuthenticatable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
@@ -21,6 +24,9 @@ use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Pipeline\Steps;
 use Keyring\Pipeline\Steps\EnsureNotThrottled;
+use Keyring\Sessions\DatabaseSessionRegistry;
+use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Testing\KeyringConformance;
 use Keyring\Tests\Fixtures\User;
 use Keyring\Tests\TestCase;
@@ -166,6 +172,33 @@ class ConformanceTest extends TestCase
         $this->expectExceptionMessage('user/sessions');
 
         $this->test_keyring_checks_the_session_on_every_signed_in_route();
+    }
+
+    public function test_the_suite_fails_when_the_session_registry_forgets_the_record_a_session_started_on(): void
+    {
+        app(SessionRegistryManager::class)->extend('forgetful', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function find(string $id): ?RegisteredSession
+            {
+                return parent::find($id)?->with(['origin' => null]);
+            }
+        });
+        config(['keyring.sessions.driver' => 'forgetful']);
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('A driver of your own should store origin and return it.');
+
+        $this->test_keyring_keeps_a_sessions_handle_when_it_moves();
+    }
+
+    public function test_the_suite_fails_when_the_migration_that_keeps_the_record_a_session_started_on_was_not_run(): void
+    {
+        Schema::table('keyring_sessions', fn (Blueprint $table) => $table->dropColumn('origin'));
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('publish and run Keyring\'s migrations. A driver of your own should store origin and return it. Moving a session failed:');
+
+        $this->test_keyring_keeps_a_sessions_handle_when_it_moves();
     }
 
     protected function keyringAcknowledgesBcryptLimit(): bool

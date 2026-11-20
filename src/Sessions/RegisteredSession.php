@@ -17,6 +17,10 @@ use Keyring\Enums\Assurance;
  * the new one (replacedBy). It's no longer a session, but its ID can be
  * told from one never issued, and followed to the session it became.
  *
+ * Every record a session moves through names the first one (origin), so
+ * the session can be told apart from its user's others wherever it is now.
+ * The first record names none: its own ID is the origin.
+ *
  * A remembered session is one "remember me" may bring back once Laravel's
  * own session has gone, so it's allowed to sit unused for longer.
  *
@@ -43,7 +47,17 @@ final readonly class RegisteredSession
         public ?string $replacedBy = null,
         public ?int $replacedAt = null,
         public bool $remembered = false,
+        public ?string $origin = null,
     ) {}
+
+    /**
+     * The ID of the record this session started on, which every record it
+     * moves to keeps.
+     */
+    public function origin(): string
+    {
+        return $this->origin ?? $this->id;
+    }
 
     /**
      * Whether this is a session of that user: the same model and the same ID.
@@ -97,6 +111,7 @@ final readonly class RegisteredSession
             'replaced_by' => $this->replacedBy,
             'replaced_at' => $this->replacedAt,
             'remembered' => $this->remembered,
+            'origin' => $this->origin,
         ];
     }
 
@@ -134,6 +149,7 @@ final readonly class RegisteredSession
             replacedBy: $data['replaced_by'] ?? null,
             replacedAt: isset($data['replaced_at']) ? (int) $data['replaced_at'] : null,
             remembered: (bool) ($data['remembered'] ?? false),
+            origin: $data['origin'] ?? null,
         );
     }
 }
