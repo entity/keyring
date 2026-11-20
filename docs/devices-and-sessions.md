@@ -369,8 +369,10 @@ A listener that throws doesn't stop the sign-out. The exception is reported with
 
 `php artisan keyring:sweep` does two things on the `database` driver:
 
-- It ends each session that has timed out with no request to end it, and announces it with the reason `idle` or `expired`. It ends exactly what the session middleware would end on the session's next request: one past its `absolute` limit, or unused for longer than `idle` (`remember_idle` for a remembered one). It never ends a session by a level's limits or by [`end_on_lapse`](#ending-a-session-with-its-level). Those depend on what the browser's session proved, which the registry doesn't hold, so they still end on the browser's next request.
-- It announces again each session that was revoked but whose event never went out. It waits five minutes after a revocation first, so an event still on its way isn't doubled. The event has the reason the session ended for, or `revoked` when that wasn't kept. It gives up on a revocation a day old.
+- It announces again each session that was revoked but whose event never went out. It waits five minutes after the revocation first, so an event still on its way isn't doubled. The event has the reason the session ended for, or `revoked` when that wasn't kept. It gives up on a revocation a day old.
+- It ends each session that has timed out with no request to end it, those that timed out longest ago first, and announces it with the reason `idle` or `expired`. It ends exactly what the session middleware would end on the session's next request: one past its `absolute` limit, or unused for longer than `idle` (`remember_idle` for a remembered one). It never ends a session by a level's limits or by [`end_on_lapse`](#ending-a-session-with-its-level). Those depend on what the browser's session proved, which the registry doesn't hold, so they still end on the browser's next request.
+
+The limits are the ones in the config of the process that runs the sweep, with its clock. An application that changes `sessions.idle` at runtime, per tenant say, has its sessions swept by the configured value.
 
 To turn it on, set how often it runs. Keyring then adds it to Laravel's scheduler, ahead of `keyring:prune`:
 
@@ -381,17 +383,23 @@ To turn it on, set how often it runs. Keyring then adds it to Laravel's schedule
 ],
 ```
 
-`sweep_every` takes minutes or hours, such as `'1m'`, `'5m'`, or `'1h'`. Pick a step that divides an hour or a day. A step that doesn't, such as `'45m'`, runs at the steps that fit in each hour. Anything that isn't a duration leaves the sweep off. The scheduled sweep runs on one server at a time, and never overlaps itself. Both need a cache store shared by your servers that supports locks, such as Redis, Memcached, or the database store. With one that doesn't, each server may run its own sweep. That's safe, since the sweeps lock what they end and wait for each other, but it's wasted work. It needs the [scheduler running](installation.md#after-installing).
+`sweep_every` takes minutes or hours, such as `'1m'`, `'5m'`, or `'1h'`. Pick a step that divides an hour or a day. A step that doesn't, such as `'45m'`, runs at the steps that fit in each hour. A bare number counts seconds, and anything under a minute runs every minute. The longest it runs apart is 12 hours: a longer setting runs every 12 hours, with a warning in your log. Something that isn't a duration, such as `'5 min'`, leaves the sweep off, with a warning in your log, and `keyring:sweep` prints the problem when you run it. It never stops the rest of your schedule.
 
-One run ends and announces at most `sweep_limit` sessions. That keeps the first run, after an upgrade or after you turn the sweep on, from announcing thousands of sessions in one go. The command says how many it ended and announced, and whether it left some for the next run. It never loops until none are left.
+The scheduled sweep runs on one server at a time, and never overlaps itself. Both need a cache store shared by your servers that supports locks, such as Redis, Memcached, or the database store. With one that doesn't, each server may run its own sweep. That's safe but wasted work: two sweeps lock the sessions they end and wait for each other, though both may announce the same lost revocation again, which listeners already have to allow for. The lock that says a sweep is running lasts twice the interval, at least ten minutes and at most six hours. So a server that dies mid-sweep holds the sweep up for that long, not for a day. It needs the [scheduler running](installation.md#after-installing).
 
-A request beats the sweep. The sweep finds what has timed out with a lock, on the write connection, then ends each only if it has still timed out. A request that used a session a moment ago keeps it.
+If no sweep runs for a day, the revocations of that day whose events were lost are given up on, and pruning forgets them.
 
-A listener that throws is reported, and the event is tried again on the next runs, up to three times in all. After the third failure, the session counts as announced, so a listener that always fails isn't run for it on every sweep forever.
+One run announces again at most `sweep_limit` sessions, then ends at most `sweep_limit` more. Each half has its own allowance, so a backlog of timeouts can't hold up a lost announcement. That keeps the first run, after an upgrade or after you turn the sweep on, from announcing thousands of sessions in one go. The command says how many it ended and announced, and whether it left some for the next run. It never loops until none are left. `sweep_limit` is at most 10000.
 
-The sweep needs three columns that a migration adds to `keyring_sessions`: `announced_at`, `end_reason`, and `announce_attempts`. Until it has run, sessions end and are announced as before. Keyring reports once that the migration is missing, and `keyring:sweep` refuses to run. The [conformance suite](testing.md#the-conformance-suite) checks for the columns. Sessions revoked before the migration count as announced, so the first sweep doesn't announce them again.
+A request beats the sweep. The sweep finds what has timed out, locks those rows by their IDs, and decides again from the locked rows. A request that used a session a moment ago keeps it.
 
-With the sweep on, `keyring:prune` keeps what the sweep still has to do: a session that timed out but hasn't been ended, and one that was revoked but not yet announced. It deletes the rest as before, and a revoked session once the sweep has given up on it. With the sweep off, pruning works as before.
+A listener that throws is reported, and the event is tried again later: five minutes after the first try, then ten, then twenty, and so on, doubling, until the day is out. That's about nine tries in all, so an outage of a few hours loses nothing, and a listener that always fails costs a handful of tries, not one every sweep. Laravel stops at the first listener that throws, so the ones behind a broken listener don't hear the event until it's tried again. Put a listener that may fail last, or queue it.
+
+The grace period runs from the revocation, not the commit. A transaction that stays open longer than five minutes around a revocation can see its session announced twice.
+
+The sweep needs four columns that a migration adds to `keyring_sessions`: `announced_at`, `end_reason`, `announce_attempts`, and `announce_after`. Until it has run, sessions end and are announced as before. Keyring logs a warning, once a day, that the migration is missing, and doesn't look again in between. `keyring:sweep` refuses to run. The [conformance suite](testing.md#the-conformance-suite) checks for the columns. Running the migration starts the noting at once, except in a long-lived process that started before it, such as an Octane worker or a queue worker: restart those. Sessions revoked before the migration count as announced, so the first sweep doesn't announce them again.
+
+Once the migration has run, `keyring:prune` keeps what a sweep still has to do, whether or not a sweep is scheduled: a session that timed out but hasn't been ended, until a day after it expired, and one that was revoked but not yet announced, until the sweep gives up on it. It deletes the rest as before. Before the migration, pruning works as it always has.
 
 Running `keyring:sweep` on the `cache` driver, or on a driver of your own that can't sweep, says so and does nothing.
 

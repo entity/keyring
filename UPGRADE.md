@@ -67,20 +67,22 @@ The contract's methods mark the parameters that hold a registry ID with `#[\Sens
 
 ### Sweeping Ended Sessions
 
-A new migration adds `announced_at`, `end_reason`, and `announce_attempts` to `keyring_sessions`, with indexes on `last_activity_at` and `revoked_at`. Run `keyring:install` again to publish it, then migrate:
+A new migration adds `announced_at`, `end_reason`, `announce_attempts`, and `announce_after` to `keyring_sessions`, with three indexes for the sweep. Run `keyring:install` again to publish it, then migrate:
 
 ```bash
 php artisan keyring:install
 php artisan migrate
 ```
 
-It marks every session revoked before it as announced, so the first sweep doesn't announce them again. That's one update of the rows revoked since the last prune.
+It marks every session revoked before it as announced, so the first sweep doesn't announce them again. Pruning keeps only the last day's revocations, so that's usually a small update. On a large table, plan for it: if pruning has never run, it touches every revoked row, and on PostgreSQL creating the indexes blocks writes to the table while they build.
 
-Until it has run, everything works as before: sessions end and are announced, and Keyring reports once that the columns are missing. `keyring:sweep` refuses to run, and `keyring:prune` deletes as it always has, even with the sweep on. The conformance suite has a check that fails until you migrate. The `cache` driver needs no migration, and has nothing to sweep.
+Until it has run, everything works as before: sessions end and are announced, and Keyring logs a warning, once a day, that the columns are missing. `keyring:sweep` refuses to run, and `keyring:prune` deletes as it always has. The conformance suite has a check that fails until you migrate. Restart long-lived processes started before the migration, such as Octane and queue workers, so they start noting announcements. The `cache` driver needs no migration, and has nothing to sweep.
 
-The sweep is off until you set `sessions.sweep_every`. With it on, `keyring:prune` no longer deletes a session that has timed out but hasn't been ended, or one that was revoked but not yet announced. The sweep takes care of those, and the prune deletes them later.
+Once the migration has run, `keyring:prune` changes, whether or not you turn the sweep on: it no longer deletes a session that has expired but that nothing ended until a day after its expiry, or one that was revoked but not yet announced until the sweep gives up on it a day later. So an expired record that nobody ended lives up to a day longer.
 
-A custom driver keeps working, and `keyring:sweep` says it has nothing to sweep. To have it swept, implement `Keyring\Contracts\SweepsSessions`.
+The sweep is off until you set `sessions.sweep_every`.
+
+A custom driver keeps working, and `keyring:sweep` says it has nothing to sweep. To have it swept, implement `Keyring\Contracts\SweepsSessions`, and keep each revocation's reason (`AnnouncingSessionRegistry::reason()`) as you revoke.
 
 `RegisteredSessionEnded` may now repeat for the same handle. Make listeners idempotent by handle.
 

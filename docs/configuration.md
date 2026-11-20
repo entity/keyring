@@ -241,8 +241,8 @@ The `locator` option is the class that works out a request's location. See [Devi
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
 | `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `remembered_session`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 | `remember_grace` | How long after that cookie is used the browser's other requests, sent with it, still get in on the same session. Each cookie works once. After this grace period, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. A `0` leaves no room at all, so requests that a browser sends together end the session too. |
-| `sweep_every` | How often Keyring schedules [`keyring:sweep`](devices-and-sessions.md#sweeping-ended-sessions), such as `'5m'` or `'1h'`, on the `database` driver. It ends sessions that timed out with no request to end them, and announces again any ended session whose event was lost. `null` (the default) leaves the sweep off, and anything that isn't a duration does too. With it on, `keyring:prune` keeps what the sweep still has to do. |
-| `sweep_limit` | The most sessions one run of the sweep ends, and the most it announces again. Anything that isn't a positive number is taken as `1000`. |
+| `sweep_every` | How often Keyring schedules [`keyring:sweep`](devices-and-sessions.md#sweeping-ended-sessions), such as `'5m'` or `'1h'`, on the `database` driver. It ends sessions that timed out with no request to end them, and announces again any ended session whose event was lost. A bare number counts seconds. It runs at least every 12 hours. `null` (the default) leaves the sweep off, and anything that isn't a duration does too, with a warning in your log. |
+| `sweep_limit` | The most sessions one run of the sweep announces again, and the most it ends, each. Anything that isn't a positive number is taken as `1000`, and it's at most `10000`. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
