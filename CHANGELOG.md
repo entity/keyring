@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### Policies and Step-Up
+
+- `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. A moment in the future, or asking for nothing, throws.
+
 ## v0.2.0 - 2026-11-20
 
 ### Rate Limits and Risk

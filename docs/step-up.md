@@ -3,6 +3,8 @@
 - [Introduction](#introduction)
 - [Raising Assurance](#raising-assurance)
 - [Fresh Verification](#fresh-verification)
+- [Asking From a Controller](#asking-from-a-controller)
+- [Reading What Was Proved](#reading-what-was-proved)
 - [The Confirm Flow](#the-confirm-flow)
 - [JSON Requests](#json-requests)
 - [Laravel's Password Confirmation](#laravels-password-confirmation)
@@ -77,6 +79,109 @@ NIST SP 800-63B-4 (Sec. 4.1.2.1) binds a new authenticator at the highest level 
 - Signing in counts as a verification, so a fresh login is also fresh for step-up. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
 
 Keyring uses `keyring.fresh:15m` on its own sensitive routes. It applies this through the `changes_middleware` config option, on top of `auth:{guard}`. Those routes cover managing authenticators, ending sessions, signing out devices, changing the password, and starting an email change.
+
+## Asking From a Controller
+
+An integration, such as an OpenID Connect provider, may need to decide what to ask for from the request itself, from parameters like `acr_values` and `max_age`. Route middleware can't do that, so `Keyring\Login\StepUp` makes the same decision from a controller:
+
+```php
+public function unlessMet(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): ?Response
+```
+
+It returns `null` when the user has already proved what's asked, and the request may carry on. Otherwise, it returns the response the middleware would give: a redirect to the confirm page, a `423` for JSON requests, or [enrolling first](#raising-assurance) for a user who can't reach what's asked.
+
+- `$level` works like `keyring:{level}`. The session must have reached that [assurance level](policies.md#assurance-levels), and the confirm asks only for what's missing. The `device-bound` and `phishing-resistant` names are only for the middleware.
+- `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. See [Fresh Verification](#fresh-verification) for what that means.
+- With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier.
+
+For example:
+
+```php
+use Illuminate\Http\Request;
+use Keyring\Enums\Assurance;
+use Keyring\Login\StepUp;
+
+class AuthorizeController
+{
+    public function __invoke(Request $request, StepUp $stepUp)
+    {
+        $level = in_array('aal2', explode(' ', $request->string('acr_values')->value()), true)
+            ? Assurance::AAL2
+            : null;
+
+        $since = $request->has('max_age')
+            ? now()->subSeconds($request->integer('max_age'))
+            : null;
+
+        $response = $level !== null || $since !== null
+            ? $stepUp->unlessMet($request, $level, $since)
+            : null;
+
+        if ($response !== null) {
+            return $response;
+        }
+
+        // Issue the authorization code...
+    }
+}
+```
+
+Map outside values to a level yourself, and decide what to do with ones you don't know. `Assurance::fromName()` throws an `InvalidArgumentException` for a name it doesn't know.
+
+`unlessMet` throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), for `Assurance::None`, and for a moment in the future. Nothing could meet a moment in the future yet, so the user would confirm and be sent back to confirm again.
+
+Pass a fixed moment. A confirmation always counts for any moment before it, so once the user confirms, the check is met. A moment that moves on with every request, such as `now()`, can't be met: the user confirms, comes back a moment later, and is asked again. This matters for `max_age=0` and `prompt=login`, which ask for a proof made during this authorization. Store the moment the flow started, for example in the session when the authorization request arrives, and pass that moment each time:
+
+```php
+$started = $request->session()->remember('oidc.started_at', fn () => now()->getTimestamp());
+
+$response = $stepUp->unlessMet($request, since: Carbon::createFromTimestamp($started));
+```
+
+Forget the stored moment once the flow ends, so the next authorization asks again. A verification counts if it was made in the same second as the moment.
+
+## Reading What Was Proved
+
+An integration may also need to say how the user authenticated, for example as `amr`, `acr`, and `auth_time` in an ID token. Read that from `Keyring\Sessions\SessionAssurance`:
+
+- `level()` returns the highest `Assurance` the session holds right now.
+- `countingToward(Assurance $level)` returns the verifications that still count toward that level. Those are the ones made within the level's overall limit, and since inactivity last [lapsed](devices-and-sessions.md#timeouts) it.
+- `all()` returns every verification recorded in the session whose authenticator still exists. That includes verifications that no longer count toward any level, such as a code proved a day ago, or before the session sat idle past its limit. Reporting from `all()` overstates what the session holds. A session could report `mfa` after its second factor stopped counting. Use `countingToward()` for what you report.
+
+Each item is a `Keyring\Login\Verification`, with these public properties:
+
+| Property | Type | Meaning |
+|---|---|---|
+| `factor` | `string` | The factor's key, such as `password`, `totp`, `passkey`, or `recovery`. |
+| `authenticator` | `?string` | The authenticator's ID, or `null` for a factor with no stored authenticator, such as the password. |
+| `categories` | `list<Category>` | What it proved, as `Keyring\Enums\Category` cases: `Knowledge`, `Possession`, `Inherence`, or `Address` for an emailed code, which isn't an authentication factor. |
+| `phishingResistant` | `bool` | Whether it was a passkey or security key. |
+| `at` | `int` | When it was verified, as a Unix timestamp. |
+| `deviceBound` | `bool` | Whether the key can't leave its device. |
+| `attested` | `bool` | Whether the key was added with a verified attestation. |
+
+To ask whether a set of verifications meets a requirement, use `Requirement::isMetBy(array $verifications): bool`. `Requirement::factors(2)` counts distinct authentication categories, so two codes of the same kind aren't multi-factor. For example:
+
+```php
+use Keyring\Enums\Assurance;
+use Keyring\Login\Requirement;
+use Keyring\Sessions\SessionAssurance;
+
+$assurance = app(SessionAssurance::class);
+$level = $assurance->level();
+$proved = $assurance->countingToward($level);
+
+$claims = [
+    'acr' => $level === Assurance::None ? null : strtolower($level->name),
+    'amr' => [
+        ...array_values(array_unique(array_column($proved, 'factor'))),
+        ...(Requirement::factors(2)->isMetBy($proved) ? ['mfa'] : []),
+    ],
+    'auth_time' => $proved === [] ? null : max(array_column($proved, 'at')),
+];
+```
+
+Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect.
 
 ## The Confirm Flow
 
