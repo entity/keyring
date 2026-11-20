@@ -54,7 +54,6 @@ use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\SingleSignOn;
 use Keyring\Tests\Fixtures\User;
-use PDOException;
 
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
