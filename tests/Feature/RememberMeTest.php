@@ -1211,7 +1211,7 @@ describe('replacing a session\'s record', function () {
 
         expect($registry->find('old')->replacedBy)->toBe('new')
             ->and($registry->forUser($this->user)->map->id->all())->toBe(['new'])
-            ->and($registry->revokeAll($this->user))->toBe(1);
+            ->and($registry->revokeAll($this->user)->map->id->all())->toBe(['new']);
     })->with('session registries');
 
     it('carries a session on from a record once, and tells a request that read it earlier so', function (string $driver) {
