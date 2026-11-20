@@ -10,12 +10,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\SessionEndReason;
+use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
@@ -394,6 +397,33 @@ trait KeyringConformance
         );
         $this->assertNull($registry->find($kept)?->revokedAt, 'Your SessionRegistry\'s revokeAll() should leave the record it was told to leave ($except).');
         $this->assertTrue($registry->revokeAll($user, except: $kept)->isEmpty(), 'Your SessionRegistry\'s revokeAll() should return nothing when it revoked nothing.');
+    }
+
+    /**
+     * Every session that ends is announced (RegisteredSessionEnded), so an
+     * app that hears about them, to sign the user out of other apps it
+     * signed them in to, say, misses none. A SessionRegistry bound in place
+     * of the one Keyring's manager gives announces nothing.
+     */
+    public function test_keyring_announces_each_session_that_ends(): void
+    {
+        $user = $this->keyringUser();
+
+        $this->actingAs($user)->withAssurance(Assurance::AAL1)->get(route('login'))->assertRedirect();
+        $session = app(SessionRegistry::class)->find((string) session(Sessions::KEY));
+
+        $this->assertNotNull($session, 'Signed-in sessions should be registered.');
+
+        $handle = app(Sessions::class)->handle($session);
+        Event::fake([RegisteredSessionEnded::class]);
+
+        $this->post(route('logout'));
+
+        $announced = Event::dispatched(RegisteredSessionEnded::class)->map(fn (array $arguments) => $arguments[0]);
+
+        $this->assertCount(1, $announced, 'Signing out should announce the session that ended, once. A SessionRegistry bound in the container in place of Keyring\'s announces nothing: register your driver with SessionRegistryManager::extend() instead.');
+        $this->assertSame($handle, $announced->first()->handle, 'The session that ended should be announced by the handle it had.');
+        $this->assertSame(SessionEndReason::LoggedOut, $announced->first()->reason, 'Signing out should be announced as logged_out.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void
