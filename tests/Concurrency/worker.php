@@ -9,8 +9,11 @@ declare(strict_types=1);
  */
 
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Cache\Repository;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Sleep;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
@@ -23,6 +26,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Sessions\CacheSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
@@ -115,6 +119,29 @@ try {
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
+        'cache-replace-paused' => (function () use ($id) {
+            // Moves a session on the cache driver, and stops between adding
+            // the key that says it moved and checking nothing revoked it,
+            // where a revocation used to slip in unannounced.
+            $cache = new class(Cache::store('database')->getStore()) extends Repository
+            {
+                public function add($key, $value, $ttl = null)
+                {
+                    $added = parent::add($key, $value, $ttl);
+
+                    if (str_ends_with((string) $key, ':replaced')) {
+                        Cache::store('database')->put('race:paused', true, 60);
+                        Sleep::sleep(2);
+                    }
+
+                    return $added;
+                }
+            };
+            $registry = new CacheSessionRegistry($cache);
+            $session = $registry->find($id);
+
+            return $registry->replace($id, $session->with(['id' => 'successor', 'origin' => $session->origin()]));
+        })(),
         'announce-revoke-all' => (function () use ($id) {
             $announced = [];
             Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {

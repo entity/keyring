@@ -26,6 +26,13 @@ use Throwable;
  */
 class CacheSessionRegistry implements SessionRegistry
 {
+    /**
+     * The owners whose lock this process holds now.
+     *
+     * @var array<string, true>
+     */
+    protected array $holding = [];
+
     public function __construct(
         protected Repository $cache,
         protected string $prefix = 'keyring:sessions:',
@@ -123,6 +130,16 @@ class CacheSessionRegistry implements SessionRegistry
      */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
+        $found = $this->find($id);
+
+        return $found === null ? null : $this->owning($this->owner($found), fn () => $this->revokeOwned($id));
+    }
+
+    /**
+     * revoke(), holding the owner's lock.
+     */
+    protected function revokeOwned(#[\SensitiveParameter] string $id): ?RegisteredSession
+    {
         $session = $this->find($id);
 
         if ($session === null) {
@@ -176,6 +193,16 @@ class CacheSessionRegistry implements SessionRegistry
      * A revocation that landed in the meantime wins: the new record goes.
      */
     public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
+    {
+        $found = $this->find($id);
+
+        return $found !== null && $this->owning($this->owner($found), fn () => $this->replaceOwned($id, $successor, $revoke));
+    }
+
+    /**
+     * replace(), holding the owner's lock.
+     */
+    protected function replaceOwned(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke): bool
     {
         $session = $this->find($id);
 
@@ -290,9 +317,40 @@ class CacheSessionRegistry implements SessionRegistry
             $this->cache->put($this->prefix.'user:'.$owner, $ids, max([0, ...$ids]) - $now + 60);
         };
 
-        $this->cache->getStore() instanceof LockProvider
-            ? $this->cache->getStore()->lock($this->prefix.'lock:'.$owner, 5)->block(5, $update)
-            : $update();
+        $this->owning($owner, $update);
+    }
+
+    /**
+     * Run the callback holding the owner's lock, so revoking and moving one
+     * of a user's records, and changing the list of their records, take
+     * turns. Without it a revocation landing in the middle of a move could
+     * see the record moved, take it for a session carried on elsewhere, and
+     * leave nothing announced when the move then gives up. A call made
+     * while this process already holds the lock runs straight away. A store
+     * without locks runs it as it comes.
+     *
+     * @template TResult
+     *
+     * @param  callable(): TResult  $callback
+     * @return TResult
+     */
+    protected function owning(string $owner, callable $callback): mixed
+    {
+        $store = $this->cache->getStore();
+
+        if (isset($this->holding[$owner]) || ! $store instanceof LockProvider) {
+            return $callback();
+        }
+
+        return $store->lock($this->prefix.'lock:'.$owner, 5)->block(5, function () use ($owner, $callback) {
+            $this->holding[$owner] = true;
+
+            try {
+                return $callback();
+            } finally {
+                unset($this->holding[$owner]);
+            }
+        });
     }
 
     protected function ttl(RegisteredSession $session): int

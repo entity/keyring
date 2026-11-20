@@ -2,12 +2,17 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Sleep;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\FailureCount;
@@ -436,4 +441,34 @@ it('signs out a session that signed in after the caller\'s transaction began', f
     expect($count)->toBe(2)
         ->and($registry->find($after)->revokedAt)->not->toBeNull()
         ->and($registry->forUser($user))->toBeEmpty();
+});
+
+// On the cache driver a revocation that lands while "remember me" moves the
+// same record either waits for the move, and finds the session carried on,
+// or ends it, and says so: never ends it with nothing announced.
+it('announces a session a sign-out ends on the cache driver while it moves', function () {
+    config(['keyring.sessions.driver' => 'cache', 'keyring.sessions.store' => 'database']);
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('moving', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    $ended = new Collection;
+    Event::listen(fn (RegisteredSessionEnded $event) => $ended->push($event));
+
+    $connection = DB::connection();
+    $mover = Process::env(['DB_CONNECTION' => $connection->getName(), 'DB_DATABASE' => $connection->getDatabaseName()])->timeout(30)->start([PHP_BINARY, __DIR__.'/worker.php', 'cache-replace-paused', 'moving']);
+
+    for ($deadline = microtime(true) + 15; ! Cache::store('database')->has('race:paused') && $mover->running() && microtime(true) < $deadline;) {
+        Sleep::usleep(50_000);
+    }
+
+    expect(Cache::store('database')->has('race:paused'))->toBeTrue($mover->output().$mover->errorOutput());
+
+    $registry->revoke('moving');
+    $result = $mover->wait();
+    expect($result->successful())->toBeTrue($result->output().$result->errorOutput());
+
+    $successor = $registry->find('successor');
+
+    expect($successor?->isActive(now()->getTimestamp()) === true ? 0 : 1)->toBe($ended->count());
 });
