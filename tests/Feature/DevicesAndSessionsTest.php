@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Illuminate\Auth\GenericUser;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -53,6 +52,7 @@ use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\AdminUser;
 use Keyring\Tests\Fixtures\SingleSignOn;
 use Keyring\Tests\Fixtures\User;
+use PDOException;
 
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
@@ -1851,8 +1851,11 @@ describe('the record a session started on', function () {
         login()->assertRedirect('/dashboard');
         $session = app(SessionRegistry::class)->find(session(Sessions::KEY));
 
+        // A QueryException in an app. On MySQL the test's own transaction
+        // ended when the column was dropped, so rolling back the failed move
+        // throws the PDOException it extends.
         expect($session->origin)->toBeNull()
-            ->and(fn () => app(SessionRegistry::class)->replace($session->id, $session->with(['id' => 'moved', 'origin' => $session->id])))->toThrow(QueryException::class);
+            ->and(fn () => app(SessionRegistry::class)->replace($session->id, $session->with(['id' => 'moved', 'origin' => $session->id])))->toThrow(PDOException::class);
     });
 });
 
