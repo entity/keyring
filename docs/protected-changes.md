@@ -13,6 +13,7 @@
     - [Checking and Cancelling](#checking-and-cancelling)
 - [Changing the Password](#changing-the-password)
 - [Requiring a Password Change](#requiring-a-password-change)
+    - [Carrying On Afterwards](#carrying-on-afterwards)
 - [Password Rules](#password-rules)
     - [Context-Specific Words](#context-specific-words)
 - [Resetting the Password](#resetting-the-password)
@@ -253,6 +254,12 @@ While a user is held:
 - A hold placed during a request applies to that request's session straight away. Other sessions that are already signed in find out about it within a minute.
 
 `requirePasswordChange()` returns `false` and does nothing for a user without a password. Someone who only signs in with a passkey has no password to change, and holding them would lock them out. A user whose password is removed after they were held is released too. The optional reason is kept on the row for your support tools, and you can read it with `Keyring\Changes\PasswordHolds::reason($user)`. A risk response fills the reason with the signals it acted on. Keyring dispatches a `Keyring\Events\PasswordChangeRequired` event when a hold is placed, with `user` and `reason`. Listen for it if you want to email the user, since Keyring doesn't send that email itself.
+
+### Carrying On Afterwards
+
+Keyring remembers the page a held user was going to when it sent them to `password_change_url`. When they change their password through `PUT /user/password`, the `password-updated` [status response](sign-in-flow.md#status-responses) redirects there instead of back. JSON callers get it as `redirect`. A password change the user chose themselves, without a hold, goes back as before.
+
+The same rules apply as [after enrolling](policies.md#carrying-on-afterwards). Only a page the browser navigated to is remembered, and it's only used on your app's own origin, for the same user, within an hour. A reset doesn't use it, since the user signs in again afterwards.
 
 The check runs in the `Keyring\Http\Middleware\RequirePasswordChange` middleware. Keyring adds it to the `web` group, after its [session middleware](devices-and-sessions.md#the-session-middleware). If `sessions.middleware` is off, add `keyring.password` wherever you add `keyring.session`.
 

@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### Policies and Step-Up
+
+- Users sent to enroll by `keyring.enrolled`, by step-up, or by the confirm page with nothing to confirm with now get the page they were going to back as `continue` on the `authenticator-added` status. Users held for a new password are redirected there by `password-updated`. Only top-level navigations and Inertia visits are remembered, and only on the app's own origin, for the same user, within an hour.
+
 ## v0.2.0 - 2026-11-20
 
 ### Rate Limits and Risk

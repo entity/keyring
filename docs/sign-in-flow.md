@@ -537,6 +537,21 @@ JSON clients get the slug, its translated message, the redirect (when there is o
 
 Other requests are redirected, either back or to `redirect`. The slug is flashed as `status`, along with any data for the next request. That data is encrypted with `APP_KEY`, since it can hold a secret being set up or new recovery codes. Read it with `Keyring::result`, or read one key of it using dot notation, for example `Keyring::result('recoveryCodes')`. It's `null` when nothing was flashed. `session('keyring.result')` holds only the ciphertext.
 
+Two statuses can say where the user was going when Keyring sent them away. That happens when they were sent to [add a sign-in method](policies.md#carrying-on-afterwards) or [held to choose a new password](protected-changes.md#carrying-on-afterwards):
+
+- `authenticator-added` carries it as `continue` in its data. It's data rather than a redirect, so a page showing new recovery codes stays up until the user has saved them. The key is left out when there's nowhere to carry on to.
+- `password-updated` uses it as `redirect`, but only when the user was held for a new password. A password change the user chose goes back, as before.
+
+```json
+{
+  "status": "authenticator-added",
+  "message": "Sign-in method added.",
+  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
+  "recoveryCodes": ["..."],
+  "continue": "https://example.com/invoices/42"
+}
+```
+
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password`, and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
 `authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
