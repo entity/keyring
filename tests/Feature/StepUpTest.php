@@ -1092,6 +1092,11 @@ describe('asking from a controller', function () {
             $level = $assurance->level($from);
             $proved = $level === Assurance::None ? [] : $assurance->countingToward($level, $from);
 
+            if ($level === Assurance::AAL1) {
+                usort($proved, fn (Verification $a, Verification $b) => $b->at <=> $a->at);
+                $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
+            }
+
             return [
                 'acr' => $level === Assurance::None ? null : strtolower($level->name),
                 'amr' => [
@@ -1122,10 +1127,9 @@ describe('asking from a controller', function () {
             $this->travel(90)->minutes();
             $this->get('/authorize?max_age=86400')->assertOk();
 
-            expect(documentedClaims(now()->subDay()))->toMatchArray(['acr' => 'aal1'])
-                ->and(documentedClaims(now()->subDay())['amr'])->not->toContain('mfa')
-                ->and(documentedClaims(null))->toMatchArray(['acr' => 'aal1'])
-                ->and(documentedClaims(null)['amr'])->not->toContain('mfa');
+            // One factor holds AAL1, so only one is reported.
+            expect(documentedClaims(now()->subDay()))->toBe(['acr' => 'aal1', 'amr' => ['password'], 'auth_time' => $this->signedInAt])
+                ->and(documentedClaims(null))->toBe(documentedClaims(now()->subDay()));
         });
 
         it('reports only what was proved since the moment', function () {

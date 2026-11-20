@@ -214,10 +214,12 @@ To ask whether a set of verifications meets a requirement, use `Requirement::isM
 
 Report `auth_time` as the oldest `at` among the verifications you build `amr` from, not the newest. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
 
-When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. `level()` and `countingToward()` take a Unix timestamp for that. They count only what was proved since then, with each level still on its own clock. Don't work the level out again with `Assurance::of()` from what counts toward a lower level. Say AAL2 lapsed after an hour idle, and the session is at AAL1. What counts toward AAL1 still holds the authenticator app proved before the lapse, so `Assurance::of()` would give AAL2. For the same reason, only report `mfa` at AAL2 or higher. For example:
+When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. `level()` and `countingToward()` take a Unix timestamp for that. They count only what was proved since then, with each level still on its own clock. Don't work the level out again with `Assurance::of()` from what counts toward a lower level. Say AAL2 lapsed after an hour idle, and the session is at AAL1. What counts toward AAL1 still holds the authenticator app proved before the lapse, so `Assurance::of()` would give AAL2. For the same reason, only report `mfa` at AAL2 or higher, and at AAL1 only report the one factor that holds it. Listing the authenticator app beside the password would read as two factors to a client that looks at `amr`. For example:
 
 ```php
 use Keyring\Enums\Assurance;
+use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
 use Keyring\Sessions\SessionAssurance;
 
 $assurance = app(SessionAssurance::class);
@@ -225,6 +227,13 @@ $from = $since?->getTimestamp() ?? 0;
 
 $level = $assurance->level($from);
 $proved = $level === Assurance::None ? [] : $assurance->countingToward($level, $from);
+
+// One factor holds AAL1: report the newest, not a second factor that
+// stopped counting toward AAL2 when it lapsed.
+if ($level === Assurance::AAL1) {
+    usort($proved, fn (Verification $a, Verification $b) => $b->at <=> $a->at);
+    $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
+}
 
 $claims = [
     'acr' => $level === Assurance::None ? null : strtolower($level->name),
@@ -238,7 +247,7 @@ $claims = [
 
 Work the claims out in the authorization request, while the user's browser session is there, and keep them with the authorization code. `SessionAssurance` reads that session. The token endpoint is called by the client, with no session, so it would read nothing.
 
-Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect.
+Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect. Tell your clients to read `acr` for the level, and not to work it out from `amr`. An `otp` in `amr` says a code was proved, not that it still counts as a second factor.
 
 ## The Confirm Flow
 
