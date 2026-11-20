@@ -290,6 +290,14 @@ class AuthenticateSession
         // left to end.
         if ($current = $this->sessions->because(SessionEndReason::Reused, fn () => $this->sessions->endLatest($user, $session))) {
             RememberMeReused::dispatch($user, $current);
+        } elseif (($latest = $this->sessions->latest($this->sessions->registry()->find($session->id))) !== null && $this->sessions->timedOut($latest)) {
+            // The session it was carried on to has since timed out, maybe
+            // ended by the sweep, which is no reason to keep quiet: the
+            // cookie was still used twice. The used one is revoked, so
+            // sending it again is refused as revoked and said only once.
+            $this->sessions->registry()->revoke($session->id);
+
+            RememberMeReused::dispatch($user, $latest);
         }
 
         return $this->signOut($request, 'reused');

@@ -809,6 +809,41 @@ describe('a "remember me" cookie that has been used', function () {
         Event::listen(fn (RememberMeReused $event) => $this->reuses->push($event));
     });
 
+    it('still gives itself away once the session it was carried on to has timed out and been swept, and only once', function () {
+        $registry = app(SessionRegistry::class);
+        $first = rememberedSignIn();
+        $second = [...$first, ...keptCookies(comeBack($first)->assertOk())];
+
+        // Nobody comes back for longer than remember_idle, and the sweep ends it.
+        $this->travel(15)->days();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect($registry->find($second['remembered_session'])->revokedAt)->not->toBeNull();
+
+        comeBack($first)->assertRedirect('/login');
+
+        expect(reuses())->toHaveCount(1)
+            ->and(reuses()[0]->session->id)->toBe($second['remembered_session'])
+            ->and(sessionEndedReasons())->toBe(['reused']);
+
+        // The used cookie is revoked now, so sending it again is just refused.
+        comeBack($first)->assertRedirect('/login');
+
+        expect(reuses())->toHaveCount(1)
+            ->and(sessionEndedReasons())->toBe(['reused', 'revoked']);
+    });
+
+    it('stays quiet when the session it was carried on to was signed out on purpose', function () {
+        $first = rememberedSignIn();
+        $second = [...$first, ...keptCookies(comeBack($first)->assertOk())];
+
+        app(SessionRegistry::class)->revoke($second['remembered_session']);
+
+        comeBack($first)->assertRedirect('/login');
+
+        expect(reuses())->toBeEmpty();
+    });
+
     it('is replaced every time the browser comes back', function (string $driver) {
         config(['keyring.sessions.driver' => $driver]);
         $registry = app(SessionRegistry::class);
