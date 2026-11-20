@@ -4,7 +4,7 @@
 
 ### Sessions and Devices
 
-- `sessions.continue_as_guest` lists routes that also serve guests. A page visit to one whose session has ended is signed out and asked for again as a guest, rather than sent to log in. JSON requests still get a `401`.
+- `sessions.continue_as_guest` lists routes that also serve guests. A page visit to one whose session has ended is signed out and asked for again as a guest, rather than sent to log in. JSON requests still get a `401`, and a session that ended as `reused` or `risk` still goes to log in with the `signed-out` status.
 
 ## v0.2.0 - 2026-11-20
 

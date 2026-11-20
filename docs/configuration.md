@@ -240,7 +240,7 @@ The `locator` option is the class that works out a request's location. See [Devi
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
 | `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `remembered_session`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 | `remember_grace` | How long after that cookie is used the browser's other requests, sent with it, still get in on the same session. Each cookie works once. After this grace period, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. A `0` leaves no room at all, so requests that a browser sends together end the session too. |
-| `continue_as_guest` | Route names, as `Request::routeIs()` takes them, where a page visit whose session has ended is asked for again as a guest instead of being sent to log in. JSON requests still get a `401`. A list with an entry that isn't a non-empty string is ignored. See [Pages That Also Serve Guests](devices-and-sessions.md#pages-that-also-serve-guests). |
+| `continue_as_guest` | Route names, as `Request::routeIs()` takes them, where a page visit whose session has ended is asked for again as a guest instead of being sent to log in. JSON requests still get a `401`, and a session that ended as `reused` or `risk` still goes to log in. A list with an entry that isn't a non-empty string is ignored. See [Pages That Also Serve Guests](devices-and-sessions.md#pages-that-also-serve-guests). |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 
