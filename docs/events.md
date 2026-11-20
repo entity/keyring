@@ -56,7 +56,7 @@ No event has a password, code, or token among its properties. However, `Attempti
 | `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved. | `user`, `session` (the `RegisteredSession` it carries on as) |
 | `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). This means two browsers held the same cookies, so the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended. Its device, IP address, and user agent belong to whoever used the cookie first.) |
 
-A user who signs out on purpose triggers `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`. `RememberMeReused` fires once, and only when there was still a session to end. See [Devices & Sessions](devices-and-sessions.md#events).
+A user who signs out on purpose triggers `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`. `RememberMeReused` fires once, when there was still a session to end, or when the session it was carried on to has timed out since. See [Devices & Sessions](devices-and-sessions.md#events).
 
 ### Why a Registered Session Ended
 
@@ -95,11 +95,13 @@ The reasons, and what gives each one:
 | `email_changed` | The email address changed, and the other sessions were signed out (`email_changes.sign_out_others`). |
 | `email_change_undone` | The old address undid an email change. |
 | `risk` | A [risk response](risk.md#actions) ended the session, or every session of the account. |
-| `idle` | The session middleware found the session had gone unused for too long. |
-| `expired` | The session middleware found the session past its absolute limit. With `sessions.end_on_lapse`, a "remember me" cookie that can't carry the session on gives it too. |
+| `idle` | The session middleware found the session had gone unused for too long, or [`keyring:sweep`](devices-and-sessions.md#sweeping-ended-sessions) ended it for that. |
+| `expired` | The session middleware found the session past its absolute limit, or the sweep ended it for that. With `sessions.end_on_lapse`, a "remember me" cookie that can't carry the session on gives it too. |
 | `other_user` | The session middleware found the session's record belongs to another user. The event names the record's user. |
 | `reused` | The session's ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). |
 | `not_allowed` | The application stopped letting the user sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)). |
+
+The event is at least once. With [the sweep](devices-and-sessions.md#sweeping-ended-sessions) on, a session whose event was lost is announced again, and one a listener failed for is tried again, so the same handle can come more than once. A session announced again has the reason it ended for, or `revoked` when that wasn't kept. Make listeners idempotent by handle.
 
 When one action ends sessions for several reasons at once, the session gets the one closest to the code that ended it. For example, a risk response that signs out everywhere gives `risk`, not `revoked`.
 

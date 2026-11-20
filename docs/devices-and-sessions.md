@@ -13,6 +13,7 @@
 - [Listing and Ending Sessions](#listing-and-ending-sessions)
     - [Is It Still Signed In?](#is-it-still-signed-in)
     - [Hearing About Ended Sessions](#hearing-about-ended-sessions)
+    - [Sweeping Ended Sessions](#sweeping-ended-sessions)
 - [The Session Registry](#the-session-registry)
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
@@ -341,7 +342,7 @@ What is announced:
 
 - One event per record the registry revoked. A record that was already revoked gives none, so two requests ending the same session at once announce it once between them.
 - Nothing when a session moves to a new record. It carries on, under the same handle.
-- Nothing when `keyring:prune` deletes records. A record it deletes was announced when it was revoked, or it [timed out](#timeouts) with no request to end it (see below).
+- Nothing when `keyring:prune` deletes records. A record it deletes was announced when it was revoked. With the sweep off, it may also have [timed out](#timeouts) with no request to end it (see below).
 
 When it goes out depends on the [driver](#drivers):
 
@@ -349,20 +350,50 @@ When it goes out depends on the [driver](#drivers):
 - **`cache`**: the event goes out as soon as the record is revoked. The cache has no transactions, so a rollback elsewhere doesn't take the revocation back, and the event goes out anyway. This is best effort. A cache that's cleared, or that evicts records to make room, ends those sessions with no event at all. When the store fails part way through signing out everywhere, the sessions it had already revoked are still announced, and then the failure is thrown. A revocation whose copy into the record fails is kept and announced, and the failure is reported.
 - **A driver of your own** is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`. See [Writing a Driver](#writing-a-driver).
 
-Some endings aren't announced yet:
+Two kinds of ending need [the sweep](#sweeping-ended-sessions) to be announced:
 
-- A session that times out with no request arriving isn't announced. Nothing ends its record until the browser comes back and the session middleware finds it idle or expired. If it never comes back, there's no event.
-- If the process stops between the commit and the event, the event is lost.
-- Laravel runs a commit's after-commit callbacks one after another, and stops at the first that throws. If another one in the same commit throws first, such as an after-commit job whose push to the queue fails, Keyring's never runs. The sessions are revoked and not announced.
-- If the commit reaches the database but its answer is lost on the way back, Laravel treats the transaction as rolled back and drops the event. The sessions are revoked and not announced.
+- A session that times out with no request arriving. Nothing ends its record until the browser comes back and the session middleware finds it idle or expired. If it never comes back, only the sweep ends it.
+- A revocation whose event was lost after its commit: the process stopped before the event went out, another after-commit callback in the same commit threw first (Laravel stops at the first that throws, so an after-commit job whose push to the queue fails stops Keyring's), or the commit reached the database but its answer was lost, which Laravel takes for a rollback.
 
-Until the sweep ships, these can all happen on the `database` driver. A later release will sweep for records that ended without an event, so each one is announced at least once there. Until then, a listener that has to know about timeouts as well can also check the sessions it cares about with [`stillSignedIn`](#is-it-still-signed-in).
+Without the sweep, these sessions end with no event. With it, on the `database` driver, each one is announced at least once. The `cache` driver can't be swept, so none of this happens there. A session that times out on the cache driver is only announced when its browser comes back, and a cache that's cleared or evicts records ends sessions with no event at all.
+
+Because an ended session can be announced again, the event is at least once: the same handle may come more than once. Make your listener idempotent by handle. Logging a client out twice should do nothing the second time.
 
 The event is dispatched in the request or command that ended the session. Signing out everywhere can end many sessions at once, so queue your listener (`ShouldQueue`) if it does anything slow, like calling another application. The event's properties are plain values, so it's safe on a queue.
 
 Queue it without waiting for a commit. Keyring already dispatches the event after the right commit. A listener with `ShouldQueueAfterCommit`, or a queue connection with `after_commit` turned on, waits again, for whichever transaction was opened last on any connection. If that one is rolled back, the job is dropped, though the sessions stay revoked. This matters when the registry is on a connection of its own, or on the `cache` driver, while some other transaction is open.
 
 A listener that throws doesn't stop the sign-out. The exception is reported with `report()`, the remaining sessions are still announced, and the rest of what was signing out still happens: the browser is signed out, the "remember me" token changes, the devices stop being trusted, and so on. So a failure in your listener can't leave someone signed in.
+
+### Sweeping Ended Sessions
+
+`php artisan keyring:sweep` does two things on the `database` driver:
+
+- It ends each session that has timed out with no request to end it, and announces it with the reason `idle` or `expired`. It ends exactly what the session middleware would end on the session's next request: one past its `absolute` limit, or unused for longer than `idle` (`remember_idle` for a remembered one). It never ends a session by a level's limits or by [`end_on_lapse`](#ending-a-session-with-its-level). Those depend on what the browser's session proved, which the registry doesn't hold, so they still end on the browser's next request.
+- It announces again each session that was revoked but whose event never went out. It waits five minutes after a revocation first, so an event still on its way isn't doubled. The event has the reason the session ended for, or `revoked` when that wasn't kept. It gives up on a revocation a day old.
+
+To turn it on, set how often it runs. Keyring then adds it to Laravel's scheduler, ahead of `keyring:prune`:
+
+```php
+'sessions' => [
+    'sweep_every' => '5m',
+    'sweep_limit' => 1000,
+],
+```
+
+`sweep_every` takes minutes or hours, such as `'1m'`, `'5m'`, or `'1h'`. Pick a step that divides an hour or a day. A step that doesn't, such as `'45m'`, runs at the steps that fit in each hour. Anything that isn't a duration leaves the sweep off. The scheduled sweep runs on one server at a time, and never overlaps itself. Both need a cache store shared by your servers that supports locks, such as Redis, Memcached, or the database store. With one that doesn't, each server may run its own sweep. That's safe, since the sweeps lock what they end and wait for each other, but it's wasted work. It needs the [scheduler running](installation.md#after-installing).
+
+One run ends and announces at most `sweep_limit` sessions. That keeps the first run, after an upgrade or after you turn the sweep on, from announcing thousands of sessions in one go. The command says how many it ended and announced, and whether it left some for the next run. It never loops until none are left.
+
+A request beats the sweep. The sweep finds what has timed out with a lock, on the write connection, then ends each only if it has still timed out. A request that used a session a moment ago keeps it.
+
+A listener that throws is reported, and the event is tried again on the next runs, up to three times in all. After the third failure, the session counts as announced, so a listener that always fails isn't run for it on every sweep forever.
+
+The sweep needs three columns that a migration adds to `keyring_sessions`: `announced_at`, `end_reason`, and `announce_attempts`. Until it has run, sessions end and are announced as before. Keyring reports once that the migration is missing, and `keyring:sweep` refuses to run. The [conformance suite](testing.md#the-conformance-suite) checks for the columns. Sessions revoked before the migration count as announced, so the first sweep doesn't announce them again.
+
+With the sweep on, `keyring:prune` keeps what the sweep still has to do: a session that timed out but hasn't been ended, and one that was revoked but not yet announced. It deletes the rest as before, and a revoked session once the sweep has given up on it. With the sweep off, pruning works as before.
+
+Running `keyring:sweep` on the `cache` driver, or on a driver of your own that can't sweep, says so and does nothing.
 
 ## The Session Registry
 
@@ -399,7 +430,7 @@ $this->app->afterResolving(SessionRegistryManager::class, function (SessionRegis
 });
 ```
 
-Then set `sessions.driver` to `custom`. Keyring wraps every driver the manager gives, yours included, in `Keyring\Sessions\AnnouncingSessionRegistry`. The wrapper dispatches a [`RegisteredSessionEnded`](#hearing-about-ended-sessions) for each record that `revoke`, `revokeAll`, and `revokeDevice` return. What your driver returns is what gets announced, so a record it revokes and leaves out is never announced, and one it returns twice is announced twice. Your driver is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`: then it's tied to the transaction on its connection, as the `database` driver is. A driver that can fail after revoking some of a user's records, because it revokes them one by one, should finish what it can and then throw a `Keyring\Exceptions\PartialRevocation` with the records it revoked and the failure, as the cache driver does. Those are announced, and the failure is thrown on. Mark the parameters that hold a registry ID, or a `RegisteredSession`, with `#[\SensitiveParameter]`, as the contract does. That keeps a record ID, which is a "remember me" cookie's value, out of the stack traces your error reporting sends. Leaving it off still works. So `app(SessionRegistry::class)` gives the wrapper, and `->inner()` gives your driver. Register a driver through the manager, as above. A `SessionRegistry` you bind in the container yourself isn't wrapped, and nothing it ends is announced. The [conformance suite](testing.md#the-conformance-suite) checks for this.
+Then set `sessions.driver` to `custom`. Keyring wraps every driver the manager gives, yours included, in `Keyring\Sessions\AnnouncingSessionRegistry`. The wrapper dispatches a [`RegisteredSessionEnded`](#hearing-about-ended-sessions) for each record that `revoke`, `revokeAll`, and `revokeDevice` return. What your driver returns is what gets announced, so a record it revokes and leaves out is never announced, and one it returns twice is announced twice. Your driver is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`: then it's tied to the transaction on its connection, as the `database` driver is. A driver that can fail after revoking some of a user's records, because it revokes them one by one, should finish what it can and then throw a `Keyring\Exceptions\PartialRevocation` with the records it revoked and the failure, as the cache driver does. Those are announced, and the failure is thrown on. A driver that keeps track of announcements may implement `Keyring\Contracts\SweepsSessions` too, as the database driver does, and `keyring:sweep` then works with it. Without it, the sweep says there's nothing to sweep. Mark the parameters that hold a registry ID, or a `RegisteredSession`, with `#[\SensitiveParameter]`, as the contract does. That keeps a record ID, which is a "remember me" cookie's value, out of the stack traces your error reporting sends. Leaving it off still works. So `app(SessionRegistry::class)` gives the wrapper, and `->inner()` gives your driver. Register a driver through the manager, as above. A `SessionRegistry` you bind in the container yourself isn't wrapped, and nothing it ends is announced. The [conformance suite](testing.md#the-conformance-suite) checks for this.
 
 Keyring calls `replace`, `revokeAll`, and `revokeDevice`, and it stores a new session while it holds the user's database row. For one user, those calls never run at the same moment, so a driver doesn't have to guard them against each other. The contract's methods are:
 
@@ -491,7 +522,7 @@ When the other one turns up, Keyring can't tell which of them is the owner. So t
 - the record the session has moved to since is revoked, however many times it was carried on. This signs the other browser out on its next request (`revoked`),
 - `Keyring\Events\RememberMeReused` is dispatched with the `user` and the `session` that was ended, and it's logged as `remember_me_reused`. This is one of the default ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts).
 
-That happens when a used cookie is sent again, and when a browser is still signed in on a record that "remember me" carried on somewhere else. If the session had already ended some other way, the request is signed out and nothing is reported.
+That happens when a used cookie is sent again, and when a browser is still signed in on a record that "remember me" carried on somewhere else. If the session it was carried on to has timed out since, whether the sweep or the session middleware ended it, the event is still dispatched, with that ended session, and the used record is revoked so the same cookie is only reported once. If the session had been ended some other way, such as signing out, the request is signed out and nothing is reported.
 
 The user's remember token is left alone, so their other remembered browsers stay signed in. Neither holder's cookies lead to a record that still works. To do more, such as signing the account out everywhere or requiring a new password, listen for the event:
 
@@ -622,7 +653,7 @@ That isn't enough where the whole application is meant to be AAL2, or where you 
 - devices revoked more than 30 days ago, or not seen for a year (`devices.keep_revoked_for` and `devices.keep_unseen_for`),
 - email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago (`email_changes.keep_ended_for`), since they hold both addresses,
 - security log entries older than `security_log.keep_for`,
-- registered sessions that have expired or been revoked, through the registry's `prune` method. A record "remember me" replaced stays until it would have expired, so its cookie is still recognised as used. The cache driver's records expire on their own.
+- registered sessions that have expired or been revoked, through the registry's `prune` method. A record "remember me" replaced stays until it would have expired, so its cookie is still recognised as used. With [the sweep](#sweeping-ended-sessions) on, a session waits until the sweep has ended and announced it. The cache driver's records expire on their own.
 
 Keyring adds the prune task to Laravel's scheduler itself, every day at 03:00. That means it runs wherever your application's `schedule:run` does, and nothing is kept past its time because a line was left out of `routes/console.php`. `php artisan schedule:list` shows it. To run it at another time, change `prune_at`:
 

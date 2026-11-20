@@ -15,6 +15,10 @@
 - A conformance check that signing out announces the session that ended, which fails when a `SessionRegistry` is bound in the container without the wrapper.
 - A driver that fails after revoking some of a user's records throws a `PartialRevocation` with the ones it revoked, so they're still announced. The `cache` driver does this when the store fails part way through signing out everywhere, and keeps a revocation whose copy into the record fails.
 - Registry IDs are marked `#[\SensitiveParameter]` on the contract, both drivers and `Sessions`, so they stay out of reported stack traces.
+- `keyring:sweep`, which ends sessions that timed out with no request to end them and announces them as `idle` or `expired`, and announces again any ended session whose event was lost, so every ended session is announced at least once on the `database` driver. Turn it on with `sessions.sweep_every`, and Keyring schedules it before the prune, on one server and never overlapping. One run handles at most `sessions.sweep_limit` (1000) sessions. A listener that throws is tried again on the next runs, three times in all. Needs a new migration, see the [upgrade guide](UPGRADE.md#sweeping-ended-sessions).
+- With the sweep on, `keyring:prune` keeps sessions the sweep still has to end or announce.
+- `RememberMeReused` now also fires when the session a used cookie was carried on to has timed out since, so a sweep ending that session doesn't hide the reuse. The used record is revoked then, so the same cookie is reported once.
+- `Keyring\Contracts\SweepsSessions`, which the database driver implements, for a driver of your own that keeps track of announcements.
 
 ## v0.2.0 - 2026-11-20
 

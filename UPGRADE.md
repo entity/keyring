@@ -65,6 +65,25 @@ If a subclass of `Keyring\Http\Middleware\AuthenticateSession` overrides `signOu
 
 The contract's methods mark the parameters that hold a registry ID with `#[\SensitiveParameter]`. A driver without the attribute still works, but its stack traces show those IDs. Adding it is recommended.
 
+### Sweeping Ended Sessions
+
+A new migration adds `announced_at`, `end_reason`, and `announce_attempts` to `keyring_sessions`, with indexes on `last_activity_at` and `revoked_at`. Run `keyring:install` again to publish it, then migrate:
+
+```bash
+php artisan keyring:install
+php artisan migrate
+```
+
+It marks every session revoked before it as announced, so the first sweep doesn't announce them again. That's one update of the rows revoked since the last prune.
+
+Until it has run, everything works as before: sessions end and are announced, and Keyring reports once that the columns are missing. `keyring:sweep` refuses to run, and `keyring:prune` deletes as it always has, even with the sweep on. The conformance suite has a check that fails until you migrate. The `cache` driver needs no migration, and has nothing to sweep.
+
+The sweep is off until you set `sessions.sweep_every`. With it on, `keyring:prune` no longer deletes a session that has timed out but hasn't been ended, or one that was revoked but not yet announced. The sweep takes care of those, and the prune deletes them later.
+
+A custom driver keeps working, and `keyring:sweep` says it has nothing to sweep. To have it swept, implement `Keyring\Contracts\SweepsSessions`.
+
+`RegisteredSessionEnded` may now repeat for the same handle. Make listeners idempotent by handle.
+
 ## From 0.1 to 0.2
 
 There's nothing to change. The new `CredentialStuffing` risk signal is off until you add it to your provider.
