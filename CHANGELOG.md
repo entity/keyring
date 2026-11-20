@@ -16,7 +16,8 @@
 - A driver that fails after revoking some of a user's records throws a `PartialRevocation` with the ones it revoked, so they're still announced. The `cache` driver does this when the store fails part way through signing out everywhere, and keeps a revocation whose copy into the record fails.
 - Registry IDs are marked `#[\SensitiveParameter]` on the contract, both drivers and `Sessions`, so they stay out of reported stack traces.
 - The database registry driver rethrows a failed query without its bindings, so record IDs, which are what "remember me" cookies hold, stay out of exception messages, logs and error trackers. `PartialRevocation` no longer repeats the failure's message.
-- On the `cache` driver, revoking a record and moving it with "remember me" take turns under the owner's lock (on a store with locks), so a sign-out that lands mid-move is never lost without an event.
+- On the `cache` driver, revoking a record and moving it with "remember me" take turns under the owner's lock (on a store with locks), so a sign-out that lands mid-move is never lost without an event. A revocation that can't have the lock within five seconds goes ahead without it. On a `database` cache store, a failed cache query is rethrown without the cache keys it named, which hold record IDs.
+- Signing out signs the browser out even when the session registry fails to revoke its record. The failure is still thrown, but the next request is a guest, where it used to be registered as a new session.
 
 ## v0.2.0 - 2026-11-20
 
