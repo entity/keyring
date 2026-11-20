@@ -105,6 +105,8 @@ A confirmation always counts for any moment before it, so once the user confirms
 So for `max_age=0` and `prompt=login`, which ask for a proof made during this authorization, store the moment the authorization request arrived, and pass that moment each time. Keep it for that one authorization request:
 
 - Store it under an ID that only this request carries, and add the ID to the URL the user comes back to. A single key for the whole session would let a moment left by an abandoned flow satisfy a later `prompt=login` without asking. Two tabs would also share it.
+- Store a hash of the authorization request beside it (`client_id`, `redirect_uri`, `state`, and `nonce`), and only take the moment for a request with the same hash. Otherwise, someone at the browser could start a `prompt=login` flow, leave it, wait for the user to confirm something else, and replay the ID with other parameters.
+- Let it expire after a few minutes, and keep only a few per session. Every visit to an authorization URL with `prompt=login`, from any site, stores another.
 - A request without an ID, or with one you don't have a moment for, starts a new authorization. Store a new moment for it.
 - Forget the moment once the authorization ends.
 
@@ -128,6 +130,10 @@ class AuthorizeController
             'max_age' => ['nullable', 'integer', 'min:0', 'max:31536000'],
             'prompt' => ['nullable', 'string', 'max:255'],
             'flow' => ['nullable', 'string', 'max:64'],
+            'client_id' => ['required', 'string', 'max:255'],
+            'redirect_uri' => ['required', 'string', 'max:2048'],
+            'state' => ['nullable', 'string', 'max:1024'],
+            'nonce' => ['nullable', 'string', 'max:1024'],
         ]);
 
         $level = in_array('aal2', explode(' ', $validated['acr_values'] ?? ''), true) ? Assurance::AAL2 : null;
@@ -135,13 +141,24 @@ class AuthorizeController
         $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
 
         // A proof made during this authorization: the moment it started,
-        // stored under an ID only this authorization request carries.
+        // stored under an ID only this authorization request carries, with
+        // a hash of the request so the ID can't be replayed with others.
+        $hash = hash('sha256', json_encode([
+            $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
+        ], JSON_THROW_ON_ERROR));
+        $flows = collect($request->session()->get('oidc.flows', []))
+            ->filter(fn (array $flow) => $flow['at'] > now()->subMinutes(10)->getTimestamp());
+
         $flow = $validated['flow'] ?? null;
-        $started = $flow === null ? null : $request->session()->get("oidc.flows.{$flow}");
+        $stored = $flow === null ? null : $flows->get($flow);
+        $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
 
         if ($freshProof && $started === null) {
             $flow = Str::random(40);
-            $request->session()->put("oidc.flows.{$flow}", now()->getTimestamp());
+            $request->session()->put('oidc.flows', [
+                ...$flows->sortByDesc('at')->take(4)->all(),
+                $flow => ['at' => now()->getTimestamp(), 'request' => $hash],
+            ]);
 
             return redirect($request->fullUrlWithQuery(['flow' => $flow]));
         }
@@ -168,6 +185,8 @@ class AuthorizeController
     }
 }
 ```
+
+A flow ID that's expired, unknown, or was stored for another request isn't used. The request starts a new authorization instead, so the user confirms again.
 
 `validate()` keeps the example short. A real provider sends an `invalid_request` error back to the client instead. Map outside values to a level yourself, and decide what to do with ones you don't know. `Assurance::fromName()` throws an `InvalidArgumentException` for a name it doesn't know.
 
