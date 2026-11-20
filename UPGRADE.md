@@ -21,6 +21,8 @@ On the `database` driver, every session move fails until you do. Signing in stil
 
 Existing rows need nothing. A record with no `origin` is the record its session started on, so sessions keep the handles they had.
 
+During a rolling deploy, or after a rollback, a server still on the old code that moves a session gives the new record no `origin`. That session's handle changes once.
+
 ### Custom Session Registry Drivers
 
 A [driver of your own](docs/devices-and-sessions.md#writing-a-driver) should store `origin` with the rest of a record and return it from `find` and `forUser`. If you store `$session->toArray()` and read it back with `RegisteredSession::fromArray()`, it already does. A driver that drops it still works, but its sessions get a new handle every time they move. The [conformance suite](docs/testing.md#the-conformance-suite) has a check for this.

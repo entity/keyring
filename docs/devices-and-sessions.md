@@ -269,7 +269,7 @@ Laravel keeps one "remember me" token per user. Changing it signs out every reme
 
 `device` is the ID of the session's [device](#listing-and-revoking-devices). It's `null` when the session has no device or when devices are off, so a page can show sessions under their devices. `lastActiveAt` is kept to the minute. A session that has been revoked, has expired, has [idled out](#timeouts), or has moved to another record isn't listed.
 
-`id` is a handle, not the session's registry ID. The registry ID is what the ["remember me" cookie](#remember-me) carries, so it never leaves the server by any other route. A page that could read it could hand someone the session. The handle is an HMAC-SHA256, under your `APP_KEY`, of the ID of the record the session started on. It can't be turned back into an ID, and it's the wrong length to be mistaken for one. The only things that accept it are the route below and the methods that look for it among the user's own sessions. A session keeps its handle when it [moves to a new record](#the-session-registry), so a handle you kept still names the same session after "remember me" carries it on or a step-up gives it a new record. Changing `APP_KEY` changes every handle.
+`id` is a handle, not the session's registry ID. The registry ID is what the ["remember me" cookie](#remember-me) carries, so it never leaves the server by any other route. A page that could read it could hand someone the session. The handle is an HMAC-SHA256, under your `APP_KEY`, of the ID of the record the session started on. It can't be turned back into an ID, and it's the wrong length to be mistaken for one. The only things that accept it are the route below and the methods that look for it among the user's own sessions. A session keeps its handle when it [moves to a new record](#the-session-registry), so a handle you kept still names the same session after "remember me" carries it on or a step-up gives it a new record. Changing `APP_KEY` changes every handle the list gives. A handle given under a key you've moved to `APP_PREVIOUS_KEYS` still works, until you take that key out of the list.
 
 `DELETE /user/sessions/{session}` ends the session with that handle. Its record is revoked, so that browser is signed out on its next request, and its "remember me" cookie brings nothing back. The response is a [status response](sign-in-flow.md#status-responses) with `session-revoked`. `SessionsRevoked` is dispatched with a count of one. The user's "remember me" token is left alone, so their other remembered browsers stay signed in.
 
@@ -308,6 +308,13 @@ if (! app(Sessions::class)->stillSignedIn($user, $handle)) {
 It's `true` only when your application still lets the user sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)), and the handle is one of the user's own sessions on Keyring's guard that can still be carried on. A session that was revoked, has expired, or has [idled out](#timeouts) gives `false`. So does anything that isn't one of the user's handles. A session that has moved to a new record keeps its handle, so the answer doesn't change when it moves.
 
 Asking changes nothing. It doesn't count as activity, so it never keeps a session from idling out, and it doesn't sign anyone out. The session middleware still does that on the session's next request.
+
+Some things are only judged on the browser's own requests, so `stillSignedIn` doesn't check them:
+
+- [`sessions.end_on_lapse`](#ending-a-session-with-its-level), [risk locks](risk.md#actions), and the risk signals that run on each request. A session that one of these ends stays `true` until its browser's next request.
+- The session's [assurance level](policies.md#assurance-levels). `true` says the user is signed in, not how strongly.
+
+It needs an Eloquent user, and returns `false` for any other. And where registration hides who has an account, a user who hasn't verified their email address can only be signed in from the browser that followed the verification link. Asked from any other request, such as a server-to-server call, `stillSignedIn` answers `false` for them.
 
 Keep the handle, not the registry ID. The ID is what the "remember me" cookie carries, so it must never leave the server.
 

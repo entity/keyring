@@ -321,6 +321,9 @@ trait KeyringConformance
 
         $this->assertNotNull($first, 'Signed-in sessions should be registered.');
 
+        $sessions = app(Sessions::class);
+        $handle = $sessions->handle($first);
+
         // What "remember me" and a step-up do: move the session to a new record.
         $moved = $first->with(['id' => Str::random(40), 'origin' => $first->origin()]);
         $hint = 'The session registry should keep the record a session started on (origin), so the session keeps its handle when it moves. On the database driver, publish and run Keyring\'s migrations. A driver of your own should store origin and return it.';
@@ -332,6 +335,9 @@ trait KeyringConformance
         }
 
         $this->assertSame($first->id, $registry->find($moved->id)?->origin, $hint);
+        // The sessions list, and anything that looks a handle up, read
+        // through forUser().
+        $this->assertSame($moved->id, $sessions->find($user, $handle)?->id, $hint.' forUser() should return it too.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void

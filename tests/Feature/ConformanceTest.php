@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User as PlainAuthenticatable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -187,6 +188,23 @@ class ConformanceTest extends TestCase
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessage('A driver of your own should store origin and return it.');
+
+        $this->test_keyring_keeps_a_sessions_handle_when_it_moves();
+    }
+
+    public function test_the_suite_fails_when_the_session_registry_lists_sessions_without_the_record_they_started_on(): void
+    {
+        app(SessionRegistryManager::class)->extend('forgetful-list', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function forUser(Authenticatable $user): Collection
+            {
+                return parent::forUser($user)->map(fn (RegisteredSession $session) => $session->with(['origin' => null]));
+            }
+        });
+        config(['keyring.sessions.driver' => 'forgetful-list']);
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('forUser() should return it too.');
 
         $this->test_keyring_keeps_a_sessions_handle_when_it_moves();
     }

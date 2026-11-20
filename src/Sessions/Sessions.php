@@ -325,16 +325,34 @@ class Sessions
      */
     public function handle(RegisteredSession $session): string
     {
-        return KeyedHash::make(KeyedHash::SESSION_HANDLES, $session->origin());
+        return $this->handles($session)[0];
+    }
+
+    /**
+     * Every handle the session goes by: under the current app key first,
+     * then under each of the previous keys (APP_PREVIOUS_KEYS), so a handle
+     * kept from before the key was rotated still names its session.
+     *
+     * @return non-empty-list<string>
+     */
+    public function handles(RegisteredSession $session): array
+    {
+        return KeyedHash::candidates(KeyedHash::SESSION_HANDLES, $session->origin());
     }
 
     /**
      * The user's session with this handle, if it's one that can still be
-     * carried on. Only ever looked for among the user's own.
+     * carried on. Only ever looked for among the user's own. A handle given
+     * under a previous app key still counts. Each of the session's handles
+     * is compared whichever matches, so how long it takes doesn't say which.
      */
     public function find(Authenticatable $user, string $handle): ?RegisteredSession
     {
-        return $this->active($user)->first(fn (RegisteredSession $session) => hash_equals($this->handle($session), $handle));
+        return $this->active($user)->first(fn (RegisteredSession $session) => array_reduce(
+            $this->handles($session),
+            fn (bool $found, string $candidate) => hash_equals($candidate, $handle) || $found,
+            false,
+        ));
     }
 
     /**

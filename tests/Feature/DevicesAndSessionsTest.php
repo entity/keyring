@@ -37,6 +37,7 @@ use Keyring\Features;
 use Keyring\Http\Middleware\AddSecurityHeaders;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
+use Keyring\Login\VerificationLink;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
@@ -1745,6 +1746,48 @@ describe('whether a user is still signed in on a session', function () {
         expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeFalse()
             // Asking ends nothing: the session middleware does that.
             ->and(app(SessionRegistry::class)->find('phone')->revokedAt)->toBeNull();
+    });
+
+    it('is still so by a handle given under a previous app key, until that key is dropped', function () {
+        $sessions = app(Sessions::class);
+        app(SessionRegistry::class)->save($this->record);
+        $old = config('app.key');
+
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32)), 'app.previous_keys' => [$old]]);
+
+        expect($sessions->handle($this->record))->not->toBe($this->handle)
+            ->and($sessions->handles($this->record))->toBe([$sessions->handle($this->record), $this->handle])
+            ->and($sessions->find($this->user, $this->handle)?->id)->toBe('phone')
+            ->and($sessions->stillSignedIn($this->user, $this->handle))->toBeTrue()
+            ->and($sessions->stillSignedIn($this->user, $sessions->handle($this->record)))->toBeTrue();
+
+        config(['app.previous_keys' => []]);
+
+        expect($sessions->find($this->user, $this->handle))->toBeNull()
+            ->and($sessions->stillSignedIn($this->user, $this->handle))->toBeFalse();
+    });
+
+    it('answers for a request that has no session of its own, as a server-to-server call does', function () {
+        app(SessionRegistry::class)->save($this->record);
+
+        expect(request()->hasSession())->toBeFalse()
+            ->and(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue();
+    });
+
+    // Where registration hides who has an account, an unverified user is
+    // only let in from the browser that followed their verification link.
+    it('is not so for an unverified user, but on the browser that followed their verification link', function () {
+        app(SessionRegistry::class)->save($this->record);
+        $this->user->forceFill(['email_verified_at' => null])->save();
+
+        expect(Keyring::hidesRegisteredAddresses())->toBeTrue()
+            ->and(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeFalse();
+
+        // Asked from that browser's own request.
+        request()->setLaravelSession(session()->driver());
+        session()->put(VerificationLink::KEY, ['id' => $this->user->id, 'hash' => sha1($this->user->email), 'expires' => now()->addHour()->getTimestamp()]);
+
+        expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue();
     });
 
     it('is not so for a user that isn\'t a model', function () {
