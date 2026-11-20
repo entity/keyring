@@ -24,6 +24,8 @@ class PartialRevocation extends RuntimeException
         public readonly Collection $revoked,
         Throwable $previous,
     ) {
-        parent::__construct('Some sessions were revoked before the registry failed: '.$previous->getMessage(), 0, $previous);
+        // Not the failure's own message, which can name a record (a cache
+        // key holds its ID): that's the previous exception's to say.
+        parent::__construct('Some sessions were revoked before the session registry failed.', 0, $previous);
     }
 }

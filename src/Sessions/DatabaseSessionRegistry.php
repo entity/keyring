@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Keyring\Sessions;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
 
@@ -31,12 +34,12 @@ class DatabaseSessionRegistry implements SessionRegistry
             unset($row['origin']);
         }
 
-        $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at'])));
+        $this->withoutIds(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
     }
 
     public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        $row = $this->query()->find($id);
+        $row = $this->withoutIds(fn () => $this->query()->find($id));
 
         return $row === null ? null : RegisteredSession::fromArray((array) $row);
     }
@@ -52,7 +55,7 @@ class DatabaseSessionRegistry implements SessionRegistry
 
     public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
-        $this->query()->where('id', $id)->update(RegisteredSession::columns($changes));
+        $this->withoutIds(fn () => $this->query()->where('id', $id)->update(RegisteredSession::columns($changes)));
     }
 
     /**
@@ -67,7 +70,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        return $this->connection->transaction(function () use ($id) {
+        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id) {
             $row = $this->query()->lockForUpdate()->find($id);
             $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
@@ -79,7 +82,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             $this->query()->where('id', $id)->update(['revoked_at' => $now]);
 
             return $session->with(['revokedAt' => $now]);
-        });
+        }));
     }
 
     /**
@@ -89,7 +92,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
-        return $this->connection->transaction(function () use ($id, $successor, $revoke) {
+        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id, $successor, $revoke) {
             $now = now()->getTimestamp();
 
             $replaced = $this->query()->where('id', $id)->whereNull('revoked_at')->whereNull('replaced_by')->update([
@@ -103,7 +106,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             }
 
             return $replaced;
-        });
+        }));
     }
 
     public function revokeAll(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): Collection
@@ -136,7 +139,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     protected function revokeFound(Builder $query): Collection
     {
-        return $this->connection->transaction(function () use ($query) {
+        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($query) {
             $now = now()->getTimestamp();
 
             $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
@@ -146,7 +149,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             );
 
             return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
-        });
+        }));
     }
 
     /**
@@ -174,7 +177,7 @@ class DatabaseSessionRegistry implements SessionRegistry
                 ->limit(1000)
                 ->pluck('id');
 
-            $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]);
+            $this->withoutIds(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]));
         } while ($ids->isNotEmpty());
     }
 
@@ -205,6 +208,41 @@ class DatabaseSessionRegistry implements SessionRegistry
     public function connection(): ConnectionInterface
     {
         return $this->connection;
+    }
+
+    /**
+     * Run statements that name records by their IDs, and fail without
+     * them. Laravel puts a query's bindings in its exception's message, and
+     * a record's ID is what the "remember me" cookie holds: reported, it
+     * would sit in your logs and error tracker. What's thrown instead is
+     * the same kind of exception, for the same SQL, with the database's own
+     * error and code, and no bindings. Wrapped around whole transactions,
+     * so Laravel's own retries and rollbacks see the original.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $statements
+     * @return TResult
+     */
+    protected function withoutIds(Closure $statements): mixed
+    {
+        try {
+            return $statements();
+        } catch (QueryException $e) {
+            throw self::masked($e);
+        } catch (DeadlockException $e) {
+            $previous = $e->getPrevious();
+            $masked = $previous instanceof QueryException ? self::masked($previous) : null;
+
+            throw new DeadlockException($masked?->getMessage() ?? 'A deadlock was found in the session registry.', (int) $e->getCode(), $masked);
+        }
+    }
+
+    protected static function masked(QueryException $e): QueryException
+    {
+        $previous = $e->getPrevious() ?? $e;
+
+        return new QueryException($e->connectionName, $e->getSql(), [], $previous, readWriteType: $e->readWriteType, maskBindings: true);
     }
 
     protected function query(): Builder
