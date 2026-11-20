@@ -833,6 +833,21 @@ describe('a "remember me" cookie that has been used', function () {
             ->and(sessionEndedReasons())->toBe(['reused', 'revoked']);
     });
 
+    it('gives itself away once when the session it was carried on to idled out but nothing ended it yet', function () {
+        $first = rememberedSignIn();
+        comeBack($first)->assertOk();
+
+        $this->travel(15)->days();
+
+        foreach ([1, 1, 1] as $count) {
+            comeBack($first)->assertRedirect('/login');
+
+            expect(reuses())->toHaveCount($count);
+        }
+
+        expect(sessionEndedReasons())->toBe(['reused', 'revoked', 'revoked']);
+    });
+
     it('stays quiet when the session it was carried on to was signed out on purpose', function () {
         $first = rememberedSignIn();
         $second = [...$first, ...keptCookies(comeBack($first)->assertOk())];

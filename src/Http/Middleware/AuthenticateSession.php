@@ -289,6 +289,10 @@ class AuthenticateSession
         // Null when it had already ended some other way: there's nothing
         // left to end.
         if ($current = $this->sessions->because(SessionEndReason::Reused, fn () => $this->sessions->endLatest($user, $session))) {
+            // The used one too, so sending it again is refused as revoked,
+            // and the reuse is said once.
+            $this->sessions->registry()->revoke($session->id);
+
             RememberMeReused::dispatch($user, $current);
         } elseif (($latest = $this->sessions->latest($this->sessions->registry()->find($session->id))) !== null && $this->sessions->timedOut($latest)) {
             // The session it was carried on to has since timed out, maybe
