@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Process;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -12,6 +13,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\Sessions;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 use Keyring\WebAuthn\Ceremonies;
@@ -342,10 +344,9 @@ it('signs out a session that moved to a new record while everyone was being sign
         ->and($registry->forUser($user))->toBeEmpty();
 });
 
-// Each revokes by ID what it read, so of two at once neither leaves a record
-// it revoked unreported: a record the other got to first is reported twice,
-// which is the side to be wrong on.
-it('reports every record two sign-outs at once revoke, at least once between them', function () {
+// The records are read with a lock, so of two at once the second waits for
+// the first, then finds them revoked: each is reported once, by one of them.
+it('reports every record two sign-outs at once revoke, once between them', function () {
     $user = taylor();
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
@@ -354,12 +355,64 @@ it('reports every record two sign-outs at once revoke, at least once between the
         $registry->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
     }
 
-    // Both read every record, then wait to revoke the one held here.
+    // Both wait for the record held here.
     $results = contend(sessionRow('second'), [
         ['revoke-all', $user->id],
         ['revoke-all', $user->id],
     ]);
 
-    expect(collect($results)->flatten()->unique()->sort()->values()->all())->toBe(['first', 'second', 'third'])
+    expect(collect($results)->sortBy(fn (array $ids) => count($ids))->values()->all())->toBe([[], ['first', 'second', 'third']])
         ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
+});
+
+// A record another request revokes while a sign-out waits for it is that
+// request's to report, not the sign-out's.
+it('leaves out a record revoked by another request while a sign-out waits for it', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+
+    foreach (['first', 'second', 'third'] as $id) {
+        $registry->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    }
+
+    [$revoked] = contend(sessionRow('second'), [['revoke-all', $user->id]], fn () => expect($registry->revoke('second')?->id)->toBe('second'));
+
+    expect($revoked)->toBe(['first', 'third'])
+        ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
+});
+
+// An app's own transaction around a sign-out everywhere may have read before
+// another browser signed in. On MySQL a plain read there sees the database
+// as it was then; the sign-out still has to find and end the new session.
+it('signs out a session that signed in after the caller\'s transaction began', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save(new RegisteredSession('before', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    $connection = DB::connection();
+    $env = ['DB_CONNECTION' => $connection->getName(), 'DB_DATABASE' => $connection->getDatabaseName()];
+
+    $connection->beginTransaction();
+
+    try {
+        // Takes this transaction's snapshot, on MySQL.
+        expect($registry->forUser($user)->map->id->all())->toBe(['before']);
+
+        $signIn = Process::env($env)->timeout(30)->run([PHP_BINARY, __DIR__.'/worker.php', 'start-session', (string) $user->id, '100']);
+        expect($signIn->successful())->toBeTrue($signIn->output().$signIn->errorOutput());
+        $after = json_decode(str($signIn->output())->afterLast('ready')->trim()->value(), true)['result'];
+
+        $count = app(Sessions::class)->signOutEverywhere($user);
+        $connection->commit();
+    } catch (Throwable $e) {
+        $connection->rollBack();
+
+        throw $e;
+    }
+
+    expect($count)->toBe(2)
+        ->and($registry->find($after)->revokedAt)->not->toBeNull()
+        ->and($registry->forUser($user))->toBeEmpty();
 });

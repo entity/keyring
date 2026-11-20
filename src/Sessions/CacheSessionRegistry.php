@@ -114,19 +114,29 @@ class CacheSessionRegistry implements SessionRegistry
     /**
      * add() only writes a key that isn't there, so of two calls only one
      * revokes the record and returns it. One found revoked already, by its
-     * own keys or by signing everyone out, is left as it is: writing the
-     * key now would move when it says the session ended.
+     * own keys or by signing everyone out, returns null, and has what says
+     * so written again in both places, with the time it already has: a
+     * store that dropped one of them gets it back, and one only the
+     * "everyone" key covered stays revoked without it.
      */
     public function revoke(string $id): ?RegisteredSession
     {
         $session = $this->find($id);
 
-        if ($session === null || $session->revokedAt !== null) {
+        if ($session === null) {
+            return null;
+        }
+
+        if ($session->revokedAt !== null) {
+            $this->cache->add($this->revokedKey($id), $session->revokedAt, $this->ttl($session));
+            $this->stamp($session, ['revoked_at' => $session->revokedAt]);
+
             return null;
         }
 
         $now = now()->getTimestamp();
 
+        // Lost to another call since find(), which stamps the record itself.
         if (! $this->cache->add($this->revokedKey($id), $now, $this->ttl($session))) {
             return null;
         }

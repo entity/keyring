@@ -354,6 +354,9 @@ class ConformanceTest extends TestCase
             /** @var Collection<int, RegisteredSession> */
             private Collection $last;
 
+            /** @var Collection<int, RegisteredSession> */
+            private Collection $lastOnDevice;
+
             public function __construct(ConnectionInterface $connection, private readonly string $broken)
             {
                 parent::__construct($connection);
@@ -371,12 +374,25 @@ class ConformanceTest extends TestCase
                 };
             }
 
+            public function revokeDevice(Authenticatable $user, string $deviceId): Collection
+            {
+                $revoked = parent::revokeDevice($user, $deviceId);
+
+                return $this->lastOnDevice = match ($this->broken) {
+                    'nothing from revokeDevice' => new Collection,
+                    'revokeDevice as they were read' => $revoked->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => null])),
+                    'revokeDevice every time' => $revoked->isEmpty() ? $this->lastOnDevice : $revoked,
+                    default => $revoked,
+                };
+            }
+
             public function revokeAll(Authenticatable $user, ?string $except = null): Collection
             {
                 $revoked = parent::revokeAll($user, $except);
 
                 return $this->last = match ($this->broken) {
                     'nothing from revokeAll' => new Collection,
+                    'revokeAll past the one kept' => $revoked->merge(parent::revokeAll($user)),
                     'revokeAll as they were read' => $revoked->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => null])),
                     'revokeAll every time' => $revoked->isEmpty() ? $this->last : $revoked,
                     default => $revoked,
@@ -407,6 +423,10 @@ class ConformanceTest extends TestCase
             'nothing from revokeAll' => ['nothing from revokeAll', 'revokeAll() should return every record it revoked'],
             'the records from revokeAll as they were' => ['revokeAll as they were read', 'revokeAll() should return each record as it now stands'],
             'the records from revokeAll every time' => ['revokeAll every time', 'revokeAll() should return nothing when it revoked nothing'],
+            'the one kept from revokeAll' => ['revokeAll past the one kept', 'nor the one it was told to leave'],
+            'nothing from revokeDevice' => ['nothing from revokeDevice', 'revokeDevice() should return every record it revoked on the device'],
+            'the records from revokeDevice as they were' => ['revokeDevice as they were read', 'revokeDevice() should return each record as it now stands'],
+            'the records from revokeDevice every time' => ['revokeDevice every time', 'revokeDevice() should return nothing when it revoked nothing'],
         ];
     }
 

@@ -60,9 +60,12 @@ interface SessionRegistry
      * Revoke every session of the user, except one (usually the current).
      * Returns the records this call revoked, each as it now stands.
      *
-     * Every record a call revokes is in what it returns. Two calls at the
-     * same moment may both return the same record, so a caller that reports
-     * what ended may report one twice, never miss one.
+     * Every record a call revokes must be in what it returns. A driver may
+     * also return one that another call ended at the same moment (reported
+     * twice, never missed), so a count taken from this may count a session
+     * another call ended. Keyring's own drivers return each record from one
+     * call only. What's returned may include records that had already
+     * expired but were never revoked: the database driver revokes those too.
      *
      * @return Collection<int, RegisteredSession>
      */

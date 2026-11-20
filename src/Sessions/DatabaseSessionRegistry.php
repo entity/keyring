@@ -49,40 +49,30 @@ class DatabaseSessionRegistry implements SessionRegistry
     }
 
     /**
-     * Read on the database written to, then revoked only while it's still
-     * as read: the update matches it unrevoked, so of two calls only the
-     * one that changed the row returns it, and with the replacedBy it had,
-     * so what's returned is what was revoked. A record replaced in between
-     * is revoked all the same, and read again, holding the row this update
-     * holds: inside a MySQL transaction a plain read would still see it as
-     * it was before.
+     * The row is read with a lock and revoked in the same transaction, so
+     * nothing changes it in between: of two calls the second waits, then
+     * finds it revoked and returns null. A locking read is always made on
+     * the write connection, and sees the latest committed row even inside a
+     * caller's MySQL transaction that took its snapshot earlier. It can't
+     * deadlock with replace() or revokeEveryone(): this takes one lock (the
+     * row, or on MySQL the gap where a missing one would be) and nothing
+     * after it, so it never holds one while waiting for another.
      */
     public function revoke(string $id): ?RegisteredSession
     {
-        $row = $this->query()->useWritePdo()->find($id);
-        $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
+        return $this->connection->transaction(function () use ($id) {
+            $row = $this->query()->lockForUpdate()->find($id);
+            $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
-        if ($session === null || $session->revokedAt !== null) {
-            return null;
-        }
+            if ($session === null || $session->revokedAt !== null) {
+                return null;
+            }
 
-        $now = now()->getTimestamp();
-        $revoked = fn (Builder $query) => $query->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now]) === 1;
+            $now = now()->getTimestamp();
+            $this->query()->where('id', $id)->update(['revoked_at' => $now]);
 
-        if ($revoked($this->query()->where('replaced_by', $session->replacedBy))) {
             return $session->with(['revokedAt' => $now]);
-        }
-
-        // Revoked, replaced or gone since it was read. Only a replaced one
-        // is left for this call to revoke.
-        if (! $revoked($this->query())) {
-            return null;
-        }
-
-        $row = $this->query()->useWritePdo()->lockForUpdate()->find($id);
-
-        // Gone only if pruned in the moment since, outside a transaction.
-        return $row === null ? $session->with(['revokedAt' => $now]) : RegisteredSession::fromArray((array) $row);
+        });
     }
 
     /**
@@ -120,37 +110,36 @@ class DatabaseSessionRegistry implements SessionRegistry
     }
 
     /**
-     * Find the records, then revoke them by ID, a thousand at a time as
-     * revokeEveryone() does, so a user with years of expired records that
-     * were never pruned doesn't make one statement too big. Read from the
-     * database written to: a replica that lags would hand back records
-     * already revoked, or miss new ones. Rows are locked one by one, never
-     * a range, so a sign in isn't held up or deadlocked.
-     *
-     * Every record this revokes is returned. The update matches nothing but
-     * the IDs that were read, and every record read is returned, so nothing
-     * can be revoked here without being returned. What's returned and wasn't
-     * revoked here is only ever a record another call revoked in between,
-     * which both then return: reported twice, never missed. A record saved
-     * after the read is neither revoked nor returned, as if it had been
-     * saved a moment after this ran. One replaced in between is revoked and
-     * returned as it was read, without its replacedBy. Keyring's own callers
-     * (Sessions::signOutEverywhere() and revokeDevice()) hold the user's row,
-     * as a move to a new record does, so they never meet one.
+     * Find the records with a lock, then revoke them by ID in the same
+     * transaction, a thousand at a time as revokeEveryone() does, so a user
+     * with years of expired records that were never pruned doesn't make one
+     * statement too big. A locking read is always made on the write
+     * connection, and reads the latest committed rows, not the snapshot of
+     * a caller's MySQL transaction that started earlier: a session signed
+     * in since then is found and revoked. It takes the locks the single
+     * UPDATE this used to be took (on MySQL, the user's range of the
+     * index), so a sign in for this user waits until it's done, and the
+     * rows can't change between the read and the update. So the records
+     * returned are exactly the ones revoked, and the update matches what
+     * the single UPDATE matched. Of two calls at once the second waits, and
+     * then finds nothing left to revoke. Rows are read in ID order, so two
+     * calls on PostgreSQL lock the rows they share in the same order.
      *
      * @return Collection<int, RegisteredSession>
      */
     protected function revokeFound(Builder $query): Collection
     {
-        $now = now()->getTimestamp();
+        return $this->connection->transaction(function () use ($query) {
+            $now = now()->getTimestamp();
 
-        $found = $query->useWritePdo()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
+            $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
 
-        $found->pluck('id')->chunk(1000)->each(
-            fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->update(['revoked_at' => $now]),
-        );
+            $found->pluck('id')->chunk(1000)->each(
+                fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now]),
+            );
 
-        return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
+            return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
+        });
     }
 
     /**

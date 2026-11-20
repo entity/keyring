@@ -323,33 +323,47 @@ trait KeyringConformance
         $registry = app(SessionRegistry::class);
         $now = now()->getTimestamp();
 
-        $saved = array_map(function () use ($user, $registry, $now) {
-            $registry->save($session = new RegisteredSession(Str::random(40), (string) $user->getAuthIdentifier(), RegisteredSession::typeOf($user), (string) config('keyring.guard'), null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+        $device = 'conformance-'.Str::random(10);
+        $ids = fn (Collection $sessions) => $sessions->map(fn (RegisteredSession $session) => $session->id)->all();
+
+        // One to revoke alone, two on one device, the one kept, and one more.
+        [$alone, $phone, $tablet, $kept, $other] = array_map(function (?string $deviceId) use ($user, $registry, $now) {
+            $registry->save($session = new RegisteredSession(Str::random(40), (string) $user->getAuthIdentifier(), RegisteredSession::typeOf($user), (string) config('keyring.guard'), $deviceId, Assurance::AAL1, null, null, $now, $now, $now + 3600));
 
             return $session->id;
-        }, range(1, 3));
+        }, [null, $device, $device, null, null]);
 
-        $first = $registry->revoke($saved[0]);
+        $first = $registry->revoke($alone);
 
-        $this->assertSame($saved[0], $first?->id, 'Your SessionRegistry\'s revoke() should return the record it revoked, or null only when it revoked nothing.');
+        $this->assertSame($alone, $first?->id, 'Your SessionRegistry\'s revoke() should return the record it revoked, or null only when it revoked nothing.');
         $this->assertNotNull($first->revokedAt, 'Your SessionRegistry\'s revoke() should return the record as it now stands, with revokedAt set.');
         $this->assertNull(
-            $registry->revoke($saved[0]),
+            $registry->revoke($alone),
             'Your SessionRegistry\'s revoke() should return null for a record that was revoked already: it revoked nothing this time.',
         );
 
-        $revoked = $registry->revokeAll($user);
+        $revoked = $registry->revokeDevice($user, $device);
+
+        $this->assertEqualsCanonicalizing([$phone, $tablet], $ids($revoked), 'Your SessionRegistry\'s revokeDevice() should return every record it revoked on the device, and only those.');
+        $this->assertTrue(
+            $revoked->every(fn (RegisteredSession $session) => $session->revokedAt !== null),
+            'Your SessionRegistry\'s revokeDevice() should return each record as it now stands, with revokedAt set.',
+        );
+        $this->assertTrue($registry->revokeDevice($user, $device)->isEmpty(), 'Your SessionRegistry\'s revokeDevice() should return nothing when it revoked nothing.');
+
+        $revoked = $registry->revokeAll($user, except: $kept);
 
         $this->assertEqualsCanonicalizing(
-            array_slice($saved, 1),
-            $revoked->map(fn (RegisteredSession $session) => $session->id)->all(),
-            'Your SessionRegistry\'s revokeAll() should return every record it revoked, and only those: not ones revoked already.',
+            [$other],
+            $ids($revoked),
+            'Your SessionRegistry\'s revokeAll() should return every record it revoked, and only those: not ones revoked already, nor the one it was told to leave.',
         );
         $this->assertTrue(
             $revoked->every(fn (RegisteredSession $session) => $session->revokedAt !== null),
             'Your SessionRegistry\'s revokeAll() should return each record as it now stands, with revokedAt set.',
         );
-        $this->assertTrue($registry->revokeAll($user)->isEmpty(), 'Your SessionRegistry\'s revokeAll() should return nothing when it revoked nothing.');
+        $this->assertNull($registry->find($kept)?->revokedAt, 'Your SessionRegistry\'s revokeAll() should leave the record it was told to leave ($except).');
+        $this->assertTrue($registry->revokeAll($user, except: $kept)->isEmpty(), 'Your SessionRegistry\'s revokeAll() should return nothing when it revoked nothing.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void

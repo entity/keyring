@@ -1864,28 +1864,41 @@ describe('the records the registry says it revoked', function () {
             ->and($registry->find('phone')->revokedAt)->not->toBeNull();
     });
 
-    it('returns what the record became when it changes between being read and revoked, on the database driver', function (Closure $meanwhile, ?string $replacedBy, ?int $revokedAt = null) {
+    // That a session ended is kept in its record and in a key beside it. A
+    // revoke that finds it ended already writes both again, with the time
+    // it ended, so a store that dropped one of them gets it back.
+    it('puts back what says a record was revoked, without moving when, on the cache driver', function (string $lost) {
+        config(['keyring.sessions.driver' => 'cache']);
         $registry = app(SessionRegistry::class);
         ($this->session)('phone');
+        $ended = $registry->revoke('phone')->revokedAt;
 
-        $raced = false;
-        DB::connection()->beforeExecuting(function (string $sql) use (&$raced, $meanwhile, $registry) {
-            if (! $raced && str_starts_with($sql, 'update') && str_contains($sql, 'replaced_by')) {
-                $raced = true;
-                $meanwhile($registry);
-            }
-        });
+        $lost === 'key'
+            ? Cache::forget('keyring:sessions:phone:revoked')
+            : Cache::put('keyring:sessions:phone', [...Cache::get('keyring:sessions:phone'), 'revoked_at' => null], 3600);
 
-        $revoked = $registry->revoke('phone');
+        $this->travel(1)->minutes();
 
-        expect($revoked?->replacedBy)->toBe($replacedBy)
-            ->and($revoked?->revokedAt)->toBe($replacedBy === null ? null : now()->getTimestamp())
-            ->and($registry->find('phone')?->revokedAt)->toBe($replacedBy === null ? $revokedAt : now()->getTimestamp());
-    })->with([
-        'moved to a new record' => [fn (SessionRegistry $registry) => $registry->replace('phone', $registry->find('phone')->with(['id' => 'phone-on'])), 'phone-on'],
-        'revoked by another request' => [fn (SessionRegistry $registry) => DB::table('keyring_sessions')->where('id', 'phone')->update(['revoked_at' => 1]), null, 1],
-        'gone' => [fn (SessionRegistry $registry) => DB::table('keyring_sessions')->where('id', 'phone')->delete(), null],
-    ]);
+        expect($registry->revoke('phone'))->toBeNull()
+            ->and(Cache::get('keyring:sessions:phone:revoked'))->toBe($ended)
+            ->and(Cache::get('keyring:sessions:phone')['revoked_at'])->toBe($ended);
+    })->with(['its revoked key' => 'key', 'its record\'s stamp' => 'stamp']);
+
+    it('keeps a record revoked that only signing everyone out covered, once it was revoked again, on the cache driver', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+        $registry->revokeEveryone();
+        $ended = now()->getTimestamp();
+
+        $this->travel(1)->minutes();
+        expect($registry->revoke('phone'))->toBeNull();
+
+        Cache::forget('keyring:sessions:everyone:revoked');
+
+        expect($registry->find('phone')->revokedAt)->toBe($ended)
+            ->and($registry->forUser($this->user))->toBeEmpty();
+    });
 
     it('counts the sessions a sign-out everywhere else ended as it always has', function (string $driver) {
         config(['keyring.sessions.driver' => $driver]);
