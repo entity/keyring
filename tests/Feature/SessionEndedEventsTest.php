@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\MissingAppKeyException;
 use Illuminate\Http\Request;
@@ -26,7 +30,10 @@ use Keyring\Enums\SessionEndReason;
 use Keyring\Events\EmailChangeReverted;
 use Keyring\Events\EveryoneSignedOut;
 use Keyring\Events\RegisteredSessionEnded;
+use Keyring\Events\SessionEnded;
+use Keyring\Exceptions\PartialRevocation;
 use Keyring\Facades\Keyring;
+use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
@@ -46,6 +53,7 @@ use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SoftDeletingUser;
 use Keyring\Tests\Fixtures\User;
+use Symfony\Component\HttpFoundation\Response;
 
 dataset('session drivers', ['database', 'cache']);
 
@@ -76,11 +84,11 @@ function signInHere(array $cookies = []): string
 /**
  * A session of the user's somewhere else.
  */
-function sessionElsewhere(User $user, ?string $device = null, int $activeAgo = 0): RegisteredSession
+function sessionElsewhere(User $user, ?string $device = null, int $activeAgo = 0, ?string $id = null): RegisteredSession
 {
     $now = now()->getTimestamp();
 
-    app(SessionRegistry::class)->save($session = new RegisteredSession(Str::random(40), (string) $user->getKey(), RegisteredSession::typeOf($user), 'web', $device, Assurance::AAL1, null, null, $now, $now - $activeAgo, $now + 3600));
+    app(SessionRegistry::class)->save($session = new RegisteredSession($id ?? Str::random(40), (string) $user->getKey(), RegisteredSession::typeOf($user), 'web', $device, Assurance::AAL1, null, null, $now, $now - $activeAgo, $now + 3600));
 
     return $session;
 }
@@ -857,7 +865,7 @@ describe('the reason', function () {
         expect($this->announced->sole()->reason)->toBe(SessionEndReason::Risk);
     });
 
-    it('is only run through when the registry bound in its place doesn\'t announce', function () {
+    it('still runs the callback when the registry bound in its place doesn\'t announce', function () {
         app()->instance(SessionRegistry::class, new CacheSessionRegistry(Cache::store('array')));
 
         expect(app(Sessions::class)->because(SessionEndReason::Risk, fn () => 'ran'))->toBe('ran');
@@ -894,5 +902,358 @@ describe('drivers', function () {
 
         expect(app(SessionRegistry::class))->toBe(app(SessionRegistryManager::class)->driver('cache'))
             ->and(app(SessionRegistry::class)->inner())->toBeInstanceOf(CacheSessionRegistry::class);
+    });
+});
+
+/**
+ * The session middleware as an app may extend it, signing out for a
+ * reason of its own.
+ */
+class SignsOutForMaintenance extends AuthenticateSession
+{
+    public function handle(Request $request, Closure $next): Response
+    {
+        return $request->is('maintenance') && $this->keyring->guard()->check() ? $this->signOut($request, 'maintenance') : parent::handle($request, $next);
+    }
+}
+
+/**
+ * Something an app wraps the registry in, as app()->extend() does.
+ */
+class CountingRegistry implements SessionRegistry
+{
+    public int $calls = 0;
+
+    public function __construct(private readonly SessionRegistry $registry) {}
+
+    public function save(RegisteredSession $session): void
+    {
+        $this->registry->save($session);
+    }
+
+    public function find(string $id): ?RegisteredSession
+    {
+        return $this->registry->find($id);
+    }
+
+    public function forUser(Authenticatable $user): Collection
+    {
+        return $this->registry->forUser($user);
+    }
+
+    public function update(string $id, array $changes): void
+    {
+        $this->registry->update($id, $changes);
+    }
+
+    public function revoke(string $id): ?RegisteredSession
+    {
+        $this->calls++;
+
+        return $this->registry->revoke($id);
+    }
+
+    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    {
+        return $this->registry->replace($id, $successor, $revoke);
+    }
+
+    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
+    {
+        $this->calls++;
+
+        return $this->registry->revokeAll($user, $except);
+    }
+
+    public function revokeDevice(Authenticatable $user, string $deviceId): Collection
+    {
+        return $this->registry->revokeDevice($user, $deviceId);
+    }
+
+    public function revokeEveryone(): void
+    {
+        $this->registry->revokeEveryone();
+    }
+
+    public function prune(): int
+    {
+        return $this->registry->prune();
+    }
+}
+
+/**
+ * An exception handler that fails as it reports.
+ */
+function brokenExceptionHandler(): void
+{
+    app()->instance(ExceptionHandler::class, new class implements ExceptionHandler
+    {
+        public function report(Throwable $e): void
+        {
+            throw new LogicException('The exception handler failed too.');
+        }
+
+        public function shouldReport(Throwable $e): bool
+        {
+            return true;
+        }
+
+        public function render($request, Throwable $e): never
+        {
+            throw $e;
+        }
+
+        public function renderForConsole($output, Throwable $e): void {}
+    });
+}
+
+describe('a sign-out that fails part way', function () {
+    it('takes a reason of a subclass\'s own, and announces it as revoked', function () {
+        app()->bind(AuthenticateSession::class, SignsOutForMaintenance::class);
+        Route::middleware(['web', 'auth'])->get('/maintenance', fn () => 'maintenance');
+        $handle = handleOf(signInHere());
+        $ended = new Collection;
+        Event::listen(fn (SessionEnded $event) => $ended->push($event->reason));
+
+        $this->get('/maintenance')->assertRedirect('/login');
+
+        $this->assertGuest();
+        expectEnded($handle, SessionEndReason::Revoked);
+        expect($ended->all())->toBe(['maintenance']);
+    });
+
+    it('still signs out and announces the rest when the exception handler fails too', function () {
+        $here = signInHere();
+        $handles = collect([1, 2])->map(fn () => movedSessionElsewhere($this->user)[0]);
+        Event::listen(fn (RegisteredSessionEnded $event) => throw new RuntimeException('A listener failed.'));
+        brokenExceptionHandler();
+
+        expect(app(Sessions::class)->signOutEverywhere($this->user, except: $here))->toBe(2);
+        $handles->each(fn (string $handle) => expectEnded($handle, SessionEndReason::Revoked));
+
+        $this->post('/logout')->assertRedirect();
+
+        $this->assertGuest();
+        expect($this->announced)->toHaveCount(3);
+    });
+
+    it('doesn\'t let a failing exception handler out of the commit', function () {
+        sessionElsewhere($this->user);
+        sessionElsewhere($this->user);
+        Event::listen(fn (RegisteredSessionEnded $event) => throw new RuntimeException('A listener failed.'));
+        brokenExceptionHandler();
+
+        DB::transaction(fn () => app(Sessions::class)->signOutEverywhere($this->user));
+
+        expect($this->announced)->toHaveCount(2);
+    });
+
+    it('announces everyone signed out when the driver fails after some of its rounds', function () {
+        app(SessionRegistryManager::class)->extend('failing-rounds', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revokeEveryone(): void
+            {
+                parent::revokeEveryone();
+
+                throw new RuntimeException('A later round failed.');
+            }
+        });
+        config(['keyring.sessions.driver' => 'failing-rounds']);
+        $session = sessionElsewhere($this->user);
+        $everyone = new Collection;
+        Event::listen(fn (EveryoneSignedOut $event) => $everyone->push($event));
+
+        expect(fn () => app(SessionRegistry::class)->revokeEveryone())->toThrow(RuntimeException::class, 'A later round failed.');
+
+        expect($everyone)->toHaveCount(1)
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
+    });
+
+    it('announces what the cache driver revoked before one record failed, then throws the failure', function () {
+        $failing = Str::random(40);
+        $driver = new class(Cache::store('array'), $failing) extends CacheSessionRegistry
+        {
+            public function __construct(Repository $cache, private readonly string $failing)
+            {
+                parent::__construct($cache);
+            }
+
+            public function revoke(string $id): ?RegisteredSession
+            {
+                return $id === $this->failing ? throw new RuntimeException('The store failed.') : parent::revoke($id);
+            }
+        };
+        app(SessionRegistryManager::class)->extend('failing-record', fn () => $driver);
+        config(['keyring.sessions.driver' => 'failing-record']);
+        $registry = app(SessionRegistry::class);
+        $kept = sessionElsewhere($this->user);
+        sessionElsewhere($this->user, id: $failing);
+        $handles = collect([1, 2])->map(fn () => app(Sessions::class)->handle(sessionElsewhere($this->user)));
+        $this->announced->splice(0);
+
+        expect(fn () => $registry->revokeAll($this->user, except: $kept->id))->toThrow(RuntimeException::class, 'The store failed.');
+
+        $handles->each(fn (string $handle) => expectEnded($handle, SessionEndReason::Revoked));
+        expect($this->announced)->toHaveCount(2)
+            ->and($registry->find($failing)->revokedAt)->toBeNull();
+
+        // The driver on its own says what it revoked, with the failure behind it.
+        $partial = null;
+        sessionElsewhere($this->user);
+
+        try {
+            $driver->revokeAll($this->user, except: $kept->id);
+        } catch (PartialRevocation $e) {
+            $partial = $e;
+        }
+
+        expect($partial?->revoked)->toHaveCount(1)
+            ->and($partial?->getPrevious()?->getMessage())->toBe('The store failed.');
+    });
+
+    it('keeps a cache revocation, and announces it, when copying it into the record fails', function () {
+        $driver = new class(Cache::store('array')) extends CacheSessionRegistry
+        {
+            protected function stamp(RegisteredSession $session, array $ended): void
+            {
+                throw new RuntimeException('The store failed.');
+            }
+        };
+        app(SessionRegistryManager::class)->extend('failing-stamp', fn () => $driver);
+        config(['keyring.sessions.driver' => 'failing-stamp']);
+        $session = sessionElsewhere($this->user);
+        Exceptions::fake();
+
+        expect(app(SessionRegistry::class)->revoke($session->id)?->revokedAt)->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
+        expectEnded(app(Sessions::class)->handle($session), SessionEndReason::Revoked);
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The store failed.');
+    });
+
+    it('still keeps the copy out of the way when even reporting that fails', function () {
+        $driver = new class(Cache::store('array')) extends CacheSessionRegistry
+        {
+            protected function stamp(RegisteredSession $session, array $ended): void
+            {
+                throw new RuntimeException('The store failed.');
+            }
+        };
+        app(SessionRegistryManager::class)->extend('failing-stamp', fn () => $driver);
+        config(['keyring.sessions.driver' => 'failing-stamp']);
+        $session = sessionElsewhere($this->user);
+        brokenExceptionHandler();
+
+        expect(app(SessionRegistry::class)->revoke($session->id)?->revokedAt)->not->toBeNull()
+            ->and($this->announced)->toHaveCount(1);
+    });
+
+    it('announces straight away when the transaction can\'t be looked up', function () {
+        $session = sessionElsewhere($this->user);
+        Exceptions::fake();
+        app()->instance('db.transactions', new class extends DatabaseTransactionsManager
+        {
+            public function callbackApplicableTransactions(): never
+            {
+                throw new LogicException('Laravel changed.');
+            }
+        });
+
+        DB::transaction(function () use ($session) {
+            app(SessionRegistry::class)->revoke($session->id);
+
+            expect($this->announced)->toHaveCount(1);
+        });
+
+        Exceptions::assertReported(LogicException::class);
+    });
+});
+
+describe('more transactions', function () {
+    it('announces everyone signed out once its transaction commits, and not when it is rolled back', function () {
+        $session = sessionElsewhere($this->user);
+        $registry = app(SessionRegistry::class);
+        $everyone = new Collection;
+        Event::listen(fn (EveryoneSignedOut $event) => $everyone->push($event));
+
+        try {
+            DB::transaction(function () use ($registry): never {
+                $registry->revokeEveryone();
+
+                throw new RuntimeException('Something after it failed.');
+            });
+        } catch (RuntimeException) {
+        }
+
+        expect($everyone)->toBeEmpty()
+            ->and($registry->find($session->id)->revokedAt)->toBeNull();
+
+        DB::transaction(function () use ($registry, $everyone) {
+            $registry->revokeEveryone();
+
+            expect($everyone)->toBeEmpty();
+        });
+
+        expect($everyone)->toHaveCount(1)
+            ->and($registry->find($session->id)->revokedAt)->not->toBeNull();
+    });
+
+    // Laravel runs a commit's callbacks one after another, and stops at the
+    // first that throws: the revocation stays and nothing announces it.
+    // The sweep a later release adds is what will catch this.
+    it('announces nothing when an earlier after-commit callback throws, though the revocation stays', function () {
+        $session = sessionElsewhere($this->user);
+
+        expect(fn () => DB::transaction(function () use ($session) {
+            DB::afterCommit(fn () => throw new RuntimeException('A queued job could not be pushed.'));
+            app(SessionRegistry::class)->revoke($session->id);
+        }))->toThrow(RuntimeException::class, 'A queued job could not be pushed.');
+
+        expect($this->announced)->toBeEmpty()
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
+    });
+
+    it('announces nothing for a deleted user whose deletion is rolled back', function () {
+        $session = sessionElsewhere($this->user);
+
+        expect(fn () => DB::transaction(function (): never {
+            $this->user->delete();
+
+            throw new RuntimeException('Something after it failed.');
+        }))->toThrow(RuntimeException::class);
+
+        expect($this->announced)->toBeEmpty()
+            ->and(User::find($this->user->id))->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->toBeNull();
+    });
+
+    it('announces nothing for a soft deleted user whose deletion is rolled back', function () {
+        Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
+        $user = SoftDeletingUser::findOrFail($this->user->id);
+        $session = sessionElsewhere($user);
+
+        expect(fn () => DB::transaction(function () use ($user): never {
+            $user->delete();
+
+            throw new RuntimeException('Something after it failed.');
+        }))->toThrow(RuntimeException::class);
+
+        expect($this->announced)->toBeEmpty()
+            ->and(SoftDeletingUser::find($user->id))->not->toBeNull()
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->toBeNull();
+    });
+});
+
+describe('a registry the app wraps', function () {
+    it('still announces, with the reason, through a wrapper of the app\'s own', function () {
+        $wrappers = new Collection;
+        app()->extend(SessionRegistry::class, fn (SessionRegistry $registry) => tap(new CountingRegistry($registry), fn (CountingRegistry $wrapper) => $wrappers->push($wrapper)));
+        signInHere();
+        [$handle] = movedSessionElsewhere($this->user);
+
+        $this->deleteJson(route('keyring.sessions.destroy-others'))->assertOk();
+
+        expectEnded($handle, SessionEndReason::SignedOutEverywhere);
+        expect($wrappers->sum('calls'))->toBeGreaterThan(0)
+            ->and(app(SessionRegistry::class))->toBeInstanceOf(CountingRegistry::class);
     });
 });

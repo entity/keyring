@@ -377,7 +377,7 @@ class Sessions
      * End one of the user's sessions, wherever it is by now: "remember me"
      * may have carried it on to another record since it was listed.
      */
-    public function revoke(Authenticatable $user, RegisteredSession $session): void
+    public function revoke(Authenticatable $user, #[\SensitiveParameter] RegisteredSession $session): void
     {
         $this->holding($user, function () use ($session) {
             if ($current = $this->latest($this->registry->find($session->id))) {
@@ -393,7 +393,7 @@ class Sessions
      * its record ended. Returns the record that was ended, or null when
      * there was nothing left to end.
      */
-    public function endLatest(Authenticatable $user, RegisteredSession $session): ?RegisteredSession
+    public function endLatest(Authenticatable $user, #[\SensitiveParameter] RegisteredSession $session): ?RegisteredSession
     {
         return $this->holding($user, function () use ($session) {
             $current = $this->latest($this->registry->find($session->id));
@@ -609,7 +609,7 @@ class Sessions
      * device stays trusted, and an email change waiting for confirmation is
      * cancelled, though its "this wasn't me" link keeps working.
      */
-    public function signOutEverywhere(Authenticatable $user, ?string $except = null): int
+    public function signOutEverywhere(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
         $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except))->count();
@@ -698,9 +698,7 @@ class Sessions
 
     /**
      * Run the callback with every session it ends announced for this
-     * reason (RegisteredSessionEnded). Keyring's own registry drivers are
-     * announced; a registry bound in their place without the wrapper that
-     * announces them just runs the callback.
+     * reason (RegisteredSessionEnded), whatever the registry is wrapped in.
      *
      * @template TResult
      *
@@ -709,7 +707,7 @@ class Sessions
      */
     public function because(SessionEndReason $reason, Closure $callback): mixed
     {
-        return $this->registry instanceof AnnouncingSessionRegistry ? $this->registry->because($reason, $callback) : $callback();
+        return AnnouncingSessionRegistry::because($reason, $callback);
     }
 
     public function registry(): SessionRegistry

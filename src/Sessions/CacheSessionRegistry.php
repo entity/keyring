@@ -10,6 +10,8 @@ use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Exceptions\PartialRevocation;
+use Throwable;
 
 /**
  * Keeps the registry in a cache store (Redis, Valkey, ...). No table needed.
@@ -36,7 +38,7 @@ class CacheSessionRegistry implements SessionRegistry
      * doesn't bring the session back. What the record already says is kept
      * when the copy being saved doesn't know it.
      */
-    public function save(RegisteredSession $session): void
+    public function save(#[\SensitiveParameter] RegisteredSession $session): void
     {
         $stored = $this->cache->get($this->key($session->id));
         $data = $session->toArray();
@@ -58,7 +60,7 @@ class CacheSessionRegistry implements SessionRegistry
         });
     }
 
-    public function find(string $id): ?RegisteredSession
+    public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
         $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id), $this->everyoneKey()]);
         $data = $found[$this->key($id)] ?? null;
@@ -96,7 +98,7 @@ class CacheSessionRegistry implements SessionRegistry
      * The cache has no partial writes, so this reads and writes the record.
      * Revocations live in their own key, so this can never undo one.
      */
-    public function update(string $id, array $changes): void
+    public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
         if ($session = $this->find($id)) {
             $this->save($session->with($changes));
@@ -119,7 +121,7 @@ class CacheSessionRegistry implements SessionRegistry
      * store that dropped one of them gets it back, and one only the
      * "everyone" key covered stays revoked without it.
      */
-    public function revoke(string $id): ?RegisteredSession
+    public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
         $session = $this->find($id);
 
@@ -141,7 +143,14 @@ class CacheSessionRegistry implements SessionRegistry
             return null;
         }
 
-        $this->stamp($session, ['revoked_at' => $now]);
+        // The revoked key is what revokes it, and it's written. Had the
+        // copy in the record failing undone this call, the record would be
+        // revoked with nobody told: the next call finds it revoked already.
+        try {
+            $this->stamp($session, ['revoked_at' => $now]);
+        } catch (Throwable $e) {
+            rescue(fn () => report($e), report: false);
+        }
 
         return $session->with(['revokedAt' => $now]);
     }
@@ -151,7 +160,7 @@ class CacheSessionRegistry implements SessionRegistry
      *
      * @param  array<string, mixed>  $ended
      */
-    protected function stamp(RegisteredSession $session, array $ended): void
+    protected function stamp(#[\SensitiveParameter] RegisteredSession $session, array $ended): void
     {
         $stored = $this->cache->get($this->key($session->id));
 
@@ -166,7 +175,7 @@ class CacheSessionRegistry implements SessionRegistry
      * request that finds the old one replaced always finds what replaced it.
      * A revocation that landed in the meantime wins: the new record goes.
      */
-    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
         $session = $this->find($id);
 
@@ -197,7 +206,7 @@ class CacheSessionRegistry implements SessionRegistry
         return $replaced;
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
+    public function revokeAll(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): Collection
     {
         return $this->revokeWhere($user, fn (RegisteredSession $session) => $session->id !== $except);
     }
@@ -214,18 +223,37 @@ class CacheSessionRegistry implements SessionRegistry
 
     /**
      * Each record is revoked by revoke(), so what's returned is what this
-     * call revoked: one another call got to first is left out.
+     * call revoked: one another call got to first is left out. A record
+     * that fails doesn't stop the rest. Once they've all been tried, the
+     * first failure is thrown, in a PartialRevocation that carries what
+     * was revoked, so those are still announced.
      *
      * @param  Closure(RegisteredSession): bool  $callback
      * @return Collection<int, RegisteredSession>
      */
     protected function revokeWhere(Authenticatable $user, Closure $callback): Collection
     {
-        return $this->forUser($user)
+        $failure = null;
+
+        $revoked = $this->forUser($user)
             ->filter($callback)
-            ->map(fn (RegisteredSession $session) => $this->revoke($session->id))
+            ->map(function (RegisteredSession $session) use (&$failure) {
+                try {
+                    return $this->revoke($session->id);
+                } catch (Throwable $e) {
+                    $failure ??= $e;
+
+                    return null;
+                }
+            })
             ->filter()
             ->values();
+
+        if ($failure !== null) {
+            throw new PartialRevocation($revoked, $failure);
+        }
+
+        return $revoked;
     }
 
     /**
@@ -272,7 +300,7 @@ class CacheSessionRegistry implements SessionRegistry
         return max(60, $session->expiresAt - now()->getTimestamp() + 60);
     }
 
-    protected function key(string $id): string
+    protected function key(#[\SensitiveParameter] string $id): string
     {
         return $this->prefix.$id;
     }
@@ -281,12 +309,12 @@ class CacheSessionRegistry implements SessionRegistry
      * Revocations live in their own key, so saving a stale copy of the
      * record can never undo one.
      */
-    protected function revokedKey(string $id): string
+    protected function revokedKey(#[\SensitiveParameter] string $id): string
     {
         return $this->key($id).':revoked';
     }
 
-    protected function replacedKey(string $id): string
+    protected function replacedKey(#[\SensitiveParameter] string $id): string
     {
         return $this->key($id).':replaced';
     }

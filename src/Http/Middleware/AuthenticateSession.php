@@ -284,7 +284,7 @@ class AuthenticateSession
      * lead to a record that works any more, and changing the token would
      * sign out every other browser the user ticked "remember me" in.
      */
-    protected function reused(Request $request, Authenticatable $user, RegisteredSession $session): Response
+    protected function reused(Request $request, Authenticatable $user, #[\SensitiveParameter] RegisteredSession $session): Response
     {
         // Null when it had already ended some other way: there's nothing
         // left to end.
@@ -337,40 +337,35 @@ class AuthenticateSession
     }
 
     /**
-     * @param  'revoked'|'expired'|'idle'|'other_user'|'reused'|'risk'|'not_allowed'  $reason
+     * Keyring's own reasons are 'revoked', 'expired', 'idle', 'other_user',
+     * 'reused', 'risk' and 'not_allowed'. A subclass may sign out for one
+     * of its own, which SessionEnded carries as it is.
      */
     protected function signOut(Request $request, string $reason): Response
     {
         // Whatever this ends, the browser's own record and the one its
-        // "remember me" holds, ends for the same reason.
-        $user = $this->sessions->because(SessionEndReason::from($reason), fn () => $this->end($request, $reason));
+        // "remember me" holds, ends for this reason. One of a subclass's own
+        // that isn't a SessionEndReason ends them as plain "revoked".
+        $user = $this->sessions->because(SessionEndReason::tryFrom($reason) ?? SessionEndReason::Revoked, function () use ($request, $reason) {
+            // An account that's kept out or locked loses the session its
+            // "remember me" would carry on, too. Otherwise the same cookies
+            // would sign it in again the moment it's let back. A cookie that
+            // was used a moment ago stands for the session it was used for.
+            // Only when it's this account's: the cookie is the browser's to
+            // send, and it may name someone else's.
+            $user = $this->keyring->guard()->user();
+
+            if (in_array($reason, ['not_allowed', 'risk'], true) && $user !== null && ($remembered = $this->sessions->remembered($request))?->belongsTo($user)) {
+                $this->sessions->endLatest($user, $remembered);
+            }
+
+            return $this->signIn->out($request, onlyThisBrowser: true);
+        });
 
         if ($user !== null) {
             SessionEnded::dispatch($user, $reason);
         }
 
         return $this->keyring->response(SignedOutResponse::class, reason: $reason)->toResponse($request);
-    }
-
-    /**
-     * Sign this browser out, returning who it was.
-     *
-     * @param  'revoked'|'expired'|'idle'|'other_user'|'reused'|'risk'|'not_allowed'  $reason
-     */
-    protected function end(Request $request, string $reason): ?Authenticatable
-    {
-        // An account that's kept out or locked loses the session its
-        // "remember me" would carry on, too. Otherwise the same cookies
-        // would sign it in again the moment it's let back. A cookie that was
-        // used a moment ago stands for the session it was used for.
-        // Only when it's this account's: the cookie is the browser's to
-        // send, and it may name someone else's.
-        $user = $this->keyring->guard()->user();
-
-        if (in_array($reason, ['not_allowed', 'risk'], true) && $user !== null && ($remembered = $this->sessions->remembered($request))?->belongsTo($user)) {
-            $this->sessions->endLatest($user, $remembered);
-        }
-
-        return $this->signIn->out($request, onlyThisBrowser: true);
     }
 }

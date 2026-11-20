@@ -15,9 +15,9 @@ use Keyring\Sessions\RegisteredSession;
  */
 interface SessionRegistry
 {
-    public function save(RegisteredSession $session): void;
+    public function save(#[\SensitiveParameter] RegisteredSession $session): void;
 
-    public function find(string $id): ?RegisteredSession;
+    public function find(#[\SensitiveParameter] string $id): ?RegisteredSession;
 
     /**
      * Active sessions for the user, most recent first.
@@ -32,7 +32,7 @@ interface SessionRegistry
      *
      * @param  array<string, mixed>  $changes
      */
-    public function update(string $id, array $changes): void;
+    public function update(#[\SensitiveParameter] string $id, array $changes): void;
 
     /**
      * Revoke one record. Returns it as it now stands (revokedAt set), or
@@ -42,7 +42,7 @@ interface SessionRegistry
      * carried on elsewhere. Of two calls revoking the same record at the
      * same moment, only one is given it.
      */
-    public function revoke(string $id): ?RegisteredSession;
+    public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession;
 
     /**
      * Move a session to a new record: store the new one, and have the old
@@ -54,7 +54,7 @@ interface SessionRegistry
      * With $revoke the old record is revoked in the same step, and no
      * request finds it replaced without being revoked.
      */
-    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool;
+    public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool;
 
     /**
      * Revoke every session of the user, except one (usually the current).
@@ -67,9 +67,14 @@ interface SessionRegistry
      * call only. What's returned may include records that had already
      * expired but were never revoked: the database driver revokes those too.
      *
+     * A driver that can fail after revoking some (one that revokes record
+     * by record, as the cache driver does) throws a PartialRevocation
+     * (Keyring\Exceptions) with the records it did revoke and the failure
+     * as its previous exception, so they're still announced.
+     *
      * @return Collection<int, RegisteredSession>
      */
-    public function revokeAll(Authenticatable $user, ?string $except = null): Collection;
+    public function revokeAll(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): Collection;
 
     /**
      * Revoke the user's sessions on one device. Returns the records this

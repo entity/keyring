@@ -17,7 +17,7 @@ class DatabaseSessionRegistry implements SessionRegistry
         protected string $table = 'keyring_sessions',
     ) {}
 
-    public function save(RegisteredSession $session): void
+    public function save(#[\SensitiveParameter] RegisteredSession $session): void
     {
         // Never clear revoked_at from a stale copy: a revocation that lands
         // between reading and saving a record must stick. So must the
@@ -34,7 +34,7 @@ class DatabaseSessionRegistry implements SessionRegistry
         $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at'])));
     }
 
-    public function find(string $id): ?RegisteredSession
+    public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
         $row = $this->query()->find($id);
 
@@ -50,7 +50,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
     }
 
-    public function update(string $id, array $changes): void
+    public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
         $this->query()->where('id', $id)->update(RegisteredSession::columns($changes));
     }
@@ -65,7 +65,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      * row, or on MySQL the gap where a missing one would be) and nothing
      * after it, so it never holds one while waiting for another.
      */
-    public function revoke(string $id): ?RegisteredSession
+    public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
         return $this->connection->transaction(function () use ($id) {
             $row = $this->query()->lockForUpdate()->find($id);
@@ -87,7 +87,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      * the new record is stored. Of two requests at the same moment the
      * second waits, then matches nothing.
      */
-    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
         return $this->connection->transaction(function () use ($id, $successor, $revoke) {
             $now = now()->getTimestamp();
@@ -106,7 +106,7 @@ class DatabaseSessionRegistry implements SessionRegistry
         });
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
+    public function revokeAll(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): Collection
     {
         return $this->revokeFound($this->activeFor($user)->when($except, fn (Builder $query) => $query->where('id', '!=', $except)));
     }

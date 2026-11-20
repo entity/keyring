@@ -14,6 +14,7 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\EveryoneSignedOut;
 use Keyring\Events\RegisteredSessionEnded;
+use Keyring\Exceptions\PartialRevocation;
 use Keyring\Support\KeyedHash;
 use Throwable;
 
@@ -22,7 +23,9 @@ use Throwable;
  * ends through it: a RegisteredSessionEnded for each record revoke(),
  * revokeAll() and revokeDevice() say they revoked, and EveryoneSignedOut
  * for revokeEveryone(). What's announced is what the driver returned, so
- * a record is announced once, by the call that revoked it.
+ * a record is announced once, by the call that revoked it. A driver that
+ * fails part way says what it revoked first with a PartialRevocation:
+ * those are announced, and the failure is thrown on.
  *
  * A record that was replaced is left out: its session carried on on the
  * record that replaced it, and is announced when that one ends. Moving a
@@ -40,7 +43,12 @@ use Throwable;
  */
 class AnnouncingSessionRegistry implements SessionRegistry
 {
-    protected ?SessionEndReason $reason = null;
+    /**
+     * The reason in force, for the whole process: whatever wraps this
+     * registry, or however many of these there are, a reason given around
+     * the call reaches the one that announces.
+     */
+    protected static ?SessionEndReason $reason = null;
 
     public function __construct(
         protected SessionRegistry $registry,
@@ -65,32 +73,32 @@ class AnnouncingSessionRegistry implements SessionRegistry
      * @param  Closure(): TResult  $callback
      * @return TResult
      */
-    public function because(SessionEndReason $reason, Closure $callback): mixed
+    public static function because(SessionEndReason $reason, Closure $callback): mixed
     {
-        $previous = $this->reason;
-        $this->reason = $reason;
+        $previous = static::$reason;
+        static::$reason = $reason;
 
         try {
             return $callback();
         } finally {
-            $this->reason = $previous;
+            static::$reason = $previous;
         }
     }
 
     /**
      * The reason a session ended now would be announced with.
      */
-    public function reason(): SessionEndReason
+    public static function reason(): SessionEndReason
     {
-        return $this->reason ?? SessionEndReason::Revoked;
+        return static::$reason ?? SessionEndReason::Revoked;
     }
 
-    public function save(RegisteredSession $session): void
+    public function save(#[\SensitiveParameter] RegisteredSession $session): void
     {
         $this->registry->save($session);
     }
 
-    public function find(string $id): ?RegisteredSession
+    public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
         return $this->registry->find($id);
     }
@@ -100,12 +108,12 @@ class AnnouncingSessionRegistry implements SessionRegistry
         return $this->registry->forUser($user);
     }
 
-    public function update(string $id, array $changes): void
+    public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
         $this->registry->update($id, $changes);
     }
 
-    public function revoke(string $id): ?RegisteredSession
+    public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
         $session = $this->registry->revoke($id);
 
@@ -114,34 +122,37 @@ class AnnouncingSessionRegistry implements SessionRegistry
         return $session;
     }
 
-    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
         return $this->registry->replace($id, $successor, $revoke);
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
+    public function revokeAll(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): Collection
     {
-        return tap($this->registry->revokeAll($user, $except), fn (Collection $revoked) => $this->ended($revoked));
+        return $this->revokeMany(fn () => $this->registry->revokeAll($user, $except));
     }
 
     public function revokeDevice(Authenticatable $user, string $deviceId): Collection
     {
-        return tap($this->registry->revokeDevice($user, $deviceId), fn (Collection $revoked) => $this->ended($revoked));
+        return $this->revokeMany(fn () => $this->registry->revokeDevice($user, $deviceId));
     }
 
     /**
      * The moment is taken once the driver is done, so it covers every
      * session the driver revoked, and perhaps one that signed in as it
      * finished: one ended too many is an extra sign-out somewhere, one too
-     * few a session left open.
+     * few a session left open. So it's announced when the driver fails
+     * part way too, as the database driver can after some of its rounds.
      */
     public function revokeEveryone(): void
     {
-        $this->registry->revokeEveryone();
+        try {
+            $this->registry->revokeEveryone();
+        } finally {
+            $event = new EveryoneSignedOut(now()->getTimestamp());
 
-        $event = new EveryoneSignedOut(now()->getTimestamp());
-
-        $this->whenDurable(fn () => $this->dispatch($event));
+            $this->whenDurable(fn () => $this->dispatch($event));
+        }
     }
 
     public function prune(): int
@@ -150,14 +161,36 @@ class AnnouncingSessionRegistry implements SessionRegistry
     }
 
     /**
+     * Announce what a bulk revocation revoked, including when it failed
+     * part way. Then the failure itself is thrown on.
+     *
+     * @param  Closure(): Collection<int, RegisteredSession>  $revoke
+     * @return Collection<int, RegisteredSession>
+     */
+    protected function revokeMany(Closure $revoke): Collection
+    {
+        try {
+            $revoked = $revoke();
+        } catch (PartialRevocation $e) {
+            $this->ended($e->revoked);
+
+            throw $e->getPrevious() ?? $e;
+        }
+
+        $this->ended($revoked);
+
+        return $revoked;
+    }
+
+    /**
      * Announce the records a call revoked, once the revocation holds. The
      * events are made now, with the reason in force now.
      *
      * @param  iterable<RegisteredSession>  $sessions
      */
-    protected function ended(iterable $sessions): void
+    protected function ended(#[\SensitiveParameter] iterable $sessions): void
     {
-        $reason = $this->reason();
+        $reason = static::reason();
         $ended = [];
 
         foreach ($sessions as $session) {
@@ -168,7 +201,7 @@ class AnnouncingSessionRegistry implements SessionRegistry
             try {
                 $ended[] = [$session, $this->event($session, $reason)];
             } catch (Throwable $e) {
-                report($e);
+                $this->report($e);
             }
         }
 
@@ -181,7 +214,7 @@ class AnnouncingSessionRegistry implements SessionRegistry
         }
     }
 
-    protected function event(RegisteredSession $session, SessionEndReason $reason): RegisteredSessionEnded
+    protected function event(#[\SensitiveParameter] RegisteredSession $session, SessionEndReason $reason): RegisteredSessionEnded
     {
         // As Sessions::handles() has them.
         $handles = KeyedHash::candidates(KeyedHash::SESSION_HANDLES, $session->origin());
@@ -202,7 +235,7 @@ class AnnouncingSessionRegistry implements SessionRegistry
      * Announce one record that ended. Every announcement goes through here,
      * so this is where a record would be noted as announced.
      */
-    protected function announce(RegisteredSession $session, RegisteredSessionEnded $event): void
+    protected function announce(#[\SensitiveParameter] RegisteredSession $session, RegisteredSessionEnded $event): void
     {
         $this->dispatch($event);
     }
@@ -212,7 +245,20 @@ class AnnouncingSessionRegistry implements SessionRegistry
         try {
             event($event);
         } catch (Throwable $e) {
+            $this->report($e);
+        }
+    }
+
+    /**
+     * Report a failure, and nothing more: an exception handler that fails
+     * too can't stop a sign-out, or the announcements after this one.
+     */
+    protected function report(Throwable $e): void
+    {
+        try {
             report($e);
+        } catch (Throwable) {
+            // Nowhere left to say so.
         }
     }
 
@@ -238,17 +284,31 @@ class AnnouncingSessionRegistry implements SessionRegistry
     /**
      * The innermost transaction open on the registry's connection, if the
      * driver is the database one. One a test wraps itself in doesn't count,
-     * as it doesn't for Laravel's own callbacks.
+     * as it doesn't for Laravel's own callbacks. A connection split into
+     * read and write is one connection, with its transactions on the write
+     * side, so that's the one followed.
+     *
+     * Should finding it fail (Laravel's transaction manager changed, say),
+     * the revocation has already been made, so it's announced straight
+     * away rather than not at all.
      */
     protected function transaction(): ?DatabaseTransactionRecord
     {
-        $connection = $this->registry instanceof DatabaseSessionRegistry ? $this->registry->connection() : null;
-        $transactions = app()->bound('db.transactions') ? app('db.transactions') : null;
+        try {
+            $connection = $this->registry instanceof DatabaseSessionRegistry ? $this->registry->connection() : null;
+            $transactions = app()->bound('db.transactions') ? app('db.transactions') : null;
 
-        if (! $connection instanceof Connection || $connection->transactionLevel() === 0 || ! $transactions instanceof DatabaseTransactionsManager) {
+            if (! $connection instanceof Connection || $connection->transactionLevel() === 0 || ! $transactions instanceof DatabaseTransactionsManager) {
+                return null;
+            }
+
+            $transaction = $transactions->callbackApplicableTransactions()->last(fn (DatabaseTransactionRecord $transaction) => $transaction->connection === $connection->getName());
+
+            return $transaction instanceof DatabaseTransactionRecord ? $transaction : null;
+        } catch (Throwable $e) {
+            $this->report($e);
+
             return null;
         }
-
-        return $transactions->callbackApplicableTransactions()->last(fn (DatabaseTransactionRecord $transaction) => $transaction->connection === $connection->getName());
     }
 }
