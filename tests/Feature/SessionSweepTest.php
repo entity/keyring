@@ -373,6 +373,87 @@ describe('announcing again', function () {
             ->and(DB::table('keyring_sessions')->whereNull('announced_at')->count())->toBe(0);
     });
 
+    it('sends the latest of two lost sign-outs of everyone, which settles both', function () {
+        Exceptions::fake();
+        $everyone = new Collection;
+        $outage = new ArrayObject(['down' => true]);
+        Event::listen(function (EveryoneSignedOut $event) use ($everyone, $outage) {
+            $everyone->push($event->at);
+
+            if ($outage['down']) {
+                throw new RuntimeException('The client app is down.');
+            }
+        });
+
+        swept($this->user);
+        app(SessionRegistry::class)->revokeEveryone();
+        $this->travel(60)->seconds();
+        swept($this->user);
+        $second = now()->getTimestamp();
+        app(SessionRegistry::class)->revokeEveryone();
+
+        $outage['down'] = false;
+        $this->travel(Sweep::GRACE)->seconds();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect($everyone->slice(2)->values()->all())->toBe([$second])
+            ->and(DB::table('keyring_sessions')->whereNull('announced_at')->count())->toBe(0);
+    });
+
+    it('tries a lost sign-out of everyone again later each time, and puts the next try off before each', function () {
+        swept($this->user);
+        Exceptions::fake();
+        $tries = new Collection;
+        $start = now()->getTimestamp();
+        Event::listen(function (EveryoneSignedOut $event) use ($tries, $start): never {
+            $tries->push(intdiv(now()->getTimestamp() - $start, 60));
+
+            throw new RuntimeException('The client app is down.');
+        });
+
+        app(SessionRegistry::class)->revokeEveryone();
+
+        for ($minutes = 0; $minutes < 160; $minutes++) {
+            $this->travel(1)->minutes();
+            $this->artisan('keyring:sweep')->assertSuccessful();
+        }
+
+        expect($tries->all())->toBe([0, 5, 15, 35, 75, 155])
+            ->and(DB::table('keyring_sessions')->value('announce_attempts'))->toBe(6);
+    });
+
+    it('keeps a sign-out of everyone that was never announced until the sweep gives up on it', function () {
+        swept($this->user);
+        Exceptions::fake();
+        Event::listen(fn (EveryoneSignedOut $event) => throw new RuntimeException('The client app is down.'));
+
+        app(SessionRegistry::class)->revokeEveryone();
+        $this->artisan('keyring:prune')->assertSuccessful();
+        expect(DB::table('keyring_sessions')->count())->toBe(1);
+
+        $this->travel(Sweep::GIVE_UP_AFTER)->seconds();
+        $this->artisan('keyring:prune')->assertSuccessful();
+        expect(DB::table('keyring_sessions')->count())->toBe(0);
+    });
+
+    it('ends what has timed out by the time the announcing before it is done', function () {
+        $lost = swept($this->user);
+        DB::table('keyring_sessions')->where('id', $lost->id)->update(['revoked_at' => now()->getTimestamp() - 3600]);
+        $soon = swept($this->user, unused: 7000);
+
+        // Announcing again takes long enough for another session to idle out.
+        Event::listen(function (RegisteredSessionEnded $event) {
+            if ($this->announced->count() === 1) {
+                $this->travel(300)->seconds();
+            }
+        });
+
+        $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions, and announced 1 ended sessions again.')->assertSuccessful();
+
+        expect(sweepRow($soon->id)->end_reason)->toBe('idle');
+    });
+
     it('notes a great many announcements as it goes, not only at the end', function () {
         $then = now()->getTimestamp() - 9000;
         DB::table('keyring_sessions')->insert(collect(range(1, 501))->map(fn (int $i) => array_diff_key(new RegisteredSession(Str::random(40), (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $then, $then, $then + 86400)->toArray(), ['origin' => true]))->all());
@@ -436,15 +517,20 @@ describe('a stale note that the migration is missing', function () {
         cache()->put(DatabaseSessionRegistry::unmigratedKey(DB::connection()->getName(), 'keyring_sessions'), true, 300);
     });
 
-    it('doesn\'t stop an announcement being noted, so the sweep doesn\'t announce it again', function () {
+    it('costs one second announcement at most, then the sweep sets it right', function () {
         $session = swept($this->user);
 
+        // The request takes the cache's word, and notes nothing.
         app(SessionRegistry::class)->revoke($session->id);
+        expect(sweepRow($session->id)->end_reason)->toBeNull();
+
+        // The sweep asks the database, clears the note, and announces the
+        // session again, once.
         $this->travel(Sweep::GRACE + 1)->seconds();
         $this->artisan('keyring:sweep')->assertSuccessful();
         $this->artisan('keyring:sweep')->assertSuccessful();
 
-        expect($this->announced)->toHaveCount(1)
+        expect($this->announced)->toHaveCount(2)
             ->and(sweepRow($session->id)->announced_at)->not->toBeNull()
             ->and(cache()->has(DatabaseSessionRegistry::unmigratedKey(DB::connection()->getName(), 'keyring_sessions')))->toBeFalse();
     });
@@ -460,14 +546,14 @@ describe('a stale note that the migration is missing', function () {
         });
 
         app(SessionRegistry::class)->revoke($session->id);
-        expect(sweepRow($session->id)->announce_attempts)->toBe(1);
+        expect(sweepRow($session->id)->announce_attempts)->toBe(0);
 
         $this->travel(Sweep::GRACE)->seconds();
         $this->artisan('keyring:sweep')->assertSuccessful();
-        expect(sweepRow($session->id)->announce_attempts)->toBe(2);
+        expect(sweepRow($session->id)->announce_attempts)->toBe(1);
 
         $outage['down'] = false;
-        $this->travel(Sweep::retryAfter(2))->seconds();
+        $this->travel(Sweep::retryAfter(1))->seconds();
         $this->artisan('keyring:sweep')->assertSuccessful();
         $this->artisan('keyring:sweep')->assertSuccessful();
 
@@ -500,10 +586,10 @@ describe('before the migration has run', function () {
 
         expect($this->announced)->toHaveCount(2)
             ->and(app(SessionRegistry::class)->find($sessions[1]->id)->revokedAt)->not->toBeNull()
-            // The revocation takes the cache's word. Only noting the
-            // announcement asks the database again, so a table migrated
-            // meanwhile isn't missed.
-            ->and($schema($queries))->toBe($oneLook);
+            // Nothing on the request's path asks the database: it takes the
+            // cache's word.
+            ->and($oneLook)->toBeGreaterThan(0)
+            ->and($schema($queries))->toBe(0);
         Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, 'Publish and run Keyring\'s migrations'));
 
         // A day later it looks again.

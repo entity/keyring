@@ -218,11 +218,19 @@ class AnnouncingSessionRegistry implements SessionRegistry
 
         $now = now()->getTimestamp();
 
-        // A sign-out of everyone whose event was lost goes again, as itself.
-        foreach ($sweeper->everyoneUnannounced($now - Sweep::GIVE_UP_AFTER, $now - Sweep::GRACE, $now) as $at) {
-            $announced = $this->dispatch(new EveryoneSignedOut($at));
+        // A sign-out of everyone whose event was lost goes again, as itself:
+        // the latest, whose moment covers those before it, and settles them
+        // when it goes out. Its next try is put off before this one, as if
+        // it failed, so a listener that dies on it holds up the rest of the
+        // sweep once, not every run.
+        $at = $sweeper->everyoneUnannounced($now - Sweep::GIVE_UP_AFTER, $now - Sweep::GRACE, $now)[0] ?? null;
 
-            $this->note(fn (SweepsSessions $sweeper) => $sweeper->everyoneAnnounced($at, $at, $announced, now()->getTimestamp()));
+        if ($at !== null) {
+            $this->note(fn (SweepsSessions $sweeper) => $sweeper->everyoneAnnounced($at, $at, false, now()->getTimestamp()));
+
+            if ($this->dispatch(new EveryoneSignedOut($at))) {
+                $this->note(fn (SweepsSessions $sweeper) => $sweeper->everyoneAnnounced($at, $at, true, now()->getTimestamp()));
+            }
         }
 
         $again = $sweeper->unannounced($now - Sweep::GIVE_UP_AFTER, $now - Sweep::GRACE, $now, $limit);

@@ -11,6 +11,9 @@ use Illuminate\Foundation\Events\Dispatchable;
  * registry's revokeEveryone()): each session that signed in up to $at, a
  * Unix timestamp. There's no RegisteredSessionEnded for each of them, as
  * the registry can't list them all.
+ *
+ * $at is a cut-off on when sessions signed in, not "now": one whose first
+ * dispatch was lost is sent again by keyring:sweep, up to a day later.
  */
 class EveryoneSignedOut
 {
