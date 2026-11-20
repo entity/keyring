@@ -442,7 +442,7 @@ trait KeyringConformance
             $this->markTestSkipped('The session registry driver keeps no note of announcements: only the database driver does.');
         }
 
-        $this->assertTrue($sweeper->canSweep(), 'The sessions table is missing the columns that note which ended sessions were announced (announced_at, end_reason, announce_attempts). Publish and run Keyring\'s migrations: php artisan keyring:install, then php artisan migrate.');
+        $this->assertTrue($sweeper->canSweep(), 'The sessions table is missing the columns that note which ended sessions were announced (announced_at, end_reason, announce_attempts, announce_after). Publish and run Keyring\'s migrations: php artisan keyring:install, then php artisan migrate.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void

@@ -308,9 +308,17 @@ class KeyringServiceProvider extends ServiceProvider
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
             // Before the prune, which leaves what the sweep has still to do.
             // One at a time, on one server: two would wait for each other's
-            // rows, and the second find nothing left.
+            // rows, and the second find nothing left. The lock that says one
+            // is running lasts a few runs, not Laravel's day, so a server
+            // that dies mid-sweep doesn't stop the sweep for longer than it
+            // keeps trying for. A setting it can't use only leaves it off,
+            // with a warning: it never stops the app's whole schedule.
+            if (($problem = Sweep::problem()) !== null) {
+                rescue(fn () => logger()->warning($problem), report: false);
+            }
+
             if (($every = Sweep::every()) !== null) {
-                $schedule->command(Console\SweepCommand::class)->cron(Sweep::cron($every))->withoutOverlapping()->onOneServer();
+                $schedule->command(Console\SweepCommand::class)->cron(Sweep::cron($every))->withoutOverlapping(Sweep::lockFor($every))->onOneServer();
             }
 
             if (($at = config('keyring.prune_at')) !== null) {

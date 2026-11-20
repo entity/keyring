@@ -987,7 +987,8 @@ it('prunes old devices, email changes, security events and ended sessions', func
     $recent = $event(1);
 
     $registry = app(SessionRegistry::class);
-    $registry->save(new RegisteredSession('ended', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subMinute()->getTimestamp()));
+    // One that expired with nothing to end it waits a day for the sweep.
+    $registry->save(new RegisteredSession('ended', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->subDay()->subMinute()->getTimestamp()));
     $registry->save(new RegisteredSession('live', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addDay()->getTimestamp()));
 
     $this->artisan('keyring:prune')->assertSuccessful();

@@ -469,9 +469,7 @@
         "Keyring\\Contracts\\SweepsSessions": [
             "announced",
             "canSweep",
-            "endedBecause",
             "sweep",
-            "timedOut",
             "unannounced"
         ],
         "Keyring\\Contracts\\TrustsAuthenticators": [

@@ -15,6 +15,15 @@ use Keyring\Enums\SessionEndReason;
 
 class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 {
+    /** The columns the sweep needs, from their own migration. */
+    public const array SWEEP_COLUMNS = ['announced_at', 'end_reason', 'announce_attempts', 'announce_after'];
+
+    /** How many IDs one statement names: SQLite takes the fewest. */
+    protected const int CHUNK = 500;
+
+    /** Whether the sweep's notes are kept, once asked (notes). */
+    protected ?bool $notes = null;
+
     public function __construct(
         protected ConnectionInterface $connection,
         protected string $table = 'keyring_sessions',
@@ -79,7 +88,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             }
 
             $now = now()->getTimestamp();
-            $this->query()->where('id', $id)->update(['revoked_at' => $now]);
+            $this->query()->where('id', $id)->update(['revoked_at' => $now, ...$this->reason()]);
 
             return $session->with(['revokedAt' => $now]);
         });
@@ -144,8 +153,10 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 
             $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
 
-            $found->pluck('id')->chunk(1000)->each(
-                fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now]),
+            $reason = $this->reason();
+
+            $found->pluck('id')->chunk(self::CHUNK)->each(
+                fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now, ...$reason]),
             );
 
             return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
@@ -168,6 +179,10 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     {
         $now = now()->getTimestamp();
 
+        // EveryoneSignedOut announces them all at once, so the sweep has
+        // none of them to announce one by one.
+        $announced = $this->notes() ? ['announced_at' => $now, 'end_reason' => SessionEndReason::Revoked->value] : [];
+
         do {
             $ids = $this->query()
                 ->useWritePdo()
@@ -177,22 +192,25 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
                 ->limit(1000)
                 ->pluck('id');
 
-            $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]);
+            $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$announced]);
         } while ($ids->isNotEmpty());
     }
 
     /**
-     * With the sweep off, every record that has expired or been revoked
-     * goes. With it on (Sweep::on), the sweep still has to end what has
-     * timed out and announce what was revoked, so a record goes once it's
-     * been announced, or once the sweep has given up on it. A replaced one
-     * is never announced, and goes when it expires, either way.
+     * Before the migration the sweep needs, every record that has expired or
+     * been revoked goes, as it always has. After it, whether or not a sweep
+     * is scheduled, a record goes once nothing is left to announce for it:
+     * a replaced one when it expires, a revoked one once it's announced or
+     * the sweep has given up on it (Sweep::GIVE_UP_AFTER). One that has
+     * timed out is left for the sweep to end, until a day past its expiry:
+     * with no sweep running, or one that can't keep up, the table can't
+     * grow without end.
      */
     public function prune(): int
     {
         $now = now()->getTimestamp();
 
-        if (! Sweep::on() || ! $this->canSweep()) {
+        if (! $this->canSweep()) {
             return $this->query()
                 ->where('expires_at', '<=', $now)
                 ->orWhere(fn (Builder $query) => $query->whereNotNull('revoked_at')->whereNull('replaced_by'))
@@ -204,135 +222,190 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             ->orWhere(fn (Builder $query) => $query->whereNotNull('revoked_at')->whereNull('replaced_by')->where(
                 fn (Builder $query) => $query->whereNotNull('announced_at')->orWhere('revoked_at', '<=', $now - Sweep::GIVE_UP_AFTER),
             ))
+            ->orWhere(fn (Builder $query) => $query->whereNull('revoked_at')->where('expires_at', '<=', $now - Sweep::GIVE_UP_AFTER))
             ->delete();
     }
 
     public function canSweep(): bool
     {
         return $this->connection instanceof Connection
-            && $this->connection->getSchemaBuilder()->hasColumns($this->table, ['announced_at', 'end_reason', 'announce_attempts']);
+            && $this->connection->getSchemaBuilder()->hasColumns($this->table, self::SWEEP_COLUMNS);
     }
 
     /**
-     * The records that have timed out are found on the write connection,
-     * then locked by their IDs, in ID order as revokeAll() locks a user's,
-     * so of two sweeps the second waits for the first, and the two never
-     * take the same rows in a different order. Locking by ID takes the rows
-     * alone, not a range of an index a sign-out is writing into, so a
-     * sign-out can't deadlock with it on MySQL. A row someone else ended
-     * meanwhile is left. Each of the rest is ended only if it has still
-     * timed out, with one $now for the lot, and read back by its new
-     * revoked_at while it's still locked: what's returned is exactly what
-     * this call ended, and a request that used one a moment ago keeps it.
+     * Whether to keep the notes the sweep reads (why each record ended,
+     * whether it was announced). Asked of the database once per process,
+     * and once a day across processes while the migration is still to be
+     * run: the answer "not yet" is kept in the cache, so a request doesn't
+     * pay for a schema query, or log a warning, each time it ends a
+     * session. Running the migration forgets it. A process that started
+     * before the migration (Octane, a queue worker) keeps not noting until
+     * it restarts.
      */
-    public function sweep(int $now, ?int $idle, ?int $rememberedIdle, int $limit): Collection
+    protected function notes(): bool
+    {
+        if ($this->notes !== null) {
+            return $this->notes;
+        }
+
+        $key = self::unmigratedKey($this->connection instanceof Connection ? $this->connection->getName() : null, $this->table);
+
+        if (rescue(fn () => cache()->has($key), false, report: false)) {
+            return $this->notes = false;
+        }
+
+        if (! $this->notes = $this->canSweep()) {
+            rescue(fn () => cache()->put($key, true, Sweep::GIVE_UP_AFTER), report: false);
+            rescue(fn () => logger()->warning("The [{$this->table}] table is missing the columns Keyring notes announced sessions in. Sessions end and are announced as usual, but none is announced again if its announcement is lost, and keyring:sweep won't run. Publish and run Keyring's migrations: php artisan keyring:install, then php artisan migrate."), report: false);
+        }
+
+        return $this->notes;
+    }
+
+    /**
+     * Where the cache keeps that a sessions table is still waiting for the
+     * migration the sweep needs.
+     */
+    public static function unmigratedKey(?string $connection, string $table): string
+    {
+        return 'keyring:sessions:unmigrated:'.sha1(($connection ?? '').'|'.$table);
+    }
+
+    /**
+     * What a revocation writes besides its time: why, if the notes are kept,
+     * so a record whose announcement is lost is announced again for the
+     * right reason. It's the reason in force where the call was made
+     * (AnnouncingSessionRegistry::because).
+     *
+     * @return array<string, string>
+     */
+    protected function reason(): array
+    {
+        return $this->notes() ? ['end_reason' => AnnouncingSessionRegistry::reason()->value] : [];
+    }
+
+    /**
+     * The records that have timed out are found oldest first, by the time
+     * each timed out, on the write connection: each kind with its own query
+     * on its own index. One more than $limit is asked for, to say whether
+     * more are left. Then they're locked by ID, in ID order, as revokeAll()
+     * locks a user's, so of two sweeps the second waits for the first, and
+     * a sweep and a sign-out never take the same rows in a different order.
+     * Locking by ID takes the rows alone, not a range of an index a sign-out
+     * is writing into. Whether each has timed out is decided again from the
+     * locked row, against one $now: one revoked or moved meanwhile is left,
+     * and so is one a request used a moment ago. The rest are ended by ID,
+     * still only if neither revoked nor replaced, so what's returned is
+     * exactly what this call ended. A deadlock is tried again, twice.
+     */
+    public function sweep(int $now, ?int $idle, ?int $rememberedIdle, int $limit): array
     {
         return $this->connection->transaction(function () use ($now, $idle, $rememberedIdle, $limit) {
-            $found = $this->timingOut($this->query()->useWritePdo(), $now, $idle, $rememberedIdle)->orderBy('id')->limit($limit)->pluck('id');
+            $open = fn () => $this->query()->useWritePdo()->whereNull('revoked_at')->whereNull('replaced_by');
 
-            $open = $found->isEmpty() ? [] : $this->query()
-                ->whereIn('id', $found->all())
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get(['id', 'revoked_at', 'replaced_by'])
-                ->filter(fn (object $row) => $row->revoked_at === null && $row->replaced_by === null)
-                ->pluck('id')
-                ->all();
+            /** @var array<string, int> $due when each timed out, by ID */
+            $due = $open()->where('expires_at', '<=', $now)->oldest('expires_at')->limit($limit + 1)->pluck('expires_at', 'id')->map(fn (mixed $at) => (int) $at)->all();
 
-            if ($open === []) {
-                return new Collection;
+            foreach ([false => $idle, true => $rememberedIdle] as $remembered => $limitFor) {
+                if ($limitFor === null) {
+                    continue;
+                }
+
+                $open()->where('remembered', (bool) $remembered)->where('last_activity_at', '<', $now - $limitFor)
+                    ->oldest('last_activity_at')->limit($limit + 1)->pluck('last_activity_at', 'id')
+                    ->each(function (mixed $at, string $id) use (&$due, $limitFor) {
+                        $due[$id] = min($due[$id] ?? PHP_INT_MAX, (int) $at + $limitFor + 1);
+                    });
             }
 
-            $still = fn () => $this->query()->whereIn('id', $open)->whereNull('revoked_at')->whereNull('replaced_by');
+            asort($due);
+            $ids = array_map(strval(...), array_keys(array_slice($due, 0, $limit, preserve_keys: true)));
+            sort($ids);
 
-            $still()->where('expires_at', '<=', $now)->update(['revoked_at' => $now, 'end_reason' => SessionEndReason::Expired->value]);
-            $this->idling($still()->where('expires_at', '>', $now), $now, $idle, $rememberedIdle)->update(['revoked_at' => $now, 'end_reason' => SessionEndReason::Idle->value]);
+            $ended = new Collection($ids)->chunk(self::CHUNK)
+                ->flatMap(fn (Collection $chunk) => $this->query()->whereIn('id', $chunk->values()->all())->orderBy('id')->lockForUpdate()->get())
+                ->map(fn (object $row) => RegisteredSession::fromArray((array) $row))
+                ->map(fn (RegisteredSession $session) => match (true) {
+                    $session->revokedAt !== null, $session->replacedBy !== null => null,
+                    $session->expiresAt <= $now => new EndedSession($session->with(['revokedAt' => $now]), SessionEndReason::Expired),
+                    $this->idledOut($session, $now, $idle, $rememberedIdle) => new EndedSession($session->with(['revokedAt' => $now]), SessionEndReason::Idle),
+                    default => null,
+                })
+                ->filter()
+                ->values();
 
-            return $this->query()->useWritePdo()
-                ->whereIn('id', $open)
-                ->where('revoked_at', $now)
-                ->whereIn('end_reason', [SessionEndReason::Expired->value, SessionEndReason::Idle->value])
-                ->orderBy('id')
-                ->get()
-                ->map(fn (object $row) => new EndedSession(RegisteredSession::fromArray((array) $row), SessionEndReason::from($row->end_reason)));
-        });
-    }
-
-    public function timedOut(int $now, ?int $idle, ?int $rememberedIdle): bool
-    {
-        return $this->timingOut($this->query()->useWritePdo(), $now, $idle, $rememberedIdle)->exists();
-    }
-
-    /**
-     * A record revoked before this driver kept why has no reason, and is
-     * announced again as plain "revoked".
-     */
-    public function unannounced(int $from, int $until, int $limit): Collection
-    {
-        return $this->query()->useWritePdo()
-            ->whereNotNull('revoked_at')
-            ->whereNull('replaced_by')
-            ->whereNull('announced_at')
-            ->where('revoked_at', '>', $from)
-            ->where('revoked_at', '<=', $until)
-            ->oldest('revoked_at')
-            ->orderBy('id')
-            ->limit($limit)
-            ->get()
-            ->map(fn (object $row) => new EndedSession(RegisteredSession::fromArray((array) $row), SessionEndReason::tryFrom((string) $row->end_reason) ?? SessionEndReason::Revoked));
-    }
-
-    /**
-     * In a transaction of its own, so a failure (a table still waiting for
-     * its migration) leaves the caller's transaction usable.
-     */
-    public function endedBecause(#[\SensitiveParameter] array $ids, SessionEndReason $reason): void
-    {
-        $this->connection->transaction(fn () => $this->query()->whereIn('id', $ids)->whereNull('end_reason')->update(['end_reason' => $reason->value]));
-    }
-
-    /**
-     * Each failure counts against the record, and the last one it's allowed
-     * marks it announced: a listener that always fails isn't run for it on
-     * every sweep.
-     */
-    public function announced(#[\SensitiveParameter] array $announced, #[\SensitiveParameter] array $failed, int $at, int $attempts): void
-    {
-        $this->connection->transaction(function () use ($announced, $failed, $at, $attempts) {
-            if ($announced !== []) {
-                $this->query()->whereIn('id', $announced)->update(['announced_at' => $at]);
+            foreach ([SessionEndReason::Expired, SessionEndReason::Idle] as $reason) {
+                $ended->filter(fn (EndedSession $one) => $one->reason === $reason)->map(fn (EndedSession $one) => $one->session->id)->chunk(self::CHUNK)->each(
+                    fn (Collection $chunk) => $this->query()->whereIn('id', $chunk->values()->all())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now, 'end_reason' => $reason->value]),
+                );
             }
 
-            if ($failed !== []) {
-                // Those on their last attempt first, so the rest can't be counted twice.
-                $this->query()->whereIn('id', $failed)->where('announce_attempts', '>=', $attempts - 1)->increment('announce_attempts', 1, ['announced_at' => $at]);
-                $this->query()->whereIn('id', $failed)->where('announce_attempts', '<', $attempts - 1)->increment('announce_attempts');
-            }
-        });
-    }
-
-    /**
-     * Records that are neither revoked nor replaced, and have expired or
-     * gone unused for too long: what the session middleware ends.
-     */
-    protected function timingOut(Builder $query, int $now, ?int $idle, ?int $rememberedIdle): Builder
-    {
-        return $query->whereNull('revoked_at')->whereNull('replaced_by')->where(
-            fn (Builder $query) => $this->idling($query->where('expires_at', '<=', $now), $now, $idle, $rememberedIdle, or: true),
-        );
+            return ['ended' => $ended, 'more' => count($due) > $limit];
+        }, attempts: 3);
     }
 
     /**
      * Unused for longer than the limit for its kind, as Sessions::idledOut()
      * has it: strictly more seconds than the limit since its last activity.
      */
-    protected function idling(Builder $query, int $now, ?int $idle, ?int $rememberedIdle, bool $or = false): Builder
+    protected function idledOut(RegisteredSession $session, int $now, ?int $idle, ?int $rememberedIdle): bool
     {
-        return $query->where(function (Builder $query) use ($now, $idle, $rememberedIdle) {
-            $query->whereRaw('1 = 0')
-                ->when($idle !== null, fn (Builder $query) => $query->orWhere(fn (Builder $query) => $query->where('remembered', false)->where('last_activity_at', '<', $now - (int) $idle)))
-                ->when($rememberedIdle !== null, fn (Builder $query) => $query->orWhere(fn (Builder $query) => $query->where('remembered', true)->where('last_activity_at', '<', $now - (int) $rememberedIdle)));
-        }, boolean: $or ? 'or' : 'and');
+        $limit = $session->remembered ? $rememberedIdle : $idle;
+
+        return $limit !== null && $now - $session->lastActivityAt > $limit;
+    }
+
+    /**
+     * Oldest first, one more than $limit to say whether more are left. Ones
+     * whose announcement failed wait for their next try (announce_after). A
+     * record revoked before this driver kept why has no reason, and is
+     * announced again as plain "revoked".
+     */
+    public function unannounced(int $from, int $until, int $now, int $limit): array
+    {
+        $found = $this->query()->useWritePdo()
+            ->whereNull('announced_at')
+            ->where('revoked_at', '>', $from)
+            ->where('revoked_at', '<=', $until)
+            ->whereNull('replaced_by')
+            ->where(fn (Builder $query) => $query->whereNull('announce_after')->orWhere('announce_after', '<=', $now))
+            ->oldest('revoked_at')
+            ->orderBy('id')
+            ->limit($limit + 1)
+            ->get();
+
+        return [
+            'ended' => $found->take($limit)->map(fn (object $row) => new EndedSession(RegisteredSession::fromArray((array) $row), SessionEndReason::tryFrom((string) $row->end_reason) ?? SessionEndReason::Revoked))->values(),
+            'more' => $found->count() > $limit,
+        ];
+    }
+
+    /**
+     * A failure counts against the record, and puts its next try off for
+     * longer each time (Sweep::retryAfter), until the sweep gives up on it
+     * a day after its revocation. In a transaction of its own, so a failed
+     * write leaves the caller's transaction usable.
+     */
+    public function announced(#[\SensitiveParameter] array $announced, #[\SensitiveParameter] array $failed, int $at): void
+    {
+        if (! $this->notes()) {
+            return;
+        }
+
+        $this->connection->transaction(function () use ($announced, $failed, $at) {
+            foreach (array_chunk($announced, self::CHUNK) as $chunk) {
+                $this->query()->whereIn('id', $chunk)->update(['announced_at' => $at]);
+            }
+
+            foreach (array_chunk($failed, self::CHUNK) as $chunk) {
+                $this->query()->whereIn('id', $chunk)->pluck('announce_attempts', 'id')
+                    ->groupBy(fn (mixed $attempts) => (int) $attempts, preserveKeys: true)
+                    ->each(fn (Collection $group, int $attempts) => $this->query()->whereIn('id', $group->keys()->map(strval(...))->all())->update([
+                        'announce_attempts' => $attempts + 1,
+                        'announce_after' => $at + Sweep::retryAfter($attempts + 1),
+                    ]));
+            }
+        });
     }
 
     /**

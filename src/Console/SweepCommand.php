@@ -25,6 +25,10 @@ class SweepCommand extends Command
 {
     public function handle(SessionRegistryManager $manager, Sessions $sessions): int
     {
+        if (($problem = Sweep::problem()) !== null) {
+            $this->components->warn($problem);
+        }
+
         $registry = $manager->driver();
         $sweeper = $registry instanceof AnnouncingSessionRegistry ? $registry->sweeper() : null;
 
@@ -45,7 +49,7 @@ class SweepCommand extends Command
         $this->components->info("Ended {$result?->ended} timed-out sessions, and announced {$result?->announcedAgain} ended sessions again.");
 
         if ($result?->more) {
-            $this->components->warn('More are left than one run may take ('.Sweep::limit().'). The next run carries on.');
+            $this->components->warn('More are left than one run may take ('.Sweep::limit().' of each). The next run carries on.');
         }
 
         return self::SUCCESS;

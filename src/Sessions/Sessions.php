@@ -114,6 +114,9 @@ class Sessions
                     fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
                 ])
                 ->skip(max(0, (int) $max - 1))
+                // In ID order, as the sweep and revokeAll() lock rows, so
+                // none of them waits on another for rows it holds itself.
+                ->sortBy(fn (RegisteredSession $other) => $other->id)
                 ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
         });
     }

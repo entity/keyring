@@ -233,11 +233,7 @@ class ConformanceTest extends TestCase
 
     public function test_the_suite_fails_when_the_migration_that_notes_announcements_was_not_run(): void
     {
-        Schema::table('keyring_sessions', function (Blueprint $table) {
-            $table->dropIndex(['last_activity_at']);
-            $table->dropIndex(['revoked_at']);
-            $table->dropColumn(['announced_at', 'end_reason', 'announce_attempts']);
-        });
+        (require __DIR__.'/../../database/migrations/2026_11_21_000001_add_announcements_to_keyring_sessions_table.php')->down();
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessage('Publish and run Keyring\'s migrations');

@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
@@ -143,7 +142,7 @@ describe('ending what timed out', function () {
 
         $this->artisan('keyring:sweep')
             ->expectsOutputToContain('Ended 2 timed-out sessions')
-            ->expectsOutputToContain('More are left than one run may take (2).')
+            ->expectsOutputToContain('More are left than one run may take (2 of each).')
             ->assertSuccessful();
 
         $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions')->doesntExpectOutputToContain('More are left')->assertSuccessful();
@@ -151,13 +150,36 @@ describe('ending what timed out', function () {
         expect($this->announced)->toHaveCount(3);
     });
 
-    it('says more are left while a timed-out session is still to be ended', function () {
-        swept($this->user, unused: 9000);
-        $registry = app(SessionRegistryManager::class)->driver();
+    it('takes the sessions that timed out longest ago first', function () {
+        config(['keyring.sessions.sweep_limit' => 2]);
+        $newest = swept($this->user, unused: 7300);
+        $oldest = swept($this->user, unused: 9000);
+        $expired = swept($this->user, expiresIn: -1000);
 
-        expect($registry->sweeper()->timedOut(now()->getTimestamp(), 7200, null))->toBeTrue()
-            ->and($registry->sweep(1, 7200, null)->more)->toBeTrue()
-            ->and($registry->sweeper()->timedOut(now()->getTimestamp(), 7200, null))->toBeFalse();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        // The expired one timed out 1000 seconds ago, the oldest idle one 1799.
+        expect(announcedReasons())->toEqual([handleFor($oldest) => 'idle', handleFor($expired) => 'expired'])
+            ->and(sweepRow($newest->id)->revoked_at)->toBeNull();
+    });
+
+    it('takes a session that both expired and idled out once, as expired', function () {
+        $both = swept($this->user, unused: 9000, expiresIn: -1);
+
+        $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions')->assertSuccessful();
+
+        expect(announcedReasons())->toBe([handleFor($both) => 'expired']);
+    });
+
+    it('ends more than one statement can name in one run', function () {
+        config(['keyring.sessions.sweep_limit' => 1200]);
+        $then = now()->getTimestamp() - 9000;
+        DB::table('keyring_sessions')->insert(collect(range(1, 1201))->map(fn (int $i) => new RegisteredSession(Str::random(40), (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $then, $then, $then + 86400)->toArray())->map(fn (array $row) => array_diff_key($row, ['origin' => true]))->all());
+
+        $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1200 timed-out sessions')->expectsOutputToContain('More are left')->assertSuccessful();
+
+        expect(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(1)
+            ->and(DB::table('keyring_sessions')->whereNotNull('announced_at')->count())->toBe(1200);
     });
 
     it('takes its limit from config only when it is a positive number', function (mixed $limit, int $taken) {
@@ -166,6 +188,8 @@ describe('ending what timed out', function () {
         expect(Sweep::limit())->toBe($taken);
     })->with([
         [50, 50],
+        [10000, 10000],
+        [50000, 10000],
         [0, 1000],
         ['lots', 1000],
         [null, 1000],
@@ -219,41 +243,91 @@ describe('announcing again', function () {
         expect($this->announced)->toHaveCount(2);
     });
 
-    it('tries a listener that failed again on the next runs, then stops', function () {
+    it('tries a listener that failed again later each time, and gives up after a day', function () {
         $session = swept($this->user, unused: 9000);
         Exceptions::fake();
         Event::listen(function (RegisteredSessionEnded $event): never {
             throw new RuntimeException('The client app is down.');
         });
+        $start = now()->getTimestamp();
 
         $this->artisan('keyring:sweep')->assertSuccessful();
-        expect(sweepRow($session->id))->toMatchObject(['announced_at' => null, 'announce_attempts' => 1]);
+        expect(sweepRow($session->id))->toMatchObject(['announced_at' => null, 'announce_attempts' => 1, 'announce_after' => $start + 300]);
 
-        $this->travel(Sweep::GRACE)->seconds();
-        $this->artisan('keyring:sweep')->expectsOutputToContain('announced 1 ended sessions again')->assertSuccessful();
-        expect(sweepRow($session->id))->toMatchObject(['announced_at' => null, 'announce_attempts' => 2]);
-
-        // The last attempt allowed counts it announced, whatever the listener does.
-        $this->artisan('keyring:sweep')->assertSuccessful();
-        expect(sweepRow($session->id))->toMatchObject(['announced_at' => now()->getTimestamp(), 'announce_attempts' => 3]);
-
-        $this->travel(Sweep::GRACE)->seconds();
+        // Before its next try is due, it's left alone.
+        $this->travel(299)->seconds();
         $this->artisan('keyring:sweep')->expectsOutputToContain('announced 0 ended sessions again')->assertSuccessful();
 
-        expect($this->announced)->toHaveCount(3);
-        Exceptions::assertReportedCount(3);
+        $tries = [$start];
+
+        for ($run = 0; now()->getTimestamp() < $start + Sweep::GIVE_UP_AFTER + 3600; $run++) {
+            $this->travel(60)->seconds();
+
+            if (sweepRow($session->id)->announce_after <= now()->getTimestamp() && now()->getTimestamp() - $start < Sweep::GIVE_UP_AFTER) {
+                $tries[] = now()->getTimestamp();
+            }
+
+            $this->artisan('keyring:sweep')->assertSuccessful();
+        }
+
+        // Five minutes, then doubling: 5, 15, 35, 75, 155, 315, 635 and 1275 minutes in.
+        expect(array_map(fn (int $at) => intdiv($at - $start, 60), $tries))->toBe([0, 5, 15, 35, 75, 155, 315, 635, 1275])
+            ->and($this->announced)->toHaveCount(9)
+            ->and(sweepRow($session->id)->announced_at)->toBeNull();
+        Exceptions::assertReportedCount(9);
+
+        // Once it's given up on, pruning forgets it.
+        $this->artisan('keyring:prune')->assertSuccessful();
+        expect(DB::table('keyring_sessions')->where('id', $session->id)->exists())->toBeFalse();
     });
 
-    it('announces again only what the run has room left for', function () {
+    it('announces a session lost during an outage of a couple of hours once the listener works again', function () {
+        $session = swept($this->user, unused: 9000);
+        Exceptions::fake();
+        $outage = new ArrayObject(['down' => true]);
+        Event::listen(function (RegisteredSessionEnded $event) use ($outage) {
+            if ($outage['down']) {
+                throw new RuntimeException('The client app is down.');
+            }
+        });
+
+        for ($minutes = 0; $minutes < 120; $minutes += 5) {
+            $this->artisan('keyring:sweep')->assertSuccessful();
+            $this->travel(5)->minutes();
+        }
+
+        $outage['down'] = false;
+        $this->travel(2)->hours();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect(sweepRow($session->id)->announced_at)->toBe(now()->getTimestamp());
+    });
+
+    it('gives lost announcements an allowance of their own, ahead of a backlog of timeouts', function () {
         config(['keyring.sessions.sweep_limit' => 2]);
         $now = now()->getTimestamp();
-        swept($this->user, unused: 9000);
-        collect([1, 2])->each(fn () => DB::table('keyring_sessions')->where('id', swept($this->user)->id)->update(['revoked_at' => $now - 3600]));
+        collect([1, 2, 3])->each(fn () => swept($this->user, unused: 9000));
+        $lost = collect([1, 2])->map(function () use ($now) {
+            $session = swept($this->user);
+            DB::table('keyring_sessions')->where('id', $session->id)->update(['revoked_at' => $now - 3600]);
+
+            return handleFor($session);
+        });
 
         $this->artisan('keyring:sweep')
-            ->expectsOutputToContain('Ended 1 timed-out sessions, and announced 1 ended sessions again.')
+            ->expectsOutputToContain('Ended 2 timed-out sessions, and announced 2 ended sessions again.')
             ->expectsOutputToContain('More are left')
             ->assertSuccessful();
+
+        expect($this->announced->take(2)->pluck('handle')->sort()->values()->all())->toBe($lost->sort()->values()->all());
+    });
+
+    it('says more lost announcements are left when they fill the allowance', function () {
+        config(['keyring.sessions.sweep_limit' => 1]);
+        $now = now()->getTimestamp();
+        collect([1, 2])->each(fn () => DB::table('keyring_sessions')->where('id', swept($this->user)->id)->update(['revoked_at' => $now - 3600]));
+
+        $this->artisan('keyring:sweep')->expectsOutputToContain('announced 1 ended sessions again')->expectsOutputToContain('More are left')->assertSuccessful();
     });
 
     it('counts a record whose event could not be made as a failed attempt', function () {
@@ -265,12 +339,34 @@ describe('announcing again', function () {
 
         expect(sweepRow($session->id))->toMatchObject(['announced_at' => null, 'announce_attempts' => 1]);
     });
+
+    it('notes everyone signed out as announced, so the sweep doesn\'t announce them one by one', function () {
+        collect([1, 2, 3, 4, 5])->each(fn () => swept($this->user));
+
+        app(SessionRegistry::class)->revokeEveryone();
+        $this->travel(Sweep::GRACE + 1)->seconds();
+        $this->artisan('keyring:sweep')->expectsOutputToContain('announced 0 ended sessions again')->assertSuccessful();
+
+        expect($this->announced)->toBeEmpty()
+            ->and(DB::table('keyring_sessions')->whereNull('announced_at')->count())->toBe(0);
+    });
+
+    it('keeps why a session ended in the same write that revokes it', function () {
+        $sessions = collect([1, 2])->map(fn () => swept($this->user));
+        $queries = new Collection;
+        DB::listen(fn ($query) => str_starts_with($query->sql, 'update') && $queries->push($query->sql));
+
+        app(Sessions::class)->because(SessionEndReason::PasswordReset, fn () => app(SessionRegistry::class)->revokeAll($this->user));
+
+        expect($sessions->map(fn (RegisteredSession $session) => sweepRow($session->id)->end_reason)->all())->toBe(['password_reset', 'password_reset'])
+            ->and($queries->filter(fn (string $sql) => str_contains($sql, 'end_reason'))->count())->toBe(1);
+    });
 });
 
 it('still ends and announces a session when noting it fails', function () {
     app(SessionRegistryManager::class)->extend('forgetful', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
     {
-        public function announced(array $announced, array $failed, int $at, int $attempts): void
+        public function announced(array $announced, array $failed, int $at): void
         {
             throw new RuntimeException('The note could not be written.');
         }
@@ -287,38 +383,60 @@ it('still ends and announces a session when noting it fails', function () {
 
 describe('before the migration has run', function () {
     beforeEach(function () {
-        Schema::table('keyring_sessions', function (Blueprint $table) {
-            $table->dropIndex(['last_activity_at']);
-            $table->dropIndex(['revoked_at']);
-            $table->dropColumn(['announced_at', 'end_reason', 'announce_attempts']);
-        });
+        (require __DIR__.'/../../database/migrations/2026_11_21_000001_add_announcements_to_keyring_sessions_table.php')->down();
     });
 
-    it('still signs in and out, announces, and says once what is missing', function () {
-        Exceptions::fake();
-        $first = swept($this->user);
-        $second = swept($this->user);
+    it('still signs in and out and announces, and warns once a day, not on every request', function () {
+        Log::spy();
+        $sessions = collect([1, 2, 3])->map(fn () => swept($this->user));
 
-        app(SessionRegistry::class)->revoke($first->id);
-        app(SessionRegistry::class)->revoke($second->id);
+        app(SessionRegistry::class)->revoke($sessions[0]->id);
+
+        // A new process: nothing kept in it from the one before.
+        app(SessionRegistryManager::class)->forgetDrivers();
+        $queries = new Collection;
+        DB::listen(fn ($query) => $queries->push($query->sql));
+        app(SessionRegistry::class)->revoke($sessions[1]->id);
 
         expect($this->announced)->toHaveCount(2)
-            ->and(app(SessionRegistry::class)->find($first->id)->revokedAt)->not->toBeNull();
-        Exceptions::assertReportedCount(1);
-        Exceptions::assertReported(fn (RuntimeException $e) => str_contains($e->getMessage(), 'publish and run Keyring\'s migrations'));
+            ->and(app(SessionRegistry::class)->find($sessions[1]->id)->revokedAt)->not->toBeNull()
+            ->and($queries->filter(fn (string $sql) => str_contains($sql, 'information_schema') || str_contains($sql, 'pragma') || str_contains($sql, 'sqlite_master'))->all())->toBe([]);
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, 'Publish and run Keyring\'s migrations'));
+
+        // A day later it looks again.
+        $this->travel(Sweep::GIVE_UP_AFTER + 1)->seconds();
+        app(SessionRegistryManager::class)->forgetDrivers();
+        app(SessionRegistry::class)->revoke($sessions[2]->id);
+        Log::shouldHaveReceived('warning')->twice();
+    });
+
+    it('starts noting at once when the migration runs', function () {
+        $session = swept($this->user);
+        app(SessionRegistry::class)->revoke(swept($this->user)->id);
+
+        (require __DIR__.'/../../database/migrations/2026_11_21_000001_add_announcements_to_keyring_sessions_table.php')->up();
+        app(SessionRegistryManager::class)->forgetDrivers();
+        app(SessionRegistry::class)->revoke($session->id);
+
+        expect(sweepRow($session->id)->announced_at)->toBe(now()->getTimestamp());
     });
 
     it('refuses to sweep, and says how to fix it', function () {
         $this->artisan('keyring:sweep')->expectsOutputToContain('Publish and run Keyring\'s migrations')->assertFailed();
     });
 
-    it('prunes as it always has, though the sweep is on', function () {
+    it('prunes as it always has, whatever the sweep is set to', function () {
         config(['keyring.sessions.sweep_every' => '5m']);
         $expired = swept($this->user, expiresIn: -1);
+        $revoked = swept($this->user);
+        app(SessionRegistry::class)->revoke($revoked->id);
+        $queries = new Collection;
+        DB::listen(fn ($query) => str_starts_with($query->sql, 'delete') && $queries->push($query->sql));
 
-        expect(app(SessionRegistry::class)->prune())->toBe(1)
-            ->and(app(SessionRegistry::class)->find($expired->id))->toBeNull();
-    });
+        expect(app(SessionRegistry::class)->prune())->toBe(2)
+            ->and(app(SessionRegistry::class)->find($expired->id))->toBeNull()
+            ->and($queries->all())->toBe(['delete from "keyring_sessions" where "expires_at" <= ? or ("revoked_at" is not null and "replaced_by" is null)']);
+    })->skip(fn () => DB::connection()->getDriverName() !== 'sqlite', 'The SQL is compared as SQLite writes it.');
 });
 
 it('counts what was revoked before the migration as announced', function () {
@@ -352,6 +470,7 @@ describe('pruning', function () {
 
         $this->rows = [
             'timed out' => swept($this->user, expiresIn: -1),
+            'expired over a day ago' => swept($this->user, expiresIn: -Sweep::GIVE_UP_AFTER),
             'live' => swept($this->user),
             'announced' => swept($this->user),
             'unannounced' => swept($this->user),
@@ -368,18 +487,38 @@ describe('pruning', function () {
 
     $kept = fn () => collect($this->rows)->filter(fn (RegisteredSession $session) => DB::table('keyring_sessions')->where('id', $session->id)->exists())->keys()->all();
 
-    it('forgets every expired or revoked record with the sweep off', function () use ($kept) {
-        $this->artisan('keyring:prune')->assertSuccessful();
+    // Whether a sweep is scheduled, scheduled by the app itself, or failing:
+    // what's left is the same, and nothing outlives its expiry by more
+    // than a day.
+    it('leaves what a sweep has still to do, whether or not one is scheduled', function (mixed $every) use ($kept) {
+        config(['keyring.sessions.sweep_every' => $every]);
 
-        expect($kept->call($this))->toBe(['live', 'moved']);
-    });
-
-    it('leaves what the sweep has still to do with the sweep on', function () use ($kept) {
-        config(['keyring.sessions.sweep_every' => '5m']);
-
-        $this->artisan('keyring:prune')->expectsOutputToContain('Pruned 3 ended sessions.')->assertSuccessful();
+        $this->artisan('keyring:prune')->expectsOutputToContain('Pruned 4 ended sessions.')->assertSuccessful();
 
         expect($kept->call($this))->toBe(['timed out', 'live', 'unannounced', 'moved']);
+    })->with([
+        'scheduled' => ['5m'],
+        'never scheduled, or scheduled by the app' => [null],
+    ]);
+
+    it('leaves what a sweep that keeps failing has to do, up to a day past its expiry', function () use ($kept) {
+        app(SessionRegistryManager::class)->extend('failing', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function sweep(int $now, ?int $idle, ?int $rememberedIdle, int $limit): array
+            {
+                throw new RuntimeException('The sweep failed.');
+            }
+        });
+        config(['keyring.sessions.driver' => 'failing']);
+
+        expect(fn () => $this->artisan('keyring:sweep'))->toThrow(RuntimeException::class);
+
+        // A day on, what timed out back then, and the revocations nobody
+        // announced, are gone. The one that was live has only just expired.
+        $this->travel(Sweep::GIVE_UP_AFTER)->seconds();
+        $this->artisan('keyring:prune')->assertSuccessful();
+
+        expect($kept->call($this))->toBe(['live']);
     });
 });
 
@@ -395,7 +534,7 @@ describe('scheduling', function () {
             ->and(Sweep::on())->toBeFalse();
     });
 
-    it('sweeps as often as sweep_every says, one at a time on one server, before the prune', function (string $every, string $expression) use ($sweeps) {
+    it('sweeps as often as sweep_every says, one at a time on one server, before the prune', function (string $every, string $expression, int $lock) use ($sweeps) {
         config(['keyring.sessions.sweep_every' => $every]);
         $events = $sweeps();
         $sweep = $events->search(fn (ScheduledEvent $event) => str_contains((string) $event->command, 'keyring:sweep'));
@@ -403,26 +542,44 @@ describe('scheduling', function () {
 
         expect($events[$sweep]->expression)->toBe($expression)
             ->and($events[$sweep]->withoutOverlapping)->toBeTrue()
+            ->and($events[$sweep]->expiresAt)->toBe($lock)
             ->and($events[$sweep]->onOneServer)->toBeTrue()
             ->and($sweep)->toBeLessThan($prune);
     })->with([
-        ['5m', '*/5 * * * *'],
-        ['30s', '*/1 * * * *'],
-        ['2h', '0 */2 * * *'],
-        ['1d', '0 0 * * *'],
-        ['15', '*/1 * * * *'],
+        ['5m', '*/5 * * * *', 10],
+        ['30s', '*/1 * * * *', 10],
+        ['15', '*/1 * * * *', 10],
+        ['2h', '0 */2 * * *', 240],
+        ['12h', '0 */12 * * *', 360],
     ]);
 
-    it('takes anything that isn\'t a duration as off', function (mixed $every) use ($sweeps) {
+    it('runs no less often than every 12 hours, and says so', function (string $every) use ($sweeps) {
+        Log::spy();
         config(['keyring.sessions.sweep_every' => $every]);
 
-        expect($sweeps()->filter(fn (ScheduledEvent $event) => str_contains((string) $event->command, 'keyring:sweep')))->toBeEmpty()
+        expect($sweeps()->first(fn (ScheduledEvent $event) => str_contains((string) $event->command, 'keyring:sweep'))->expression)->toBe('0 */12 * * *');
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, 'longer than 12 hours'));
+
+        $this->artisan('keyring:sweep')->expectsOutputToContain('longer than 12 hours')->assertSuccessful();
+    })->with(['13h', '1d', '7d']);
+
+    it('takes anything that isn\'t a duration as off, warns, and leaves the rest of the schedule alone', function (mixed $every, string $warning) use ($sweeps) {
+        Log::spy();
+        config(['keyring.sessions.sweep_every' => $every]);
+        $events = $sweeps();
+
+        expect($events->filter(fn (ScheduledEvent $event) => str_contains((string) $event->command, 'keyring:sweep')))->toBeEmpty()
+            ->and($events->filter(fn (ScheduledEvent $event) => str_contains((string) $event->command, 'keyring:prune')))->toHaveCount(1)
             ->and(Sweep::on())->toBeFalse();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, $warning));
+
+        $this->artisan('keyring:sweep')->expectsOutputToContain($warning)->assertSuccessful();
     })->with([
-        'junk' => ['often'],
-        'zero' => ['0'],
-        'a list' => [['5m']],
-        'true' => [true],
+        'junk' => ['often', 'isn\'t a duration'],
+        'spaced out' => ['5 min', 'isn\'t a duration'],
+        'zero' => ['0', 'is zero'],
+        'a list' => [['5m'], 'isn\'t a duration'],
+        'true' => [true, 'isn\'t a duration'],
     ]);
 });
 
