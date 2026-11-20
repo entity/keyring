@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\DatabaseTransactionsManager;
+use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\MissingAppKeyException;
 use Illuminate\Http\Request;
@@ -918,6 +919,18 @@ class SignsOutForMaintenance extends AuthenticateSession
 }
 
 /**
+ * A user Keyring takes for one being soft deleted.
+ */
+#[Table(name: 'users')]
+class SoftDeletedWithoutSchema extends User
+{
+    public function isForceDeleting(): bool
+    {
+        return false;
+    }
+}
+
+/**
  * Something an app wraps the registry in, as app()->extend() does.
  */
 class CountingRegistry implements SessionRegistry
@@ -1227,8 +1240,9 @@ describe('more transactions', function () {
     });
 
     it('announces nothing for a soft deleted user whose deletion is rolled back', function () {
-        Schema::table('users', fn (Blueprint $table) => $table->softDeletes());
-        $user = SoftDeletingUser::findOrFail($this->user->id);
+        // Taken for soft deleted by Keyring, without a schema change: that
+        // would commit the test's own transaction on MySQL.
+        $user = SoftDeletedWithoutSchema::findOrFail($this->user->id);
         $session = sessionElsewhere($user);
 
         expect(fn () => DB::transaction(function () use ($user): never {
@@ -1238,7 +1252,7 @@ describe('more transactions', function () {
         }))->toThrow(RuntimeException::class);
 
         expect($this->announced)->toBeEmpty()
-            ->and(SoftDeletingUser::find($user->id))->not->toBeNull()
+            ->and(User::find($user->id))->not->toBeNull()
             ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->toBeNull();
     });
 });
