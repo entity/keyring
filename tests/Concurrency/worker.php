@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
@@ -115,6 +116,16 @@ try {
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
+        'sweep' => (function () {
+            $announced = [];
+            Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {
+                $announced[] = $event->handle;
+            });
+
+            Artisan::call('keyring:sweep');
+
+            return $announced;
+        })(),
         'announce-revoke-all' => (function () use ($id) {
             $announced = [];
             Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {
