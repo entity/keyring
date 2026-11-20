@@ -107,11 +107,12 @@ class AuthenticatorController
 
         // Where they were going when sent here, as data rather than a
         // redirect: a page with new recovery codes on it has to stay up
-        // until they're saved.
+        // until they're saved. New recovery codes meet no requirement, so
+        // they'd only be sent back here.
         return $this->status('authenticator-added', array_filter([
             'authenticator' => $authenticator->factor()->present($authenticator),
             'recoveryCodes' => $recoveryCodes,
-            'continue' => $this->detours->pull($request, Detours::ENROLLMENT),
+            'continue' => $factor->key() === RecoveryCodes::KEY ? null : $this->detours->pull($request, Detours::ENROLLMENT),
         ]));
     }
 
