@@ -848,6 +848,22 @@ describe('a "remember me" cookie that has been used', function () {
         expect(sessionEndedReasons())->toBe(['reused', 'revoked', 'revoked']);
     });
 
+    it('still gives itself away after the sweep ended the session it was carried on to and the prune ran', function () {
+        $first = rememberedSignIn();
+        $second = [...$first, ...keptCookies(comeBack($first)->assertOk())];
+
+        $this->travel(15)->days();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+        $this->travel(2)->days();
+        $this->artisan('keyring:prune')->assertSuccessful();
+
+        expect(app(SessionRegistry::class)->find($second['remembered_session']))->not->toBeNull();
+
+        comeBack($first)->assertRedirect('/login');
+
+        expect(reuses())->toHaveCount(1);
+    });
+
     it('stays quiet when the session it was carried on to was signed out on purpose', function () {
         $first = rememberedSignIn();
         $second = [...$first, ...keptCookies(comeBack($first)->assertOk())];

@@ -313,7 +313,8 @@ class KeyringServiceProvider extends ServiceProvider
             // that dies mid-sweep doesn't stop the sweep for longer than it
             // keeps trying for. A setting it can't use only leaves it off,
             // with a warning: it never stops the app's whole schedule.
-            if (($problem = Sweep::problem()) !== null) {
+            // Once a day: the schedule is read every minute.
+            if (($problem = Sweep::problem()) !== null && rescue(fn () => cache()->add('keyring:sweep:problem:'.sha1($problem), true, Sweep::GIVE_UP_AFTER), true, report: false)) {
                 rescue(fn () => logger()->warning($problem), report: false);
             }
 

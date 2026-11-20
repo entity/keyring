@@ -44,6 +44,9 @@ use Throwable;
  */
 class AnnouncingSessionRegistry implements SessionRegistry
 {
+    /** How many announcements go out between notes of which went out. */
+    protected const int NOTE_EVERY = 500;
+
     /**
      * The reason in force, for the whole process: whatever wraps this
      * registry, or however many of these there are, a reason given around
@@ -147,13 +150,17 @@ class AnnouncingSessionRegistry implements SessionRegistry
      */
     public function revokeEveryone(): void
     {
+        $from = now()->getTimestamp();
+
         try {
             $this->registry->revokeEveryone();
         } finally {
             $event = new EveryoneSignedOut(now()->getTimestamp());
 
-            $this->whenDurable(function () use ($event): void {
-                $this->dispatch($event);
+            $this->whenDurable(function () use ($event, $from): void {
+                $announced = $this->dispatch($event);
+
+                $this->note(fn (SweepsSessions $sweeper) => $sweeper->everyoneAnnounced($from, $event->at, $announced, now()->getTimestamp()));
             });
         }
     }
@@ -211,10 +218,18 @@ class AnnouncingSessionRegistry implements SessionRegistry
 
         $now = now()->getTimestamp();
 
+        // A sign-out of everyone whose event was lost goes again, as itself.
+        foreach ($sweeper->everyoneUnannounced($now - Sweep::GIVE_UP_AFTER, $now - Sweep::GRACE, $now) as $at) {
+            $announced = $this->dispatch(new EveryoneSignedOut($at));
+
+            $this->note(fn (SweepsSessions $sweeper) => $sweeper->everyoneAnnounced($at, $at, $announced, now()->getTimestamp()));
+        }
+
         $again = $sweeper->unannounced($now - Sweep::GIVE_UP_AFTER, $now - Sweep::GRACE, $now, $limit);
         $this->announceAll($again['ended']);
 
-        $ended = $sweeper->sweep($now, $idle, $rememberedIdle, $limit);
+        // A fresh moment: announcing may have taken a while.
+        $ended = $sweeper->sweep(now()->getTimestamp(), $idle, $rememberedIdle, $limit);
         $this->announceAll($ended['ended']);
 
         return new SweepResult(ended: $ended['ended']->count(), announcedAgain: $again['ended']->count(), more: $ended['more'] || $again['more']);
@@ -260,14 +275,24 @@ class AnnouncingSessionRegistry implements SessionRegistry
             }
         }
 
+        // Noted a chunk at a time, so a run that's killed part way, or a
+        // listener that dies on one record, doesn't leave every one before
+        // it to be announced again.
         $this->whenDurable(function () use ($events, $failed) {
-            $announced = [];
+            foreach (array_chunk($events, self::NOTE_EVERY) as $i => $chunk) {
+                $announced = [];
+                $failedHere = $i === 0 ? $failed : [];
 
-            foreach ($events as [$session, $event]) {
-                $this->announce($session, $event) ? $announced[] = $session->id : $failed[] = $session->id;
+                foreach ($chunk as [$session, $event]) {
+                    $this->announce($session, $event) ? $announced[] = $session->id : $failedHere[] = $session->id;
+                }
+
+                $this->noteAnnounced($announced, $failedHere);
             }
 
-            $this->noteAnnounced($announced, $failed);
+            if ($events === []) {
+                $this->noteAnnounced([], $failed);
+            }
         });
     }
 
@@ -311,8 +336,21 @@ class AnnouncingSessionRegistry implements SessionRegistry
      */
     protected function noteAnnounced(#[\SensitiveParameter] array $announced, #[\SensitiveParameter] array $failed): void
     {
+        $this->note(fn (SweepsSessions $sweeper) => $sweeper->announced($announced, $failed, now()->getTimestamp()));
+    }
+
+    /**
+     * Write a note for the sweep, if the driver keeps them. A write that
+     * fails is reported, and changes nothing else.
+     *
+     * @param  Closure(SweepsSessions): void  $write
+     */
+    protected function note(Closure $write): void
+    {
         try {
-            $this->sweeper()?->announced($announced, $failed, now()->getTimestamp());
+            if (($sweeper = $this->sweeper()) !== null) {
+                $write($sweeper);
+            }
         } catch (Throwable $e) {
             $this->report($e);
         }

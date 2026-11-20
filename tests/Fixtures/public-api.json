@@ -469,6 +469,8 @@
         "Keyring\\Contracts\\SweepsSessions": [
             "announced",
             "canSweep",
+            "everyoneAnnounced",
+            "everyoneUnannounced",
             "sweep",
             "unannounced"
         ],

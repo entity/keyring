@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\SessionEndReason;
+use Keyring\Events\EveryoneSignedOut;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Sessions\AnnouncingSessionRegistry;
 use Keyring\Sessions\CacheSessionRegistry;
@@ -190,6 +191,9 @@ describe('ending what timed out', function () {
         [50, 50],
         [10000, 10000],
         [50000, 10000],
+        ['250', 250],
+        [' 250 ', 250],
+        ['2.5', 1000],
         [0, 1000],
         ['lots', 1000],
         [null, 1000],
@@ -340,6 +344,50 @@ describe('announcing again', function () {
         expect(sweepRow($session->id))->toMatchObject(['announced_at' => null, 'announce_attempts' => 1]);
     });
 
+    it('sends a lost EveryoneSignedOut again, as itself, and never announces its sessions one by one', function () {
+        $sessions = collect([1, 2, 3])->map(fn () => swept($this->user));
+        Exceptions::fake();
+        $everyone = new Collection;
+        $outage = new ArrayObject(['down' => true]);
+        Event::listen(function (EveryoneSignedOut $event) use ($everyone, $outage) {
+            $everyone->push($event->at);
+
+            if ($outage['down']) {
+                throw new RuntimeException('The client app is down.');
+            }
+        });
+        $at = now()->getTimestamp();
+
+        app(SessionRegistry::class)->revokeEveryone();
+
+        expect(DB::table('keyring_sessions')->whereNull('announced_at')->count())->toBe(3)
+            ->and(sweepRow($sessions[0]->id)->end_reason)->toBe(DatabaseSessionRegistry::EVERYONE);
+
+        $outage['down'] = false;
+        $this->travel(Sweep::GRACE)->seconds();
+        $this->artisan('keyring:sweep')->expectsOutputToContain('announced 0 ended sessions again')->assertSuccessful();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect($everyone->all())->toBe([$at, $at])
+            ->and($this->announced)->toBeEmpty()
+            ->and(DB::table('keyring_sessions')->whereNull('announced_at')->count())->toBe(0);
+    });
+
+    it('notes a great many announcements as it goes, not only at the end', function () {
+        $then = now()->getTimestamp() - 9000;
+        DB::table('keyring_sessions')->insert(collect(range(1, 501))->map(fn (int $i) => array_diff_key(new RegisteredSession(Str::random(40), (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $then, $then, $then + 86400)->toArray(), ['origin' => true]))->all());
+        $notedBeforeTheLast = null;
+        Event::listen(function (RegisteredSessionEnded $event) use (&$notedBeforeTheLast) {
+            if ($this->announced->count() === 501) {
+                $notedBeforeTheLast = DB::table('keyring_sessions')->whereNotNull('announced_at')->count();
+            }
+        });
+
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect($notedBeforeTheLast)->toBe(500);
+    });
+
     it('notes everyone signed out as announced, so the sweep doesn\'t announce them one by one', function () {
         collect([1, 2, 3, 4, 5])->each(fn () => swept($this->user));
 
@@ -381,26 +429,81 @@ it('still ends and announces a session when noting it fails', function () {
     Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The note could not be written.');
 });
 
+describe('a stale note that the migration is missing', function () {
+    beforeEach(function () {
+        // Left by a process that looked before the migration ran, in a
+        // cache the migration couldn't clear.
+        cache()->put(DatabaseSessionRegistry::unmigratedKey(DB::connection()->getName(), 'keyring_sessions'), true, 300);
+    });
+
+    it('doesn\'t stop an announcement being noted, so the sweep doesn\'t announce it again', function () {
+        $session = swept($this->user);
+
+        app(SessionRegistry::class)->revoke($session->id);
+        $this->travel(Sweep::GRACE + 1)->seconds();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect($this->announced)->toHaveCount(1)
+            ->and(sweepRow($session->id)->announced_at)->not->toBeNull()
+            ->and(cache()->has(DatabaseSessionRegistry::unmigratedKey(DB::connection()->getName(), 'keyring_sessions')))->toBeFalse();
+    });
+
+    it('still tries a failed announcement again until the listener takes it', function () {
+        $session = swept($this->user);
+        Exceptions::fake();
+        $outage = new ArrayObject(['down' => true]);
+        Event::listen(function (RegisteredSessionEnded $event) use ($outage) {
+            if ($outage['down']) {
+                throw new RuntimeException('The client app is down.');
+            }
+        });
+
+        app(SessionRegistry::class)->revoke($session->id);
+        expect(sweepRow($session->id)->announce_attempts)->toBe(1);
+
+        $this->travel(Sweep::GRACE)->seconds();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+        expect(sweepRow($session->id)->announce_attempts)->toBe(2);
+
+        $outage['down'] = false;
+        $this->travel(Sweep::retryAfter(2))->seconds();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect(sweepRow($session->id)->announced_at)->toBe(now()->getTimestamp())
+            ->and($this->announced)->toHaveCount(3);
+    });
+});
+
 describe('before the migration has run', function () {
     beforeEach(function () {
         (require __DIR__.'/../../database/migrations/2026_11_21_000001_add_announcements_to_keyring_sessions_table.php')->down();
     });
 
-    it('still signs in and out and announces, and warns once a day, not on every request', function () {
+    it('still signs in and out and announces, and warns once a day', function () {
         Log::spy();
         $sessions = collect([1, 2, 3])->map(fn () => swept($this->user));
 
         app(SessionRegistry::class)->revoke($sessions[0]->id);
 
-        // A new process: nothing kept in it from the one before.
-        app(SessionRegistryManager::class)->forgetDrivers();
+        $schema = fn (Collection $queries) => $queries->filter(fn (string $sql) => str_contains($sql, 'information_schema') || str_contains($sql, 'pragma') || str_contains($sql, 'sqlite_master'))->count();
         $queries = new Collection;
         DB::listen(fn ($query) => $queries->push($query->sql));
+        app(SessionRegistryManager::class)->driver('database')->inner()->canSweep();
+        $oneLook = $schema($queries);
+
+        // A new process: nothing kept in it from the one before.
+        app(SessionRegistryManager::class)->forgetDrivers();
+        $queries->splice(0);
         app(SessionRegistry::class)->revoke($sessions[1]->id);
 
         expect($this->announced)->toHaveCount(2)
             ->and(app(SessionRegistry::class)->find($sessions[1]->id)->revokedAt)->not->toBeNull()
-            ->and($queries->filter(fn (string $sql) => str_contains($sql, 'information_schema') || str_contains($sql, 'pragma') || str_contains($sql, 'sqlite_master'))->all())->toBe([]);
+            // The revocation takes the cache's word. Only noting the
+            // announcement asks the database again, so a table migrated
+            // meanwhile isn't missed.
+            ->and($schema($queries))->toBe($oneLook);
         Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, 'Publish and run Keyring\'s migrations'));
 
         // A day later it looks again.
@@ -419,6 +522,17 @@ describe('before the migration has run', function () {
         app(SessionRegistry::class)->revoke($session->id);
 
         expect(sweepRow($session->id)->announced_at)->toBe(now()->getTimestamp());
+    });
+
+    it('still signs everyone out, and says so', function () {
+        $session = swept($this->user);
+        $everyone = new Collection;
+        Event::listen(fn (EveryoneSignedOut $event) => $everyone->push($event));
+
+        app(SessionRegistry::class)->revokeEveryone();
+
+        expect($everyone)->toHaveCount(1)
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
     });
 
     it('refuses to sweep, and says how to fix it', function () {
@@ -552,6 +666,19 @@ describe('scheduling', function () {
         ['2h', '0 */2 * * *', 240],
         ['12h', '0 */12 * * *', 360],
     ]);
+
+    it('warns of a setting it can\'t use once a day, though the schedule is read every minute', function () use ($sweeps) {
+        Log::spy();
+        config(['keyring.sessions.sweep_every' => 'often']);
+
+        $sweeps();
+        $sweeps();
+        Log::shouldHaveReceived('warning')->once();
+
+        $this->travel(Sweep::GIVE_UP_AFTER + 1)->seconds();
+        $sweeps();
+        Log::shouldHaveReceived('warning')->twice();
+    });
 
     it('runs no less often than every 12 hours, and says so', function (string $every) use ($sweeps) {
         Log::spy();

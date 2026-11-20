@@ -114,9 +114,15 @@ class Sessions
                     fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
                 ])
                 ->skip(max(0, (int) $max - 1))
-                // In ID order, as the sweep and revokeAll() lock rows, so
-                // none of them waits on another for rows it holds itself.
-                ->sortBy(fn (RegisteredSession $other) => $other->id)
+                // By ID, byte by byte. That's the order the sweep and
+                // revokeAll() lock rows in where the database sorts IDs the
+                // same way (SQLite, or a binary or "C" collation). Where it
+                // sorts them otherwise (MySQL's utf8mb4_*_ci, PostgreSQL's
+                // locale collations), this and a sweep ending the same
+                // sessions can deadlock now and then: the database ends one,
+                // the sweep tries again, and the sign in fails as it would
+                // on any database error.
+                ->sortBy(fn (RegisteredSession $other) => $other->id, SORT_STRING)
                 ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
         });
     }

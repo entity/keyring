@@ -54,4 +54,21 @@ interface SweepsSessions
      * @param  list<string>  $failed
      */
     public function announced(#[\SensitiveParameter] array $announced, #[\SensitiveParameter] array $failed, int $at): void;
+
+    /**
+     * The moments everyone was signed out at (revokeEveryone), between $from
+     * and $until, whose EveryoneSignedOut never went out, and that are due
+     * a try at $now, oldest first. A driver marks the records such a
+     * sign-out ends so they aren't announced one by one, and counts them
+     * announced once the event has gone out.
+     *
+     * @return list<int>
+     */
+    public function everyoneUnannounced(int $from, int $until, int $now): array;
+
+    /**
+     * Note how the EveryoneSignedOut for the sign-out made between $from and
+     * $until went: announced, or to be tried again later.
+     */
+    public function everyoneAnnounced(int $from, int $until, bool $announced, int $at): void;
 }

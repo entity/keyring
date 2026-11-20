@@ -253,8 +253,8 @@ return [
     | "sweep_every" ("5m", "1h"...) runs keyring:sweep that often, on the
     | database driver: it ends sessions that timed out with no request to
     | end them, and announces again any ended session whose announcement
-    | was lost. Null leaves it off. One run ends and announces at most
-    | "sweep_limit" sessions.
+    | was lost. Null leaves it off. One run announces again at most
+    | "sweep_limit" sessions, and ends at most "sweep_limit" more.
     |
     */
 

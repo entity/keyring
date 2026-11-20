@@ -21,6 +21,9 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     /** The columns the sweep needs, from their own migration. */
     public const array SWEEP_COLUMNS = ['announced_at', 'end_reason', 'announce_attempts', 'announce_after'];
 
+    /** What end_reason says for a record everyone was signed out of: EveryoneSignedOut announces it, not one of its own. */
+    public const string EVERYONE = 'everyone_signed_out';
+
     /** How many IDs one statement names: SQLite takes the fewest. */
     protected const int CHUNK = 500;
 
@@ -82,7 +85,12 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id) {
+        // Settled before the transaction: on PostgreSQL a cache query that
+        // fails inside it, on a database cache store sharing the
+        // connection, would leave the transaction unusable.
+        $reason = $this->reason();
+
+        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id, $reason) {
             $row = $this->query()->lockForUpdate()->find($id);
             $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
@@ -91,7 +99,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             }
 
             $now = now()->getTimestamp();
-            $this->query()->where('id', $id)->update(['revoked_at' => $now, ...$this->reason()]);
+            $this->query()->where('id', $id)->update(['revoked_at' => $now, ...$reason]);
 
             return $session->with(['revokedAt' => $now]);
         }));
@@ -133,7 +141,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 
     /**
      * Find the records with a lock, then revoke them by ID in the same
-     * transaction, a thousand at a time as revokeEveryone() does, so a user
+     * transaction, 500 at a time, so a user
      * with years of expired records that were never pruned doesn't make one
      * statement too big. A locking read is always made on the write
      * connection, and reads the latest committed rows, not the snapshot of
@@ -151,12 +159,12 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     protected function revokeFound(Builder $query): Collection
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($query) {
+        $reason = $this->reason();
+
+        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($query, $reason) {
             $now = now()->getTimestamp();
 
             $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
-
-            $reason = $this->reason();
 
             $found->pluck('id')->chunk(self::CHUNK)->each(
                 fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now, ...$reason]),
@@ -182,9 +190,11 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     {
         $now = now()->getTimestamp();
 
-        // EveryoneSignedOut announces them all at once, so the sweep has
-        // none of them to announce one by one.
-        $announced = $this->notes() ? ['announced_at' => $now, 'end_reason' => SessionEndReason::Revoked->value] : [];
+        // EveryoneSignedOut announces them all at once, so they're marked
+        // for it, and not for announcing one by one. They count as announced
+        // once it has gone out (announcedEveryone), and the sweep sends it
+        // again if it didn't.
+        $announced = $this->notes() ? ['end_reason' => self::EVERYONE] : [];
 
         do {
             $ids = $this->query()
@@ -220,30 +230,48 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
                 ->delete();
         }
 
+        // A record "remember me" moved a session to (one with an origin)
+        // stays until it expires, ended or not: it's what a used cookie is
+        // followed to, so that turning up again still raises the alarm
+        // (RememberMeReused) after the sweep ended the session.
         return $this->query()
             ->where(fn (Builder $query) => $query->whereNotNull('replaced_by')->where('expires_at', '<=', $now))
-            ->orWhere(fn (Builder $query) => $query->whereNotNull('revoked_at')->whereNull('replaced_by')->where(
-                fn (Builder $query) => $query->whereNotNull('announced_at')->orWhere('revoked_at', '<=', $now - Sweep::GIVE_UP_AFTER),
-            ))
+            ->orWhere(fn (Builder $query) => $query->whereNotNull('revoked_at')->whereNull('replaced_by')
+                ->where(fn (Builder $query) => $query->whereNotNull('announced_at')->orWhere('revoked_at', '<=', $now - Sweep::GIVE_UP_AFTER))
+                ->where(fn (Builder $query) => $query->whereNull('origin')->orWhere('expires_at', '<=', $now)))
             ->orWhere(fn (Builder $query) => $query->whereNull('revoked_at')->where('expires_at', '<=', $now - Sweep::GIVE_UP_AFTER))
             ->delete();
     }
 
+    /**
+     * Asks the database itself. Finding the columns settles it for this
+     * process, and clears what the cache said for the others: a migrated
+     * table is never taken for one that isn't for longer than the cache
+     * keeps that (Sweep::UNMIGRATED_FOR).
+     */
     public function canSweep(): bool
     {
-        return $this->connection instanceof Connection
+        $can = $this->connection instanceof Connection
             && $this->connection->getSchemaBuilder()->hasColumns($this->table, self::SWEEP_COLUMNS);
+
+        if ($can) {
+            $this->notes = true;
+            rescue(fn () => cache()->forget($this->unmigrated()), report: false);
+        }
+
+        return $can;
     }
 
     /**
-     * Whether to keep the notes the sweep reads (why each record ended,
-     * whether it was announced). Asked of the database once per process,
-     * and once a day across processes while the migration is still to be
-     * run: the answer "not yet" is kept in the cache, so a request doesn't
-     * pay for a schema query, or log a warning, each time it ends a
-     * session. Running the migration forgets it. A process that started
-     * before the migration (Octane, a queue worker) keeps not noting until
-     * it restarts.
+     * Whether to write why each record ended as it's revoked, which the
+     * sweep reads. Once the columns are found that holds for the process.
+     * While they're missing, a process asks the database once, and keeps
+     * the answer in the cache for a few minutes (Sweep::UNMIGRATED_FOR), so
+     * a request doesn't pay for a schema query each time it ends a session.
+     * So writing reasons starts within those minutes of migrating, at once
+     * in the process that ran the sweep or the prune, and in a long-lived
+     * process (Octane, a queue worker) once it asks again. The warning that
+     * the migration is missing is logged once a day.
      */
     protected function notes(): bool
     {
@@ -251,18 +279,26 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             return $this->notes;
         }
 
-        $key = self::unmigratedKey($this->connection instanceof Connection ? $this->connection->getName() : null, $this->table);
-
-        if (rescue(fn () => cache()->has($key), false, report: false)) {
-            return $this->notes = false;
+        if (rescue(fn () => cache()->has($this->unmigrated()), false, report: false)) {
+            return false;
         }
 
-        if (! $this->notes = $this->canSweep()) {
-            rescue(fn () => cache()->put($key, true, Sweep::GIVE_UP_AFTER), report: false);
+        if ($this->canSweep()) {
+            return true;
+        }
+
+        rescue(fn () => cache()->put($this->unmigrated(), true, Sweep::UNMIGRATED_FOR), report: false);
+
+        if (rescue(fn () => cache()->add($this->unmigrated().':warned', true, Sweep::GIVE_UP_AFTER), true, report: false)) {
             rescue(fn () => logger()->warning("The [{$this->table}] table is missing the columns Keyring notes announced sessions in. Sessions end and are announced as usual, but none is announced again if its announcement is lost, and keyring:sweep won't run. Publish and run Keyring's migrations: php artisan keyring:install, then php artisan migrate."), report: false);
         }
 
-        return $this->notes;
+        return false;
+    }
+
+    protected function unmigrated(): string
+    {
+        return self::unmigratedKey($this->connection instanceof Connection ? $this->connection->getName() : null, $this->table);
     }
 
     /**
@@ -291,9 +327,12 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      * The records that have timed out are found oldest first, by the time
      * each timed out, on the write connection: each kind with its own query
      * on its own index. One more than $limit is asked for, to say whether
-     * more are left. Then they're locked by ID, in ID order, as revokeAll()
-     * locks a user's, so of two sweeps the second waits for the first, and
-     * a sweep and a sign-out never take the same rows in a different order.
+     * more are left. Then they're locked by ID in one statement, in the
+     * order the database sorts IDs, as revokeAll() locks a user's, so of
+     * two sweeps the second waits for the first, and a sweep and a
+     * sign-out don't take the same rows in a different order. (A sign in
+     * past sessions.max sorts in PHP, which can differ: see
+     * Sessions::register.)
      * Locking by ID takes the rows alone, not a range of an index a sign-out
      * is writing into. Whether each has timed out is decided again from the
      * locked row, against one $now: one revoked or moved meanwhile is left,
@@ -303,7 +342,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     public function sweep(int $now, ?int $idle, ?int $rememberedIdle, int $limit): array
     {
-        return $this->connection->transaction(function () use ($now, $idle, $rememberedIdle, $limit) {
+        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($now, $idle, $rememberedIdle, $limit) {
             $open = fn () => $this->query()->useWritePdo()->whereNull('revoked_at')->whereNull('replaced_by');
 
             /** @var array<string, int> $due when each timed out, by ID */
@@ -323,9 +362,11 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 
             asort($due);
             $ids = array_map(strval(...), array_keys(array_slice($due, 0, $limit, preserve_keys: true)));
-            sort($ids);
 
-            $ended = new Collection($ids)->chunk(self::CHUNK)
+            // Locked in one statement, in the order the database sorts IDs
+            // in, as revokeAll() locks a user's. Only SQLite, which locks
+            // the whole database to write, takes them a chunk at a time.
+            $ended = new Collection($ids)->chunk($this->connection instanceof Connection && $this->connection->getDriverName() === 'sqlite' ? self::CHUNK : Sweep::MAX_LIMIT)
                 ->flatMap(fn (Collection $chunk) => $this->query()->whereIn('id', $chunk->values()->all())->orderBy('id')->lockForUpdate()->get())
                 ->map(fn (object $row) => RegisteredSession::fromArray((array) $row))
                 ->map(fn (RegisteredSession $session) => match (true) {
@@ -344,7 +385,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             }
 
             return ['ended' => $ended, 'more' => count($due) > $limit];
-        }, attempts: 3);
+        }, attempts: 3));
     }
 
     /**
@@ -371,6 +412,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             ->where('revoked_at', '>', $from)
             ->where('revoked_at', '<=', $until)
             ->whereNull('replaced_by')
+            ->where(fn (Builder $query) => $query->whereNull('end_reason')->orWhere('end_reason', '!=', self::EVERYONE))
             ->where(fn (Builder $query) => $query->whereNull('announce_after')->orWhere('announce_after', '<=', $now))
             ->oldest('revoked_at')
             ->orderBy('id')
@@ -391,23 +433,73 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     public function announced(#[\SensitiveParameter] array $announced, #[\SensitiveParameter] array $failed, int $at): void
     {
-        if (! $this->notes()) {
+        // Not the cached "not migrated yet" alone: a table migrated since
+        // would never have its announcements noted.
+        if (! $this->notes() && ! $this->canSweep()) {
             return;
         }
 
-        $this->connection->transaction(function () use ($announced, $failed, $at) {
+        $this->withoutIds(fn () => $this->connection->transaction(function () use ($announced, $failed, $at) {
             foreach (array_chunk($announced, self::CHUNK) as $chunk) {
                 $this->query()->whereIn('id', $chunk)->update(['announced_at' => $at]);
             }
 
             foreach (array_chunk($failed, self::CHUNK) as $chunk) {
-                $this->query()->whereIn('id', $chunk)->pluck('announce_attempts', 'id')
-                    ->groupBy(fn (mixed $attempts) => (int) $attempts, preserveKeys: true)
-                    ->each(fn (Collection $group, int $attempts) => $this->query()->whereIn('id', $group->keys()->map(strval(...))->all())->update([
-                        'announce_attempts' => $attempts + 1,
-                        'announce_after' => $at + Sweep::retryAfter($attempts + 1),
-                    ]));
+                $this->failed($this->query()->whereIn('id', $chunk), $at);
             }
+        }));
+    }
+
+    /**
+     * Count a failed try against each record, and put its next one off
+     * (Sweep::retryAfter), by how many tries it has had.
+     */
+    protected function failed(Builder $records, int $at): void
+    {
+        // Most tries first, so none is counted twice.
+        (clone $records)->distinct()->orderByDesc('announce_attempts')->pluck('announce_attempts')
+            ->each(fn (mixed $attempts) => (clone $records)->where('announce_attempts', (int) $attempts)->update([
+                'announce_attempts' => (int) $attempts + 1,
+                'announce_after' => $at + Sweep::retryAfter((int) $attempts + 1),
+            ]));
+    }
+
+    /**
+     * The moments everyone was signed out at, between $from and $until,
+     * whose EveryoneSignedOut never went out and is due a try at $now.
+     *
+     * @return list<int>
+     */
+    public function everyoneUnannounced(int $from, int $until, int $now): array
+    {
+        return $this->query()->useWritePdo()
+            ->where('end_reason', self::EVERYONE)
+            ->whereNull('announced_at')
+            ->where('revoked_at', '>', $from)
+            ->where('revoked_at', '<=', $until)
+            ->where(fn (Builder $query) => $query->whereNull('announce_after')->orWhere('announce_after', '<=', $now))
+            ->distinct()
+            ->oldest('revoked_at')
+            ->pluck('revoked_at')
+            ->map(fn (mixed $at) => (int) $at)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Note how the EveryoneSignedOut for the sign-out made between $from and
+     * $until went: announced, or tried again later, as one record is.
+     */
+    public function everyoneAnnounced(int $from, int $until, bool $announced, int $at): void
+    {
+        if (! $this->notes() && ! $this->canSweep()) {
+            return;
+        }
+
+        $this->connection->transaction(function () use ($from, $until, $announced, $at) {
+            $records = $this->query()->where('end_reason', self::EVERYONE)->whereNull('announced_at')->whereBetween('revoked_at', [$from, $until]);
+
+            $announced ? $records->update(['announced_at' => $at]) : $this->failed($records, $at);
         });
     }
 

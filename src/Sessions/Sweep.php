@@ -10,9 +10,9 @@ use Throwable;
 /**
  * The sweep's settings, read in one place: keyring:sweep ends sessions that
  * have timed out with no request to end them, and announces again those
- * whose announcement was lost (database driver only). It's on when
- * "sessions.sweep_every" is set, and then pruning leaves what the sweep has
- * still to do.
+ * whose announcement was lost (database driver only). Keyring schedules it
+ * when "sessions.sweep_every" is set. Pruning leaves what a sweep has
+ * still to do once the migration it needs has run, scheduled or not.
  */
 final class Sweep
 {
@@ -27,6 +27,9 @@ final class Sweep
 
     /** How long after its revocation the sweep keeps trying to announce a record. After that pruning may forget it. */
     public const int GIVE_UP_AFTER = 86400;
+
+    /** How long the cache keeps that a sessions table is still to be migrated, so a request needn't ask the database each time. */
+    public const int UNMIGRATED_FOR = 300;
 
     /** The longest "sessions.sweep_every" may be, in minutes, well inside GIVE_UP_AFTER. */
     public const int LONGEST = 720;
@@ -115,6 +118,11 @@ final class Sweep
     public static function limit(): int
     {
         $limit = config('keyring.sessions.sweep_limit');
+
+        // A number given as a string, from env(), counts as that number.
+        if (is_string($limit) && ctype_digit(trim($limit))) {
+            $limit = (int) trim($limit);
+        }
 
         return is_int($limit) && $limit > 0 ? min(self::MAX_LIMIT, $limit) : self::LIMIT;
     }
