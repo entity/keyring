@@ -32,8 +32,6 @@ class SignedOutResponse implements SignedOutResponseContract
             : to_route('login')->with('status', 'signed-out');
 
         // As on sign out: nothing the session cached stays in the browser.
-        $response->headers->set('Clear-Site-Data', '"cache", "storage"');
-
-        return $response;
+        return $this->clearSiteData($response);
     }
 }
