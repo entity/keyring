@@ -4,7 +4,12 @@
 
 ### Policies and Step-Up
 
-- `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. A moment in the future, or asking for nothing, throws.
+- `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. Asking for nothing, or for a moment more than a few seconds in the future, throws.
+- The docs explain how to read what a session proved, for claims like `amr`, `acr`, and `auth_time`.
+
+### Extending
+
+- `StepUp` makes the decisions for the `keyring` and `keyring.fresh` middleware, and its constructor also takes a `DeviceManager`. What `keyring.fresh` asks for is `StepUp::freshRequirement()`, no longer the middleware's own `requirement()`. See the upgrade guide.
 
 ## v0.2.0 - 2026-11-20
 
