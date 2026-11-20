@@ -44,7 +44,11 @@ beforeEach(function () {
  */
 function endedReason(string $case): string
 {
-    return $case === 'lapsed' ? 'idle' : $case;
+    return match ($case) {
+        'lapsed' => 'idle',
+        'locked' => 'risk',
+        default => $case,
+    };
 }
 
 /**
@@ -59,6 +63,17 @@ function endSessionFor(string $reason): array
 {
     $sign = fn (bool $remember = false) => test()->withHeader('User-Agent', FIREFOX)
         ->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => $remember]);
+
+    // A risk lock refuses the cookie when the browser comes back.
+    if ($reason === 'locked') {
+        test()->flushSession();
+        $cookies = guestCookies($sign(true));
+
+        app(RiskLocks::class)->lock(test()->user, 3600);
+        test()->flushSession();
+
+        return $cookies;
+    }
 
     if ($reason === 'reused') {
         test()->flushSession();
@@ -157,7 +172,20 @@ function visitAfterEnding(string $reason, array $cookies, string $uri, array $he
         ->get($uri);
 }
 
-dataset('reasons', ['revoked', 'expired', 'idle', 'lapsed', 'other_user', 'not_allowed', 'risk', 'reused']);
+dataset('reasons', ['revoked', 'expired', 'idle', 'lapsed', 'other_user', 'not_allowed', 'risk', 'locked', 'reused']);
+
+// Someone else may hold the session, so its owner hears about it.
+dataset('security reasons', ['risk', 'locked', 'reused']);
+
+/**
+ * The headers an Inertia visit sends.
+ *
+ * @return array<string, string>
+ */
+function inertiaVisit(): array
+{
+    return ['X-Inertia' => 'true', 'X-Requested-With' => 'XMLHttpRequest', 'Accept' => 'text/html, application/xhtml+xml'];
+}
 
 it('asks for a listed page again as a guest when the session ended as :dataset', function (string $reason) {
     $cookies = endSessionFor($reason);
@@ -182,7 +210,28 @@ it('asks for a listed page again as a guest when the session ended as :dataset',
 
     $this->assertGuest();
     expect($this->ended->all())->toBe([endedReason($reason)]);
-})->with('reasons');
+})->with(['revoked', 'expired', 'idle', 'lapsed', 'other_user', 'not_allowed']);
+
+it('sends a listed page to log in as before when the session ended as :dataset on :dataset', function (string $reason, array $headers) {
+    $cookies = endSessionFor($reason);
+
+    $response = visitAfterEnding($reason, $cookies, '/welcome?b=2&a=1', $headers)
+        ->assertRedirect('/login')
+        ->assertHeader('Clear-Site-Data', '"cache", "storage"')
+        ->assertHeaderMissing('X-Inertia-Location')
+        ->assertSessionHas('status', 'signed-out');
+
+    if ($cookies !== []) {
+        $response->assertCookieExpired(Auth::guard()->getRecallerName())->assertCookieExpired('remembered_session');
+    }
+
+    $this->assertGuest();
+    expect(session('url.intended'))->toEndWith('/welcome?a=1&b=2')
+        ->and($this->ended->all())->toBe([endedReason($reason)]);
+})->with('security reasons')->with([
+    'a page visit' => [[]],
+    'an inertia visit' => [inertiaVisit()],
+]);
 
 it('sends an unlisted page to log in as before when the session ended as :dataset', function (string $reason) {
     $cookies = endSessionFor($reason);
@@ -237,12 +286,7 @@ it('still answers json requests to a listed page with a 401', function () {
 it('has inertia load a listed page in full for :dataset', function (array $headers) {
     endSessionFor('revoked');
 
-    $this->withHeaders([
-        'X-Inertia' => 'true',
-        'X-Requested-With' => 'XMLHttpRequest',
-        'Accept' => 'text/html, application/xhtml+xml',
-        ...$headers,
-    ])->get('/welcome?b=2&a=1')
+    $this->withHeaders([...inertiaVisit(), ...$headers])->get('/welcome?b=2&a=1')
         ->assertConflict()
         ->assertHeader('X-Inertia-Location', 'http://localhost/welcome?a=1&b=2')
         ->assertHeaderMissing('Location')
@@ -268,7 +312,6 @@ it('carries on as a guest when a remembered browser comes back and :dataset', fu
     match ($case) {
         'gone' => DB::table('keyring_sessions')->delete(),
         'idle' => $this->travel(15)->days(),
-        'locked' => app(RiskLocks::class)->lock($this->user, 3600),
         'lapsed' => config(['keyring.sessions.end_on_lapse' => true]),
     };
 
@@ -289,7 +332,6 @@ it('carries on as a guest when a remembered browser comes back and :dataset', fu
 })->with([
     'its record is gone' => ['gone', 'expired'],
     'it stayed away too long' => ['idle', 'idle'],
-    'the account is locked' => ['locked', 'risk'],
     'sessions end with their level' => ['lapsed', 'expired'],
 ]);
 

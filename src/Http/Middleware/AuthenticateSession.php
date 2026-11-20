@@ -370,7 +370,11 @@ class AuthenticateSession
         // it asked for, and the page would go on showing who was signed in.
         // A prefetch gets the same answer: Inertia keeps it until the link
         // is followed, and only then loads the page.
-        if ($this->continuesAsGuest($request)) {
+        //
+        // Not when it ended because someone else may hold the session: the
+        // owner is told on the login page, rather than carrying on as a
+        // guest with no sign of why.
+        if (! in_array($reason, ['reused', 'risk'], true) && $this->continuesAsGuest($request)) {
             $url = $request->fullUrl();
 
             // As on sign out: nothing the session cached stays in the browser.
