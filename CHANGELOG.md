@@ -13,6 +13,8 @@
 - An `EveryoneSignedOut` event when `keyring:sign-out --all` or the registry's `revokeEveryone()` ends every user's sessions at once.
 - Every registry driver, a custom one included, is wrapped in `AnnouncingSessionRegistry`, which dispatches those events from what the driver returns. `app(SessionRegistry::class)` returns the wrapper, and its `inner()` the driver. See the [upgrade guide](UPGRADE.md#the-session-registry-is-wrapped).
 - A conformance check that signing out announces the session that ended, which fails when a `SessionRegistry` is bound in the container without the wrapper.
+- A driver that fails after revoking some of a user's records throws a `PartialRevocation` with the ones it revoked, so they're still announced. The `cache` driver does this when the store fails part way through signing out everywhere, and keeps a revocation whose copy into the record fails.
+- Registry IDs are marked `#[\SensitiveParameter]` on the contract, both drivers and `Sessions`, so they stay out of reported stack traces.
 
 ## v0.2.0 - 2026-11-20
 

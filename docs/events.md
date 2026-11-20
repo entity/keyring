@@ -82,8 +82,8 @@ The reasons, and what gives each one:
 | Reason | Given When |
 |---|---|
 | `logged_out` | The user signed out, with `POST /logout` or by ending the current session from the sessions list. |
-| `signed_out_everywhere` | "Sign out everywhere else" from the sessions or devices page, or after adding a sign-in method with `sign_out_others`. An administrator's `keyring:sign-out` for one user gives it too. |
-| `revoked` | One session was ended from the sessions list. It's also the reason for any revocation Keyring didn't name, such as your own call to `Sessions::signOutEverywhere()` or to the registry. |
+| `signed_out_everywhere` | "Sign out everywhere else" from the sessions or devices page, or after adding or removing a sign-in method with `sign_out_others`. An administrator's `keyring:sign-out` for one user gives it too. |
+| `revoked` | One session was ended from the sessions list. A sign in that's refused at the last step ends the session it had just registered with this reason too: when the password, email address, or sign-in methods changed while it was being checked, and when something failed as the session was being set up. It's also the reason for any revocation Keyring didn't name, such as your own call to `Sessions::signOutEverywhere()` or to the registry, and for a reason of your own that a subclass of the session middleware signs out for. |
 | `signed_in_again` | The browser signed in again while it was signed in, and left the session it was on. |
 | `device_revoked` | The session's device was signed out from the devices list. |
 | `device_reported` | The session's device was reported with the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link). |

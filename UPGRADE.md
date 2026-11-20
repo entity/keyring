@@ -61,6 +61,10 @@ A custom driver registered with `SessionRegistryManager::extend()` needs no chan
 
 A session you revoke by writing `revokedAt` with `save()` or `update()` isn't announced. Revoke it with `revoke()`.
 
+If a subclass of `Keyring\Http\Middleware\AuthenticateSession` overrides `signOut()` without calling the parent, the sessions it ends are announced as `revoked`. Call `parent::signOut()`, or end them inside `app(Sessions::class)->because($reason, fn () => ...)`. A reason of your own passed to `signOut()` still reaches `SessionEnded` as it is, and the new event gets `revoked`.
+
+The contract's methods mark the parameters that hold a registry ID with `#[\SensitiveParameter]`. A driver without the attribute still works, but its stack traces show those IDs. Adding it is recommended.
+
 ## From 0.1 to 0.2
 
 There's nothing to change. The new `CredentialStuffing` risk signal is off until you add it to your provider.
