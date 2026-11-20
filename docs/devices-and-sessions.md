@@ -16,6 +16,7 @@
     - [Writing a Driver](#writing-a-driver)
     - [How Many Sessions](#how-many-sessions)
     - [The Session Middleware](#the-session-middleware)
+    - [Pages That Also Serve Guests](#pages-that-also-serve-guests)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
 - [Keyring's Cookies](#keyrings-cookies)
@@ -387,6 +388,21 @@ A second middleware, `keyring.password`, is added to the `web` group after it. I
 A session whose record has gone missing is signed out rather than registered again. This means clearing records can't restart a session's window.
 
 A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
+
+### Pages That Also Serve Guests
+
+Some pages work for guests too, like a public page that shows more when you're signed in, or an OIDC authorize endpoint that has to answer `prompt=none` itself. Sending those to the login page when a session ends is wrong. List their route names in `sessions.continue_as_guest`, in any form `Request::routeIs()` takes, wildcards included:
+
+```php
+'sessions' => [
+    // ...
+    'continue_as_guest' => ['welcome', 'oauth.authorize', 'docs.*'],
+],
+```
+
+When a session ends on a `GET` page visit to one of those routes, the browser is signed out and `SessionEnded` is dispatched as usual. Then the browser is redirected to the same URL, query string included, with `Clear-Site-Data` and nothing else: no `signed-out` status and no intended URL. It asks for the page again as a guest. Inertia visits count as page visits. JSON requests still get the `401`, and other methods, like `POST`, are signed out as before. It happens ahead of your own [`SignedOutResponse`](sign-in-flow.md#responses), so binding one doesn't change it.
+
+The route has to let guests in. One behind `auth` sends the guest to log in anyway. A route without a name can't be listed.
 
 ### "Remember Me"
 
