@@ -19,6 +19,7 @@ use Keyring\Factors\Factor;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Login\Detours;
 use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\Sessions;
@@ -40,6 +41,8 @@ class AuthenticatorController
     protected EnrollmentStore $enrollments { get => app(EnrollmentStore::class); }
 
     protected SignIn $signIn { get => app(SignIn::class); }
+
+    protected Detours $detours { get => app(Detours::class); }
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -102,9 +105,13 @@ class AuthenticatorController
             $this->signIn->enrolled($request, $authenticator);
         }
 
+        // Where they were going when sent here, as data rather than a
+        // redirect: a page with new recovery codes on it has to stay up
+        // until they're saved.
         return $this->status('authenticator-added', array_filter([
             'authenticator' => $authenticator->factor()->present($authenticator),
             'recoveryCodes' => $recoveryCodes,
+            'continue' => $this->detours->pull($request, Detours::ENROLLMENT),
         ]));
     }
 
