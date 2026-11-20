@@ -147,7 +147,7 @@ class AuthorizeController
             $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
         ], JSON_THROW_ON_ERROR));
         $flows = collect($request->session()->get('oidc.flows', []))
-            ->filter(fn (array $flow) => $flow['at'] > now()->subMinutes(10)->getTimestamp());
+            ->filter(fn (mixed $flow) => is_array($flow) && $flow['at'] > now()->subMinutes(10)->getTimestamp());
 
         $flow = $validated['flow'] ?? null;
         $stored = $flow === null ? null : $flows->get($flow);
@@ -177,7 +177,7 @@ class AuthorizeController
             return $response;
         }
 
-        if ($flow !== null) {
+        if ($started !== null) {
             $request->session()->forget("oidc.flows.{$flow}");
         }
 
