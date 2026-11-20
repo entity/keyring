@@ -93,7 +93,7 @@ public function unlessMet(Request $request, ?Assurance $level = null, ?DateTimeI
 It returns `null` when the user has already proved what's asked, and the request may carry on. Otherwise, it returns the response the middleware would give: a redirect to the confirm page, a `423` for JSON requests, or [enrolling first](#raising-assurance) for a user who can't reach what's asked.
 
 - `$level` works like `keyring:{level}`. The session must have reached that [assurance level](policies.md#assurance-levels), and the confirm asks only for what's missing. The `device-bound` and `phishing-resistant` names are only for the middleware.
-- `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. A proof made in the same second as the moment counts. See [Fresh Verification](#fresh-verification) for what that means.
+- `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. A proof made in the same second as the moment counts. See [Fresh Verification](#fresh-verification) for what that means. A moment on its own doesn't look at whether a level lapsed: a password and an authenticator app proved 90 minutes ago meet a moment a day ago, though AAL2 lapsed after an hour idle. Pass `$level` too when the level the session holds now matters.
 - With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier. A recovery code is taken beside another factor whenever the level alone would take one, and never in place of the key AAL3 asks for.
 
 `unlessMet` throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
@@ -175,8 +175,8 @@ class AuthorizeController
 
 An integration may also need to say how the user authenticated, for example as `amr`, `acr`, and `auth_time` in an ID token. Read that from `Keyring\Sessions\SessionAssurance`:
 
-- `level()` returns the highest `Assurance` the session holds right now.
-- `countingToward(Assurance $level)` returns the verifications that still count toward that level. Those are the ones made within the level's overall limit, and since inactivity last [lapsed](devices-and-sessions.md#timeouts) it.
+- `level(int $since = 0)` returns the highest `Assurance` the session holds right now. Given a Unix timestamp, it counts only what was proved since then.
+- `countingToward(Assurance $level, int $since = 0)` returns the verifications that still count toward that level. Those are the ones made within the level's overall limit, and since inactivity last [lapsed](devices-and-sessions.md#timeouts) it. Given a Unix timestamp, it returns only those made since then too.
 - `all()` returns every verification recorded in the session whose authenticator still exists. That includes verifications that no longer count toward any level, such as a code proved a day ago, or before the session sat idle past its limit. Reporting from `all()` overstates what the session holds. A session could report `mfa` after its second factor stopped counting. Use `countingToward()` for what you report.
 
 Each item is a `Keyring\Login\Verification`, with these public properties:
@@ -195,32 +195,29 @@ To ask whether a set of verifications meets a requirement, use `Requirement::isM
 
 Report `auth_time` as the oldest `at` among the verifications you build `amr` from, not the newest. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
 
-When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. For example:
+When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. `level()` and `countingToward()` take a Unix timestamp for that. They count only what was proved since then, with each level still on its own clock. Don't work the level out again with `Assurance::of()` from what counts toward a lower level. Say AAL2 lapsed after an hour idle, and the session is at AAL1. What counts toward AAL1 still holds the authenticator app proved before the lapse, so `Assurance::of()` would give AAL2. For the same reason, only report `mfa` at AAL2 or higher. For example:
 
 ```php
 use Keyring\Enums\Assurance;
-use Keyring\Login\Requirement;
-use Keyring\Login\Verification;
 use Keyring\Sessions\SessionAssurance;
 
 $assurance = app(SessionAssurance::class);
-$level = $assurance->level();
-$proved = $assurance->countingToward($level);
+$from = $since?->getTimestamp() ?? 0;
 
-if ($since !== null) {
-    $proved = array_values(array_filter($proved, fn (Verification $verification) => $verification->at >= $since->getTimestamp()));
-    $level = Assurance::of($proved);
-}
+$level = $assurance->level($from);
+$proved = $level === Assurance::None ? [] : $assurance->countingToward($level, $from);
 
 $claims = [
     'acr' => $level === Assurance::None ? null : strtolower($level->name),
     'amr' => [
         ...array_values(array_unique(array_column($proved, 'factor'))),
-        ...(Requirement::factors(2)->isMetBy($proved) ? ['mfa'] : []),
+        ...($level->atLeast(Assurance::AAL2) ? ['mfa'] : []),
     ],
     'auth_time' => $proved === [] ? null : min(array_column($proved, 'at')),
 ];
 ```
+
+Work the claims out in the authorization request, while the user's browser session is there, and keep them with the authorization code. `SessionAssurance` reads that session. The token endpoint is called by the client, with no session, so it would read nothing.
 
 Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect.
 

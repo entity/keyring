@@ -6,6 +6,7 @@
 
 - `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. Asking for nothing, or for a moment more than a few seconds in the future, throws.
 - The docs explain how to read what a session proved, for claims like `amr`, `acr`, and `auth_time`.
+- `SessionAssurance::level()` and `countingToward()` take a timestamp, to count only what was proved since then with each level still on its own clock, so claims built for `max_age` don't report a level that lapsed.
 
 ### Extending
 

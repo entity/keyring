@@ -1066,6 +1066,83 @@ describe('asking from a controller', function () {
         $this->get('/authorize?acr=aal2&max_age=7200')->assertOk();
     });
 
+    it('meets a moment alone after aal2 lapsed, so asks for the level only when told to', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
+        signIn();
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+        $this->travel(90)->minutes();
+        $this->get('/authorize?max_age=86400')->assertOk();
+
+        expect(app(StepUp::class)->unlessMet(request(), null, now()->subDay()))->toBeNull()
+            ->and(app(StepUp::class)->unlessMet(request(), Assurance::AAL2, now()->subDay()))->not->toBeNull();
+    });
+
+    describe('reading the claims as the docs do', function () {
+        /**
+         * The acr, amr and auth_time docs/step-up.md builds.
+         *
+         * @return array{acr: ?string, amr: list<string>, auth_time: ?int}
+         */
+        function documentedClaims(?DateTimeInterface $since): array
+        {
+            $assurance = app(SessionAssurance::class);
+            $from = $since?->getTimestamp() ?? 0;
+
+            $level = $assurance->level($from);
+            $proved = $level === Assurance::None ? [] : $assurance->countingToward($level, $from);
+
+            return [
+                'acr' => $level === Assurance::None ? null : strtolower($level->name),
+                'amr' => [
+                    ...array_values(array_unique(array_column($proved, 'factor'))),
+                    ...($level->atLeast(Assurance::AAL2) ? ['mfa'] : []),
+                ],
+                'auth_time' => $proved === [] ? null : min(array_column($proved, 'at')),
+            ];
+        }
+
+        beforeEach(function () {
+            $this->freezeSecond();
+            $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
+            signIn();
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+            $this->signedInAt = now()->getTimestamp();
+        });
+
+        it('reports both factors and mfa while aal2 holds', function () {
+            $this->travel(30)->minutes();
+            $this->get('/authorize?max_age=86400')->assertOk();
+
+            expect(documentedClaims(null))->toBe(['acr' => 'aal2', 'amr' => ['password', 'totp', 'mfa'], 'auth_time' => $this->signedInAt])
+                ->and(documentedClaims(now()->subDay()))->toBe(documentedClaims(null));
+        });
+
+        it('reports aal1 and no mfa once aal2 lapsed, though a moment alone is met', function () {
+            $this->travel(90)->minutes();
+            $this->get('/authorize?max_age=86400')->assertOk();
+
+            expect(documentedClaims(now()->subDay()))->toMatchArray(['acr' => 'aal1'])
+                ->and(documentedClaims(now()->subDay())['amr'])->not->toContain('mfa')
+                ->and(documentedClaims(null))->toMatchArray(['acr' => 'aal1'])
+                ->and(documentedClaims(null)['amr'])->not->toContain('mfa');
+        });
+
+        it('reports only what was proved since the moment', function () {
+            $this->travel(20)->minutes();
+            $since = now();
+
+            // The plain confirm page takes the password alone.
+            $this->inertia()->get(route('keyring.confirm.challenge'));
+            $this->flushHeaders();
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+
+            expect(documentedClaims($since))->toBe(['acr' => 'aal1', 'amr' => ['password'], 'auth_time' => $since->getTimestamp()])
+                ->and(documentedClaims(null))->toBe(['acr' => 'aal2', 'amr' => ['password', 'totp', 'mfa'], 'auth_time' => $this->signedInAt])
+                ->and(documentedClaims(now()->addSecond()))->toBe(['acr' => null, 'amr' => [], 'auth_time' => null]);
+        });
+    });
+
     describe('with a key that can\'t leave its device', function () {
         beforeEach(function () {
             Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()->requireAttestation(), Totp::class, RecoveryCodes::class]);
