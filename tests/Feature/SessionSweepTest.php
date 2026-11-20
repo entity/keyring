@@ -573,7 +573,7 @@ describe('before the migration has run', function () {
 
         app(SessionRegistry::class)->revoke($sessions[0]->id);
 
-        $schema = fn (Collection $queries) => $queries->filter(fn (string $sql) => str_contains($sql, 'information_schema') || str_contains($sql, 'pragma') || str_contains($sql, 'sqlite_master'))->count();
+        $schema = fn (Collection $queries) => $queries->filter(fn (string $sql) => str_contains($sql, 'information_schema') || str_contains($sql, 'pg_attribute') || str_contains($sql, 'pragma') || str_contains($sql, 'sqlite_master'))->count();
         $queries = new Collection;
         DB::listen(fn ($query) => $queries->push($query->sql));
         app(SessionRegistryManager::class)->driver('database')->inner()->canSweep();
