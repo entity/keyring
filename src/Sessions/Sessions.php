@@ -574,7 +574,7 @@ class Sessions
     public function signOutEverywhere(Authenticatable $user, ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
-        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except));
+        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except))->count();
 
         $this->cycleRememberToken($user);
         $this->distrustDevices($user, except: $keptDevice);
@@ -607,7 +607,7 @@ class Sessions
      */
     public function revokeDevice(Authenticatable $user, string $deviceId): int
     {
-        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId));
+        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId))->count();
     }
 
     public function cycleRememberToken(Authenticatable $user): void

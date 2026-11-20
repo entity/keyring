@@ -1,5 +1,12 @@
 # Release Notes
 
+## Unreleased
+
+### Sessions and Devices
+
+- The session registry says which records it revoked. `revoke()` returns the record it revoked, or `null` when it revoked nothing, and `revokeAll()` and `revokeDevice()` return the records they revoked instead of a count. Custom registry drivers need to return them too: see the [upgrade guide](UPGRADE.md#from-02-to-03). `Sessions::signOutEverywhere()`, `Sessions::revokeDevice()` and the `SessionsRevoked` event still give a count.
+- The conformance suite checks that the configured registry returns the records it revoked.
+
 ## v0.2.0 - 2026-11-20
 
 ### Rate Limits and Risk

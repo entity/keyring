@@ -341,3 +341,25 @@ it('signs out a session that moved to a new record while everyone was being sign
         ->and($registry->find('remembered')->revokedAt)->not->toBeNull()
         ->and($registry->forUser($user))->toBeEmpty();
 });
+
+// Each revokes by ID what it read, so of two at once neither leaves a record
+// it revoked unreported: a record the other got to first is reported twice,
+// which is the side to be wrong on.
+it('reports every record two sign-outs at once revoke, at least once between them', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+
+    foreach (['first', 'second', 'third'] as $id) {
+        $registry->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+    }
+
+    // Both read every record, then wait to revoke the one held here.
+    $results = contend(sessionRow('second'), [
+        ['revoke-all', $user->id],
+        ['revoke-all', $user->id],
+    ]);
+
+    expect(collect($results)->flatten()->unique()->sort()->values()->all())->toBe(['first', 'second', 'third'])
+        ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
+});

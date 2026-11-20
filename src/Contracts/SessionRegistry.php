@@ -34,7 +34,15 @@ interface SessionRegistry
      */
     public function update(string $id, array $changes): void;
 
-    public function revoke(string $id): void;
+    /**
+     * Revoke one record. Returns it as it now stands (revokedAt set), or
+     * null when this call revoked nothing: there's no such record, or it was
+     * revoked already. A record that was replaced but not revoked is revoked
+     * all the same, and returned with its replacedBy, which says the session
+     * carried on elsewhere. Of two calls revoking the same record at the
+     * same moment, only one is given it.
+     */
+    public function revoke(string $id): ?RegisteredSession;
 
     /**
      * Move a session to a new record: store the new one, and have the old
@@ -50,10 +58,23 @@ interface SessionRegistry
 
     /**
      * Revoke every session of the user, except one (usually the current).
+     * Returns the records this call revoked, each as it now stands.
+     *
+     * Every record a call revokes is in what it returns. Two calls at the
+     * same moment may both return the same record, so a caller that reports
+     * what ended may report one twice, never miss one.
+     *
+     * @return Collection<int, RegisteredSession>
      */
-    public function revokeAll(Authenticatable $user, ?string $except = null): int;
+    public function revokeAll(Authenticatable $user, ?string $except = null): Collection;
 
-    public function revokeDevice(Authenticatable $user, string $deviceId): int;
+    /**
+     * Revoke the user's sessions on one device. Returns the records this
+     * call revoked, as revokeAll() does.
+     *
+     * @return Collection<int, RegisteredSession>
+     */
+    public function revokeDevice(Authenticatable $user, string $deviceId): Collection;
 
     /**
      * Revoke every session of every user that signed in up to now, however

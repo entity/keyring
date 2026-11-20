@@ -111,14 +111,29 @@ class CacheSessionRegistry implements SessionRegistry
         return 0;
     }
 
-    public function revoke(string $id): void
+    /**
+     * add() only writes a key that isn't there, so of two calls only one
+     * revokes the record and returns it. One found revoked already, by its
+     * own keys or by signing everyone out, is left as it is: writing the
+     * key now would move when it says the session ended.
+     */
+    public function revoke(string $id): ?RegisteredSession
     {
-        if ($session = $this->find($id)) {
-            $now = now()->getTimestamp();
+        $session = $this->find($id);
 
-            $this->cache->add($this->revokedKey($id), $now, $this->ttl($session));
-            $this->stamp($session, ['revoked_at' => $session->revokedAt ?? $now]);
+        if ($session === null || $session->revokedAt !== null) {
+            return null;
         }
+
+        $now = now()->getTimestamp();
+
+        if (! $this->cache->add($this->revokedKey($id), $now, $this->ttl($session))) {
+            return null;
+        }
+
+        $this->stamp($session, ['revoked_at' => $now]);
+
+        return $session->with(['revokedAt' => $now]);
     }
 
     /**
@@ -172,12 +187,12 @@ class CacheSessionRegistry implements SessionRegistry
         return $replaced;
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): int
+    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
     {
         return $this->revokeWhere($user, fn (RegisteredSession $session) => $session->id !== $except);
     }
 
-    public function revokeDevice(Authenticatable $user, string $deviceId): int
+    public function revokeDevice(Authenticatable $user, string $deviceId): Collection
     {
         return $this->revokeWhere($user, fn (RegisteredSession $session) => $session->deviceId === $deviceId);
     }
@@ -188,14 +203,19 @@ class CacheSessionRegistry implements SessionRegistry
     }
 
     /**
+     * Each record is revoked by revoke(), so what's returned is what this
+     * call revoked: one another call got to first is left out.
+     *
      * @param  Closure(RegisteredSession): bool  $callback
+     * @return Collection<int, RegisteredSession>
      */
-    protected function revokeWhere(Authenticatable $user, Closure $callback): int
+    protected function revokeWhere(Authenticatable $user, Closure $callback): Collection
     {
         return $this->forUser($user)
             ->filter($callback)
-            ->each(fn (RegisteredSession $session) => $this->revoke($session->id))
-            ->count();
+            ->map(fn (RegisteredSession $session) => $this->revoke($session->id))
+            ->filter()
+            ->values();
     }
 
     /**

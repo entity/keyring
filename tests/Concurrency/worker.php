@@ -21,6 +21,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
 use Keyring\Tests\Fixtures\User;
@@ -111,6 +112,7 @@ try {
             return app(Sessions::class)->endLatest(User::findOrFail($session->userId), $session)?->id;
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
+        'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),
         'change-password' => (function () use ($id, $value) {

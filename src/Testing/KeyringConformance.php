@@ -20,6 +20,7 @@ use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 
@@ -308,6 +309,47 @@ trait KeyringConformance
 
         $this->assertNotNull($id, 'Signed-in sessions should be registered.');
         $this->assertNotNull(app(SessionRegistry::class)->find($id)?->revokedAt, 'Signing out should revoke the registered session.');
+    }
+
+    /**
+     * What a registry revokes is what it reports, so anything built on it
+     * (events for each session that ends, say) misses none. A custom
+     * SessionRegistry driver, or anything wrapping one, has to say which
+     * records each call revoked.
+     */
+    public function test_keyring_registry_returns_the_sessions_it_revokes(): void
+    {
+        $user = $this->keyringUser();
+        $registry = app(SessionRegistry::class);
+        $now = now()->getTimestamp();
+
+        $saved = array_map(function () use ($user, $registry, $now) {
+            $registry->save($session = new RegisteredSession(Str::random(40), (string) $user->getAuthIdentifier(), RegisteredSession::typeOf($user), (string) config('keyring.guard'), null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+            return $session->id;
+        }, range(1, 3));
+
+        $first = $registry->revoke($saved[0]);
+
+        $this->assertSame($saved[0], $first?->id, 'Your SessionRegistry\'s revoke() should return the record it revoked, or null only when it revoked nothing.');
+        $this->assertNotNull($first->revokedAt, 'Your SessionRegistry\'s revoke() should return the record as it now stands, with revokedAt set.');
+        $this->assertNull(
+            $registry->revoke($saved[0]),
+            'Your SessionRegistry\'s revoke() should return null for a record that was revoked already: it revoked nothing this time.',
+        );
+
+        $revoked = $registry->revokeAll($user);
+
+        $this->assertEqualsCanonicalizing(
+            array_slice($saved, 1),
+            $revoked->map(fn (RegisteredSession $session) => $session->id)->all(),
+            'Your SessionRegistry\'s revokeAll() should return every record it revoked, and only those: not ones revoked already.',
+        );
+        $this->assertTrue(
+            $revoked->every(fn (RegisteredSession $session) => $session->revokedAt !== null),
+            'Your SessionRegistry\'s revokeAll() should return each record as it now stands, with revokedAt set.',
+        );
+        $this->assertTrue($registry->revokeAll($user)->isEmpty(), 'Your SessionRegistry\'s revokeAll() should return nothing when it revoked nothing.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void

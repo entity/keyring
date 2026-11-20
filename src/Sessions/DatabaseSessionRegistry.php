@@ -48,9 +48,41 @@ class DatabaseSessionRegistry implements SessionRegistry
         $this->query()->where('id', $id)->update(RegisteredSession::columns($changes));
     }
 
-    public function revoke(string $id): void
+    /**
+     * Read on the database written to, then revoked only while it's still
+     * as read: the update matches it unrevoked, so of two calls only the
+     * one that changed the row returns it, and with the replacedBy it had,
+     * so what's returned is what was revoked. A record replaced in between
+     * is revoked all the same, and read again, holding the row this update
+     * holds: inside a MySQL transaction a plain read would still see it as
+     * it was before.
+     */
+    public function revoke(string $id): ?RegisteredSession
     {
-        $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => now()->getTimestamp()]);
+        $row = $this->query()->useWritePdo()->find($id);
+        $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
+
+        if ($session === null || $session->revokedAt !== null) {
+            return null;
+        }
+
+        $now = now()->getTimestamp();
+        $revoked = fn (Builder $query) => $query->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now]) === 1;
+
+        if ($revoked($this->query()->where('replaced_by', $session->replacedBy))) {
+            return $session->with(['revokedAt' => $now]);
+        }
+
+        // Revoked, replaced or gone since it was read. Only a replaced one
+        // is left for this call to revoke.
+        if (! $revoked($this->query())) {
+            return null;
+        }
+
+        $row = $this->query()->useWritePdo()->lockForUpdate()->find($id);
+
+        // Gone only if pruned in the moment since, outside a transaction.
+        return $row === null ? $session->with(['revokedAt' => $now]) : RegisteredSession::fromArray((array) $row);
     }
 
     /**
@@ -77,18 +109,48 @@ class DatabaseSessionRegistry implements SessionRegistry
         });
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): int
+    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
     {
-        return $this->activeFor($user)
-            ->when($except, fn (Builder $query) => $query->where('id', '!=', $except))
-            ->update(['revoked_at' => now()->getTimestamp()]);
+        return $this->revokeFound($this->activeFor($user)->when($except, fn (Builder $query) => $query->where('id', '!=', $except)));
     }
 
-    public function revokeDevice(Authenticatable $user, string $deviceId): int
+    public function revokeDevice(Authenticatable $user, string $deviceId): Collection
     {
-        return $this->activeFor($user)
-            ->where('device_id', $deviceId)
-            ->update(['revoked_at' => now()->getTimestamp()]);
+        return $this->revokeFound($this->activeFor($user)->where('device_id', $deviceId));
+    }
+
+    /**
+     * Find the records, then revoke them by ID, a thousand at a time as
+     * revokeEveryone() does, so a user with years of expired records that
+     * were never pruned doesn't make one statement too big. Read from the
+     * database written to: a replica that lags would hand back records
+     * already revoked, or miss new ones. Rows are locked one by one, never
+     * a range, so a sign in isn't held up or deadlocked.
+     *
+     * Every record this revokes is returned. The update matches nothing but
+     * the IDs that were read, and every record read is returned, so nothing
+     * can be revoked here without being returned. What's returned and wasn't
+     * revoked here is only ever a record another call revoked in between,
+     * which both then return: reported twice, never missed. A record saved
+     * after the read is neither revoked nor returned, as if it had been
+     * saved a moment after this ran. One replaced in between is revoked and
+     * returned as it was read, without its replacedBy. Keyring's own callers
+     * (Sessions::signOutEverywhere() and revokeDevice()) hold the user's row,
+     * as a move to a new record does, so they never meet one.
+     *
+     * @return Collection<int, RegisteredSession>
+     */
+    protected function revokeFound(Builder $query): Collection
+    {
+        $now = now()->getTimestamp();
+
+        $found = $query->useWritePdo()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
+
+        $found->pluck('id')->chunk(1000)->each(
+            fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->update(['revoked_at' => $now]),
+        );
+
+        return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
     }
 
     /**
