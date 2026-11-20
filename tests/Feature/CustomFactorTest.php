@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
+use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
@@ -52,6 +55,23 @@ class VoicePrint extends Factor
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
         return $request->input('code') === 'my voice is my passport' ? $this->verified($authenticator) : null;
+    }
+}
+
+/**
+ * Sets aside the carrier a number is with when enrolling it: kept on the
+ * server until the code comes back, never shown to the browser.
+ */
+class CarrierSmsCode extends SmsCode
+{
+    public function beginEnrollment(Authenticatable&Model $user, Request $request): Enrollment
+    {
+        return parent::beginEnrollment($user, $request)->with('carrier', $request->string('carrier')->value());
+    }
+
+    public function confirmEnrollment(Authenticatable&Model $user, Enrollment $enrollment, Request $request): ?Authenticator
+    {
+        return parent::confirmEnrollment($user, $enrollment, $request)?->withMeta('carrier', $enrollment->state('carrier'));
     }
 }
 
@@ -131,6 +151,33 @@ it('keeps enrollments small in the session', function () {
         ->assertJsonStructure(['enrollment' => ['qr']]);
 
     expect(json_decode(Crypt::decryptString(session('keyring.enrollment.totp')), true))->not->toHaveKey('props');
+});
+
+it('keeps what a custom factor sets aside at enrollment on the server until it is confirmed', function () {
+    Keyring::factors([Password::class, CarrierSmsCode::class]);
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+    $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900001', 'carrier' => 'Vodafone'])
+        ->assertOk()
+        ->assertDontSee('Vodafone');
+
+    $this->postJson(route('keyring.authenticators.confirm', 'sms'), ['code' => SmsCode::$sent['+447700900001']])->assertOk();
+
+    expect($this->user->keyring->refresh()->of('sms')->sole()->meta('carrier'))->toBe('Vodafone');
+});
+
+it('takes an enrollment kept in a shape it can\'t read back as one that has gone', function () {
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+
+    // As a release that kept enrollments differently might have left it.
+    $kept = json_decode(Crypt::decryptString(session('keyring.enrollment.totp')), true);
+    session(['keyring.enrollment.totp' => Crypt::encryptString(json_encode([...$kept, 'state' => 'a secret'], JSON_THROW_ON_ERROR))]);
+
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000'])
+        ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
+
+    expect($this->user->keyring->refresh()->of('totp'))->toBeEmpty();
 });
 
 it('refuses a custom code factor whose codes are too short or last too long, when it is registered', function (string $factor, string $message) {

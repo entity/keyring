@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\GenericUser;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -44,6 +45,7 @@ use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\AdminUser;
+use Keyring\Tests\Fixtures\SingleSignOn;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -334,12 +336,6 @@ describe('a sign in that fails after the guard is signed in', function () {
             {
                 throw new RuntimeException('The database went away.');
             }
-
-            // And is still away when the sign in is undone.
-            public function revoke(string $id): void
-            {
-                throw new RuntimeException('The database went away.');
-            }
         });
 
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();
@@ -350,6 +346,32 @@ describe('a sign in that fails after the guard is signed in', function () {
         app()->forgetInstance(SessionRegistry::class);
         $this->get('/home')->assertRedirect('/login');
         expect(DB::table('keyring_sessions')->count())->toBe(0);
+    });
+
+    it('leaves nobody signed in when the session can\'t be ended either', function () {
+        Keyring::factors([Password::class, SingleSignOn::class]);
+        SingleSignOn::$vouchedFor = 'taylor@example.com';
+        Route::middleware('web')->post('/sso/callback', fn (Request $request) => Keyring::attempt($request, 'sso'));
+
+        login()->assertRedirect('/dashboard');
+
+        // The registry stores the new session, then fails to end the one the
+        // browser was on, and the new one when the sign in is undone.
+        app()->bind(SessionRegistry::class, fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revoke(string $id): void
+            {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+
+        $this->post('/sso/callback')->assertServerError();
+
+        $this->assertGuest();
+        expect(session()->has(Sessions::KEY))->toBeFalse();
+
+        app()->forgetInstance(SessionRegistry::class);
+        $this->get('/home')->assertRedirect('/login');
     });
 
     it('does not fail on a device describer of the app\'s that throws, or names a browser at length', function (Closure $describer, ?string $name) {
@@ -1653,6 +1675,24 @@ it('lets a change through on an app that never made the devices table', function
     });
 
     expect($this->user->fresh()->name)->toBe('Still here');
+});
+
+// A user the app keeps outside Eloquent (the database provider's
+// GenericUser, say) has sessions in the registry, but no devices to trust.
+it('signs a user that isn\'t a model out everywhere, and leaves the devices alone', function () {
+    login()->assertRedirect('/dashboard');
+    Device::query()->update(['trusted_until' => now()->addDays(30)]);
+
+    $now = now()->getTimestamp();
+    $other = new GenericUser(['id' => $this->user->id, 'remember_token' => 'remembered']);
+    app(SessionRegistry::class)->save(new RegisteredSession('generic', (string) $other->getAuthIdentifier(), RegisteredSession::typeOf($other), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    expect(app(Sessions::class)->signOutEverywhere($other))->toBe(1)
+        ->and(app(SessionRegistry::class)->find('generic')->revokedAt)->not->toBeNull()
+        ->and($other->getRememberToken())->not->toBe('remembered')
+        // The model's devices and session with the same ID are another account's.
+        ->and(Device::query()->sole()->trusted_until)->not->toBeNull()
+        ->and(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
 });
 
 it('never queries the devices table when devices are off, but to end trust', function () {

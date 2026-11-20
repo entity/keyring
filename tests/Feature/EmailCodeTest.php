@@ -105,6 +105,37 @@ it('rejects an expired code', function () {
     $this->assertGuest();
 });
 
+it('rejects a code from the second after it expires, though the store keeps it a moment longer', function () {
+    config(['keyring.pending_logins.keep_for' => 3600]);
+    emailAuthenticator($this->user);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->get(route('keyring.login.challenge'));
+
+    // Sent late in a second, so the store holds it until late in the second
+    // after the one it expires in.
+    $this->travelTo(now()->startOfSecond()->addMilliseconds(900));
+    $this->post(route('keyring.login.send', 'email-code'));
+    $this->travelTo(now()->startOfSecond()->addSeconds(601));
+
+    $this->post(route('keyring.login.verify', 'email-code'), ['code' => sentCode($this->user)])
+        ->assertSessionHasErrors('code');
+    $this->assertGuest();
+});
+
+it('sends no code once the sign in has expired, and sends the browser back to sign in', function () {
+    emailAuthenticator($this->user);
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+    $this->get(route('keyring.login.challenge'));
+
+    $this->travel(11)->minutes();
+
+    $this->post(route('keyring.login.send', 'email-code'))
+        ->assertRedirect(route('login'))
+        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+    Notification::assertNothingSent();
+});
+
 it('burns the code after too many wrong guesses', function () {
     config(['keyring.limits.per_account' => 100]);
     emailAuthenticator($this->user);
@@ -368,6 +399,16 @@ it('enrolls email codes by confirming a sent code', function () {
         ->assertJsonPath('authenticator.name', 'Email');
 
     expect($this->user->keyring->refresh()->of('email-code'))->toHaveCount(1);
+});
+
+it('warns that someone may be signed in when a code to add the address was not asked for', function () {
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
+        ->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+
+    $enrolling = renderedMail(Notification::sent($this->user, VerificationCode::class)->sole()->toMail($this->user));
+
+    expect($enrolling['text'])->toContain('If you didn\'t ask to add this email as a sign-in method, someone may be signed in to your account.')
+        ->not->toContain('If you didn\'t try to sign in');
 });
 
 it('burns the enrollment code after too many wrong guesses', function () {

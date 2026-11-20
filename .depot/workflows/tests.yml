@@ -23,15 +23,27 @@ concurrency:
 jobs:
   tests:
     runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 8.5 job keeps the name "tests": main requires a check by that name.
+        include:
+          - php: '8.5'
+            name: tests
+          - php: '8.6'
+            name: tests (php 8.6)
+    name: ${{ matrix.name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
-          php-version: '8.5'
+          php-version: ${{ matrix.php }}
           extensions: sqlite3, pdo_sqlite, sodium, bcmath, intl
-          coverage: none
+          coverage: pcov
+          # Assertions on, so the checks they make run too.
+          ini-values: zend.assertions=1
       - run: composer install --no-interaction --prefer-dist
       # Fails on a known vulnerability in anything installed. An abandoned
       # package is listed without failing: that's not a vulnerability.
@@ -40,7 +52,8 @@ jobs:
       - run: vendor/bin/pint --test
       - run: vendor/bin/phpstan analyse --no-progress
       - run: vendor/bin/phpstan analyse -c phpstan.stubs.neon --no-progress
-      - run: vendor/bin/pest --parallel
+      # Every line of src/ is run by a test, or says why it can't be.
+      - run: vendor/bin/pest --parallel --coverage --min=100
 
   # The oldest versions composer.json allows, so its floors stay true.
   lowest:
@@ -126,4 +139,4 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun audit
       - run: bun run typecheck
-      - run: bun test --randomize
+      - run: bun test --randomize --coverage

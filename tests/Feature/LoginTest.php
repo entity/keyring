@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Encryption\Encrypter;
 use Illuminate\Hashing\BcryptHasher;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
@@ -10,6 +12,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
 use Keyring\Events\Authenticated;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\RecoveryCodeUsed;
@@ -19,10 +22,12 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Login\AttemptStore;
 use Keyring\Login\Requirement;
 use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Support\EncryptedSession;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
@@ -328,6 +333,18 @@ it('offers other ways to sign in', function () {
         ->assertJsonPath('props.factor', 'recovery');
 });
 
+it('goes back to the challenge page when asked for a sign-in method the user doesn\'t have', function () {
+    $user = taylor();
+    $totp = totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    $this->get(route('keyring.login.challenge', ['passkey']))->assertRedirect(route('keyring.login.challenge'));
+
+    $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.authenticator.id', $totp->id);
+    $this->assertGuest();
+});
+
 it('signs in with a recovery code once', function () {
     Event::fake([RecoveryCodeUsed::class]);
     $user = taylor();
@@ -510,6 +527,65 @@ it('sends people back to login when the attempt has expired', function () {
     $this->travel(11)->minutes();
 
     $this->get(route('keyring.login.challenge'))->assertRedirect('/login');
+});
+
+it('starts over when the half-finished sign in in the session can\'t be read back', function (array $broken) {
+    $user = taylor();
+    $totp = totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    // As a release that kept it differently, or a session that was tampered
+    // with, might have left it.
+    $session = app(EncryptedSession::class);
+    $session->put(AttemptStore::key(Purpose::Login), [...$session->get(AttemptStore::key(Purpose::Login)), ...$broken]);
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect(route('login'))
+        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+    $this->assertGuest();
+    expect(session()->has(AttemptStore::key(Purpose::Login)))->toBeFalse();
+})->with([
+    'a purpose it doesn\'t know' => [['purpose' => 'unlock']],
+    'a field of the wrong type' => [['verifications' => 'password']],
+]);
+
+it('starts over when the half-finished sign in was kept under another app key, or isn\'t keyring\'s', function (string $payload) {
+    $user = taylor();
+    $totp = totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    session()->put(AttemptStore::key(Purpose::Login), $payload);
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect(route('login'))
+        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+    $this->assertGuest();
+})->with([
+    'another app key' => fn () => new Encrypter(random_bytes(32), 'aes-256-cbc')->encryptString('{"id":"x"}'),
+    'encrypted, but not json' => fn () => Crypt::encryptString('not json'),
+    'encrypted json that isn\'t a sign in' => fn () => Crypt::encryptString('"a string"'),
+]);
+
+it('ends a half-finished sign in when the account is deleted meanwhile', function () {
+    $user = taylor();
+    $totp = totpFor($user);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
+        ->assertRedirect(route('keyring.login.challenge'));
+
+    $user->delete();
+
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])
+        ->assertRedirect(route('login'))
+        ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+    $this->assertGuest();
 });
 
 it('answers json clients with json', function () {

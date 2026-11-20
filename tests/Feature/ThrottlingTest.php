@@ -67,6 +67,31 @@ it('does not let junk passkey requests lock everyone out of passkey sign in', fu
         ->assertRedirect('/dashboard');
 });
 
+// Counted going in, like every attempt, and not given back: a request that
+// doesn't validate is still one the address made.
+it('counts sign ins that don\'t validate against the address, and refuses the one past its limit', function () {
+    Event::fake([Lockout::class]);
+    config(['keyring.limits.per_ip' => 4, 'keyring.limits.per_account' => 100]);
+    account('taylor@example.com');
+
+    // A wrong guess first, so the account has failures in a row to add to.
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
+    $failures = FailureCount::query()->sole()->only(['failures', 'known_failures']);
+
+    foreach (range(1, 3) as $attempt) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => ['not', 'a', 'string']])->assertSessionHasErrors('password');
+    }
+
+    // They aren't failures in a row, so what each reserved going in is given back.
+    expect(FailureCount::query()->sole()->only(['failures', 'known_failures']))->toBe($failures);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertSessionHasErrors('email');
+
+    $this->assertGuest();
+    expect(session('errors')->first('email'))->toContain('Too many');
+    Event::assertDispatchedTimes(Lockout::class, 1);
+});
+
 it('counts password guesses at login and when confirming together', function () {
     config(['keyring.limits.per_account' => 3]);
     $user = account('taylor@example.com');
@@ -1412,6 +1437,7 @@ describe('the cap on failures in a row', function () {
     })->with([
         'a reset' => [fn (User $user) => completeReset($user), 'a brand new passphrase'],
         'an unlock' => [fn (User $user) => Keyring::unlock($user), 'password'],
+        'an unlock that names the password' => [fn (User $user) => Keyring::unlock($user, 'password'), 'password'],
         'a change' => [fn (User $user) => test()->actingAs($user)->withAssurance(Assurance::AAL1)->putJson(route('user-password.update'), [
             'current_password' => 'password',
             'password' => 'a brand new passphrase',

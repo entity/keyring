@@ -41,6 +41,7 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\CloneSuspected;
@@ -322,6 +323,21 @@ it('uses the app\'s own pending change and security event models', function () {
         ->and(Keyring::activity($this->user)->first())->toBeInstanceOf(AppSecurityEvent::class);
 });
 
+it('counts failures in a row with the app\'s own model', function () {
+    Keyring::useFailureCountModel(AppFailureCount::class);
+    $counted = null;
+    AppFailureCount::created(function (AppFailureCount $count) use (&$counted) {
+        $counted = $count;
+    });
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong'])->assertSessionHasErrors('email');
+
+    expect(Keyring::failureCountModel())->toBe(AppFailureCount::class)
+        ->and($counted)->toBeInstanceOf(AppFailureCount::class)
+        ->and($counted->failures)->toBe(1)
+        ->and($counted->owner()?->is($this->user))->toBeTrue();
+});
+
 dataset('mandatory steps', [
     EnsureNotThrottled::class,
     VerifyFactor::class,
@@ -453,6 +469,8 @@ class AppPendingChange extends PendingChange {}
 
 class AppSecurityEvent extends SecurityEvent {}
 
+class AppFailureCount extends FailureCount {}
+
 class FillsEverything implements UpdatesUserPasswords
 {
     public function update(Authenticatable&Model $user, array $input): void
@@ -520,6 +538,62 @@ it('lets a step of the app\'s own turn a request away before it counts against a
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'human' => 'yes'])->assertRedirect(route('keyring.login.challenge'));
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
 });
+
+it('neither counts nor clears failures in a row for a request a later step of the app\'s turns away without an answer', function () {
+    config(['keyring.limits.per_account' => 100, 'keyring.limits.per_ip' => 100]);
+    Keyring::pipeline(fn (Steps $steps) => $steps->after(EnsureNotThrottled::class, PausesSignIns::class));
+
+    foreach (range(1, 2) as $attempt) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'wrong']);
+    }
+
+    config(['test.paused' => true]);
+
+    foreach (range(1, 3) as $attempt) {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->assertGuest();
+    }
+
+    expect(FailureCount::query()->sole()->failures)->toBe(2);
+
+    config(['test.paused' => false]);
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+    expect(FailureCount::query()->exists())->toBeFalse();
+});
+
+it('refuses a request a rate limit refused, whatever a step in between made of it', function () {
+    Log::spy();
+
+    $verification = new Verification('password', null, [Category::Knowledge], at: now()->getTimestamp());
+    $attempt = Attempt::start(Purpose::Login, $this->user, requirement: Requirement::aal1());
+    $attempt->record($verification);
+
+    $context = new Context(Request::create('/login', 'POST'), Purpose::Login, Keyring::factor('password'), $attempt);
+    $context->verification = $verification;
+    $context->throttleChecked = true;
+    $context->riskLockChecked = true;
+    $context->refuse(60);
+
+    app(CompleteAttempt::class)->handle($context, fn (Context $context) => $context);
+
+    expect($context->outcome)->toBe(Outcome::Failed);
+    $this->assertGuest();
+
+    Log::shouldNotHaveReceived('error');
+});
+
+/**
+ * Turns every sign in away while paused, with no answer of its own, as a
+ * maintenance switch of the app's might.
+ */
+class PausesSignIns
+{
+    public function handle(Context $context, Closure $next): Context
+    {
+        return config('test.paused') ? $context : $next($context);
+    }
+}
 
 class ChecksForBots
 {

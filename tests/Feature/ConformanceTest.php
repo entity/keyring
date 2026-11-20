@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Keyring\Tests\Feature;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Attributes\Unguarded;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Auth\User as PlainAuthenticatable;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Keyring\Facades\Keyring;
@@ -21,6 +26,7 @@ use Keyring\Tests\Fixtures\User;
 use Keyring\Tests\TestCase;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\SkippedTest;
 
 /**
  * Keyring runs its own conformance suite against a full setup.
@@ -41,6 +47,9 @@ class ConformanceTest extends TestCase
     /** Keyring's own tests run on Laravel's default hasher. */
     private bool $acknowledgesBcrypt = true;
 
+    /** A user model that was never given the HasKeyring trait. */
+    private bool $userWithoutKeyring = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -49,8 +58,14 @@ class ConformanceTest extends TestCase
         Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys(), Totp::class, EmailCode::asExtraStep(), RecoveryCodes::class]);
     }
 
-    protected function keyringUser(): User
+    protected function keyringUser(): Authenticatable&Model
     {
+        if ($this->userWithoutKeyring) {
+            $user = new #[Unguarded] #[Table(name: 'users')] class extends PlainAuthenticatable {};
+
+            return $user->newQuery()->create(['name' => 'Taylor', 'email' => 'taylor-'.uniqid().'@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        }
+
         return User::create(['name' => 'Taylor', 'email' => 'taylor-'.uniqid().'@example.com', 'password' => 'password', 'email_verified_at' => now()]);
     }
 
@@ -280,5 +295,85 @@ class ConformanceTest extends TestCase
         $this->acknowledged = [EnsureNotThrottled::class];
 
         $this->test_keyring_keeps_its_mandatory_pipeline_steps();
+    }
+
+    public function test_the_suite_fails_when_the_user_model_does_not_guard_its_email_and_password(): void
+    {
+        if (Keyring::protectedAttributes() === []) {
+            $this->markTestSkipped('Nothing is protected.');
+        }
+
+        $this->userWithoutKeyring = true;
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('attribute changed outside a Keyring flow');
+
+        $this->test_keyring_protects_email_and_password();
+    }
+
+    #[DataProvider('checksForWhatIsTurnedOff')]
+    public function test_the_suite_skips_a_check_for_what_the_app_has_turned_off_and_says_how_to_turn_it_on(string $check, string $reason): void
+    {
+        config(['keyring.features' => [], 'keyring.protected' => []]);
+
+        try {
+            $this->{$check}();
+        } catch (SkippedTest $skipped) {
+            $this->assertStringContainsString($reason, $skipped->getMessage());
+
+            return;
+        }
+
+        $this->fail("The [{$check}] check ran with what it checks turned off.");
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    public static function checksForWhatIsTurnedOff(): array
+    {
+        return [
+            'reset links' => ['test_keyring_limits_how_often_an_account_is_sent_a_reset_link', 'turn on Features::resetPasswords()'],
+            'registration' => ['test_keyring_registers_a_taken_address_like_a_free_one', 'Registration is off'],
+            'protected attributes' => ['test_keyring_protects_email_and_password', 'Features::updatePasswords() protects the password'],
+            'fresh verification' => ['test_keyring_requires_a_fresh_verification_to_change_sign_in_methods', 'turn on Features::manageAuthenticators()'],
+            'enrolling' => ['test_keyring_lets_every_enrollable_factor_begin_enrolling', 'turn on Features::manageAuthenticators()'],
+        ];
+    }
+
+    /**
+     * An app that uses the suite and overrides nothing has acknowledged
+     * nothing: every removed step, unchecked route and bcrypt hash fails.
+     */
+    public function test_the_suite_acknowledges_nothing_an_app_has_not_listed(): void
+    {
+        $suite = new class('defaults') extends TestCase
+        {
+            use KeyringConformance;
+
+            protected function keyringUser(): User
+            {
+                return User::create(['name' => 'Taylor', 'email' => 'taylor-'.uniqid().'@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+            }
+        };
+
+        Keyring::pipeline(fn (Steps $steps) => $steps->dangerouslyRemove(EnsureNotThrottled::class));
+        Route::middleware('auth:web')->get('/reports/unchecked', fn () => 'reports');
+
+        foreach ([
+            'test_keyring_keeps_its_mandatory_pipeline_steps' => 'Mandatory pipeline steps were removed or replaced',
+            'test_keyring_checks_the_session_on_every_signed_in_route' => 'reports/unchecked',
+            'test_keyring_takes_passwords_of_64_characters' => 'hashed with bcrypt',
+        ] as $check => $message) {
+            try {
+                $suite->{$check}();
+            } catch (AssertionFailedError $failure) {
+                $this->assertStringContainsString($message, $failure->getMessage());
+
+                continue;
+            }
+
+            $this->fail("The [{$check}] check let through what the app never acknowledged.");
+        }
     }
 }

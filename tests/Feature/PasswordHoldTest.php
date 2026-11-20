@@ -25,6 +25,7 @@ use Keyring\Risk\Finding;
 use Keyring\Risk\Risk;
 use Keyring\Risk\Signals\BreachedPassword;
 use Keyring\Risk\Signals\Signal;
+use Keyring\Testing\VirtualAuthenticator;
 
 // NIST SP 800-63B-4, Sec. 3.1.1.2: no periodic changes, and a forced one
 // when there's evidence the password was compromised.
@@ -322,14 +323,22 @@ describe('as a risk response', function () {
     });
 
     it('does nothing to an account that signed in without a password', function () {
+        $key = new VirtualAuthenticator;
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+        $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+        $this->post('/logout');
+
         Keyring::risk()->respond(fn () => Action::allow()->requirePasswordChange());
         $this->user->forceFill(['password' => null])->saveQuietly();
-        Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
-        Keyring::fake()->pass('passkey');
 
-        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => ['id' => $this->user->keyring->of('passkey')->sole()->credential_id]]);
+        $options = $this->getJson(route('keyring.login.options', 'passkey'))->assertOk()->json('options');
+        $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options)])
+            ->assertRedirect('/dashboard');
 
+        $this->assertAuthenticatedAs($this->user);
         expect(PasswordHold::query()->exists())->toBeFalse();
+        $this->get('/home')->assertOk();
     });
 
     describe('by default, when the password just used is found in a breach', function () {
@@ -376,6 +385,21 @@ describe('as a risk response', function () {
             $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
 
             $this->get('/home')->assertRedirect('/settings/password');
+        });
+
+        it('looks at no password sent along with a sign in that didn\'t use one', function () {
+            $key = new VirtualAuthenticator;
+            $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+            $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+            $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+            $this->post('/logout');
+
+            $options = $this->getJson(route('keyring.login.options', 'passkey'))->assertOk()->json('options');
+            $this->post(route('keyring.login.factor', 'passkey'), ['credential' => $key->assert($options), 'password' => 'password'])
+                ->assertRedirect('/dashboard');
+
+            $this->assertAuthenticatedAs($this->user);
+            expect(Keyring::requiresPasswordChange($this->user))->toBeFalse();
         });
 
         it('leaves the answer to a responder of the app\'s own', function () {

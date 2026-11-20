@@ -1,0 +1,6 @@
+[test]
+# CI runs `bun test --coverage`: every line and function of src/ is tested.
+coverageThreshold = 1.0
+coverageSkipTestFiles = true
+# The stand-ins in tests/ aren't the package.
+coveragePathIgnorePatterns = ["tests/**"]

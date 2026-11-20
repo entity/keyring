@@ -63,7 +63,9 @@ class FailureCounts
         }
 
         // Nothing to add to. Either it's refused by now, or a success or a
-        // reset has cleared the row since it was read.
+        // reset has cleared the row since it was read. Only another request
+        // can do either in between, so the race tests are what reach this.
+        // @codeCoverageIgnoreStart
         if ($this->query($limit)->exists()) {
             return false;
         }
@@ -71,6 +73,7 @@ class FailureCounts
         $limit->count = null;
 
         return true;
+        // @codeCoverageIgnoreEnd
     }
 
     /**

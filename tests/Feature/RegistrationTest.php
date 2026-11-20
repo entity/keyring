@@ -861,6 +861,15 @@ describe('saying when an address is taken', function () {
         expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
     });
 
+    it('sends a user whose address is already verified on, without mailing another link', function () {
+        $this->actingAs(taylor());
+
+        $this->get('/email/verify')->assertRedirect('/dashboard');
+        $this->post('/email/verification-notification')->assertRedirect('/dashboard');
+
+        Notification::assertNothingSent();
+    });
+
     it('sends a signed-out browser that follows the link to sign in, and back to its page', function () {
         $user = User::create(['name' => 'Taylor', 'email' => 'taylor@example.com', 'password' => 'password']);
         $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)], absolute: false);

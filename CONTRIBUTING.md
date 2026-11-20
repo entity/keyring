@@ -14,6 +14,8 @@ composer check     # everything CI runs: Rector (dry run), Pint, PHPStan, and Pe
 
 Run `composer check` before opening a pull request.
 
+CI also requires every line of `src/` and `js/src/` to be covered by a test. That needs a coverage driver, pcov or Xdebug, and PHP runs with assertions on so the `assert()` calls count too. `bin/ci tests js` checks coverage the same way CI does. If a line really can't be reached by a test, such as one that only runs when two requests race each other, give it a `@codeCoverageIgnore` comment that says why.
+
 The `bin/ci` script runs every CI job on your own machine. That covers the checks above, the oldest dependencies Keyring allows, PostgreSQL, MySQL (in Docker), and the browser package. To run only some of the jobs, name them, as in `bin/ci tests js`. Only run one `bin/ci` at a time. The installer's tests publish into a test application that every run shares, so two runs at once fail each other.
 
 The race tests run operations in separate processes against a real database. That means they need PostgreSQL or MySQL, and they run as their own suite. CI runs them on both databases:

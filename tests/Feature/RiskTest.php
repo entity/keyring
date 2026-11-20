@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
@@ -25,6 +26,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
+use Keyring\Models\PendingChange;
 use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
 use Keyring\Notifications\NewDevice as NewDeviceNotice;
@@ -43,6 +45,7 @@ use Keyring\Risk\Signals\ImpossibleTravel;
 use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\NewCountry;
 use Keyring\Risk\Signals\NewDevice;
+use Keyring\Risk\Signals\RecentlyChangedRecovery;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Risk\Signals\SuccessAfterFailures;
@@ -277,6 +280,20 @@ it('spots impossible travel', function () {
     expect(SecurityEvent::where('type', 'risk_denied')->latest('created_at')->first()->meta['reasons'])->toHaveCount(3);
 });
 
+it('finds nothing about where a sign in is from when the locator can\'t place it', function () {
+    // Scored to refuse the sign in if either fired.
+    Keyring::risk()->signals([new NewCountry(score: 95), new ImpossibleTravel(score: 95)]);
+    $this->locator->location = ['country' => 'GB', 'latitude' => 51.5, 'longitude' => -0.12];
+    signInAs()->assertRedirect('/dashboard');
+    $this->post('/logout');
+
+    $this->travel(10)->minutes();
+    $this->locator->location = null;
+
+    signInAs()->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($this->user);
+});
+
 it('asks again before sensitive pages when the session moves browser', function () {
     Keyring::risk()->signals([SessionFingerprintChanged::class]);
     signInAs();
@@ -330,6 +347,14 @@ it('does not let a confirmation started before the session moved browser keep it
         ->assertRedirect(route('keyring.confirm.challenge'));
 
     $this->withHeader('User-Agent', CHROME)->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+});
+
+it('has nothing to compare when the session signed in without a user agent', function () {
+    Keyring::risk()->signals([SessionFingerprintChanged::class])->respond(fn ($risk, $at) => $risk->isElevated() ? Action::reauthenticate() : Action::allow());
+    signInAs(agent: '')->assertRedirect('/dashboard');
+
+    $this->withHeader('User-Agent', CHROME)->get('/home')->assertOk();
+    $this->assertAuthenticatedAs($this->user);
 });
 
 it('can sign a hijacked session out', function () {
@@ -635,6 +660,19 @@ class OwnNewDevice extends Illuminate\Notifications\Notification
 it('runs no signals until the app picks some', function () {
     expect(new RiskEngine()->signalsFor(Checkpoint::Login))->toBe([])
         ->and(new RiskEngine()->signalsFor(Checkpoint::Request))->toBe([]);
+});
+
+it('adds signals to the ones the app already picked', function () {
+    Keyring::risk()->signals([NewDevice::class])->push(new AlwaysRisky);
+
+    expect(Keyring::risk()->signalsFor(Checkpoint::Login))
+        ->sequence(
+            fn ($signal) => $signal->toBeInstanceOf(NewDevice::class),
+            fn ($signal) => $signal->toBeInstanceOf(AlwaysRisky::class),
+        );
+
+    signInAs()->assertSessionHasErrors('email');
+    $this->assertGuest();
 });
 
 it('doesn\'t call every browser new when devices are off', function () {
@@ -1074,4 +1112,65 @@ it('tells the user about either, and refuses neither, when both are found at onc
     $notice = Notification::sent($this->user, SuspiciousActivity::class)->sole();
 
     expect($notice->reasons)->toBe('The first sign in for 91 days. Signed in after 5 failed attempts in the last 1h.');
+});
+
+/**
+ * An email change to the user's address that was applied then, and
+ * undone later when given.
+ */
+function emailChangedAt(User $user, DateTimeInterface $applied, ?DateTimeInterface $reverted = null): void
+{
+    $change = new PendingChange([
+        'attribute' => 'email',
+        'value' => 'taylor@example.com',
+        'previous_value' => 'old@example.com',
+        'confirm_token' => PendingChange::hashToken('confirm'),
+        'revert_token' => PendingChange::hashToken('revert'),
+        'confirmed_at' => $applied,
+        'applied_at' => $applied,
+        'reverted_at' => $reverted,
+        'revertable_until' => CarbonImmutable::parse($applied)->addDays(7),
+        'expires_at' => CarbonImmutable::parse($applied)->addDay(),
+    ]);
+
+    $change->authenticatable()->associate($user)->save();
+}
+
+describe('a sign in soon after the email address changed', function () {
+    it('is found within a week of the change', function () {
+        Keyring::risk()->signals([RecentlyChangedRecovery::class])->respond(function (Risk $risk) use (&$found) {
+            $found = $risk;
+
+            return Action::allow();
+        });
+        emailChangedAt($this->user, now()->subDays(6));
+
+        signInAs()->assertRedirect('/dashboard');
+
+        expect($found->has('recent_recovery_change'))->toBeTrue()
+            ->and($found->score)->toBe(25)
+            ->and($found->reasons())->toBe(['The email address changed recently.']);
+    });
+
+    it('counts an undo as a change', function () {
+        Keyring::risk()->signals([app()->make(RecentlyChangedRecovery::class, ['score' => 95])]);
+        emailChangedAt($this->user, now()->subDays(20), reverted: now()->subDay());
+
+        signInAs()->assertSessionHasErrors('email');
+        $this->assertGuest();
+    });
+
+    it('is not found once the change is older than the app looks back', function () {
+        config(['keyring.risk.recent_change' => '1d']);
+        Keyring::risk()->signals([app()->make(RecentlyChangedRecovery::class, ['score' => 95])]);
+        emailChangedAt($this->user, now()->subDays(2));
+
+        signInAs()->assertRedirect('/dashboard');
+    });
+
+    it('is not found for an address that never changed', function () {
+        Keyring::risk()->signals([app()->make(RecentlyChangedRecovery::class, ['score' => 95])]);
+
+        signInAs()->assertRedirect('/dashboard');
+    });
 });
