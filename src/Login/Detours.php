@@ -6,6 +6,8 @@ namespace Keyring\Login;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Uri;
 use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Sessions\RegisteredSession;
@@ -35,7 +37,9 @@ class Detours
 
     /**
      * Keyring's own pages, and the ones it sends users to: none is a place
-     * to come back to.
+     * to come back to. Pages opened from emailed links are left out too:
+     * their URL holds the link's token, and some of them, like confirming
+     * an email change, stop working once the password changes.
      *
      * @var list<string>
      */
@@ -60,7 +64,7 @@ class Detours
 
         $url ??= $request->routeIs(...$this->own) ? null : $request->fullUrl();
 
-        if ($url !== null && $this->isOwnOrigin($request, $url)) {
+        if ($url !== null && $this->isOwnOrigin($request, $url) && ! $this->isDestination($key, $url)) {
             $request->session()->put($key, ['url' => $url, 'user' => $this->owner($user), 'at' => now()->getTimestamp()]);
         }
     }
@@ -111,7 +115,7 @@ class Detours
      */
     protected function isNavigation(Request $request): bool
     {
-        if (! $request->isMethod('GET') || ! $request->hasSession() || $this->wantsJson($request)) {
+        if (! $request->isMethod('GET') || ! $request->hasSession() || $this->wantsJson($request) || $this->isPrefetch($request)) {
             return false;
         }
 
@@ -123,6 +127,28 @@ class Detours
 
         return $request->header('Sec-Fetch-Mode') === 'navigate'
             && in_array($request->header('Sec-Fetch-Dest'), [null, 'document'], true);
+    }
+
+    /**
+     * Whether the browser is only fetching the page ahead of time, or
+     * rendering it out of sight. Laravel's prefetch() compares the whole
+     * header, so it misses Chrome's "prefetch;prerender".
+     */
+    protected function isPrefetch(Request $request): bool
+    {
+        return $request->prefetch() || str_starts_with(strtolower((string) $request->header('Sec-Purpose')), 'prefetch');
+    }
+
+    /**
+     * Whether a URL is the page this detour sends users to, matched by path
+     * as the middleware let it through. Coming back to it would only leave
+     * them where they already are.
+     */
+    protected function isDestination(string $key, string $url): bool
+    {
+        $destination = config($key === static::ENROLLMENT ? 'keyring.enrollment_url' : 'keyring.password_change_url');
+
+        return is_string($destination) && Str::is(Uri::of($destination)->path(), rawurldecode(Uri::of($url)->path()));
     }
 
     /**
