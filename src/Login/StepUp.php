@@ -4,12 +4,19 @@ declare(strict_types=1);
 
 namespace Keyring\Login;
 
+use DateTimeInterface;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
 use Keyring\Contracts\Responses\EnrollmentRequiredResponse;
+use Keyring\Devices\DeviceManager;
+use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
+use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\UserKeyring;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -21,7 +28,94 @@ class StepUp
         protected AttemptStore $attempts,
         protected SessionAssurance $assurance,
         protected KeyringManager $keyring,
+        protected DeviceManager $devices,
     ) {}
+
+    /**
+     * Ask for step-up from a controller, when the session hasn't reached a
+     * level, or the user hasn't verified at or after a moment, or both.
+     * Null means the request may carry on. Otherwise it's the answer the
+     * keyring and keyring.fresh middleware give: the confirm page, or
+     * enrolling first for a user who can't reach what's asked.
+     *
+     * Freshness asks what keyring.fresh does, the strongest combination the
+     * account can give, verified at or after $since. With a level as well,
+     * both are asked for in one confirm. Give $since as a fixed moment: once
+     * the user confirms, any moment up to then is met, so the check can't
+     * send them round again. A moment that moves on with every request can.
+     *
+     * @throws InvalidArgumentException when nothing is asked, the level is
+     *                                  none, or $since is in the future
+     */
+    public function unlessMet(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): ?Response
+    {
+        if ($level === Assurance::None) {
+            throw new InvalidArgumentException('Ask for a level of at least AAL1.');
+        }
+
+        if ($since === null) {
+            return $level === null
+                ? throw new InvalidArgumentException('Ask for a level, a verification since a moment, or both.')
+                : $this->unlessReached($request, $level, Requirement::for($level));
+        }
+
+        // Nothing verified later could reach a moment that hasn't come yet,
+        // until it does, so the user would confirm and be asked again.
+        if ($since->getTimestamp() > now()->getTimestamp()) {
+            throw new InvalidArgumentException('A verification can\'t be asked for since a moment in the future.');
+        }
+
+        return $this->unlessFresh($request, $since->getTimestamp(), $level);
+    }
+
+    /**
+     * The keyring middleware's decision: the session must have reached the
+     * level, and what still counts toward it must meet the requirement.
+     * What's missing is asked for, building on what still counts.
+     *
+     * @internal
+     */
+    public function unlessReached(Request $request, Assurance $level, Requirement $requirement): ?Response
+    {
+        $proved = $this->assurance->countingToward($level);
+
+        if ($this->assurance->level()->atLeast($level) && $requirement->isMetBy($proved)) {
+            return null;
+        }
+
+        return $this->require($request, $requirement, $proved);
+    }
+
+    /**
+     * The keyring.fresh middleware's decision: what freshRequirement() asks,
+     * verified at or after the timestamp. With a level, the session must
+     * have reached it too, and a confirm asks for both at once. It asks
+     * afresh rather than building on what was proved before.
+     *
+     * @internal
+     */
+    public function unlessFresh(Request $request, int $since, ?Assurance $level = null): ?Response
+    {
+        $requirement = $this->freshRequirement($request);
+        $reached = true;
+
+        if ($level !== null) {
+            $requirement = $requirement->atLeast(Requirement::for($level));
+            $reached = $this->assurance->level()->atLeast($level) && Requirement::for($level)->isMetBy($this->assurance->countingToward($level));
+        }
+
+        $proved = $this->assurance->since($since);
+
+        if (! $requirement->acceptsRecoveryCodes) {
+            $proved = array_values(array_filter($proved, fn (Verification $verification) => $verification->factor !== RecoveryCodes::KEY));
+        }
+
+        if ($reached && $requirement->isMetBy($proved)) {
+            return null;
+        }
+
+        return $this->require($request, $requirement);
+    }
 
     /**
      * @param  list<Verification>  $proved  what still counts from this session, to build on
@@ -70,5 +164,65 @@ class StepUp
             requirement: $requirement,
             verifications: $proved,
         );
+    }
+
+    /**
+     * What a fresh verification asks of the signed-in user: the strongest
+     * combination their account can give, at least what signing in would
+     * ask of them, and a possession factor whenever they have one.
+     * Otherwise a stolen session plus one phished factor could add new ones
+     * without ever touching the rest.
+     *
+     * The policy is asked twice: about this browser as a sign in would find
+     * it, and about one nothing is known of. The stricter answer stands, so
+     * a policy that asks more of a new device is heard here, and one that
+     * asks less of a trusted device gets no discount.
+     */
+    public function freshRequirement(Request $request): Requirement
+    {
+        $user = $this->keyring->user();
+        $keyring = $this->keyring->for($user)->withoutFallbacks();
+
+        $here = Attempt::start(Purpose::Login, $user);
+        $here->resolveDevice($this->devices->find($request, $user)?->id);
+
+        $policy = $this->keyring->requirementFor($user, $here, reachable: true)
+            ->atLeast($this->keyring->requirementFor($user, Attempt::start(Purpose::Login, $user), reachable: true));
+
+        // Together they must still be something the account can prove, or
+        // it could never add anything again.
+        $requirement = $keyring->reachable($policy->atLeast($this->strongest($keyring, $policy)));
+
+        if ($keyring->has(Category::Possession)) {
+            $requirement = $requirement->atLeast(Requirement::aal1()->including(Category::Possession));
+        }
+
+        // A recovery code stands in for a lost factor beside another one. It
+        // is never the whole of a verification: with one factor to prove,
+        // that factor is what's asked for.
+        return $requirement->factors < 2 ? $requirement->withoutRecoveryCodes() : $requirement;
+    }
+
+    /**
+     * The most the account's authenticators can prove together, whatever
+     * the policy asks at sign in. NIST SP 800-63B-4 (Sec. 4.1.2.1) has a new
+     * authenticator bound at the highest level the account can reach, or at
+     * the level the new one will be used at if that's lower. Keyring always
+     * asks for the highest: otherwise a user who holds a key that can't
+     * leave its device could add another after proving only a password and
+     * a code.
+     *
+     * A key nothing vouches for is asked for too: if it is what it says, it
+     * is the best the account has. A recovery code is taken in a lost key's
+     * place, as it is at sign in, unless the policy takes none there. An
+     * account with nothing beyond one factor proves that, so it can always
+     * add its first.
+     */
+    protected function strongest(UserKeyring $keyring, Requirement $policy): Requirement
+    {
+        $strongest = array_find([Requirement::aal3(), Requirement::aal2()->deviceBound()], $keyring->canMeet(...));
+
+        return $strongest?->acceptingInstead($policy->noDowngrade ? $policy->downgradeExceptions : [RecoveryCodes::KEY])
+            ?? $keyring->reachable(Requirement::aal2());
     }
 }
