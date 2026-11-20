@@ -10,6 +10,8 @@
 - [Checkpoints](#checkpoints)
 - [Configuring Signals](#configuring-signals)
 - [Writing a Signal](#writing-a-signal)
+    - [Allowed and Blocked Countries](#allowed-and-blocked-countries)
+    - [IP Reputation](#ip-reputation)
 - [Running Risk Yourself](#running-risk-yourself)
 - [Using Risk in Your Policy](#using-risk-in-your-policy)
 - [Events and Logging](#events-and-logging)
@@ -32,19 +34,21 @@ Keyring::risk()->signals([
     Signals\NewDevice::class,
     Signals\InactiveAccount::class,
     // Signals\RecentlyChangedRecovery::class,
+    // Signals\CredentialStuffing::class,
     // Signals\BreachedPassword::class,
     // Signals\NewCountry::class,
     // Signals\ImpossibleTravel::class,
 ]);
 ```
 
-With the installer's default features, that means `SessionFingerprintChanged`, `RepeatedFactorFailures`, and `SuccessAfterFailures`. `NewDevice` and `InactiveAccount` are written in as comments until you turn on [`Features::devices()`](devices-and-sessions.md). The other four stay off until you turn them on yourself:
+With the installer's default features, that means `SessionFingerprintChanged`, `RepeatedFactorFailures`, and `SuccessAfterFailures`. `NewDevice` and `InactiveAccount` are written in as comments until you turn on [`Features::devices()`](devices-and-sessions.md). The other five stay off until you turn them on yourself:
 
 - `BreachedPassword` makes a network call at every sign in. When it finds a user's password in a breach, it [holds that user](#requiring-a-new-password) until they choose another.
 - `NewCountry` and `ImpossibleTravel` need a [locator](devices-and-sessions.md#locations). They never fire without one.
 - `RecentlyChangedRecovery` needs `Features::emailChanges()`. It's left off because of what the scores add up to, as explained below.
+- `CredentialStuffing` reads the security log. It's left off because everyone behind a shared IP address can set it off for each other, and because of what the scores add up to.
 
-Unless you set your own responses, Keyring responds to what the signals find, [as shown below](#responding-to-risk). The starting set is chosen so that those responses can't keep out a user who has only a password. A step-up asks a user who has a second factor for one, and does nothing to a user who doesn't. The signals that can fire for such a user (`NewDevice`, `InactiveAccount`, and `SuccessAfterFailures`) add up to 75. That's short of the 90 at which a sign in is refused. `RepeatedFactorFailures` only counts failures that follow a correct password, so someone has to know the password to raise it. Adding `RecentlyChangedRecovery`, or raising a score, can take a password-only user past 90. Check the sums whenever you change the list.
+Unless you set your own responses, Keyring responds to what the signals find, [as shown below](#responding-to-risk). The starting set is chosen so that those responses can't keep out a user who has only a password. A step-up asks a user who has a second factor for one, and does nothing to a user who doesn't. The signals that can fire for such a user (`NewDevice`, `InactiveAccount`, and `SuccessAfterFailures`) add up to 75. That's short of the 90 at which a sign in is refused. `RepeatedFactorFailures` only counts failures that follow a correct password, so someone has to know the password to raise it. Adding `RecentlyChangedRecovery` or `CredentialStuffing`, or raising a score, can take a password-only user past 90. With `CredentialStuffing` on, `InactiveAccount` (30), `SuccessAfterFailures` (30), and `CredentialStuffing` (40) add up to 100 without a new device, and all four that can fire for such a user add up to 115. Either sign in is refused. `Level::Critical` is a plain deny, so a user with a second factor is refused too, and isn't asked for it. Check the sums whenever you change the list.
 
 If your application doesn't use the published provider, it has no signals until you call `Keyring::risk()->signals([...])`.
 
@@ -61,6 +65,7 @@ The built-in signals live in `Keyring\Risk\Signals`:
 | `RecentlyChangedRecovery` | The email address changed (or was changed back) within `risk.recent_change` (7 days). | 25 | login |
 | `InactiveAccount` | The account last signed in 90 days ago or more (the `after` option), and none of its sessions has been used since. | 30 | login |
 | `SuccessAfterFailures` | The first factor was right after five or more failed attempts on the account (the `threshold` option) in the last hour (`within`), counted since it last signed in. | 30 | login |
+| `CredentialStuffing` | The first factor was right, and in the last hour (`within`) five or more other accounts (`threshold`) failed a factor from the same IP address. The published provider leaves it off. Keyring's own response [tells the user](#telling-the-user). | 40 | login |
 | `SessionFingerprintChanged` | A signed-in session now comes from a different browser or platform than the one it was last seen in. IP changes alone don't count. | 60 | every request |
 | `BreachedPassword` | The password used to sign in appears in a public breach list. It makes a network call at sign in, so the published provider leaves it off. Whatever it scores, Keyring's own response to it [holds the user until they choose a new password](#requiring-a-new-password). | 40 | login |
 
@@ -72,17 +77,22 @@ The built-in signals live in `Keyring\Risk\Signals`:
 
 `SuccessAfterFailures` counts every failed attempt on the account, wrong passwords included. That's what tells a guessed password from a known one. Anyone who knows a username can cause those failures, so the signal can't say whose sign in this is, only that someone has been trying. Its score asks for a second factor and no more. A run of failures is followed once, since the count starts over at each sign in.
 
+`CredentialStuffing` goes by the IP address instead of the account. Someone trying a list of leaked passwords fails on many accounts from one address, and the one that works signs in from there too. The signal counts accounts, not attempts, so ten failures on one account count once. The user's own failures don't count, since `SuccessAfterFailures` covers those. A failure here is any `factor_failed` entry in the [security log](security-log-and-emails.md). That's a wrong password or passkey at sign in, but also a wrong second factor after a right password, and a wrong password when [confirming](step-up.md#the-confirm-flow) a sensitive action. A failure for a name nobody has doesn't record which name was typed, so those failures can't be told apart. All of them together count as one account. That way, someone who mistyped their own address a few times doesn't look like a list. Keyring also limits how many of those entries it writes: `security_log.refusals` every `refusals_per` (20 an hour), counted by the request's real IP address. See [Refusals That Repeat](security-log-and-emails.md#refusals-that-repeat). Since they count as one account anyway, the limit changes little here.
+
+Only failures from the same address count, so a stranger can only raise the risk of sign ins made from where they are. But many people can share one address, such as an office, a school, or a mobile network. Since a wrong second factor or confirm password counts too, five of them getting something wrong in the same hour is easier than it sounds, and it fires the signal for the rest. The same happens to every user when Laravel doesn't [trust your proxies](security.md#trusted-proxies), or when a frontend server posts the login to Keyring on its users' behalf. Both put everyone on one address. If your users share addresses like that, raise the `threshold`, or leave the signal off. On its own, the signal's 40 asks for a second factor, and so does 55 alongside `NewDevice`. The signal compares the address Keyring records. So when [`Keyring::recordIpsUsing()`](security-log-and-emails.md#whats-stored) shortens addresses, a whole network counts as one address, and when it keeps none, the signal never fires. It reads the security log table, so it does nothing when `Features::securityLog()` is off or the table can't be read.
+
 ### Telling the User
 
-OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own, each of these two findings reaches `Level::Medium`. That level asks for a second factor and sends nothing. So Keyring's own response emails the user whenever either finding turns up, whatever the level. The email is the `suspicious_activity` [notice](security-log-and-emails.md#email-types).
+OWASP ASVS 5.0.0 requirement 6.3.5 asks that users hear about a sign in after a long quiet period, or one that follows several failures. On its own, each of these two findings reaches `Level::Medium`. That level asks for a second factor and sends nothing. So Keyring's own response emails the user whenever either finding turns up, whatever the level. It does the same for `CredentialStuffing`, when you turn it on. A user with only a password gets through `Level::Medium`, and a sign in from an address where many other accounts have failed is the one they most need to hear about. The email is the `suspicious_activity` [notice](security-log-and-emails.md#email-types).
 
-A responder of your own replaces Keyring's, this part included. If you want to keep the emails, notify for the two findings yourself:
+A responder of your own replaces Keyring's, this part included. If you want to keep the emails, notify for these findings yourself:
 
 ```php
 use Keyring\Risk\Action;
 use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Level;
 use Keyring\Risk\Risk;
+use Keyring\Risk\Signals\CredentialStuffing;
 use Keyring\Risk\Signals\InactiveAccount;
 use Keyring\Risk\Signals\SuccessAfterFailures;
 
@@ -94,7 +104,7 @@ Keyring::risk()->respond(function (Risk $risk, Checkpoint $at) {
         Level::Critical => Action::deny()->revokeAllSessions()->notify(),
     };
 
-    return $risk->has(InactiveAccount::FINDING) || $risk->has(SuccessAfterFailures::FINDING)
+    return $risk->has(InactiveAccount::FINDING) || $risk->has(SuccessAfterFailures::FINDING) || $risk->has(CredentialStuffing::FINDING)
         ? $action->notify()
         : $action;
 });
@@ -127,9 +137,9 @@ If you don't write your own responder, Keyring takes these actions at every chec
 
 At login, `revokeAllSessions` is always ignored. A critical login is refused and the `suspicious_activity` email goes out, but the owner stays signed in everywhere else.
 
-Three findings are answered whatever the level. Two of them add a notice, and one adds a hold:
+Four findings are answered whatever the level. Three of them add a notice, and one adds a hold:
 
-- A sign in that follows several failures (`SuccessAfterFailures`) or a long quiet period (`InactiveAccount`) adds `->notify()` to the action above. See [Telling the User](#telling-the-user).
+- A sign in that follows several failures (`SuccessAfterFailures`), a long quiet period (`InactiveAccount`), or failures on many other accounts from the same address (`CredentialStuffing`) adds `->notify()` to the action above. See [Telling the User](#telling-the-user).
 - When `BreachedPassword` finds the password used to sign in in a breach, `->requirePasswordChange()` is added. See [Requiring a New Password](#requiring-a-new-password).
 
 To set your own, add a responder in your `KeyringServiceProvider`:
@@ -226,9 +236,10 @@ With [`sessions.end_on_lapse`](devices-and-sessions.md#ending-a-session-with-its
 `Keyring::risk()->signals([...])` replaces the signal list. To keep the signals that are already on and add to them, use `push`:
 
 ```php
+use App\Keyring\ListedIp;
 use Keyring\Risk\Signals\BreachedPassword;
 
-Keyring::risk()->push(BreachedPassword::class, BlocklistedIp::class);
+Keyring::risk()->push(BreachedPassword::class, ListedIp::class);
 ```
 
 Both methods accept class names and instances, so you can change a signal's score:
@@ -245,7 +256,7 @@ Keyring::risk()->signals([
 ]);
 ```
 
-Use `app()->make()` for signals that have dependencies: `RepeatedFactorFailures`, `SuccessAfterFailures`, `InactiveAccount`, `RecentlyChangedRecovery`, and `BreachedPassword`.
+Use `app()->make()` for signals that have dependencies: `RepeatedFactorFailures`, `SuccessAfterFailures`, `CredentialStuffing`, `InactiveAccount`, `RecentlyChangedRecovery`, and `BreachedPassword`.
 
 These are the constructor options. `within` and `after` are [durations](configuration.md#durations):
 
@@ -255,6 +266,7 @@ These are the constructor options. `within` and `after` are [durations](configur
 | `ImpossibleTravel` | `maxKph`, `minKm` | `900`, `500` |
 | `RepeatedFactorFailures` | `threshold`, `within` | `5`, `15m` |
 | `SuccessAfterFailures` | `threshold`, `within` | `5`, `1h` |
+| `CredentialStuffing` | `threshold`, `within` | `5`, `1h` |
 | `InactiveAccount` | `after` | `90d` |
 
 For example:
@@ -271,27 +283,9 @@ Keyring::risk()->push(
 
 ## Writing a Signal
 
-To write your own, extend `Keyring\Risk\Signals\Signal` and write the `assess()` method:
+To write your own, extend `Keyring\Risk\Signals\Signal` and write the `assess()` method. It returns a `Keyring\Risk\Finding` with a name, a score, and a reason, or `null` when nothing's wrong. The name is what `$risk->has()` looks for, and the reason is listed in the `suspicious_activity` email. The two examples below show the whole class. Register a signal's class name with `push` or `signals`. The container builds it, so its constructor can ask for what it needs.
 
-```php
-namespace App\Keyring;
-
-use Keyring\Risk\Assessment;
-use Keyring\Risk\Finding;
-use Keyring\Risk\Signals\Signal;
-
-class BlocklistedIp extends Signal
-{
-    public function assess(Assessment $assessment): ?Finding
-    {
-        return app(IpBlocklist::class)->contains($assessment->request->ip())
-            ? new Finding('blocklisted_ip', 40, 'Signing in from a blocklisted address.')
-            : null;
-    }
-}
-```
-
-A signal runs while signing in, unless its `checkpoints()` method says otherwise. To run on every signed-in request instead, return `[Checkpoint::Request]`, and keep those signals cheap. The base class is only a default. Anything that implements `Keyring\Contracts\Signal` works.
+A signal runs while signing in, unless its `checkpoints()` method says otherwise. To run on every signed-in request instead, return `[Checkpoint::Request]`, and keep those signals cheap. The base class is only a default. Anything that implements `Keyring\Contracts\Signal` works. An exception thrown from `assess()` isn't caught, so the sign in fails with it.
 
 The `Assessment` gives you the following:
 
@@ -304,7 +298,126 @@ The `Assessment` gives you the following:
 | `session` | The `RegisteredSession`, at the request checkpoint. |
 | `location()` | The request's location from the locator, looked up once per request (`Location::of()`). |
 
-Return `null` when nothing's wrong.
+### Allowed and Blocked Countries
+
+This signal goes by the country code in the request's [location](devices-and-sessions.md#locations), so it needs a locator. With no location, there's nothing to go by, and it returns `null`:
+
+```php
+namespace App\Keyring;
+
+use Keyring\Risk\Assessment;
+use Keyring\Risk\Finding;
+use Keyring\Risk\Signals\Signal;
+
+class CountryRules extends Signal
+{
+    /**
+     * @param  list<string>  $allowed  Country codes to allow. Empty allows any not blocked.
+     * @param  list<string>  $blocked  Country codes never to allow.
+     */
+    public function __construct(
+        protected array $allowed = [],
+        protected array $blocked = [],
+        protected int $score = 90,
+    ) {}
+
+    public function assess(Assessment $assessment): ?Finding
+    {
+        $country = $assessment->location()['country'] ?? null;
+
+        if (! is_string($country)) {
+            return null;
+        }
+
+        $refused = in_array($country, $this->blocked, true)
+            || ($this->allowed !== [] && ! in_array($country, $this->allowed, true));
+
+        return $refused
+            ? new Finding('country_not_allowed', $this->score, "Signing in from a country that isn't allowed ({$country}).")
+            : null;
+    }
+}
+```
+
+```php
+use App\Keyring\CountryRules;
+
+Keyring::risk()->push(new CountryRules(allowed: ['GB', 'IE']));
+```
+
+This is closer to a policy than a risk. A score of 90 reaches `Level::Critical` on its own, which Keyring's own response refuses, so it works as a block. The owner is emailed about it too. With a lower score, such as 30, a sign in from elsewhere is asked for a second factor instead. A request the locator can't place gets through, and so does anyone who can pick their country, through a VPN or a [header the locator trusts](devices-and-sessions.md#locations). Remember to add up the scores of the other signals that are on.
+
+### IP Reputation
+
+This signal asks a list of bad addresses, such as Tor exit nodes or an abuse database, about the request's address. The list and the client that asks it are your application's own. Give the signal an interface and bind your client to it:
+
+```php
+namespace App\Keyring;
+
+interface IpReputation
+{
+    /**
+     * Whether the address is a Tor exit node or on an abuse list, or null
+     * when the list can't be reached.
+     */
+    public function isListed(string $ip): ?bool;
+}
+```
+
+```php
+namespace App\Keyring;
+
+use Illuminate\Support\Facades\Cache;
+use Keyring\Risk\Assessment;
+use Keyring\Risk\Finding;
+use Keyring\Risk\Signals\Signal;
+
+class ListedIp extends Signal
+{
+    public function __construct(
+        protected IpReputation $reputation,
+        protected int $score = 40,
+    ) {}
+
+    public function assess(Assessment $assessment): ?Finding
+    {
+        $ip = $assessment->request->ip();
+
+        if ($ip === null) {
+            return null;
+        }
+
+        $key = 'ip-reputation:'.$ip;
+        $listed = Cache::get($key);
+
+        if ($listed === null) {
+            $listed = $this->reputation->isListed($ip);
+
+            // Only a real answer is kept, so an outage isn't remembered.
+            if ($listed !== null) {
+                Cache::put($key, $listed, now()->addHour());
+            }
+        }
+
+        return $listed === true
+            ? new Finding('listed_ip', $this->score, 'Signing in from an address on an abuse list.')
+            : null;
+    }
+}
+```
+
+```php
+// In your KeyringServiceProvider
+use App\Keyring\IpReputation;
+use App\Keyring\ListedIp;
+use App\Keyring\TorExitList; // Your client for the list.
+
+$this->app->bind(IpReputation::class, TorExitList::class);
+
+Keyring::risk()->push(ListedIp::class);
+```
+
+A lookup is usually a network call, so the answer is cached for an hour, and the signal keeps the base class's `Checkpoint::Login`. Don't run it at `Checkpoint::Request`. It reads `$request->ip()`, the real address, rather than the one Keyring records. An exception from a signal fails the sign in, so give your client a short timeout, and have it return `null` when the list can't be reached. The signal then finds nothing for that sign in and asks again next time. Caching that as "not listed" would let every address through for the next hour. Plenty of people use Tor to keep their privacy, so 40 asks them for a second factor and no more.
 
 ## Running Risk Yourself
 

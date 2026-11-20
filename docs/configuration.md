@@ -327,7 +327,7 @@ The `levels` option sets the score thresholds. The `recent_change` option sets h
 
 The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in.
 
-The table is turned on by `Features::securityLog()`, which is on by default. Without it, the same events are written to the log `channel` instead. `null` means your default channel. Without the table, "was this you?" alerts and the `RepeatedFactorFailures` and `SuccessAfterFailures` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
+The table is turned on by `Features::securityLog()`, which is on by default. Without it, the same events are written to the log `channel` instead. `null` means your default channel. Without the table, "was this you?" alerts and the `RepeatedFactorFailures`, `SuccessAfterFailures`, and `CredentialStuffing` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
 
 The `context_key` option is the key in Laravel's Context where your application keeps a request's ID, if it keeps one. Every entry that the request writes then carries that ID. If your application doesn't keep one, Keyring makes an ID of its own for each request. If you set it to `null`, the ID is left out. See [Request IDs](security-log-and-emails.md#request-ids).
 

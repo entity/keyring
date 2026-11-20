@@ -102,7 +102,7 @@ An assessment that ends in `Action::allow` dispatches nothing. See [Risk](risk.m
 
 None of these changes what the refused person sees. Each one fires every time, however often it's repeated. Only the [security log](security-log-and-emails.md#refusals-that-repeat) limits how many it writes down. A form that fails ordinary validation dispatches nothing.
 
-That makes these events the right place to count from. Keyring keeps no metrics of its own, so if you watch for credential stuffing, you may feed your counters from a listener:
+That makes these events the right place to count from. Keyring keeps no metrics of its own, so if you watch for credential stuffing, you may feed your counters from a listener. To act on it at sign in instead, turn on the [`CredentialStuffing`](risk.md#built-in-signals) risk signal, which flags a sign in from an address where many other accounts have failed:
 
 ```php
 use Illuminate\Support\Facades\Event;

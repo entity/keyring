@@ -57,6 +57,11 @@ class KeyringServiceProvider extends ServiceProvider
             // Off: with the ones above it could refuse a user who has no
             // second factor to give. It needs Features::emailChanges().
             // Signals\RecentlyChangedRecovery::class,
+            // Off: it counts failures on other accounts from the same IP
+            // address, which an office or a mobile network shares. With the
+            // ones above it can reach the score that refuses a sign in, even
+            // for a user with a second factor. It reads the security log.
+            // Signals\CredentialStuffing::class,
             // Off: it asks Have I Been Pwned at every sign in, and holds a
             // user whose password it finds until they choose another. Set
             // "password_change_url" in config/keyring.php before turning it on.
