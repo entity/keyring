@@ -77,6 +77,8 @@ Its properties are plain values, so it's safe to queue a listener for it:
 
 It never carries the session's registry ID. That ID is what the browser's "remember me" cookie holds.
 
+Laravel stops calling an event's listeners at the first that throws or returns `false`, so a listener registered before yours can stop yours hearing it. A handle also stops matching when the app key is rotated without `APP_PREVIOUS_KEYS`. Don't rely on this event alone to end sessions elsewhere: see [Hearing About Ended Sessions](devices-and-sessions.md#hearing-about-ended-sessions).
+
 The reasons, and what gives each one:
 
 | Reason | Given When |
