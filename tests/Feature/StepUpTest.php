@@ -24,6 +24,7 @@ use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\AnsweringStepUp;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
 
@@ -974,6 +975,36 @@ describe('asking from a controller', function () {
         $this->getJson('/authorize?acr=aal2&max_age=600')->assertForbidden()->assertJsonPath('status', 'enroll-first');
     });
 
+    it('takes a recovery code beside the password for a level, building on the password', function () {
+        Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+        signIn();
+        $this->travel(11)->minutes();
+
+        $this->get('/authorize?acr=aal2')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'recovery');
+        $this->flushHeaders();
+        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])
+            ->assertRedirect('/authorize?acr=aal2');
+
+        $this->get('/authorize?acr=aal2')->assertOk();
+    });
+
+    it('takes a recovery code beside the password for a level and a fresh proof, as it does for the level alone', function () {
+        Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+        signIn();
+        $this->travel(11)->minutes();
+
+        $this->get('/authorize?acr=aal2&max_age=600')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+            ->assertRedirect(route('keyring.confirm.challenge'));
+        $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'recovery');
+        $this->flushHeaders();
+        $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])
+            ->assertRedirect('/authorize?acr=aal2&max_age=600');
+
+        $this->get('/authorize?acr=aal2&max_age=600')->assertOk();
+    });
+
     it('lets a fresh proof through once the user confirms, rather than asking again', function () {
         signIn();
         $this->travel(5)->minutes();
@@ -995,6 +1026,84 @@ describe('asking from a controller', function () {
         $this->get('/authorize?max_age=0')->assertOk();
     });
 
+    it('refuses a proof made the second before the moment', function () {
+        $this->freezeSecond();
+        signIn();
+        $this->travel(1)->seconds();
+
+        $this->get('/authorize?max_age=0')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('takes a moment within the clock leeway as now', function () {
+        $this->freezeSecond();
+        signIn();
+
+        expect(app(StepUp::class)->unlessMet(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->toBeNull();
+
+        $this->travel(1)->seconds();
+        expect(app(StepUp::class)->unlessMet(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->not->toBeNull();
+    });
+
+    it('asks for the level when it lapsed, though proofs since the moment would do', function () {
+        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
+        signIn();
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+        // Idle past AAL2's limit: what was proved no longer counts toward it.
+        $this->travel(61)->minutes();
+        $this->get('/authorize?max_age=7200')->assertOk();
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+
+        $this->get('/authorize?acr=aal2&max_age=7200')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->getJson('/authorize?acr=aal2&max_age=7200')->assertStatus(423)
+            ->assertJsonPath('redirect', route('keyring.confirm.challenge'));
+        $this->get('/authorize?acr=aal2&max_age=7200');
+
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, step: 1)])
+            ->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+            ->assertRedirect('/authorize?acr=aal2&max_age=7200');
+        $this->get('/authorize?acr=aal2&max_age=7200')->assertOk();
+    });
+
+    describe('with a key that can\'t leave its device', function () {
+        beforeEach(function () {
+            Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()->requireAttestation(), Totp::class, RecoveryCodes::class]);
+            Keyring::fake()->pass('security-key');
+
+            Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
+            Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+            $this->actingAs($this->user);
+        });
+
+        it('takes a recovery code in the key\'s place for aal2 and a fresh proof', function () {
+            $this->get('/authorize?acr=aal2&max_age=600')->assertRedirect(route('keyring.confirm.challenge'));
+            $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.alternatives.0.factor', 'recovery');
+            $this->flushHeaders();
+
+            $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])
+                ->assertRedirect(route('keyring.confirm.challenge'));
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+                ->assertRedirect('/authorize?acr=aal2&max_age=600');
+            $this->get('/authorize?acr=aal2&max_age=600')->assertOk();
+        });
+
+        it('takes no recovery code in the key\'s place for aal3 and a fresh proof', function () {
+            $this->get('/authorize?acr=aal3&max_age=600')->assertRedirect(route('keyring.confirm.challenge'));
+            $this->inertia()->get(route('keyring.confirm.challenge'))
+                ->assertJsonPath('props.factor', 'security-key')
+                ->assertJsonPath('props.alternatives', []);
+        });
+    });
+
+    it('resolves a subclass of the service from the container', function () {
+        app()->bind(StepUp::class, AnsweringStepUp::class);
+        signIn();
+
+        $this->get('/account')->assertStatus(409)->assertSee('asked by the subclass');
+        $this->get('/authorize?max_age=600')->assertStatus(409);
+    });
+
     it('refuses what it could never answer', function (?Assurance $level, ?string $since, string $message) {
         $this->freezeSecond();
 
@@ -1004,7 +1113,7 @@ describe('asking from a controller', function () {
         'nothing to ask' => [null, null, 'Ask for a level, a verification since a moment, or both.'],
         'no level' => [Assurance::None, null, 'Ask for a level of at least AAL1.'],
         'no level, with a moment' => [Assurance::None, '-1 minute', 'Ask for a level of at least AAL1.'],
-        'a moment in the future' => [null, '+1 second', 'A verification can\'t be asked for since a moment in the future.'],
+        'a moment beyond the leeway' => [null, '+6 seconds', 'A verification can\'t be asked for since a moment in the future.'],
         'a level and a moment in the future' => [Assurance::AAL2, '+1 day', 'A verification can\'t be asked for since a moment in the future.'],
     ]);
 });

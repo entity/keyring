@@ -24,6 +24,12 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class StepUp
 {
+    /**
+     * How many seconds ahead of this server's clock unlessMet() takes a
+     * moment to be, as one another server stored a little ahead of it.
+     */
+    public const int CLOCK_LEEWAY = 5;
+
     public function __construct(
         protected AttemptStore $attempts,
         protected SessionAssurance $assurance,
@@ -45,7 +51,8 @@ class StepUp
      * send them round again. A moment that moves on with every request can.
      *
      * @throws InvalidArgumentException when nothing is asked, the level is
-     *                                  none, or $since is in the future
+     *                                  none, or $since is further in the
+     *                                  future than CLOCK_LEEWAY
      */
     public function unlessMet(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): ?Response
     {
@@ -59,13 +66,16 @@ class StepUp
                 : $this->unlessReached($request, $level, Requirement::for($level));
         }
 
+        $now = now()->getTimestamp();
+
         // Nothing verified later could reach a moment that hasn't come yet,
-        // until it does, so the user would confirm and be asked again.
-        if ($since->getTimestamp() > now()->getTimestamp()) {
+        // until it does, so the user would confirm and be asked again. A
+        // moment just ahead is another server's clock, and is taken as now.
+        if ($since->getTimestamp() > $now + static::CLOCK_LEEWAY) {
             throw new InvalidArgumentException('A verification can\'t be asked for since a moment in the future.');
         }
 
-        return $this->unlessFresh($request, $since->getTimestamp(), $level);
+        return $this->unlessFresh($request, min($since->getTimestamp(), $now), $level);
     }
 
     /**
@@ -96,11 +106,10 @@ class StepUp
      */
     public function unlessFresh(Request $request, int $since, ?Assurance $level = null): ?Response
     {
-        $requirement = $this->freshRequirement($request);
+        $requirement = $this->freshRequirement($request, $level);
         $reached = true;
 
         if ($level !== null) {
-            $requirement = $requirement->atLeast(Requirement::for($level));
             $reached = $this->assurance->level()->atLeast($level) && Requirement::for($level)->isMetBy($this->assurance->countingToward($level));
         }
 
@@ -177,8 +186,11 @@ class StepUp
      * it, and about one nothing is known of. The stricter answer stands, so
      * a policy that asks more of a new device is heard here, and one that
      * asks less of a trusted device gets no discount.
+     *
+     * With a level, it asks for that level's requirement as well, and takes
+     * a recovery code beside another factor as the level alone would.
      */
-    public function freshRequirement(Request $request): Requirement
+    public function freshRequirement(Request $request, ?Assurance $level = null): Requirement
     {
         $user = $this->keyring->user();
         $keyring = $this->keyring->for($user)->withoutFallbacks();
@@ -195,6 +207,10 @@ class StepUp
 
         if ($keyring->has(Category::Possession)) {
             $requirement = $requirement->atLeast(Requirement::aal1()->including(Category::Possession));
+        }
+
+        if ($level !== null) {
+            $requirement = $requirement->atLeast(Requirement::for($level));
         }
 
         // A recovery code stands in for a lost factor beside another one. It
