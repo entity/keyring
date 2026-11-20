@@ -116,6 +116,19 @@ try {
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
+        'start-session-announcing' => (function () use ($id, $value) {
+            config(['keyring.sessions.max' => (int) $value]);
+            $announced = [];
+            Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {
+                $announced[] = $event->handle;
+            });
+
+            $request = Request::create('/');
+            $request->setLaravelSession(app('session.store'));
+            app(Sessions::class)->start($request, User::findOrFail($id), null, Assurance::AAL1);
+
+            return $announced;
+        })(),
         'sweep' => (function () {
             $announced = [];
             Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {

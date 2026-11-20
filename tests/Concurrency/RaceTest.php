@@ -491,3 +491,16 @@ it('leaves a session signed out while the sweep waited for it to the sign-out', 
     expect($signedOut->all())->toBe([$handles['timed-out-1']])
         ->and($swept)->toBe([$handles['timed-out-2']]);
 });
+
+// A sign in past sessions.max ends the account's idle sessions in ID order,
+// as the sweep does, so the two wait for each other rather than deadlock,
+// and each session is ended, and announced, by one of them.
+it('announces each session once when the sweep and a sign in past the limit end the same ones', function () {
+    $user = taylor();
+    $handles = timedOutSessions($user, 3);
+
+    $results = contend(sessionRow('timed-out-2'), [['sweep', 0], ['start-session-announcing', $user->id, '1']]);
+
+    expect(collect($results)->flatten()->sort()->values()->all())->toBe(collect($handles)->sort()->values()->all())
+        ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(1);
+});
