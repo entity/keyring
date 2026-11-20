@@ -402,8 +402,9 @@ trait KeyringConformance
     /**
      * Every session that ends is announced (RegisteredSessionEnded), so an
      * app that hears about them, to sign the user out of other apps it
-     * signed them in to, say, misses none. A SessionRegistry bound in place
-     * of the one Keyring's manager gives announces nothing.
+     * signed them in to, say, misses none, and why it ended arrives with
+     * it. A SessionRegistry bound in place of the one Keyring's manager
+     * gives announces nothing.
      */
     public function test_keyring_announces_each_session_that_ends(): void
     {
@@ -421,7 +422,7 @@ trait KeyringConformance
 
         $announced = Event::dispatched(RegisteredSessionEnded::class)->map(fn (array $arguments) => $arguments[0]);
 
-        $this->assertCount(1, $announced, 'Signing out should announce the session that ended, once. A SessionRegistry bound in the container in place of Keyring\'s announces nothing: register your driver with SessionRegistryManager::extend() instead.');
+        $this->assertCount(1, $announced, 'Signing out should announce the session that ended, once. Nothing is announced when a SessionRegistry is bound in the container in place of Keyring\'s: register your driver with SessionRegistryManager::extend() instead. Nor while a transaction your test opened itself is still open: the announcement waits for it to commit. Nor when something that wraps the registry, with app()->extend(SessionRegistry::class, ...), doesn\'t pass revoke() on to the registry it was given.');
         $this->assertSame($handle, $announced->first()->handle, 'The session that ended should be announced by the handle it had.');
         $this->assertSame(SessionEndReason::LoggedOut, $announced->first()->reason, 'Signing out should be announced as logged_out.');
     }
