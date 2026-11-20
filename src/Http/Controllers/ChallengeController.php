@@ -50,8 +50,8 @@ class ChallengeController
     public function show(Request $request, ?string $factor = null): mixed
     {
         $purpose = $this->purpose($request);
-        $attempt = $this->attempts->current($purpose)
-            ?? ($purpose === Purpose::Confirm ? $this->confirming($request) : null);
+        $current = $this->attempts->current($purpose);
+        $attempt = $current ?? ($purpose === Purpose::Confirm ? $this->confirming($request) : null);
 
         if ($attempt === null) {
             return $this->expired($request, $purpose);
@@ -67,9 +67,11 @@ class ChallengeController
             $this->attempts->forget($purpose);
 
             // With nothing to confirm with, coming back here would only loop.
-            // Once enrolled, they carry on to the page the confirm was for.
+            // Once enrolled, they carry on to the page the confirm was for,
+            // if they were sent here for one: on a visit of their own,
+            // url.intended is whatever someone last left in it.
             return $purpose === Purpose::Confirm
-                ? $this->stepUp->enrollFirst($request, $this->confirmingFor($request))
+                ? $this->stepUp->enrollFirst($request, $current === null ? null : $this->confirmingFor($request))
                 : $this->expired($request, $purpose, __('keyring::keyring.unavailable'));
         }
 
