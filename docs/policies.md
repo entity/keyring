@@ -133,15 +133,17 @@ The enrollment page is always let through, and so are the routes users need to g
 
 Keyring remembers the page a user was going to when it sent them to enroll. This happens with `keyring.enrolled`, with [step-up](step-up.md#raising-assurance) when the account can't reach the level, and from the [confirm page](step-up.md#the-confirm-flow) when there's nothing to confirm with. In that last case, it's the page the confirmation was for. Once they've added a sign-in method, the `authenticator-added` [status response](sign-in-flow.md#status-responses) carries that page as `continue`.
 
-Keyring doesn't redirect there itself, because the security page may be showing new recovery codes. Show a "Continue" link once the codes are saved instead:
+Keyring doesn't redirect there itself, because the security page may be showing new recovery codes. Show a "Continue" link instead. When the response came with recovery codes, wait until they're saved. A second authenticator comes without any, so show the link straight away:
 
 ```vue
-<a v-if="keyringResult?.continue && codesSaved" :href="keyringResult.continue">Continue</a>
+<a v-if="keyringResult?.continue && (!keyringResult.recoveryCodes || codesSaved)" :href="keyringResult.continue">Continue</a>
 ```
 
-Here `keyringResult` is `Keyring::result()`, shared as in [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). JSON callers find `continue` in the response body.
+Here `keyringResult` is `Keyring::result()`, shared as in [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). JSON callers find `continue` in the response body. New recovery codes on their own never carry it, since they don't meet any requirement.
 
-Only a page the browser navigated to is remembered: a `GET` with `Sec-Fetch-Mode: navigate`, or an Inertia visit that isn't a prefetch or a partial reload. Images, `fetch()` calls, form posts, JSON requests and Keyring's own pages never replace it. It's only handed back on your app's own origin, to the user it was saved for, within an hour. Signing in forgets it.
+Only a page the browser navigated to is remembered. That's a `GET` with `Sec-Fetch-Mode: navigate` and, when the browser sends it, `Sec-Fetch-Dest: document`, so a page loaded in a frame doesn't count. An Inertia visit counts too, unless it's a partial reload. A prefetch or prerender never counts, whether Inertia's, the browser's (`Sec-Purpose: prefetch`) or a `Purpose: prefetch` one. Images, `fetch()` calls, `HEAD` requests, form posts, JSON requests, Keyring's own pages and the enrollment page itself never replace it. When the user was sent there from the confirm page, the page the confirmation was for is only used if a confirmation was actually in progress. It's only handed back on your app's own origin, to the user it was saved for, within an hour. Signing in forgets it.
+
+Browsers only send `Sec-Fetch-*` headers over HTTPS or to `localhost`. On a plain-HTTP development host, such as `http://myapp.test`, a Blade app gets no `continue`. Inertia visits still do.
 
 ## No Downgrade
 

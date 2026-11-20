@@ -259,7 +259,7 @@ While a user is held:
 
 Keyring remembers the page a held user was going to when it sent them to `password_change_url`. When they change their password through `PUT /user/password`, the `password-updated` [status response](sign-in-flow.md#status-responses) redirects there instead of back. JSON callers get it as `redirect`. A password change the user chose themselves, without a hold, goes back as before.
 
-The same rules apply as [after enrolling](policies.md#carrying-on-afterwards). Only a page the browser navigated to is remembered, and it's only used on your app's own origin, for the same user, within an hour. A reset doesn't use it, since the user signs in again afterwards.
+The same rules apply as [after enrolling](policies.md#carrying-on-afterwards). Only a page the browser navigated to is remembered, and it's only used on your app's own origin, for the same user, within an hour. The change-password page itself is never saved. Pages opened from emailed links aren't saved either. Their URL holds the link's token, and some of them, like confirming an email change, stop working once the password changes. A reset doesn't use it, since the user signs in again afterwards.
 
 The check runs in the `Keyring\Http\Middleware\RequirePasswordChange` middleware. Keyring adds it to the `web` group, after its [session middleware](devices-and-sessions.md#the-session-middleware). If `sessions.middleware` is off, add `keyring.password` wherever you add `keyring.session`.
 
