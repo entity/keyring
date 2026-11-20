@@ -3,6 +3,7 @@
 - [Introduction](#introduction)
 - [Signing In and Confirming](#signing-in-and-confirming)
 - [Sessions and Devices](#sessions-and-devices)
+    - [Why a Registered Session Ended](#why-a-registered-session-ended)
 - [Authenticators](#authenticators)
 - [Account Changes](#account-changes)
 - [Risk](#risk)
@@ -50,10 +51,57 @@ No event has a password, code, or token among its properties. However, `Attempti
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
 | `SessionsRevoked` | Sessions were signed out. This happens with "sign out everywhere else", when one session is ended from the sessions list, when an administrator runs `keyring:sign-out` for the user, or on the first request refused for an account [the application keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
 | `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed` |
+| `RegisteredSessionEnded` | A registered session ended, whoever ended it and wherever. There's one for each record the registry revoked. | `handle`, `handles`, `userId`, `userType`, `guard`, `deviceId`, `endedAt`, `reason` (see [below](#why-a-registered-session-ended)) |
+| `EveryoneSignedOut` | Every user's sessions ended at once, with `keyring:sign-out --all` or the registry's `revokeEveryone()`. | `at` (every session that signed in up to this Unix timestamp ended) |
 | `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved. | `user`, `session` (the `RegisteredSession` it carries on as) |
 | `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). This means two browsers held the same cookies, so the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended. Its device, IP address, and user agent belong to whoever used the cookie first.) |
 
 A user who signs out on purpose triggers `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`. `RememberMeReused` fires once, and only when there was still a session to end. See [Devices & Sessions](devices-and-sessions.md#events).
+
+### Why a Registered Session Ended
+
+`SessionEnded` only fires in the request of the browser that was signed out. `RegisteredSessionEnded` fires for every registered session that ends, in that request or any other, so code that has to hear about each one listens for it. It's how a single sign-on provider built on Keyring knows to log the user out of its client applications. See [Hearing About Ended Sessions](devices-and-sessions.md#hearing-about-ended-sessions) for when it fires and what it promises.
+
+Its properties are plain values, so it's safe to queue a listener for it:
+
+| Property | Holds |
+|---|---|
+| `handle` | The session's [handle](devices-and-sessions.md#listing-and-ending-sessions) under the current `APP_KEY`. It's the same handle the session had before it moved to a new record. |
+| `handles` | The handle under the current key and then under each key in `APP_PREVIOUS_KEYS`, so a handle you stored before a key rotation still matches one of them. |
+| `userId` | The user's ID, as a string. |
+| `userType` | The connection and table the ID is unique in, such as `mysql:users`. It's not a class name. Compare it with `RegisteredSession::typeOf($user)`. |
+| `guard` | The guard the session signed in on. |
+| `deviceId` | The ID of the session's device, or `null`. |
+| `endedAt` | When it was revoked, as a Unix timestamp. |
+| `reason` | A `Keyring\Enums\SessionEndReason`. |
+
+It never carries the session's registry ID. That ID is what the browser's "remember me" cookie holds.
+
+The reasons, and what gives each one:
+
+| Reason | Given When |
+|---|---|
+| `logged_out` | The user signed out, with `POST /logout` or by ending the current session from the sessions list. |
+| `signed_out_everywhere` | "Sign out everywhere else" from the sessions or devices page, or after adding a sign-in method with `sign_out_others`. An administrator's `keyring:sign-out` for one user gives it too. |
+| `revoked` | One session was ended from the sessions list. It's also the reason for any revocation Keyring didn't name, such as your own call to `Sessions::signOutEverywhere()` or to the registry. |
+| `signed_in_again` | The browser signed in again while it was signed in, and left the session it was on. |
+| `device_revoked` | The session's device was signed out from the devices list. |
+| `device_reported` | The session's device was reported with the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link). |
+| `device_limit` | Its device was forgotten to keep the account to [`devices.limit`](devices-and-sessions.md#devices). |
+| `session_limit` | A new sign in took the account past [`sessions.max`](devices-and-sessions.md#how-many-sessions), and this session had gone unused longest. |
+| `account_deleted` | The user was deleted, soft deleted or for good. |
+| `password_changed` | The user changed their password, and their other sessions were signed out. |
+| `password_reset` | The password was reset from a reset link. |
+| `email_changed` | The email address changed, and the other sessions were signed out (`email_changes.sign_out_others`). |
+| `email_change_undone` | The old address undid an email change. |
+| `risk` | A [risk response](risk.md#actions) ended the session, or every session of the account. |
+| `idle` | The session middleware found the session had gone unused for too long. |
+| `expired` | The session middleware found the session past its absolute limit. With `sessions.end_on_lapse`, a "remember me" cookie that can't carry the session on gives it too. |
+| `other_user` | The session middleware found the session's record belongs to another user. The event names the record's user. |
+| `reused` | The session's ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). |
+| `not_allowed` | The application stopped letting the user sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)). |
+
+When one action ends sessions for several reasons at once, the session gets the one closest to the code that ended it. For example, a risk response that signs out everywhere gives `risk`, not `revoked`.
 
 ## Authenticators
 

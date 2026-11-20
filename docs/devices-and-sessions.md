@@ -12,6 +12,7 @@
 - [Listing and Revoking Devices](#listing-and-revoking-devices)
 - [Listing and Ending Sessions](#listing-and-ending-sessions)
     - [Is It Still Signed In?](#is-it-still-signed-in)
+    - [Hearing About Ended Sessions](#hearing-about-ended-sessions)
 - [The Session Registry](#the-session-registry)
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
@@ -318,6 +319,47 @@ It needs an Eloquent user, and returns `false` for any other. And where registra
 
 Keep the handle, not the registry ID. The ID is what the "remember me" cookie carries, so it must never leave the server.
 
+### Hearing About Ended Sessions
+
+To be told when a session ends, rather than asking, listen for `Keyring\Events\RegisteredSessionEnded`. There's one for every registered session that ends, whoever ended it and wherever: signing out, signing out everywhere, ending one session or a device, the device and session limits, a deleted user, a risk response, a password reset, an email change being undone, and the session middleware finding a session idle, expired, used twice, or kept out. See [Events](events.md#why-a-registered-session-ended) for its properties and every reason.
+
+```php
+use Illuminate\Support\Facades\Event;
+use Keyring\Events\RegisteredSessionEnded;
+
+Event::listen(function (RegisteredSessionEnded $event) {
+    // Every handle the session goes by, so one stored before a key rotation matches.
+    ClientSession::whereIn('keyring_handle', $event->handles)->each->logOut();
+});
+```
+
+`ClientSession` stands for whatever your application stores against a handle. Match on `handles`, not only `handle`. `handle` is the session's handle under the current `APP_KEY`. `handles` adds the handle under each key in `APP_PREVIOUS_KEYS`, so a handle you stored before rotating the key still finds its session. Store the handle you got from the sessions list, from `Sessions::handle()`, or from a `RegisteredSessionEnded`. A session keeps its handle when it moves to a new record, so you only need to store it once.
+
+When every user is signed out at once, with `keyring:sign-out --all` or the registry's `revokeEveryone()`, Keyring can't list each session. It dispatches one `Keyring\Events\EveryoneSignedOut` instead. Its `at` says that every session that signed in up to then has ended.
+
+What is announced:
+
+- One event per record the registry revoked. A record that was already revoked gives none, so two requests ending the same session at once announce it once between them.
+- Nothing when a session moves to a new record. It carries on, under the same handle.
+- Nothing when `keyring:prune` deletes records. A record it deletes was announced when it was revoked, or it [timed out](#timeouts) with no request to end it (see below).
+
+When it goes out depends on the [driver](#drivers):
+
+- **`database`**: the event is tied to the transaction on the registry's connection. Outside a transaction, it goes out as soon as the record is revoked. Inside one, such as the user's row that Keyring holds while it signs out everywhere, it goes out once that transaction commits. If the transaction is rolled back, so is the revocation, and nothing is announced. A transaction on any other connection doesn't change when it goes out.
+- **`cache`**: the event goes out as soon as the record is revoked. The cache has no transactions, so a rollback elsewhere doesn't take the revocation back, and the event goes out anyway. This is best effort. A cache that's cleared, or that evicts records to make room, ends those sessions with no event at all.
+- **A driver of your own** is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`. See [Writing a Driver](#writing-a-driver).
+
+Some endings aren't announced yet:
+
+- A session that times out with no request arriving isn't announced. Nothing ends its record until the browser comes back and the session middleware finds it idle or expired. If it never comes back, there's no event.
+- If the process stops between the commit and the event, the event is lost. A later release will sweep for records that ended without an event, so each one is announced at least once on the `database` driver.
+
+Until then, a listener that has to know about timeouts as well can also check the sessions it cares about with [`stillSignedIn`](#is-it-still-signed-in).
+
+The event is dispatched in the request or command that ended the session. Signing out everywhere can end many sessions at once, so queue your listener (`ShouldQueue`) if it does anything slow, like calling another application. The event's properties are plain values, so it's safe on a queue.
+
+A listener that throws doesn't stop the sign-out. The exception is reported with `report()`, the remaining sessions are still announced, and the rest of what was signing out still happens: the browser is signed out, the "remember me" token changes, the devices stop being trusted, and so on. So a failure in your listener can't leave someone signed in.
+
 ## The Session Registry
 
 Every signed-in session gets a record in Keyring's registry. Each record has its own random ID, along with the user, the device, the assurance level, the IP address, the user agent, whether "remember me" was ticked, and its timestamps. Laravel's session ID is never stored. The registry ID lives inside the session.
@@ -353,7 +395,9 @@ $this->app->afterResolving(SessionRegistryManager::class, function (SessionRegis
 });
 ```
 
-Then set `sessions.driver` to `custom`. Keyring calls `replace`, `revokeAll`, and `revokeDevice`, and it stores a new session while it holds the user's database row. For one user, those calls never run at the same moment, so a driver doesn't have to guard them against each other. The contract's methods are:
+Then set `sessions.driver` to `custom`. Keyring wraps every driver the manager gives, yours included, in `Keyring\Sessions\AnnouncingSessionRegistry`. The wrapper dispatches a [`RegisteredSessionEnded`](#hearing-about-ended-sessions) for each record that `revoke`, `revokeAll`, and `revokeDevice` return. What your driver returns is what gets announced, so a record it revokes and leaves out is never announced, and one it returns twice is announced twice. Your driver is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`: then it's tied to the transaction on its connection, as the `database` driver is. So `app(SessionRegistry::class)` gives the wrapper, and `->inner()` gives your driver. Register a driver through the manager, as above. A `SessionRegistry` you bind in the container yourself isn't wrapped, and nothing it ends is announced. The [conformance suite](testing.md#the-conformance-suite) checks for this.
+
+Keyring calls `replace`, `revokeAll`, and `revokeDevice`, and it stores a new session while it holds the user's database row. For one user, those calls never run at the same moment, so a driver doesn't have to guard them against each other. The contract's methods are:
 
 | Method | Does |
 |---|---|
@@ -493,7 +537,7 @@ php artisan keyring:sign-out --all
 
 **One user** is named by ID or by username (the `username` attribute, typed the way the user would type it). The command says who it signed out and how many sessions ended. It does what `Sessions::signOutEverywhere($user)` does. Every session is revoked, the "remember me" token is changed, no device stays trusted, and a pending email change is cancelled, so nothing gets back in without signing in. It dispatches `SessionsRevoked`, which is logged as `sessions_revoked`. If the name is one user's ID and another user's username, nobody is signed out, and the command names both. Run it again with `--id` and the ID of the user you mean.
 
-**Everyone** takes `--all`, and it asks first unless you pass `--force`. Every session that signed in up to that moment ends, whichever record it's on, and each browser is signed out on its next request. "Remember me" brings none of them back. A cookie is only good for the session it names, and a session that was being carried on at that very moment is ended on the record it moved to. People can sign in again straight away. The command only ends sessions. Trusted devices, "remember me" tokens, and pending email changes are left as they are, since signing everyone out says nothing about any one account.
+**Everyone** takes `--all`, and it asks first unless you pass `--force`. Every session that signed in up to that moment ends, whichever record it's on, and each browser is signed out on its next request. "Remember me" brings none of them back. A cookie is only good for the session it names, and a session that was being carried on at that very moment is ended on the record it moved to. People can sign in again straight away. The command only ends sessions. Trusted devices, "remember me" tokens, and pending email changes are left as they are, since signing everyone out says nothing about any one account. It dispatches one `EveryoneSignedOut`, not an event for each session.
 
 From your own code, such as an admin screen, you may use:
 
@@ -606,6 +650,8 @@ The events are in `Keyring\Events`:
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
 | `SessionsRevoked` | `user`, `count`. After signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the application keeps out. |
 | `SessionEnded` | `user`, `reason` (`revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed`) |
+| `RegisteredSessionEnded` | `handle`, `handles`, `userId`, `userType`, `guard`, `deviceId`, `endedAt`, `reason`. One for every registered session that ends. See [Hearing About Ended Sessions](#hearing-about-ended-sessions). |
+| `EveryoneSignedOut` | `at`. Every user's sessions ended at once. |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
 | `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as) |
 | `AccessRefused` | `user`, `resource` (`device`), `id`. A request to sign out a device that isn't the user's, answered with a 404. |
