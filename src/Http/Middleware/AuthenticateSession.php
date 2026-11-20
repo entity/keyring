@@ -364,9 +364,17 @@ class AuthenticateSession
         // redirect and not the rest of this request: that would run on the
         // session that just ended. Ahead of the app's own response, which
         // would send it to log in.
+        //
+        // Inertia loads it in full. A redirect is followed with the same
+        // headers, so a partial reload would come back with only the props
+        // it asked for, and the page would go on showing who was signed in.
+        // A prefetch gets the same answer: Inertia keeps it until the link
+        // is followed, and only then loads the page.
         if ($this->continuesAsGuest($request)) {
+            $url = $request->fullUrl();
+
             // As on sign out: nothing the session cached stays in the browser.
-            return redirect()->to($request->fullUrl())->withHeaders(['Clear-Site-Data' => '"cache", "storage"']);
+            return $this->clearSiteData($request->hasHeader('X-Inertia') ? $this->loadInFull($url) : redirect()->to($url));
         }
 
         return $this->keyring->response(SignedOutResponse::class, reason: $reason)->toResponse($request);
