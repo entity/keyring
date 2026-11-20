@@ -400,9 +400,11 @@ Some pages work for guests too, like a public page that shows more when you're s
 ],
 ```
 
-When a session ends on a `GET` page visit to one of those routes, the browser is signed out and `SessionEnded` is dispatched as usual. Then the browser is redirected to the same URL, query string included, with `Clear-Site-Data` and nothing else: no `signed-out` status and no intended URL. It asks for the page again as a guest. Inertia visits count as page visits. JSON requests still get the `401`, and other methods, like `POST`, are signed out as before. It happens ahead of your own [`SignedOutResponse`](sign-in-flow.md#responses), so binding one doesn't change it.
+When a session ends on a `GET` page visit to one of those routes, the browser is signed out and `SessionEnded` is dispatched as usual. The browser is then redirected back to the URL it asked for, so it asks for the page again as a guest. The query string is kept, though its parameters may come back in a different order. The redirect sends `Clear-Site-Data` and clears the session and "remember me" cookies, as signing out does. No `signed-out` status is flashed and no intended URL is saved. JSON requests still get the `401`. `HEAD`, `POST`, and other methods are signed out as before. This happens before your own [`SignedOutResponse`](sign-in-flow.md#responses) is used, so binding one doesn't change it.
 
-The route has to let guests in. One behind `auth` sends the guest to log in anyway. A route without a name can't be listed.
+An Inertia visit gets a `409` with an `X-Inertia-Location` header instead of a redirect, which makes Inertia load the page in full. A redirect would be followed with the same headers, so a partial reload or a poll would get back only the props it asked for, and the page would still show the user as signed in. A prefetch gets the same answer. Inertia keeps that answer until the link is followed, and only then loads the page.
+
+Only list pages that render for a guest. The route has to let guests in, because one behind `auth` sends the guest to log in anyway. A broad pattern like `*` also matches Keyring's own pages. A route without a name can't be listed. If any entry in the list isn't a non-empty string, Keyring ignores the whole list, and the visit goes to log in as before.
 
 ### "Remember Me"
 
