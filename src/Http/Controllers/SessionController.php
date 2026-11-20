@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Contracts\Responses\StatusResponse;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\AccessRefused;
 use Keyring\Events\LoggedOut;
 use Keyring\Events\SessionsRevoked;
@@ -45,7 +46,7 @@ class SessionController
         $session = $this->sessions->find($user, $session) ?? $this->refuse($user, $session);
 
         if ($session->id === $this->sessions->current($request)?->id) {
-            $signIn->out($request);
+            $this->sessions->because(SessionEndReason::LoggedOut, fn () => $signIn->out($request));
 
             LoggedOut::dispatch($user);
 

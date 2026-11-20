@@ -20,6 +20,7 @@ use Keyring\Changes\PendingEmailChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Features;
 use Keyring\KeyringManager;
@@ -79,7 +80,7 @@ class Sessions
         // carrying on with it on the cookie session driver, and on any
         // driver it would be listed and counted with nobody left on it.
         if (is_string($previous)) {
-            $this->registry->revoke($previous);
+            $this->because(SessionEndReason::SignedInAgain, fn () => $this->registry->revoke($previous));
         }
 
         return $session;
@@ -113,7 +114,7 @@ class Sessions
                     fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
                 ])
                 ->skip(max(0, (int) $max - 1))
-                ->each(fn (RegisteredSession $other) => $this->registry->revoke($other->id));
+                ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
         });
     }
 
@@ -630,7 +631,7 @@ class Sessions
      */
     public function signOutOthers(Request $request, Authenticatable $user): int
     {
-        $count = $this->signOutEverywhere($user, except: $this->current($request)?->id);
+        $count = $this->because(SessionEndReason::SignedOutEverywhere, fn () => $this->signOutEverywhere($user, except: $this->current($request)?->id));
 
         $this->rotate($request);
 
@@ -693,6 +694,22 @@ class Sessions
         // In a transaction of its own, so a table that isn't there leaves
         // the caller's usable where a failed statement would end it.
         rescue(fn () => $this->keyring->deviceModel()::query()->getConnection()->transaction($distrust), report: false);
+    }
+
+    /**
+     * Run the callback with every session it ends announced for this
+     * reason (RegisteredSessionEnded). Keyring's own registry drivers are
+     * announced; a registry bound in their place without the wrapper that
+     * announces them just runs the callback.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    public function because(SessionEndReason $reason, Closure $callback): mixed
+    {
+        return $this->registry instanceof AnnouncingSessionRegistry ? $this->registry->because($reason, $callback) : $callback();
     }
 
     public function registry(): SessionRegistry

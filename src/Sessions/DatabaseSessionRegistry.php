@@ -198,6 +198,15 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->whereNull('replaced_by');
     }
 
+    /**
+     * The connection the records are kept on, whose transactions decide
+     * when a revocation holds (AnnouncingSessionRegistry).
+     */
+    public function connection(): ConnectionInterface
+    {
+        return $this->connection;
+    }
+
     protected function query(): Builder
     {
         return $this->connection->table($this->table);

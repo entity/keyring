@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Keyring\Enums\Category;
 use Keyring\Enums\EmailConfirmation;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EmailChanged;
 use Keyring\Events\EmailChangeRequested;
@@ -247,7 +248,7 @@ class EmailChanges
         $change = $change->fresh();
 
         if ($reverted && ($user = $change?->owner())) {
-            $this->sessions->signOutEverywhere($user);
+            $this->sessions->because(SessionEndReason::EmailChangeUndone, fn () => $this->sessions->signOutEverywhere($user));
 
             // Once more, now no session is left to make another. A request
             // that was under way while the undo ran either waited for the
@@ -385,7 +386,7 @@ class EmailChanges
         $here = $request->hasSession() && $this->signedInAs($user);
 
         if (config('keyring.email_changes.sign_out_others')) {
-            $this->sessions->signOutEverywhere($user, except: $here ? $this->sessions->current($request)?->id : null);
+            $this->sessions->because(SessionEndReason::EmailChanged, fn () => $this->sessions->signOutEverywhere($user, except: $here ? $this->sessions->current($request)?->id : null));
         }
 
         if ($here) {

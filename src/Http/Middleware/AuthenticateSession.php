@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionEnded;
@@ -149,7 +150,7 @@ class AuthenticateSession
     protected function keepOut(Request $request, Authenticatable $user): Response
     {
         if ($this->sessions->registry()->forUser($user)->isNotEmpty()) {
-            SessionsRevoked::dispatch($user, $this->sessions->signOutEverywhere($user));
+            SessionsRevoked::dispatch($user, $this->sessions->because(SessionEndReason::NotAllowed, fn () => $this->sessions->signOutEverywhere($user)));
         }
 
         return $this->signOut($request, 'not_allowed');
@@ -219,7 +220,7 @@ class AuthenticateSession
         if ($ended !== null) {
             // An idle session ends for good, as when its own request shows it.
             if ($ended === 'idle') {
-                $this->sessions->registry()->revoke($session->id);
+                $this->sessions->because(SessionEndReason::Idle, fn () => $this->sessions->registry()->revoke($session->id));
             }
 
             return $this->signOut($request, $ended);
@@ -228,7 +229,7 @@ class AuthenticateSession
         // The cookie proves nothing, so it can't carry a session on where a
         // session ends with the level it signed in at.
         if (config('keyring.sessions.end_on_lapse')) {
-            $this->sessions->registry()->revoke($session->id);
+            $this->sessions->because(SessionEndReason::Expired, fn () => $this->sessions->registry()->revoke($session->id));
 
             return $this->signOut($request, 'expired');
         }
@@ -287,7 +288,7 @@ class AuthenticateSession
     {
         // Null when it had already ended some other way: there's nothing
         // left to end.
-        if ($current = $this->sessions->endLatest($user, $session)) {
+        if ($current = $this->sessions->because(SessionEndReason::Reused, fn () => $this->sessions->endLatest($user, $session))) {
             RememberMeReused::dispatch($user, $current);
         }
 
@@ -340,6 +341,24 @@ class AuthenticateSession
      */
     protected function signOut(Request $request, string $reason): Response
     {
+        // Whatever this ends, the browser's own record and the one its
+        // "remember me" holds, ends for the same reason.
+        $user = $this->sessions->because(SessionEndReason::from($reason), fn () => $this->end($request, $reason));
+
+        if ($user !== null) {
+            SessionEnded::dispatch($user, $reason);
+        }
+
+        return $this->keyring->response(SignedOutResponse::class, reason: $reason)->toResponse($request);
+    }
+
+    /**
+     * Sign this browser out, returning who it was.
+     *
+     * @param  'revoked'|'expired'|'idle'|'other_user'|'reused'|'risk'|'not_allowed'  $reason
+     */
+    protected function end(Request $request, string $reason): ?Authenticatable
+    {
         // An account that's kept out or locked loses the session its
         // "remember me" would carry on, too. Otherwise the same cookies
         // would sign it in again the moment it's let back. A cookie that was
@@ -352,10 +371,6 @@ class AuthenticateSession
             $this->sessions->endLatest($user, $remembered);
         }
 
-        if ($user = $this->signIn->out($request, onlyThisBrowser: true)) {
-            SessionEnded::dispatch($user, $reason);
-        }
-
-        return $this->keyring->response(SignedOutResponse::class, reason: $reason)->toResponse($request);
+        return $this->signIn->out($request, onlyThisBrowser: true);
     }
 }

@@ -535,6 +535,9 @@
             "reason",
             "user"
         ],
+        "Keyring\\Events\\EveryoneSignedOut": [
+            "at"
+        ],
         "Keyring\\Events\\FactorChallenged": [
             "attempt",
             "authenticator"
@@ -593,6 +596,16 @@
         "Keyring\\Events\\RecoveryCodesGenerated": [
             "authenticator",
             "user"
+        ],
+        "Keyring\\Events\\RegisteredSessionEnded": [
+            "deviceId",
+            "endedAt",
+            "guard",
+            "handle",
+            "handles",
+            "reason",
+            "userId",
+            "userType"
         ],
         "Keyring\\Events\\RememberMeReused": [
             "session",
