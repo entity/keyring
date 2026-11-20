@@ -7,11 +7,10 @@ namespace Keyring\Sessions;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\ConnectionInterface;
-use Illuminate\Database\DeadlockException;
 use Illuminate\Database\Query\Builder;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Support\WithoutBindings;
 
 class DatabaseSessionRegistry implements SessionRegistry
 {
@@ -211,13 +210,9 @@ class DatabaseSessionRegistry implements SessionRegistry
     }
 
     /**
-     * Run statements that name records by their IDs, and fail without
-     * them. Laravel puts a query's bindings in its exception's message, and
-     * a record's ID is what the "remember me" cookie holds: reported, it
-     * would sit in your logs and error tracker. What's thrown instead is
-     * the same kind of exception, for the same SQL, with the database's own
-     * error and code, and no bindings. Wrapped around whole transactions,
-     * so Laravel's own retries and rollbacks see the original.
+     * Run statements that name records by their IDs, and fail without them
+     * (WithoutBindings). Wrapped around whole transactions, so Laravel's
+     * own retries and rollbacks see the original.
      *
      * @template TResult
      *
@@ -226,23 +221,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     protected function withoutIds(Closure $statements): mixed
     {
-        try {
-            return $statements();
-        } catch (QueryException $e) {
-            throw self::masked($e);
-        } catch (DeadlockException $e) {
-            $previous = $e->getPrevious();
-            $masked = $previous instanceof QueryException ? self::masked($previous) : null;
-
-            throw new DeadlockException($masked?->getMessage() ?? 'A deadlock was found in the session registry.', (int) $e->getCode(), $masked);
-        }
-    }
-
-    protected static function masked(QueryException $e): QueryException
-    {
-        $previous = $e->getPrevious() ?? $e;
-
-        return new QueryException($e->connectionName, $e->getSql(), [], $previous, readWriteType: $e->readWriteType, maskBindings: true);
+        return WithoutBindings::run($statements);
     }
 
     protected function query(): Builder

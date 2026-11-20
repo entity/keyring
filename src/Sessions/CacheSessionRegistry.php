@@ -7,10 +7,13 @@ namespace Keyring\Sessions;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\LockProvider;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Exceptions\PartialRevocation;
+use Keyring\Support\WithoutBindings;
 use Throwable;
 
 /**
@@ -47,6 +50,14 @@ class CacheSessionRegistry implements SessionRegistry
      */
     public function save(#[\SensitiveParameter] RegisteredSession $session): void
     {
+        WithoutBindings::run(fn () => $this->store($session));
+    }
+
+    /**
+     * save(), its cache calls failing without the keys they named.
+     */
+    protected function store(#[\SensitiveParameter] RegisteredSession $session): void
+    {
         $stored = $this->cache->get($this->key($session->id));
         $data = $session->toArray();
 
@@ -69,7 +80,7 @@ class CacheSessionRegistry implements SessionRegistry
 
     public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        $found = $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id), $this->everyoneKey()]);
+        $found = WithoutBindings::run(fn () => $this->cache->many([$this->key($id), $this->revokedKey($id), $this->replacedKey($id), $this->everyoneKey()]));
         $data = $found[$this->key($id)] ?? null;
 
         // A record from before records said whose table their ID is one of
@@ -128,11 +139,27 @@ class CacheSessionRegistry implements SessionRegistry
      * store that dropped one of them gets it back, and one only the
      * "everyone" key covered stays revoked without it.
      */
+    /**
+     * Holding the owner's lock, so a move of the same record can't take the
+     * revocation for a session carried on elsewhere. Should the lock not
+     * come within its wait, the revocation goes ahead without it: ending
+     * the session matters more than announcing it.
+     */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        $found = $this->find($id);
+        return WithoutBindings::run(function () use ($id) {
+            $found = $this->find($id);
 
-        return $found === null ? null : $this->owning($this->owner($found), fn () => $this->revokeOwned($id));
+            if ($found === null) {
+                return null;
+            }
+
+            try {
+                return $this->owning($this->owner($found), fn () => $this->revokeOwned($id));
+            } catch (LockTimeoutException) {
+                return $this->revokeOwned($id);
+            }
+        });
     }
 
     /**
@@ -194,9 +221,11 @@ class CacheSessionRegistry implements SessionRegistry
      */
     public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
-        $found = $this->find($id);
+        return WithoutBindings::run(function () use ($id, $successor, $revoke) {
+            $found = $this->find($id);
 
-        return $found !== null && $this->owning($this->owner($found), fn () => $this->replaceOwned($id, $successor, $revoke));
+            return $found !== null && $this->owning($this->owner($found), fn () => $this->replaceOwned($id, $successor, $revoke));
+        });
     }
 
     /**
@@ -268,7 +297,7 @@ class CacheSessionRegistry implements SessionRegistry
                 try {
                     return $this->revoke($session->id);
                 } catch (Throwable $e) {
-                    $failure ??= $e;
+                    $failure ??= $e instanceof QueryException ? WithoutBindings::masked($e) : $e;
 
                     return null;
                 }
