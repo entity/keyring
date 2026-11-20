@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v0.2.0 - 2026-11-20
 
 ### Rate Limits and Risk
 
