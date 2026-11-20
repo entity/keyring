@@ -20,6 +20,8 @@
 - `keyring:sign-out --all` notes every session it ends as announced, since `EveryoneSignedOut` announces them all.
 - `RememberMeReused` now also fires when the session a used cookie was carried on to has timed out since, so a sweep ending that session doesn't hide the reuse. The used record is revoked then, so the same cookie is reported once.
 - `Keyring\Contracts\SweepsSessions`, which the database driver implements, for a driver of your own that keeps track of announcements.
+- The database registry driver rethrows a failed query without its bindings, so record IDs, which are what "remember me" cookies hold, stay out of exception messages, logs and error trackers. `PartialRevocation` no longer repeats the failure's message.
+- On the `cache` driver, revoking a record and moving it with "remember me" take turns under the owner's lock (on a store with locks), so a sign-out that lands mid-move is never lost without an event.
 
 ## v0.2.0 - 2026-11-20
 

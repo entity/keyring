@@ -336,6 +336,8 @@ Event::listen(function (RegisteredSessionEnded $event) {
 
 `ClientSession` stands for whatever your application stores against a handle. Match on `handles`, not only `handle`. `handle` is the session's handle under the current `APP_KEY`. `handles` adds the handle under each key in `APP_PREVIOUS_KEYS`, so a handle you stored before rotating the key still finds its session. Store the handle you got from the sessions list, from `Sessions::handle()`, or from a `RegisteredSessionEnded`. A session keeps its handle when it moves to a new record, so you only need to store it once.
 
+A handle you stored stops matching when `APP_KEY` is rotated without the old key in `APP_PREVIOUS_KEYS`, when a key is taken out of `APP_PREVIOUS_KEYS`, when a server still on old code moves a session during a rolling deploy, or when a [driver of your own](#writing-a-driver) loses `origin`. An event for that session then names a handle you don't have, and nothing tells you. [`stillSignedIn`](#is-it-still-signed-in) answers `false` for such a handle, so it fails safe where the event fails open. Code that keeps someone signed in elsewhere on the strength of a Keyring session should also ask `stillSignedIn` now and then, such as when it refreshes a token, rather than rely on events alone.
+
 When every user is signed out at once, with `keyring:sign-out --all` or the registry's `revokeEveryone()`, Keyring can't list each session. It dispatches one `Keyring\Events\EveryoneSignedOut` instead. Its `at` says that every session that signed in up to then has ended.
 
 What is announced:
@@ -347,7 +349,7 @@ What is announced:
 When it goes out depends on the [driver](#drivers):
 
 - **`database`**: the event is tied to the transaction on the registry's connection. Outside a transaction, it goes out as soon as the record is revoked. Inside one, such as the user's row that Keyring holds while it signs out everywhere, it goes out once that transaction commits. If the transaction is rolled back, so is the revocation, and nothing is announced. A transaction on any other connection doesn't change when it goes out. A connection with separate `read` and `write` hosts is still one connection, with its transactions on the write host, so the event follows the write host's transaction.
-- **`cache`**: the event goes out as soon as the record is revoked. The cache has no transactions, so a rollback elsewhere doesn't take the revocation back, and the event goes out anyway. This is best effort. A cache that's cleared, or that evicts records to make room, ends those sessions with no event at all. When the store fails part way through signing out everywhere, the sessions it had already revoked are still announced, and then the failure is thrown. A revocation whose copy into the record fails is kept and announced, and the failure is reported.
+- **`cache`**: the event goes out as soon as the record is revoked. The cache has no transactions, so a rollback elsewhere doesn't take the revocation back, and the event goes out anyway. This is best effort. A cache that's cleared, or that evicts records to make room, ends those sessions with no event at all. When the store fails part way through signing out everywhere, the sessions it had already revoked are still announced, and then the failure is thrown. A revocation whose copy into the record fails is kept and announced, and the failure is reported. Revoking a session and moving it with "remember me" take turns under a lock, so a sign-out that lands mid-move is announced. On a store without locks they can't, and such a sign-out can end the session with no event.
 - **A driver of your own** is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`. See [Writing a Driver](#writing-a-driver).
 
 Two kinds of ending need [the sweep](#sweeping-ended-sessions) to be announced:
@@ -363,7 +365,9 @@ The event is dispatched in the request or command that ended the session. Signin
 
 Queue it without waiting for a commit. Keyring already dispatches the event after the right commit. A listener with `ShouldQueueAfterCommit`, or a queue connection with `after_commit` turned on, waits again, for whichever transaction was opened last on any connection. If that one is rolled back, the job is dropped, though the sessions stay revoked. This matters when the registry is on a connection of its own, or on the `cache` driver, while some other transaction is open.
 
-A listener that throws doesn't stop the sign-out. The exception is reported with `report()`, the remaining sessions are still announced, and the rest of what was signing out still happens: the browser is signed out, the "remember me" token changes, the devices stop being trusted, and so on. So a failure in your listener can't leave someone signed in.
+A listener that throws doesn't stop the sign-out. The exception is reported with `report()`, the remaining sessions are still announced, and the rest of what was signing out still happens: the browser is signed out, the "remember me" token changes, the devices stop being trusted, and so on. So a failure in your listener can't leave someone signed in to your Keyring app.
+
+It can leave someone signed in elsewhere, though. Laravel calls an event's listeners in turn, and stops at the first that throws or returns `false`. Another listener registered before yours, one of your app's own or a package's, can stop yours hearing the event at all, and all that's left of it is a report. So queue your listener, keep anything else listening for this event from returning `false`, and don't rely on the event alone (see below).
 
 ### Sweeping Ended Sessions
 

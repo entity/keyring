@@ -5,8 +5,12 @@ declare(strict_types=1);
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\DatabaseTransactionsManager;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Encryption\MissingAppKeyException;
 use Illuminate\Http\Request;
@@ -1269,5 +1273,95 @@ describe('a registry the app wraps', function () {
         expectEnded($handle, SessionEndReason::SignedOutEverywhere);
         expect($wrappers->sum('calls'))->toBeGreaterThan(0)
             ->and(app(SessionRegistry::class))->toBeInstanceOf(CountingRegistry::class);
+    });
+});
+
+/**
+ * The database driver, failing on the given statement: as a missing table
+ * would, or as a deadlock does once Laravel has given up on it.
+ */
+function failingRegistry(int $failOn, bool $deadlock = false, string $id = ''): DatabaseSessionRegistry
+{
+    return new class(DB::connection(), $failOn, $deadlock, $id) extends DatabaseSessionRegistry
+    {
+        private int $calls = 0;
+
+        public function __construct(ConnectionInterface $connection, private readonly int $failOn, private readonly bool $deadlock, private readonly string $id)
+        {
+            parent::__construct($connection);
+        }
+
+        protected function query(): Builder
+        {
+            if (++$this->calls !== $this->failOn) {
+                return parent::query();
+            }
+
+            if ($this->deadlock) {
+                throw new DeadlockException("Deadlock found (SQL: update keyring_sessions where id = {$this->id})", 0, new QueryException('testing', 'update keyring_sessions where id = ?', [$this->id], new PDOException('Deadlock found')));
+            }
+
+            return $this->connection->table('keyring_missing');
+        }
+    };
+}
+
+/**
+ * Every message an exception and the ones behind it would put in a log.
+ */
+function messagesOf(Throwable $e): string
+{
+    $messages = [];
+
+    for (; $e !== null; $e = $e->getPrevious()) {
+        $messages[] = $e->getMessage().($e instanceof QueryException ? implode(',', $e->getBindings()) : '');
+    }
+
+    return implode("\n", $messages);
+}
+
+describe('a database failure', function () {
+    it('says what failed without the record IDs it was given', function (Closure $call, int $failOn) {
+        $sessions = collect([1, 2, 3])->map(fn () => sessionElsewhere($this->user));
+        $failed = null;
+
+        try {
+            $call(failingRegistry($failOn), $sessions->first(), $this->user);
+        } catch (QueryException $e) {
+            $failed = $e;
+        }
+
+        expect($failed)->toBeInstanceOf(QueryException::class)
+            ->and(messagesOf($failed))->toContain('keyring_missing');
+        $sessions->each(fn (RegisteredSession $session) => expect(messagesOf($failed))->not->toContain($session->id));
+    })->with([
+        'save' => [fn (DatabaseSessionRegistry $registry, RegisteredSession $session) => $registry->save($session), 1],
+        'find' => [fn (DatabaseSessionRegistry $registry, RegisteredSession $session) => $registry->find($session->id), 1],
+        'update' => [fn (DatabaseSessionRegistry $registry, RegisteredSession $session) => $registry->update($session->id, ['lastActivityAt' => 1]), 1],
+        'revoke' => [fn (DatabaseSessionRegistry $registry, RegisteredSession $session) => $registry->revoke($session->id), 1],
+        'replace' => [fn (DatabaseSessionRegistry $registry, RegisteredSession $session) => $registry->replace($session->id, $session->with(['id' => Str::random(40)])), 1],
+        'revokeAll' => [fn (DatabaseSessionRegistry $registry, RegisteredSession $session, User $user) => $registry->revokeAll($user), 2],
+        'revokeEveryone' => [fn (DatabaseSessionRegistry $registry) => $registry->revokeEveryone(), 2],
+    ]);
+
+    it('gives up on a deadlock without the record IDs it was given', function () {
+        $session = sessionElsewhere($this->user);
+        $failed = null;
+
+        try {
+            failingRegistry(1, deadlock: true, id: $session->id)->revoke($session->id);
+        } catch (DeadlockException $e) {
+            $failed = $e;
+        }
+
+        expect($failed)->toBeInstanceOf(DeadlockException::class)
+            ->and(messagesOf($failed))->toContain('Deadlock found')
+            ->not->toContain($session->id);
+    });
+
+    it('leaves the failure\'s own words out of a partial revocation', function () {
+        $partial = new PartialRevocation(new Collection, new RuntimeException('keyring:sessions:secret-id:revoked'));
+
+        expect($partial->getMessage())->not->toContain('secret-id');
     });
 });
