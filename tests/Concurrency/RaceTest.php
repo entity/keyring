@@ -365,6 +365,27 @@ it('reports every record two sign-outs at once revoke, once between them', funct
         ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
 });
 
+// Each announces what it revoked, so between them every record is announced
+// once: none twice, none missed.
+it('announces every record two sign-outs at once revoke, once between them', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+
+    $handles = array_map(function (string $id) use ($user, $registry, $now) {
+        $registry->save($session = new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+        return app(Sessions::class)->handle($session);
+    }, ['first', 'second', 'third']);
+
+    $results = contend(sessionRow('second'), [
+        ['announce-revoke-all', $user->id],
+        ['announce-revoke-all', $user->id],
+    ]);
+
+    expect(collect($results)->flatten()->sort()->values()->all())->toBe(collect($handles)->sort()->values()->all());
+});
+
 // A record another request revokes while a sign-out waits for it is that
 // request's to report, not the sign-out's.
 it('leaves out a record revoked by another request while a sign-out waits for it', function () {

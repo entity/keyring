@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
@@ -17,6 +18,7 @@ use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
+use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
@@ -113,6 +115,16 @@ try {
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
+        'announce-revoke-all' => (function () use ($id) {
+            $announced = [];
+            Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {
+                $announced[] = $event->handle;
+            });
+
+            app(SessionRegistry::class)->revokeAll(User::findOrFail($id));
+
+            return $announced;
+        })(),
         'confirm-email-change' => app(EmailChanges::class)->confirm(PendingChange::findOrFail($id), $value)->name,
         'revert-email-change' => app(EmailChanges::class)->revert(PendingChange::findOrFail($id), $value),
         'change-password' => (function () use ($id, $value) {
