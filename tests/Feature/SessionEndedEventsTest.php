@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Sleep;
 use Illuminate\Support\Str;
 use Keyring\Changes\EmailChanges;
 use Keyring\Changes\PasswordChanges;
@@ -1364,4 +1365,97 @@ describe('a database failure', function () {
 
         expect($partial->getMessage())->not->toContain('secret-id');
     });
+});
+
+describe('the cache driver failing', function () {
+    beforeEach(function () {
+        config([
+            'cache.stores.broken' => ['driver' => 'database', 'table' => 'keyring_missing_cache', 'lock_table' => 'keyring_missing_locks'],
+            'keyring.sessions.driver' => 'cache',
+            'keyring.sessions.store' => 'broken',
+        ]);
+    });
+
+    it('says what failed without the cache keys, which hold record IDs', function (Closure $call) {
+        $id = Str::random(40);
+        $failed = null;
+
+        try {
+            $call(app(SessionRegistry::class), $id, $this->user);
+        } catch (QueryException $e) {
+            $failed = $e;
+        }
+
+        expect($failed)->toBeInstanceOf(QueryException::class)
+            ->and(messagesOf($failed))->toContain('keyring_missing_cache')
+            ->not->toContain($id);
+    })->with([
+        'find' => [fn (SessionRegistry $registry, string $id) => $registry->find($id)],
+        'save' => [fn (SessionRegistry $registry, string $id, User $user) => $registry->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, 0, 0, now()->addHour()->getTimestamp()))],
+        'revoke' => [fn (SessionRegistry $registry, string $id) => $registry->revoke($id)],
+        'replace' => [fn (SessionRegistry $registry, string $id) => $registry->replace($id, new RegisteredSession(Str::random(40), '1', 'testing:users', 'web', null, Assurance::AAL1, null, null, 0, 0, 0))],
+    ]);
+
+    it('says what failed part way through a sign-out everywhere without the record it failed on', function () {
+        config(['keyring.sessions.store' => 'array']);
+        $failing = sessionElsewhere($this->user)->id;
+        sessionElsewhere($this->user);
+        $driver = new class(Cache::store('array'), $failing) extends CacheSessionRegistry
+        {
+            public function __construct(Repository $cache, private readonly string $failing)
+            {
+                parent::__construct($cache);
+            }
+
+            public function revoke(string $id): ?RegisteredSession
+            {
+                return $id === $this->failing
+                    ? throw new QueryException('testing', 'delete from cache where key = ?', ["keyring:sessions:{$id}:revoked"], new PDOException('The store failed.'))
+                    : parent::revoke($id);
+            }
+        };
+        app(SessionRegistryManager::class)->extend('failing-store', fn () => $driver);
+        config(['keyring.sessions.driver' => 'failing-store']);
+        $failed = null;
+
+        try {
+            app(SessionRegistry::class)->revokeAll($this->user);
+        } catch (QueryException $e) {
+            $failed = $e;
+        }
+
+        expect(messagesOf($failed))->toContain('The store failed.')->not->toContain($failing)
+            ->and($this->announced)->toHaveCount(1);
+    });
+
+    it('revokes without the owner\'s lock when it can\'t have it in time', function () {
+        config(['keyring.sessions.store' => 'array']);
+        $session = sessionElsewhere($this->user);
+        Sleep::fake(syncWithCarbon: true);
+        $held = Cache::store('array')->lock('keyring:sessions:lock:'.sha1(RegisteredSession::typeOf($this->user).'|'.$this->user->id), 60);
+        expect($held->get())->toBeTrue();
+
+        expect(app(SessionRegistry::class)->revoke($session->id)?->revokedAt)->not->toBeNull()
+            ->and($this->announced)->toHaveCount(1);
+    });
+});
+
+it('signs the browser out though the registry fails to revoke its session, so the next request is a guest', function () {
+    $here = signInHere();
+    app(SessionRegistryManager::class)->extend('unrevoking', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+    {
+        public function revoke(string $id): ?RegisteredSession
+        {
+            throw new RuntimeException('The registry is down.');
+        }
+    });
+    config(['keyring.sessions.driver' => 'unrevoking']);
+    $records = DB::table('keyring_sessions')->count();
+
+    $this->post('/logout')->assertServerError();
+
+    $this->get('/home')->assertRedirect('/login');
+    $this->assertGuest();
+    expect(DB::table('keyring_sessions')->count())->toBe($records)
+        ->and(DB::table('keyring_sessions')->where('id', $here)->value('revoked_at'))->toBeNull();
 });
