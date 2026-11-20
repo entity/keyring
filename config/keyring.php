@@ -250,6 +250,12 @@ return [
     | requests, sent with the one that used it, are still let in on the same
     | session. Used after that, the session ends for everyone holding it.
     |
+    | "sweep_every" ("5m", "1h"...) runs keyring:sweep that often, on the
+    | database driver: it ends sessions that timed out with no request to
+    | end them, and announces again any ended session whose announcement
+    | was lost. Null leaves it off. One run ends and announces at most
+    | "sweep_limit" sessions.
+    |
     */
 
     'sessions' => [
@@ -269,6 +275,8 @@ return [
         'middleware' => true,
         'remember_cookie' => null,
         'remember_grace' => '10s',
+        'sweep_every' => null,
+        'sweep_limit' => 1000,
     ],
 
     /*

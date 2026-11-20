@@ -11,11 +11,13 @@ use Illuminate\Database\DatabaseTransactionRecord;
 use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Contracts\SweepsSessions;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\EveryoneSignedOut;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Exceptions\PartialRevocation;
 use Keyring\Support\KeyedHash;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -49,6 +51,9 @@ class AnnouncingSessionRegistry implements SessionRegistry
      * the call reaches the one that announces.
      */
     protected static ?SessionEndReason $reason = null;
+
+    /** Whether the driver's store can be swept, once asked. */
+    protected ?bool $sweepable = null;
 
     public function __construct(
         protected SessionRegistry $registry,
@@ -151,7 +156,9 @@ class AnnouncingSessionRegistry implements SessionRegistry
         } finally {
             $event = new EveryoneSignedOut(now()->getTimestamp());
 
-            $this->whenDurable(fn () => $this->dispatch($event));
+            $this->whenDurable(function () use ($event): void {
+                $this->dispatch($event);
+            });
         }
     }
 
@@ -183,6 +190,44 @@ class AnnouncingSessionRegistry implements SessionRegistry
     }
 
     /**
+     * The driver's sweeping, if it can (SweepsSessions).
+     */
+    public function sweeper(): ?SweepsSessions
+    {
+        return $this->registry instanceof SweepsSessions ? $this->registry : null;
+    }
+
+    /**
+     * End up to $limit sessions that have timed out with no request to end
+     * them, and announce each, then announce again up to what's left of
+     * $limit whose announcement was lost. Null when the driver can't sweep.
+     * Those revoked in the last few minutes (Sweep::GRACE) may still be
+     * being announced, and are left for the next run. Those revoked over a
+     * day ago (Sweep::GIVE_UP_AFTER) are given up on.
+     */
+    public function sweep(int $limit, ?int $idle, ?int $rememberedIdle): ?SweepResult
+    {
+        if (($sweeper = $this->sweeper()) === null) {
+            return null;
+        }
+
+        $now = now()->getTimestamp();
+
+        $ended = $sweeper->sweep($now, $idle, $rememberedIdle, $limit);
+        $this->announceAll($ended, keepReasons: false);
+
+        $left = $limit - $ended->count();
+        $again = $left > 0 ? $sweeper->unannounced($now - Sweep::GIVE_UP_AFTER, $now - Sweep::GRACE, $left) : new Collection;
+        $this->announceAll($again, keepReasons: false);
+
+        return new SweepResult(
+            ended: $ended->count(),
+            announcedAgain: $again->count(),
+            more: $ended->count() === $limit || ($left > 0 && $again->count() === $left) || $sweeper->timedOut($now, $idle, $rememberedIdle),
+        );
+    }
+
+    /**
      * Announce the records a call revoked, once the revocation holds. The
      * events are made now, with the reason in force now.
      *
@@ -191,27 +236,57 @@ class AnnouncingSessionRegistry implements SessionRegistry
     protected function ended(#[\SensitiveParameter] iterable $sessions): void
     {
         $reason = static::reason();
-        $ended = [];
 
-        foreach ($sessions as $session) {
-            if ($session->replacedBy !== null) {
-                continue;
-            }
+        $this->announceAll(
+            collect($sessions)->reject(fn (RegisteredSession $session) => $session->replacedBy !== null)->map(fn (RegisteredSession $session) => new EndedSession($session, $reason))->values(),
+            keepReasons: true,
+        );
+    }
 
+    /**
+     * Make each record's event now, keep why it ended (for announcing it
+     * again, should this announcement be lost), then announce them once
+     * the revocation holds, and note which went out.
+     *
+     * @param  Collection<int, EndedSession>  $ended
+     */
+    protected function announceAll(#[\SensitiveParameter] Collection $ended, bool $keepReasons): void
+    {
+        if ($ended->isEmpty()) {
+            return;
+        }
+
+        $events = [];
+        $failed = [];
+
+        foreach ($ended as $one) {
             try {
-                $ended[] = [$session, $this->event($session, $reason)];
+                $events[] = [$one->session, $this->event($one->session, $one->reason)];
             } catch (Throwable $e) {
                 $this->report($e);
+                $failed[] = $one->session->id;
             }
         }
 
-        if ($ended !== []) {
-            $this->whenDurable(function () use ($ended) {
-                foreach ($ended as [$session, $event]) {
-                    $this->announce($session, $event);
+        if ($keepReasons) {
+            foreach (SessionEndReason::cases() as $reason) {
+                $ids = $ended->filter(fn (EndedSession $one) => $one->reason === $reason)->map(fn (EndedSession $one) => $one->session->id)->values()->all();
+
+                if ($ids !== []) {
+                    $this->keep(fn (SweepsSessions $sweeper) => $sweeper->endedBecause($ids, $reason));
                 }
-            });
+            }
         }
+
+        $this->whenDurable(function () use ($events, $failed) {
+            $announced = [];
+
+            foreach ($events as [$session, $event]) {
+                $this->announce($session, $event) ? $announced[] = $session->id : $failed[] = $session->id;
+            }
+
+            $this->noteAnnounced($announced, $failed);
+        });
     }
 
     protected function event(#[\SensitiveParameter] RegisteredSession $session, SessionEndReason $reason): RegisteredSessionEnded
@@ -232,20 +307,74 @@ class AnnouncingSessionRegistry implements SessionRegistry
     }
 
     /**
-     * Announce one record that ended. Every announcement goes through here,
-     * so this is where a record would be noted as announced.
+     * Announce one record that ended. Returns whether every listener took
+     * it: one that threw was reported, and the record is tried again.
      */
-    protected function announce(#[\SensitiveParameter] RegisteredSession $session, RegisteredSessionEnded $event): void
+    protected function announce(#[\SensitiveParameter] RegisteredSession $session, RegisteredSessionEnded $event): bool
     {
-        $this->dispatch($event);
+        return $this->dispatch($event);
     }
 
-    protected function dispatch(object $event): void
+    /**
+     * Note which records were announced, once each was dispatched, with one
+     * write for the lot. The sweep announces again any left out, and those
+     * a listener failed for, up to Sweep::ATTEMPTS times. Only on a driver
+     * that keeps track (SweepsSessions), and only once its migration has
+     * run: until then, nothing is noted, and nothing else changes.
+     *
+     * @param  list<string>  $announced
+     * @param  list<string>  $failed
+     */
+    protected function noteAnnounced(#[\SensitiveParameter] array $announced, #[\SensitiveParameter] array $failed): void
+    {
+        $this->keep(fn (SweepsSessions $sweeper) => $sweeper->announced($announced, $failed, now()->getTimestamp(), Sweep::ATTEMPTS));
+    }
+
+    /**
+     * Write down what the sweep will need, if the driver keeps it. A write
+     * that fails is reported, and changes nothing else: no revocation or
+     * announcement waits on it.
+     *
+     * @param  Closure(SweepsSessions): void  $write
+     */
+    protected function keep(Closure $write): void
+    {
+        try {
+            if (($sweeper = $this->sweeper()) !== null && $this->sweepable($sweeper)) {
+                $write($sweeper);
+            }
+        } catch (Throwable $e) {
+            $this->report($e);
+        }
+    }
+
+    /**
+     * Whether the driver's store has what sweeping needs, asked once. One
+     * still waiting for its migration is reported the once.
+     */
+    protected function sweepable(SweepsSessions $sweeper): bool
+    {
+        if ($this->sweepable !== null) {
+            return $this->sweepable;
+        }
+
+        if (! $sweepable = $sweeper->canSweep()) {
+            $this->report(new RuntimeException('The session registry can\'t note which ended sessions were announced: publish and run Keyring\'s migrations (php artisan keyring:install, then php artisan migrate).'));
+        }
+
+        return $this->sweepable = $sweepable;
+    }
+
+    protected function dispatch(object $event): bool
     {
         try {
             event($event);
+
+            return true;
         } catch (Throwable $e) {
             $this->report($e);
+
+            return false;
         }
     }
 

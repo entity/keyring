@@ -578,9 +578,31 @@ class Sessions
      */
     public function idledOut(RegisteredSession $session, ?int $now = null): bool
     {
-        $idle = $session->remembered ? config('keyring.sessions.remember_idle') : config('keyring.sessions.idle');
+        $idle = $this->idleLimit($session->remembered);
 
-        return $idle !== null && ($now ?? now()->getTimestamp()) - $session->lastActivityAt > Duration::seconds($idle);
+        return $idle !== null && ($now ?? now()->getTimestamp()) - $session->lastActivityAt > $idle;
+    }
+
+    /**
+     * Seconds a session may go unused before it ends, for one that's
+     * remembered or not. Null for no limit. The sweep ends sessions by this
+     * too, so it ends what the session middleware would.
+     */
+    public function idleLimit(bool $remembered): ?int
+    {
+        $idle = $remembered ? config('keyring.sessions.remember_idle') : config('keyring.sessions.idle');
+
+        return $idle === null ? null : Duration::seconds($idle);
+    }
+
+    /**
+     * Whether a record that has ended did so by timing out: revoked once it
+     * had expired, or had gone unused for too long, as the sweep and the
+     * session middleware end them.
+     */
+    public function timedOut(RegisteredSession $session): bool
+    {
+        return $session->revokedAt !== null && ($session->expiresAt <= $session->revokedAt || $this->idledOut($session, $session->revokedAt));
     }
 
     /**

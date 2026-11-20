@@ -74,7 +74,9 @@
             "end_on_lapse": false,
             "middleware": true,
             "remember_cookie": null,
-            "remember_grace": "10s"
+            "remember_grace": "10s",
+            "sweep_every": null,
+            "sweep_limit": 1000
         },
         "protected": [],
         "email_changes": {
@@ -463,6 +465,14 @@
         "Keyring\\Contracts\\Signal": [
             "assess",
             "checkpoints"
+        ],
+        "Keyring\\Contracts\\SweepsSessions": [
+            "announced",
+            "canSweep",
+            "endedBecause",
+            "sweep",
+            "timedOut",
+            "unannounced"
         ],
         "Keyring\\Contracts\\TrustsAuthenticators": [
             "roots"

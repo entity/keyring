@@ -42,6 +42,7 @@ use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
+use Keyring\Sessions\Sweep;
 use Keyring\Support\Duration;
 use Keyring\Support\PasswordRules;
 use Keyring\Support\TooManyAttempts;
@@ -305,6 +306,13 @@ class KeyringServiceProvider extends ServiceProvider
     protected function schedulePruning(): void
     {
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+            // Before the prune, which leaves what the sweep has still to do.
+            // One at a time, on one server: two would wait for each other's
+            // rows, and the second find nothing left.
+            if (($every = Sweep::every()) !== null) {
+                $schedule->command(Console\SweepCommand::class)->cron(Sweep::cron($every))->withoutOverlapping()->onOneServer();
+            }
+
             if (($at = config('keyring.prune_at')) !== null) {
                 $schedule->command(Console\PruneCommand::class)->dailyAt($at);
             }
@@ -313,7 +321,7 @@ class KeyringServiceProvider extends ServiceProvider
 
     protected function registerPublishing(): void
     {
-        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class, Console\PruneCommand::class, Console\SignOutCommand::class]);
+        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class, Console\PruneCommand::class, Console\SignOutCommand::class, Console\SweepCommand::class]);
 
         $this->publishes([__DIR__.'/../config/keyring.php' => config_path('keyring.php')], 'keyring-config');
         $this->publishesMigrations([__DIR__.'/../database/migrations' => database_path('migrations')], 'keyring-migrations');
