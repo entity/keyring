@@ -6,6 +6,7 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
@@ -1119,8 +1120,8 @@ describe('asking from a controller', function () {
                     return redirect($request->fullUrlWithQuery(['flow' => $flow]));
                 }
 
-                if ($request->user() === null) {
-                    throw new AuthenticationException;
+                if (Keyring::guard()->guest()) {
+                    throw new AuthenticationException(guards: [config('keyring.guard')]);
                 }
 
                 $since = match (true) {
@@ -1193,6 +1194,31 @@ describe('asking from a controller', function () {
             'max_age' => 'max_age=60',
             'prompt=login' => 'prompt=login',
         ]);
+
+        describe('with keyring.guard set to another guard', function () {
+            beforeEach(function () {
+                config([
+                    'auth.providers.staff' => ['driver' => 'eloquent', 'model' => Staff::class],
+                    'auth.guards.staff' => ['driver' => 'session', 'provider' => 'staff'],
+                    'keyring.guard' => 'staff',
+                ]);
+            });
+
+            it('authorizes a user signed in only to Keyring\'s guard', function () {
+                $this->actingAs(staff(), 'staff');
+                Auth::shouldUse('web');
+
+                $this->get('/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback')
+                    ->assertOk()->assertSee('authorized');
+            });
+
+            it('sends a user signed in only to the default guard to sign in', function () {
+                $this->actingAs($this->user, 'web');
+
+                $this->get('/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback')
+                    ->assertRedirect(route('login'));
+            });
+        });
     });
 
     describe('reading the claims as the docs do', function () {

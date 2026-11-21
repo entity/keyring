@@ -124,6 +124,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
 use Keyring\Login\StepUp;
 
 class AuthorizeController
@@ -170,8 +171,8 @@ class AuthorizeController
         }
 
         // Signing in comes after the moment, so it counts toward it.
-        if ($request->user() === null) {
-            throw new AuthenticationException;
+        if (Keyring::guard()->guest()) {
+            throw new AuthenticationException(guards: [config('keyring.guard')]);
         }
 
         $since = match (true) {
