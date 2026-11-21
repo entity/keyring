@@ -52,7 +52,7 @@ class StepUp
      */
     public function enrollFirst(Request $request, ?string $continue = null): Response
     {
-        $this->detours->remember($request, Detours::ENROLLMENT, $continue);
+        $this->detours->save($request, Detours::ENROLLMENT, $continue);
 
         return $this->keyring->response(EnrollmentRequiredResponse::class)->toResponse($request);
     }

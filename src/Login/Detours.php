@@ -52,19 +52,33 @@ class Detours
     /**
      * Save where this request was going: the page itself, or for one of
      * Keyring's own pages only the $url it says it was there for. Anything
-     * but a navigation leaves what's saved alone.
+     * but a navigation, and anything off this origin or on the detour's own
+     * page, leaves what's saved alone.
      */
-    public function remember(Request $request, string $key, ?string $url = null): void
+    public function save(Request $request, string $key, ?string $url = null): void
     {
-        $user = $this->keyring->guard()->user();
-
-        if (! $user instanceof Authenticatable || ! $this->isNavigation($request)) {
+        if (! $this->isNavigation($request)) {
             return;
         }
 
         $url ??= $request->routeIs(...$this->own) ? null : $request->fullUrl();
 
         if ($url !== null && $this->isOwnOrigin($request, $url) && ! $this->isDestination($key, $url)) {
+            $this->remember($request, $key, $url);
+        }
+    }
+
+    /**
+     * Save $url under $key for the signed-in user, replacing what was saved
+     * before. Every save goes through here once save() has checked it, so
+     * an app that binds its own subclass can skip requests it never wants
+     * carried on to, and call the parent for the rest.
+     */
+    public function remember(Request $request, string $key, string $url): void
+    {
+        $user = $this->keyring->guard()->user();
+
+        if ($user instanceof Authenticatable) {
             $request->session()->put($key, ['url' => $url, 'user' => $this->owner($user), 'at' => now()->getTimestamp()]);
         }
     }

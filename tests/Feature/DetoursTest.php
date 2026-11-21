@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Uri;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
 use Keyring\Contracts\Responses\EnrollmentRequiredResponse;
@@ -482,8 +483,8 @@ describe('a held password change', function () {
         $this->get('/home', NAVIGATE);
         // The page saving itself, or being handed in as where to go.
         Route::middleware('web')->get('/settings/password', function (Request $request) {
-            app(Detours::class)->remember($request, Detours::PASSWORD_CHANGE);
-            app(Detours::class)->remember($request, Detours::PASSWORD_CHANGE, url('/settings/password?step=2'));
+            app(Detours::class)->save($request, Detours::PASSWORD_CHANGE);
+            app(Detours::class)->save($request, Detours::PASSWORD_CHANGE, url('/settings/password?step=2'));
 
             return 'ok';
         });
@@ -539,5 +540,97 @@ describe('a password change the user chose', function () {
 
         expect(session()->has(Detours::PASSWORD_CHANGE))->toBeFalse()
             ->and(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/invoices/42');
+    });
+});
+
+/**
+ * An app's own Detours, as docs/extending.md shows: it never saves a silent
+ * authorize request, and notes every call so a test can see who used it.
+ */
+class SkipsSilentRequests extends Detours
+{
+    /** @var list<array{0: string, 1?: string, 2?: string}> */
+    public static array $calls = [];
+
+    public function remember(Request $request, string $key, string $url): void
+    {
+        static::$calls[] = ['remember', $key, $url];
+
+        if (Uri::of($url)->query()->get('prompt') !== 'none') {
+            parent::remember($request, $key, $url);
+        }
+    }
+
+    public function pull(Request $request, string $key): ?string
+    {
+        static::$calls[] = ['pull', $key];
+
+        return parent::pull($request, $key);
+    }
+
+    public function forget(Request $request): void
+    {
+        static::$calls[] = ['forget'];
+
+        parent::forget($request);
+    }
+}
+
+describe('an app\'s own detours', function () {
+    beforeEach(function () {
+        SkipsSilentRequests::$calls = [];
+        $this->app->bind(Detours::class, SkipsSilentRequests::class);
+    });
+
+    it('is used when a user is sent to enroll, and when they have', function () {
+        signIn();
+        $this->get('/invoices/42', NAVIGATE)->assertRedirect('/settings/security');
+
+        $this->get('/invoices/7?prompt=none', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(addAuthenticatorApp()['continue'])->toBe('http://localhost/invoices/42')
+            ->and(SkipsSilentRequests::$calls)->toBe([
+                ['forget'],
+                ['remember', Detours::ENROLLMENT, 'http://localhost/invoices/42'],
+                ['remember', Detours::ENROLLMENT, 'http://localhost/invoices/7?prompt=none'],
+                ['pull', Detours::ENROLLMENT],
+            ]);
+    });
+
+    it('is used when a user is held for a new password, and when they have chosen one', function () {
+        signIn();
+        Keyring::requirePasswordChange($this->user);
+
+        $this->get('/home', NAVIGATE)->assertRedirect('/settings/password');
+        $this->get('/home?prompt=none', NAVIGATE)->assertRedirect('/settings/password');
+
+        $this->putJson(route('user-password.update'), ['current_password' => 'password', 'password' => 'a much longer passphrase', 'password_confirmation' => 'a much longer passphrase'])
+            ->assertJsonPath('redirect', 'http://localhost/home');
+
+        expect(SkipsSilentRequests::$calls)->toBe([
+            ['forget'],
+            ['remember', Detours::PASSWORD_CHANGE, 'http://localhost/home'],
+            ['remember', Detours::PASSWORD_CHANGE, 'http://localhost/home?prompt=none'],
+            ['pull', Detours::PASSWORD_CHANGE],
+        ]);
+    });
+
+    it('is handed the page a confirm was for, not the confirm page', function () {
+        signIn();
+
+        $this->get('/keys-only?prompt=none', NAVIGATE)->assertRedirect(route('keyring.confirm.challenge'));
+        $this->get(route('keyring.confirm.challenge'), NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(session()->has(Detours::ENROLLMENT))->toBeFalse()
+            ->and(SkipsSilentRequests::$calls)->toContain(['remember', Detours::ENROLLMENT, 'http://localhost/keys-only?prompt=none']);
+    });
+
+    it('is what a sign in forgets with', function () {
+        $this->withSession([Detours::ENROLLMENT => savedFor($this->user)]);
+
+        signIn();
+
+        expect(SkipsSilentRequests::$calls)->toBe([['forget']])
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
     });
 });
