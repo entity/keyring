@@ -290,15 +290,16 @@ it('leaves out only the types security_log.unlisted names, whatever else is ther
     config(['keyring.security_log' => [...Arr::except(config('keyring.security_log'), 'unlisted'), ...$option]]);
     app(SecurityLog::class)->record('signed_in', $this->user);
     app(SecurityLog::class)->record('token_issued', $this->user);
+    app(SecurityLog::class)->record('token_revoked', $this->user);
 
     expect(Keyring::activity($this->user)->pluck('type')->all())->toEqualCanonicalizing($listed);
 })->with([
-    'missing, from a config cached before the option' => [[], ['signed_in', 'token_issued']],
-    'null' => [['unlisted' => null], ['signed_in', 'token_issued']],
-    'a type, not a list' => [['unlisted' => 'token_issued'], ['signed_in', 'token_issued']],
-    'a null in the list' => [['unlisted' => ['token_issued', null]], ['signed_in']],
-    'a 0 in the list' => [['unlisted' => ['token_issued', 0]], ['signed_in']],
-    'a list in the list' => [['unlisted' => ['token_issued', ['signed_in']]], ['signed_in']],
+    'missing, from a config cached before the option' => [[], ['signed_in', 'token_issued', 'token_revoked']],
+    'null' => [['unlisted' => null], ['signed_in', 'token_issued', 'token_revoked']],
+    'a type, not a list' => [['unlisted' => 'token_issued'], ['signed_in', 'token_issued', 'token_revoked']],
+    'a null between two types' => [['unlisted' => ['token_issued', null, 'token_revoked']], ['signed_in']],
+    'a 0 between two types' => [['unlisted' => ['token_issued', 0, 'token_revoked']], ['signed_in']],
+    'a list between two types' => [['unlisted' => ['token_issued', ['signed_in'], 'token_revoked']], ['signed_in']],
 ]);
 
 // Every query fails, as if the table were gone, without DDL that MySQL would commit.
