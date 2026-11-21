@@ -566,7 +566,14 @@ class Sessions
         // The guard is signed out whatever becomes of the record: a
         // registry that can't be reached is reported, not thrown from the
         // middle of the app's sign-out.
-        rescue(fn () => $this->end($request));
+        // logoutCurrentDevice() leaves the "remember me" token as it was,
+        // and the record that would have refused it is still open, so the
+        // token is cycled instead.
+        rescue(fn () => $this->end($request), function () use ($event) {
+            if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
+                rescue(fn () => $this->cycleRememberToken($event->user));
+            }
+        });
 
         $request->session()->forget(['keyring', 'auth.password_confirmed_at']);
     }
