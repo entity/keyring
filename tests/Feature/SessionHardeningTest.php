@@ -8,8 +8,10 @@ use Illuminate\Cache\ApcWrapper;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
@@ -27,6 +29,7 @@ use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
@@ -693,5 +696,57 @@ describe('a sign-out the app does itself', function () {
         expect(session(Sessions::KEY))->not->toBeNull()->not->toBe($registered)
             ->and(session(SessionAssurance::KEY))->toBeNull()
             ->and(app(SessionAssurance::class)->level())->toBe(Assurance::None);
+    });
+
+    it('leaves the session alone when another guard signs out', function () {
+        config(['auth.guards.staff' => ['driver' => 'session', 'provider' => 'users']]);
+        Route::middleware('web')->post('/staff/logout', fn () => tap(response()->noContent(), fn () => auth('staff')->logout()));
+
+        signInWith();
+        $registered = session(Sessions::KEY);
+        $verified = session(SessionAssurance::KEY);
+
+        $this->post('/staff/logout')->assertNoContent();
+
+        $this->assertAuthenticatedAs($this->user);
+        expect(session(Sessions::KEY))->toBe($registered)
+            ->and(session(SessionAssurance::KEY))->toBe($verified)
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+        $this->get('/home')->assertOk();
+    });
+
+    it('does nothing without a session to end, as in a queued job or a command', function () {
+        signInWith();
+        $registered = session(Sessions::KEY);
+
+        app()->instance('request', Request::create('/'));
+        Auth::guard('web')->logout();
+
+        expect(session(Sessions::KEY))->toBe($registered)
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+    });
+
+    it('still signs out when the registry can\'t be reached, and reports it', function () {
+        Exceptions::fake();
+        signInWith();
+        $registered = session(Sessions::KEY);
+
+        app()->bind(SessionRegistry::class, fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revoke(string $id): void
+            {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+
+        $this->post('/app/logout-only')->assertNoContent();
+
+        $this->assertGuest();
+        expect(session()->has('keyring'))->toBeFalse()
+            ->and(session()->has('auth.password_confirmed_at'))->toBeFalse();
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The database went away.');
+
+        app()->forgetInstance(SessionRegistry::class);
+        expect(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
     });
 });
