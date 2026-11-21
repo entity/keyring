@@ -62,7 +62,7 @@ $this->app->bind(KeyringAuthenticatorController::class, AuthenticatorController:
 
 The services behind them work the same way. They include `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Login\Detours`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager`, `Keyring\Support\Throttle`, and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
 
-`Detours` keeps the page a user was going to when Keyring sent them to enroll or to choose a new password, for them to [carry on to afterwards](policies.md#carrying-on-afterwards). Every page it saves goes through its `remember()` method, with the request, the key for the detour (`Detours::ENROLLMENT` or `Detours::PASSWORD_CHANGE`), and the URL being saved. Keyring has already checked that URL by then, and for the confirm page it's the page the confirmation was for, not the confirm page. Override `remember()` to keep out pages you never want a user carried on to. For example, an OpenID provider that answers a `prompt=none` authorize request with an error has nothing to come back to:
+`Detours` keeps the page a user was going to when Keyring sent them to enroll or to choose a new password, for them to [carry on to afterwards](policies.md#carrying-on-afterwards). Every page it saves goes through its `remember()` method, which checks it and then calls `put()` with the request, the key for the detour (`Detours::ENROLLMENT` or `Detours::PASSWORD_CHANGE`), and the URL being saved. Override `put()` to keep out pages you never want a user carried on to. Look at `$url`, not the request, because on the confirm page the request is the confirm page and `$url` is the page the confirmation was for. For example, an OpenID provider that answers a `prompt=none` authorize request with an error has nothing to come back to:
 
 ```php
 namespace App\Login;
@@ -73,13 +73,13 @@ use Keyring\Login\Detours as KeyringDetours;
 
 class Detours extends KeyringDetours
 {
-    public function remember(Request $request, string $key, string $url): void
+    protected function put(Request $request, string $key, string $url): void
     {
         if (Uri::of($url)->query()->get('prompt') === 'none') {
             return;
         }
 
-        parent::remember($request, $key, $url);
+        parent::put($request, $key, $url);
     }
 }
 ```

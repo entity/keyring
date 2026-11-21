@@ -145,7 +145,7 @@ Only a page the browser navigated to is remembered. That's a `GET` with `Sec-Fet
 
 Browsers only send `Sec-Fetch-*` headers over HTTPS or to `localhost`. On a plain-HTTP development host, such as `http://myapp.test`, a Blade app gets no `continue`. Inertia visits still do.
 
-To keep other pages out, such as a `prompt=none` authorize request that your app answers with an error, bind your own `Keyring\Login\Detours` and override its `remember()` method. See [Replacing a Controller or Service](extending.md#replacing-a-controller-or-service).
+To keep other pages out, such as a `prompt=none` authorize request that your app answers with an error, bind your own `Keyring\Login\Detours` and override its `put()` method. See [Replacing a Controller or Service](extending.md#replacing-a-controller-or-service).
 
 ## No Downgrade
 

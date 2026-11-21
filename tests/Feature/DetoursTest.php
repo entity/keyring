@@ -483,8 +483,8 @@ describe('a held password change', function () {
         $this->get('/home', NAVIGATE);
         // The page saving itself, or being handed in as where to go.
         Route::middleware('web')->get('/settings/password', function (Request $request) {
-            app(Detours::class)->save($request, Detours::PASSWORD_CHANGE);
-            app(Detours::class)->save($request, Detours::PASSWORD_CHANGE, url('/settings/password?step=2'));
+            app(Detours::class)->remember($request, Detours::PASSWORD_CHANGE);
+            app(Detours::class)->remember($request, Detours::PASSWORD_CHANGE, url('/settings/password?step=2'));
 
             return 'ok';
         });
@@ -552,12 +552,12 @@ class SkipsSilentRequests extends Detours
     /** @var list<array{0: string, 1?: string, 2?: string}> */
     public static array $calls = [];
 
-    public function remember(Request $request, string $key, string $url): void
+    protected function put(Request $request, string $key, string $url): void
     {
-        static::$calls[] = ['remember', $key, $url];
+        static::$calls[] = ['put', $key, $url];
 
         if (Uri::of($url)->query()->get('prompt') !== 'none') {
-            parent::remember($request, $key, $url);
+            parent::put($request, $key, $url);
         }
     }
 
@@ -591,8 +591,8 @@ describe('an app\'s own detours', function () {
         expect(addAuthenticatorApp()['continue'])->toBe('http://localhost/invoices/42')
             ->and(SkipsSilentRequests::$calls)->toBe([
                 ['forget'],
-                ['remember', Detours::ENROLLMENT, 'http://localhost/invoices/42'],
-                ['remember', Detours::ENROLLMENT, 'http://localhost/invoices/7?prompt=none'],
+                ['put', Detours::ENROLLMENT, 'http://localhost/invoices/42'],
+                ['put', Detours::ENROLLMENT, 'http://localhost/invoices/7?prompt=none'],
                 ['pull', Detours::ENROLLMENT],
             ]);
     });
@@ -609,8 +609,8 @@ describe('an app\'s own detours', function () {
 
         expect(SkipsSilentRequests::$calls)->toBe([
             ['forget'],
-            ['remember', Detours::PASSWORD_CHANGE, 'http://localhost/home'],
-            ['remember', Detours::PASSWORD_CHANGE, 'http://localhost/home?prompt=none'],
+            ['put', Detours::PASSWORD_CHANGE, 'http://localhost/home'],
+            ['put', Detours::PASSWORD_CHANGE, 'http://localhost/home?prompt=none'],
             ['pull', Detours::PASSWORD_CHANGE],
         ]);
     });
@@ -622,7 +622,7 @@ describe('an app\'s own detours', function () {
         $this->get(route('keyring.confirm.challenge'), NAVIGATE)->assertRedirect('/settings/security');
 
         expect(session()->has(Detours::ENROLLMENT))->toBeFalse()
-            ->and(SkipsSilentRequests::$calls)->toContain(['remember', Detours::ENROLLMENT, 'http://localhost/keys-only?prompt=none']);
+            ->and(SkipsSilentRequests::$calls)->toContain(['put', Detours::ENROLLMENT, 'http://localhost/keys-only?prompt=none']);
     });
 
     it('is what a sign in forgets with', function () {

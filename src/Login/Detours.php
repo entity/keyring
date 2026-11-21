@@ -55,7 +55,7 @@ class Detours
      * but a navigation, and anything off this origin or on the detour's own
      * page, leaves what's saved alone.
      */
-    public function save(Request $request, string $key, ?string $url = null): void
+    public function remember(Request $request, string $key, ?string $url = null): void
     {
         if (! $this->isNavigation($request)) {
             return;
@@ -64,22 +64,7 @@ class Detours
         $url ??= $request->routeIs(...$this->own) ? null : $request->fullUrl();
 
         if ($url !== null && $this->isOwnOrigin($request, $url) && ! $this->isDestination($key, $url)) {
-            $this->remember($request, $key, $url);
-        }
-    }
-
-    /**
-     * Save $url under $key for the signed-in user, replacing what was saved
-     * before. Every save goes through here once save() has checked it, so
-     * an app that binds its own subclass can skip requests it never wants
-     * carried on to, and call the parent for the rest.
-     */
-    public function remember(Request $request, string $key, string $url): void
-    {
-        $user = $this->keyring->guard()->user();
-
-        if ($user instanceof Authenticatable) {
-            $request->session()->put($key, ['url' => $url, 'user' => $this->owner($user), 'at' => now()->getTimestamp()]);
+            $this->put($request, $key, $url);
         }
     }
 
@@ -119,6 +104,23 @@ class Detours
     public function forget(Request $request): void
     {
         $request->session()->forget([static::ENROLLMENT, static::PASSWORD_CHANGE]);
+    }
+
+    /**
+     * Save $url under $key for the signed-in user, replacing what was saved
+     * before. This is the override point: remember() only gets here after
+     * its checks, so an app that binds its own subclass can skip pages it
+     * never wants carried on to, and call the parent for the rest. $url is
+     * the page being saved. On the confirm page $request is the confirm
+     * page itself, so check $url, not $request.
+     */
+    protected function put(Request $request, string $key, string $url): void
+    {
+        $user = $this->keyring->guard()->user();
+
+        if ($user instanceof Authenticatable) {
+            $request->session()->put($key, ['url' => $url, 'user' => $this->owner($user), 'at' => now()->getTimestamp()]);
+        }
     }
 
     /**

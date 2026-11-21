@@ -46,7 +46,7 @@ class RequirePasswordChange
 
         // Saved here rather than in the response, so an app's own response
         // gets it too: the new password carries them on to it.
-        $this->detours->save($request, Detours::PASSWORD_CHANGE);
+        $this->detours->remember($request, Detours::PASSWORD_CHANGE);
 
         return $this->keyring->response(PasswordChangeRequiredResponse::class)->toResponse($request);
     }
