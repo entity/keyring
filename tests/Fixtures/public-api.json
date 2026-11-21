@@ -283,6 +283,7 @@
         "signsInAfterRegistering(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Illuminate\\Http\\Request $request): bool",
         "statusMessage(mixed $status): ?string",
         "steps(): array",
+        "unlistedTypes(): array",
         "unlock(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, ?string $factor = null): void",
         "updateUserPasswordsUsing(string $action): static",
         "useAuthenticatorModel(string $model): static",

@@ -302,6 +302,13 @@ it('leaves out only the types security_log.unlisted names, whatever else is ther
     'a list between two types' => [['unlisted' => ['token_issued', ['signed_in'], 'token_revoked']], ['signed_in']],
 ]);
 
+// For an app that builds its activity page from a query of its own.
+it('gives the types activity leaves out, as a list', function () {
+    config(['keyring.security_log.unlisted' => ['token_issued', null, 'token_revoked']]);
+
+    expect(Keyring::unlistedTypes())->toBe(['token_issued', 'token_revoked']);
+});
+
 // Every query fails, as if the table were gone, without DDL that MySQL would commit.
 #[Table('keyring_events_missing')]
 class MissingSecurityEvent extends SecurityEvent {}

@@ -452,6 +452,7 @@ The `Keyring\Facades\Keyring` facade is the entry point for everything you set i
 | `Keyring::hidesRegisteredAddresses()` | Whether registration answers the same for a taken address, which it does unless `registration.reveal_taken` is on. |
 | `Keyring::withoutProtection($callback, reason: ...)` | Changes protected attributes outside Keyring's flows. See [Protected Changes](protected-changes.md#bypassing-protection). |
 | `Keyring::activity($user, $limit = 25)` | Recent security log entries, leaving out the types in `security_log.unlisted`. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
+| `Keyring::unlistedTypes()` | The entry types `Keyring::activity` leaves out, for an activity query of your own. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |
 | `Keyring::user()` | The user signed in to Keyring's guard. Throws an `AuthenticationException` when there isn't one. |
 | `Keyring::fake()` | Passes or fails factors in tests. See [Testing](testing.md). |

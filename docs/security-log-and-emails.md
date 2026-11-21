@@ -218,7 +218,7 @@ Unlisted entries are still the user's. They're deleted when the user is force de
 
 - ["Was this you?" alerts](#was-this-you-alerts) come from the `alerts` list alone. An unlisted type isn't an alert unless you add it there too.
 - A line written to [your application's log](#without-the-table) still names the user.
-- Your own queries on `SecurityEvent` still find them. If you build the activity page from a query of your own, leave out the types in `config('keyring.security_log.unlisted')` there too.
+- Your own queries on `SecurityEvent` still find them. If you build the activity page from a query of your own, add `->whereNotIn('type', Keyring::unlistedTypes())` to it. That's the list `Keyring::activity` uses, with anything that isn't a string taken out, so a `null` in the option can't hide every entry.
 
 ### Pruning
 
