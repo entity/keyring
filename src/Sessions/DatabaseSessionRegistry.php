@@ -239,12 +239,18 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
         // A record "remember me" moved a session to (one with an origin)
         // stays until it expires, ended or not: it's what a used cookie is
         // followed to, so that turning up again still raises the alarm
-        // (RememberMeReused) after the sweep ended the session.
+        // (RememberMeReused) after the sweep ended the session. One that
+        // ended for timing out stays as long as it would have unended, a
+        // day past its expiry, so a browser that comes back is told it
+        // timed out, as it would be had nothing swept it.
         return $this->query()
             ->where(fn (Builder $query) => $query->whereNotNull('replaced_by')->where('expires_at', '<=', $now))
             ->orWhere(fn (Builder $query) => $query->whereNotNull('revoked_at')->whereNull('replaced_by')
                 ->where(fn (Builder $query) => $query->whereNotNull('announced_at')->orWhere('revoked_at', '<=', $now - Sweep::GIVE_UP_AFTER))
-                ->where(fn (Builder $query) => $query->whereNull('origin')->orWhere('expires_at', '<=', $now)))
+                ->where(fn (Builder $query) => $query->whereNull('origin')->orWhere('expires_at', '<=', $now))
+                ->where(fn (Builder $query) => $query->whereNull('end_reason')
+                    ->orWhereNotIn('end_reason', [SessionEndReason::Idle->value, SessionEndReason::Expired->value])
+                    ->orWhere('expires_at', '<=', $now - Sweep::GIVE_UP_AFTER)))
             ->orWhere(fn (Builder $query) => $query->whereNull('revoked_at')->where('expires_at', '<=', $now - Sweep::GIVE_UP_AFTER))
             ->delete();
     }

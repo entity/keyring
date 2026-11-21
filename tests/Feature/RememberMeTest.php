@@ -254,6 +254,7 @@ it('tells a remembered browser coming back after the sweep ended its session tha
 
     $this->travel(11)->minutes();
     $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions')->assertSuccessful();
+    $this->artisan('keyring:prune')->assertSuccessful();
 
     comeBack($cookies)->assertRedirect('/login')->assertCookieExpired('remembered_session');
     $this->assertGuest();

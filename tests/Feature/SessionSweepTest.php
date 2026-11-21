@@ -757,12 +757,16 @@ describe('pruning', function () {
             'given up on' => swept($this->user),
             'moved and expired' => swept($this->user, expiresIn: -1, changes: ['replacedBy' => 'elsewhere']),
             'moved' => swept($this->user, changes: ['replacedBy' => 'elsewhere']),
+            'swept for idling' => swept($this->user),
+            'swept, expired over a day ago' => swept($this->user, expiresIn: -Sweep::GIVE_UP_AFTER),
         ];
 
         DB::table('keyring_sessions')->where('id', $this->rows['announced']->id)->update(['revoked_at' => $now, 'announced_at' => $now]);
         DB::table('keyring_sessions')->where('id', $this->rows['unannounced']->id)->update(['revoked_at' => $now]);
         DB::table('keyring_sessions')->where('id', $this->rows['given up on']->id)->update(['revoked_at' => $now - Sweep::GIVE_UP_AFTER]);
         DB::table('keyring_sessions')->where('id', $this->rows['moved']->id)->update(['revoked_at' => $now]);
+        DB::table('keyring_sessions')->where('id', $this->rows['swept for idling']->id)->update(['revoked_at' => $now, 'announced_at' => $now, 'end_reason' => 'idle']);
+        DB::table('keyring_sessions')->where('id', $this->rows['swept, expired over a day ago']->id)->update(['revoked_at' => $now, 'announced_at' => $now, 'end_reason' => 'expired']);
     });
 
     $kept = fn () => collect($this->rows)->filter(fn (RegisteredSession $session) => DB::table('keyring_sessions')->where('id', $session->id)->exists())->keys()->all();
@@ -773,9 +777,11 @@ describe('pruning', function () {
     it('leaves what a sweep has still to do, whether or not one is scheduled', function (mixed $every) use ($kept) {
         config(['keyring.sessions.sweep_every' => $every]);
 
-        $this->artisan('keyring:prune')->expectsOutputToContain('Pruned 4 ended sessions.')->assertSuccessful();
+        $this->artisan('keyring:prune')->expectsOutputToContain('Pruned 5 ended sessions.')->assertSuccessful();
 
-        expect($kept->call($this))->toBe(['timed out', 'live', 'unannounced', 'moved']);
+        // One the sweep ended for timing out stays as long as it would have
+        // unended, so its browser is still told why.
+        expect($kept->call($this))->toBe(['timed out', 'live', 'unannounced', 'moved', 'swept for idling']);
     })->with([
         'scheduled' => ['5m'],
         'never scheduled, or scheduled by the app' => [null],
@@ -794,11 +800,13 @@ describe('pruning', function () {
         expect(fn () => $this->artisan('keyring:sweep'))->toThrow(RuntimeException::class);
 
         // A day on, what timed out back then, and the revocations nobody
-        // announced, are gone. The one that was live has only just expired.
+        // announced, are gone. The one that was live has only just expired,
+        // and the one swept for idling won't have been for a day until an
+        // hour from now.
         $this->travel(Sweep::GIVE_UP_AFTER)->seconds();
         $this->artisan('keyring:prune')->assertSuccessful();
 
-        expect($kept->call($this))->toBe(['live']);
+        expect($kept->call($this))->toBe(['live', 'swept for idling']);
     });
 });
 
@@ -885,6 +893,8 @@ it('ends what the middleware would, and the middleware agrees afterwards', funct
 
     $this->travel($away)->seconds();
     $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions')->assertSuccessful();
+    // The daily prune, in between, keeps what the browser is told by.
+    $this->artisan('keyring:prune')->assertSuccessful();
 
     $this->get('/home')->assertRedirect('/login');
 
