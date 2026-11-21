@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
@@ -1078,6 +1080,121 @@ describe('asking from a controller', function () {
             ->and(app(StepUp::class)->unlessMet(request(), Assurance::AAL2, now()->subDay()))->not->toBeNull();
     });
 
+    describe('the authorize controller the docs show', function () {
+        beforeEach(function () {
+            // docs/step-up.md's example, on a route that isn't behind auth.
+            Route::middleware('web')->get('/oidc/authorize', function (Request $request, StepUp $stepUp) {
+                $validated = $request->validate([
+                    'acr_values' => ['nullable', 'string', 'max:255'],
+                    'max_age' => ['nullable', 'integer', 'min:0', 'max:31536000'],
+                    'prompt' => ['nullable', 'string', 'max:255'],
+                    'flow' => ['nullable', 'string', 'max:64'],
+                    'client_id' => ['required', 'string', 'max:255'],
+                    'redirect_uri' => ['required', 'string', 'max:2048'],
+                    'state' => ['nullable', 'string', 'max:1024'],
+                    'nonce' => ['nullable', 'string', 'max:1024'],
+                ]);
+
+                $level = in_array('aal2', explode(' ', $validated['acr_values'] ?? ''), true) ? Assurance::AAL2 : null;
+                $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
+                $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
+
+                $hash = hash('sha256', json_encode([
+                    $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
+                ], JSON_THROW_ON_ERROR));
+                $flows = collect($request->session()->get('oidc.flows', []))
+                    ->filter(fn (mixed $flow) => is_array($flow) && $flow['at'] > now()->subMinutes(10)->getTimestamp());
+
+                $flow = $validated['flow'] ?? null;
+                $stored = $flow === null ? null : $flows->get($flow);
+                $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
+
+                if (($freshProof || $maxAge !== null) && $started === null) {
+                    $flow = Str::random(40);
+                    $request->session()->put('oidc.flows', [
+                        ...$flows->sortByDesc('at')->take(4)->all(),
+                        $flow => ['at' => now()->getTimestamp(), 'request' => $hash],
+                    ]);
+
+                    return redirect($request->fullUrlWithQuery(['flow' => $flow]));
+                }
+
+                if ($request->user() === null) {
+                    throw new AuthenticationException;
+                }
+
+                $since = match (true) {
+                    $freshProof => Carbon::createFromTimestamp($started),
+                    $maxAge !== null => Carbon::createFromTimestamp($started - $maxAge),
+                    default => null,
+                };
+
+                $response = $level !== null || $since !== null
+                    ? $stepUp->unlessMet($request, $level, $since)
+                    : null;
+
+                if ($response !== null) {
+                    return $response;
+                }
+
+                if ($started !== null) {
+                    $request->session()->forget("oidc.flows.{$flow}");
+                }
+
+                return 'authorized';
+            });
+        });
+
+        /**
+         * The URL the controller sends the browser back to, with its flow.
+         */
+        function startAuthorizing(string $query): string
+        {
+            return test()->get("/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback&{$query}")
+                ->assertRedirectContains('flow=')
+                ->headers->get('Location');
+        }
+
+        it('lets a slow second factor through a short max_age, counting back from when the request arrived', function () {
+            signIn();
+            $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
+            $this->travel(5)->minutes();
+
+            $url = startAuthorizing('max_age=60');
+            $this->get($url)->assertRedirect(route('keyring.confirm.challenge'));
+
+            $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])
+                ->assertRedirect(route('keyring.confirm.challenge'));
+            $this->travel(90)->seconds();
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+                ->assertRedirectContains(parse_url($url, PHP_URL_PATH));
+
+            $this->get($url)->assertOk()->assertSee('authorized');
+        });
+
+        it('sends a guest that asks for nothing to sign in, rather than authorizing them', function () {
+            $this->get('/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback')->assertRedirect(route('login'));
+            $this->assertGuest();
+        });
+
+        it('stores the moment before a guest signs in, so a slow sign in counts toward it', function (string $query) {
+            $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
+
+            $url = startAuthorizing($query);
+            $this->get($url)->assertRedirect(route('login'));
+
+            signIn();
+            $this->travel(90)->seconds();
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+            $this->assertAuthenticatedAs($this->user);
+
+            $this->get($url)->assertOk()->assertSee('authorized');
+        })->with([
+            'max_age' => 'max_age=60',
+            'prompt=login' => 'prompt=login',
+        ]);
+    });
+
     describe('reading the claims as the docs do', function () {
         /**
          * The acr, amr and auth_time docs/step-up.md builds.
@@ -1184,6 +1301,15 @@ describe('asking from a controller', function () {
         $this->get('/account')->assertStatus(409)->assertSee('asked by the subclass');
         $this->get('/authorize?max_age=600')->assertStatus(409);
     });
+
+    it('throws for a guest, whatever it is asked', function (?Assurance $level, bool $since) {
+        expect(fn () => app(StepUp::class)->unlessMet(request(), $level, $since ? now()->subMinute() : null))
+            ->toThrow(AuthenticationException::class);
+    })->with([
+        'a level' => [Assurance::AAL1, false],
+        'a moment' => [null, true],
+        'both' => [Assurance::AAL2, true],
+    ]);
 
     it('refuses what it could never answer', function (?Assurance $level, ?string $since, string $message) {
         $this->freezeSecond();

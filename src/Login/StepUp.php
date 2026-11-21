@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Login;
 
 use DateTimeInterface;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
 use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
@@ -47,9 +48,12 @@ class StepUp
      * Freshness asks what keyring.fresh does, the strongest combination the
      * account can give, verified at or after $since. With a level as well,
      * both are asked for in one confirm. Give $since as a fixed moment: once
-     * the user confirms, any moment up to then is met, so the check can't
-     * send them round again. A moment that moves on with every request can.
+     * the user confirms, any moment before the confirm is met, so the check
+     * can't send them round again. Each factor is stamped when it's proved,
+     * so a confirm in two steps only meets moments up to its first step. A
+     * moment that moves on with every request can send them round forever.
      *
+     * @throws AuthenticationException for a guest
      * @throws InvalidArgumentException when nothing is asked, the level is
      *                                  none, or $since is further in the
      *                                  future than CLOCK_LEEWAY

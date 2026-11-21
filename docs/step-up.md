@@ -96,25 +96,30 @@ It returns `null` when the user has already proved what's asked, and the request
 - `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. A proof made in the same second as the moment counts. See [Fresh Verification](#fresh-verification) for what that means. A moment on its own doesn't look at whether a level lapsed: a password and an authenticator app proved 90 minutes ago meet a moment a day ago, though AAL2 lapsed after an hour idle. Pass `$level` too when the level the session holds now matters.
 - With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier. A recovery code is taken beside another factor whenever the level alone would take one, and never in place of the key AAL3 asks for.
 
-`unlessMet` throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
+For a guest, `unlessMet` throws an `AuthenticationException`, which Laravel answers by sending them to sign in. It throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
 
 ### Passing a Fixed Moment
 
-A confirmation always counts for any moment before it, so once the user confirms, the check is met. A moment that moves on with every request can't be met. If you pass `now()` each time, the user confirms, comes back a moment later, and is asked again. That's what `max_age=0` would do if you turned it into `now()->subSeconds(0)`.
+A confirmation counts for any moment before it, so once the user confirms, the check is met. Each factor is stamped when it's proved, though, so a confirm with two steps only meets moments up to its first step. The password is older than the code the user typed after it.
 
-So for `max_age=0` and `prompt=login`, which ask for a proof made during this authorization, store the moment the authorization request arrived, and pass that moment each time. Keep it for that one authorization request:
+A moment that moves on with every request can't be met. If you pass `now()` each time, the user confirms, comes back a moment later, and is asked again. That's what `max_age=0` would do if you turned it into `now()->subSeconds(0)`. Any `max_age` does the same once a confirm takes longer than it. With `max_age=60`, a user who proves the password and then takes 90 seconds to find their phone comes back with a password older than `now()->subSeconds(60)`, and is sent to confirm again, every time.
+
+So whenever there's a `max_age`, or a `prompt=login`, store the moment the authorization request arrived, and count back from that moment each time. `max_age` asks for a proof made in the `max_age` seconds before the request, as OpenID Connect counts it. `max_age=0` and `prompt=login` ask for a proof made during this authorization, so pass the stored moment itself. Keep it for that one authorization request:
 
 - Store it under an ID that only this request carries, and add the ID to the URL the user comes back to. A single key for the whole session would let a moment left by an abandoned flow satisfy a later `prompt=login` without asking. Two tabs would also share it.
 - Store a hash of the authorization request beside it (`client_id`, `redirect_uri`, `state`, and `nonce`), and only take the moment for a request with the same hash. Otherwise, someone at the browser could start a `prompt=login` flow, leave it, wait for the user to confirm something else, and replay the ID with other parameters.
-- Let it expire after a few minutes, and keep only a few per session. Every visit to an authorization URL with `prompt=login`, from any site, stores another.
+- Let it expire after a few minutes, and keep only a few per session. Every visit to an authorization URL with `max_age` or `prompt=login`, from any site, stores another.
 - A request without an ID, or with one you don't have a moment for, starts a new authorization. Store a new moment for it.
 - Forget the moment once the authorization ends.
 
+Store the moment before a guest signs in, so don't put this route behind `auth`. Without it, the controller stores the moment and then sends the guest to sign in, so their sign-in comes after the moment and counts toward it. Behind `auth`, the guest signs in before the controller runs, and the moment comes after their sign-in. With two steps at sign in, the password is older than that moment, and `prompt=login` would send them to confirm right after they signed in.
+
 ### An Example
 
-This controller reads `acr_values`, `max_age`, and `prompt`. Values from outside are checked before they reach `unlessMet`. A negative `max_age` would otherwise be a moment in the future, and throw.
+This controller reads `acr_values`, `max_age`, and `prompt`. Values from outside are checked before they reach `unlessMet`. A negative `max_age` would otherwise be a moment in the future, and throw. The route isn't behind `auth`, so the controller sends a guest to sign in itself, once the moment is stored. A request that asks for nothing would otherwise reach the authorization code without anyone signed in.
 
 ```php
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -140,9 +145,10 @@ class AuthorizeController
         $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
         $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
 
-        // A proof made during this authorization: the moment it started,
-        // stored under an ID only this authorization request carries, with
-        // a hash of the request so the ID can't be replayed with others.
+        // The moment this authorization started, for max_age to count back
+        // from and prompt=login to ask for a proof since, stored under an ID
+        // only this authorization request carries, with a hash of the
+        // request so the ID can't be replayed with others.
         $hash = hash('sha256', json_encode([
             $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
         ], JSON_THROW_ON_ERROR));
@@ -153,7 +159,7 @@ class AuthorizeController
         $stored = $flow === null ? null : $flows->get($flow);
         $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
 
-        if ($freshProof && $started === null) {
+        if (($freshProof || $maxAge !== null) && $started === null) {
             $flow = Str::random(40);
             $request->session()->put('oidc.flows', [
                 ...$flows->sortByDesc('at')->take(4)->all(),
@@ -163,9 +169,14 @@ class AuthorizeController
             return redirect($request->fullUrlWithQuery(['flow' => $flow]));
         }
 
+        // Signing in comes after the moment, so it counts toward it.
+        if ($request->user() === null) {
+            throw new AuthenticationException;
+        }
+
         $since = match (true) {
             $freshProof => Carbon::createFromTimestamp($started),
-            $maxAge !== null => now()->subSeconds($maxAge),
+            $maxAge !== null => Carbon::createFromTimestamp($started - $maxAge),
             default => null,
         };
 
