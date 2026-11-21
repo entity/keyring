@@ -216,7 +216,7 @@ config()->push('keyring.security_log.unlisted', 'acme.token_issued');
 
 Your app may add types from a service provider of its own too. Push them the same way: setting the option there replaces what packages have already pushed, since their providers boot first. In `config/keyring.php`, keep the option a list even for one type. A string there leaves nothing out, and the first package to push to it throws an error.
 
-Keyring's own [entry types](#entry-types) are never left out, even when they're listed. A package adds its types where your app doesn't see them, and one of Keyring's there would hide the user's real sign ins or sign outs.
+Keyring's own [entry types](#entry-types) are never left out, even when they're listed, and that includes any spelling your database takes for one: on MySQL, Laravel's default collation takes `Signed_Out` or `signed_out ` for `signed_out`. A package adds its types where your app doesn't see them, and one of Keyring's there would hide the user's real sign ins or sign outs.
 
 Unlisted entries are still the user's. They're deleted when the user is force deleted, and kept for `keep_for` like any other entry. Only `Keyring::activity` leaves them out:
 

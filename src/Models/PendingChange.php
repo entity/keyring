@@ -13,13 +13,12 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Concerns\BelongsToUser;
 use Keyring\Models\Concerns\HashesTokens;
+use Keyring\Support\Collation;
 use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
-use Normalizer;
 
 /**
  * A change to a protected attribute (like the email address) waiting for
@@ -82,27 +81,16 @@ class PendingChange extends Model
 
     /**
      * The value as the loosest database would compare it: normalised like a
-     * username, then without accents, case, width or characters that don't
-     * show. MySQL's default collations take "tàylor@example.com" for
-     * "taylor@example.com", so a reserved address has to be found under
-     * every spelling its unique index would refuse, or the lookalike could
-     * be registered and leave a revert nowhere to put the address back.
-     * Folding too much only keeps a similar address back while the
-     * reservation lasts.
-     *
-     * Collations don't agree on "ß": MySQL's utf8mb4_general_ci takes it for
-     * "s", and utf8mb4_unicode_ci and utf8mb4_0900_ai_ci for "ss". So a run
-     * of "s" folds to one, and "klauß", "klaus" and "klauss" are all found
-     * as each other.
+     * username, then folded. MySQL's default collations take
+     * "tàylor@example.com" for "taylor@example.com", so a reserved address
+     * has to be found under every spelling its unique index would refuse,
+     * or the lookalike could be registered and leave a revert nowhere to put
+     * the address back. Folding too much only keeps a similar address back
+     * while the reservation lasts.
      */
     public static function fold(string $value): string
     {
-        $value = Keyring::normalizeUsername($value);
-        $value = Normalizer::normalize($value, Normalizer::NFKD) ?: $value;
-        $value = preg_replace('/[\p{M}\p{C}\s]+/u', '', $value) ?? $value;
-        $value = Str::lower(Str::transliterate($value, ''));
-
-        return preg_replace('/s{2,}/', 's', $value) ?? $value;
+        return Collation::fold(Keyring::normalizeUsername($value));
     }
 
     protected function casts(): array

@@ -311,15 +311,27 @@ it('gives the types activity leaves out, as a list', function () {
 
 // Packages push to the list without the app seeing it. One that logged its
 // back-channel logouts as signed_out and listed that would take the user's
-// own sign outs off their page too.
-it('never leaves out an entry type keyring writes itself', function () {
-    config(['keyring.security_log.unlisted' => ['signed_out', 'token_issued']]);
+// own sign outs off their page too. So would any spelling the database
+// takes for it: asked of MySQL 8.4, utf8mb4_unicode_ci (which the tests
+// use) takes all but the sharp s for "signed_out", utf8mb4_general_ci the
+// capitals, the space, the accent and the sharp s, and utf8mb4_0900_ai_ci
+// all but the space and the sharp s. PostgreSQL and SQLite take none.
+it('never leaves out an entry type keyring writes itself, however it is spelled', function (string $spelling) {
+    config(['keyring.security_log.unlisted' => [$spelling, 'token_issued']]);
     app(SecurityLog::class)->record('signed_out', $this->user);
     app(SecurityLog::class)->record('token_issued', $this->user);
 
-    expect(Keyring::unlistedTypes())->toBe(['token_issued'])
-        ->and(Keyring::activity($this->user)->pluck('type')->all())->toBe(['signed_out']);
-});
+    expect(Keyring::activity($this->user)->pluck('type')->all())->toBe(['signed_out'])
+        ->and(Keyring::unlistedTypes())->toBe(['token_issued']);
+})->with([
+    'as it is' => 'signed_out',
+    'in capitals' => 'Signed_Out',
+    'with a space after it' => 'signed_out ',
+    'with an accent' => 'sígned_out',
+    'in full-width letters' => 'ｓｉｇｎｅｄ＿ｏｕｔ',
+    'with a character that does not show' => "signed\u{200B}_out",
+    'with a sharp s' => 'ßigned_out',
+]);
 
 // Every query fails, as if the table were gone, without DDL that MySQL would commit.
 #[Table('keyring_events_missing')]

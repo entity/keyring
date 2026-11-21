@@ -21,6 +21,7 @@ use Keyring\Enums\Severity;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
+use Keyring\Support\Collation;
 use Keyring\Support\Duration;
 use Throwable;
 
@@ -157,9 +158,11 @@ class SecurityLog
      * isn't a string is passed over, since a null would leave out every
      * entry, and so would a 0 on MySQL. Only that entry: several packages
      * may add to the list, and one bad entry shouldn't undo the others.
-     * Keyring's own types are passed over too. A package adds its types
-     * where the app doesn't see them, and one of Keyring's there would take
-     * the user's real sign ins or sign outs off their page.
+     * Keyring's own types are passed over too, in any spelling a database
+     * would take for them: on MySQL, Laravel's default collation takes
+     * "Signed_Out " for "signed_out". A package adds its types where the
+     * app doesn't see them, and one of Keyring's there would take the
+     * user's real sign ins or sign outs off their page.
      *
      * @return list<string>
      */
@@ -171,7 +174,9 @@ class SecurityLog
             return [];
         }
 
-        return array_values(array_diff(array_filter($types, is_string(...)), self::TYPES));
+        $keyrings = array_map(Collation::fold(...), self::TYPES);
+
+        return array_values(array_filter($types, fn (mixed $type) => is_string($type) && ! in_array(Collation::fold($type), $keyrings, true)));
     }
 
     /**
