@@ -19,6 +19,10 @@
 - `SessionAssurance::level()` and `countingToward()` take a timestamp, to count only what was proved since then with each level still on its own clock, so claims built for `max_age` don't report a level that lapsed.
 - Users sent to enroll by `keyring.enrolled`, by step-up, or by the confirm page with nothing to confirm with now get the page they were going to back as `continue` on the `authenticator-added` status. Users held for a new password are redirected there by `password-updated`. Only top-level navigations and Inertia visits are remembered, and only on the app's own origin, for the same user, within an hour. Bind your own `Keyring\Login\Detours` and override `put()` to keep other pages out, such as `prompt=none` authorize requests.
 
+### Logging and Emails
+
+- A queued listener for `FactorChallenged` or `FactorVerified` now runs for a password. A password has no stored authenticator, so the job failed with a `ModelNotFoundException`. The password's authenticator is now queued as it is, without the user loaded with it, and a stored authenticator is still queued by its ID.
+
 ### Extending
 
 - `StepUp` makes the decisions for the `keyring` and `keyring.fresh` middleware, and its constructor also takes a `DeviceManager`. What `keyring.fresh` asks for is `StepUp::freshRequirement()`, no longer the middleware's own `requirement()`. See the upgrade guide.
