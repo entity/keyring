@@ -31,14 +31,14 @@ A [driver of your own](docs/devices-and-sessions.md#writing-a-driver) should sto
 
 This only matters if you queue listeners for Keyring's events. Some events are now serialised differently, so they don't put registry IDs, password hashes, or secrets on your queue. See [Events](docs/events.md).
 
-Drain the queue before you deploy. Jobs queued by the old version don't restore under the new one:
+Drain the queue before you deploy, and restart your queue workers with the deploy. Jobs queued by the old version don't restore under the new one, and a worker still running the old code can't restore jobs the new one queues either:
 
 - A job for an event that carries an `attempt` (`Authenticated`, `Confirmed`, `FactorChallenged`, `FactorVerified`, `VerificationRefused`) fails with a `TypeError` when the worker unserialises it.
 - A job for `SessionResumed` or `RememberMeReused` restores without its `handle`, so reading `$event->handle` throws.
 
 Then prune `failed_jobs` of these events. Rows queued before the upgrade still hold session registry IDs and users' password hashes and remember tokens.
 
-A queued listener for `SessionResumed` or `RememberMeReused` now gets the session with a blank `id` and a null `replacedBy`. Code that used the ID does nothing now. For example, `Sessions::revoke($user, $event->session)` won't find the session. Use the event's `handle` instead:
+A queued listener for `SessionResumed` or `RememberMeReused` now gets the session without its registry IDs: a blank `id`, and a null `replacedBy` and `origin`. Code that used them does nothing now. For example, `Sessions::revoke($user, $event->session)` won't find the session, and `Sessions::handle($event->session)` throws a `LogicException`. Use the event's `handle` instead, which is always set:
 
 ```php
 use Keyring\Events\SessionResumed;
