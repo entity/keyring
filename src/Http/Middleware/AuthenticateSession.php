@@ -16,6 +16,7 @@ use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionEnded;
 use Keyring\Events\SessionResumed;
 use Keyring\Events\SessionsRevoked;
+use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
@@ -34,6 +35,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AuthenticateSession
 {
+    use ChoosesFormat;
+
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
@@ -356,6 +359,56 @@ class AuthenticateSession
             SessionEnded::dispatch($user, $reason);
         }
 
+        // A page that also serves guests (sessions.continue_as_guest) is
+        // asked for again, now as a guest, rather than sent to log in. A
+        // redirect and not the rest of this request: that would run on the
+        // session that just ended. Ahead of the app's own response, which
+        // would send it to log in.
+        //
+        // Inertia loads it in full. A redirect is followed with the same
+        // headers, so a partial reload would come back with only the props
+        // it asked for, and the page would go on showing who was signed in.
+        // A prefetch gets the same answer: Inertia keeps it until the link
+        // is followed, and only then loads the page.
+        //
+        // For every reason, "reused" and "risk" too: the login page would go
+        // to whichever browser asked next, not always the owner's, and an
+        // authorize request with prompt=none mustn't be shown one. The
+        // status SignedOutResponse would give is flashed, on the new
+        // session, so a page that shows statuses can say why. The request
+        // the browser is sent back to uses it up. No intended URL is saved.
+        if ($this->continuesAsGuest($request)) {
+            $url = $request->fullUrl();
+
+            $request->session()->flash('status', 'signed-out');
+
+            // As on sign out: nothing the session cached stays in the browser.
+            return $this->clearSiteData($request->hasHeader('X-Inertia') ? $this->loadInFull($url) : redirect()->to($url));
+        }
+
         return $this->keyring->response(SignedOutResponse::class, reason: $reason)->toResponse($request);
+    }
+
+    /**
+     * Whether a signed-out page visit carries on as a guest. The config is
+     * read once the browser has been signed out, so anything but a list of
+     * route names, from an old published config say, means no routes rather
+     * than an error.
+     */
+    protected function continuesAsGuest(Request $request): bool
+    {
+        $routes = config('keyring.sessions.continue_as_guest');
+
+        if (! is_array($routes) || $routes === [] || ! array_is_list($routes)) {
+            return false;
+        }
+
+        foreach ($routes as $route) {
+            if (! is_string($route) || $route === '') {
+                return false;
+            }
+        }
+
+        return $request->isMethod('GET') && ! $this->wantsJson($request) && $request->routeIs(...$routes);
     }
 }

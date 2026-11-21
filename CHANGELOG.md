@@ -9,6 +9,7 @@
 - A conformance check that the session registry keeps `origin` when a session moves, so a missing migration or a custom driver that drops it is caught in your tests.
 - The session registry says which records it revoked. `revoke()` returns the record it revoked, or `null` when it revoked nothing, and `revokeAll()` and `revokeDevice()` return the records they revoked instead of a count. Custom registry drivers need to return them too: see the [upgrade guide](UPGRADE.md#from-02-to-03). `Sessions::signOutEverywhere()`, `Sessions::revokeDevice()` and the `SessionsRevoked` event still give a count.
 - The conformance suite checks that the configured registry returns the records it revoked.
+- `sessions.continue_as_guest` lists routes that also serve guests. A page visit to one whose session has ended is signed out and asked for again as a guest, rather than sent to log in, whatever the reason it ended. The `signed-out` status is flashed and no intended URL is saved. JSON requests still get a `401`.
 
 ## v0.2.0 - 2026-11-20
 
