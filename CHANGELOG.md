@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v0.3.0 - 2026-11-21
 
 ### Sessions and Devices
 
@@ -45,6 +45,10 @@
 ### Extending
 
 - `StepUp` makes the decisions for the `keyring` and `keyring.fresh` middleware, and its constructor also takes a `DeviceManager`. What `keyring.fresh` asks for is `StepUp::freshRequirement()`, no longer the middleware's own `requirement()`. See the upgrade guide.
+
+### Browser Package
+
+- `@keyringjs/keyring` 0.1.1. `confirmEnrollment()` and `enroll()` include `continue` in their return type, for the page the user was going to before they were sent to enroll.
 
 ### Security
 
