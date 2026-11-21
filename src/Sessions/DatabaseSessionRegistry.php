@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Keyring\Sessions;
 
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Support\WithoutBindings;
 
 class DatabaseSessionRegistry implements SessionRegistry
 {
@@ -17,7 +19,7 @@ class DatabaseSessionRegistry implements SessionRegistry
         protected string $table = 'keyring_sessions',
     ) {}
 
-    public function save(RegisteredSession $session): void
+    public function save(#[\SensitiveParameter] RegisteredSession $session): void
     {
         // Never clear revoked_at from a stale copy: a revocation that lands
         // between reading and saving a record must stick. So must the
@@ -31,12 +33,12 @@ class DatabaseSessionRegistry implements SessionRegistry
             unset($row['origin']);
         }
 
-        $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at'])));
+        $this->withoutBindings(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
     }
 
-    public function find(string $id): ?RegisteredSession
+    public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        $row = $this->query()->find($id);
+        $row = $this->withoutBindings(fn () => $this->query()->find($id));
 
         return $row === null ? null : RegisteredSession::fromArray((array) $row);
     }
@@ -50,9 +52,9 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
     }
 
-    public function update(string $id, array $changes): void
+    public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
-        $this->query()->where('id', $id)->update(RegisteredSession::columns($changes));
+        $this->withoutBindings(fn () => $this->query()->where('id', $id)->update(RegisteredSession::columns($changes)));
     }
 
     /**
@@ -66,9 +68,9 @@ class DatabaseSessionRegistry implements SessionRegistry
      * (the row, or on MySQL the gap where a missing one would be) and
      * nothing after it, so it never holds one while waiting for another.
      */
-    public function revoke(string $id): ?RegisteredSession
+    public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        return $this->connection->transaction(function () use ($id) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id) {
             $row = $this->query()->lockForUpdate()->find($id);
             $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
@@ -80,7 +82,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             $revoked = $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now]) === 1;
 
             return $revoked ? $session->with(['revokedAt' => $now]) : null;
-        });
+        }));
     }
 
     /**
@@ -88,9 +90,9 @@ class DatabaseSessionRegistry implements SessionRegistry
      * the new record is stored. Of two requests at the same moment the
      * second waits, then matches nothing.
      */
-    public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+    public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
-        return $this->connection->transaction(function () use ($id, $successor, $revoke) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id, $successor, $revoke) {
             $now = now()->getTimestamp();
 
             $replaced = $this->query()->where('id', $id)->whereNull('revoked_at')->whereNull('replaced_by')->update([
@@ -104,10 +106,10 @@ class DatabaseSessionRegistry implements SessionRegistry
             }
 
             return $replaced;
-        });
+        }));
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
+    public function revokeAll(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): Collection
     {
         return $this->revokeFound($this->activeFor($user)->when($except, fn (Builder $query) => $query->where('id', '!=', $except)));
     }
@@ -137,7 +139,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     protected function revokeFound(Builder $query): Collection
     {
-        return $this->connection->transaction(function () use ($query) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($query) {
             $now = now()->getTimestamp();
 
             $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
@@ -147,7 +149,7 @@ class DatabaseSessionRegistry implements SessionRegistry
             );
 
             return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
-        });
+        }));
     }
 
     /**
@@ -175,7 +177,7 @@ class DatabaseSessionRegistry implements SessionRegistry
                 ->limit(1000)
                 ->pluck('id');
 
-            $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]);
+            $this->withoutBindings(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]));
         } while ($ids->isNotEmpty());
     }
 
@@ -197,6 +199,30 @@ class DatabaseSessionRegistry implements SessionRegistry
             ->where('user_id', (string) $user->getAuthIdentifier())
             ->whereNull('revoked_at')
             ->whereNull('replaced_by');
+    }
+
+    /**
+     * The connection the records are kept on, whose transactions decide
+     * when a revocation holds (AnnouncingSessionRegistry).
+     */
+    public function connection(): ConnectionInterface
+    {
+        return $this->connection;
+    }
+
+    /**
+     * Run statements that name records by their IDs, and fail without them
+     * (WithoutBindings). Wrapped around whole transactions, so Laravel's
+     * own retries and rollbacks see the original.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $statements
+     * @return TResult
+     */
+    protected function withoutBindings(Closure $statements): mixed
+    {
+        return WithoutBindings::run($statements);
     }
 
     protected function query(): Builder

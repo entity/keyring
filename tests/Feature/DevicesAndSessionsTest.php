@@ -2073,16 +2073,32 @@ describe('the records the registry says it revoked', function () {
         $registry = app(SessionRegistry::class);
         ($this->session)('phone');
 
-        // The other request revokes it just after this one read it.
-        Event::listen(CacheMissed::class, function (CacheMissed $event) use ($registry) {
-            if ($event->key === 'keyring:sessions:phone:revoked' && Cache::missing('raced')) {
-                Cache::put('raced', true);
+        // The other request revokes it just after this one read it, with
+        // the owner's lock held: on a store without locks, say.
+        $misses = 0;
+        Event::listen(CacheMissed::class, function (CacheMissed $event) use ($registry, &$misses) {
+            if ($event->key === 'keyring:sessions:phone:revoked' && ++$misses === 2) {
                 $registry->revoke('phone');
             }
         });
 
         expect($registry->revoke('phone'))->toBeNull()
             ->and($registry->find('phone')->revokedAt)->not->toBeNull();
+    });
+
+    it('revokes nothing when the record goes while the revoke waits for its lock, on the cache driver', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+
+        Event::listen(CacheMissed::class, function (CacheMissed $event) {
+            if ($event->key === 'keyring:sessions:phone:revoked' && Cache::missing('gone')) {
+                Cache::put('gone', true);
+                Cache::forget('keyring:sessions:phone');
+            }
+        });
+
+        expect($registry->revoke('phone'))->toBeNull();
     });
 
     // That a session ended is kept in its record and in a key beside it. A

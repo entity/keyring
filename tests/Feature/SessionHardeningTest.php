@@ -395,7 +395,7 @@ it('signs out a session whose registry record expired instead of registering it 
     $this->assertGuest();
 });
 
-it('signs out on the next request when ending an expired session fails, without registering it again', function () {
+it('signs out when ending an expired session fails, and revokes it on the retry without registering it again', function () {
     config(['keyring.sessions.absolute' => '1h']);
     signInWith();
     $registered = session(Sessions::KEY);
@@ -420,8 +420,10 @@ it('signs out on the next request when ending an expired session fails, without 
 
     $this->travel(62)->minutes();
 
+    // The browser is signed out whatever the registry does, and the guard's
+    // logout, on the way, has a second go at revoking the record.
     $this->get('/home')->assertServerError();
-    expect(session(Sessions::KEY))->toBe($registered);
+    expect(session(Sessions::KEY))->toBeNull();
 
     $this->get('/home')->assertRedirect('/login');
     $this->assertGuest();

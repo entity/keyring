@@ -221,6 +221,16 @@ class ConformanceTest extends TestCase
         $this->test_keyring_keeps_a_sessions_handle_when_it_moves();
     }
 
+    public function test_the_suite_fails_when_the_session_registry_is_bound_without_what_announces_it(): void
+    {
+        app()->instance(SessionRegistry::class, new DatabaseSessionRegistry(DB::connection()));
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('register your driver with SessionRegistryManager::extend() instead');
+
+        $this->test_keyring_announces_each_session_that_ends();
+    }
+
     protected function keyringAcknowledgesBcryptLimit(): bool
     {
         return $this->acknowledgesBcrypt;

@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Signal;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\RiskAssessed;
 use Keyring\Risk\Signals\BreachedPassword;
 use Keyring\Risk\Signals\CredentialStuffing;
@@ -142,7 +143,8 @@ class RiskEngine
         }
 
         if ($action->revokeSessions) {
-            app(Sessions::class)->signOutEverywhere($user);
+            $sessions = app(Sessions::class);
+            $sessions->because(SessionEndReason::Risk, fn () => $sessions->signOutEverywhere($user));
         }
 
         if ($action->lockSeconds !== null) {

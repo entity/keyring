@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Keyring\Changes\ProtectedAttributes;
 use Keyring\Changes\ReservedAddresses;
 use Keyring\Changes\ResetTokens;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
@@ -54,13 +55,15 @@ trait HasKeyring
         static::deleted(function (self $user) {
             app(ResetTokens::class)->forget($user);
 
+            $sessions = app(Sessions::class);
+
             if (method_exists($user, 'isForceDeleting') && ! $user->isForceDeleting()) {
-                app(Sessions::class)->signOutEverywhere($user);
+                $sessions->because(SessionEndReason::AccountDeleted, fn () => $sessions->signOutEverywhere($user));
 
                 return;
             }
 
-            app(Sessions::class)->registry()->revokeAll($user);
+            $sessions->because(SessionEndReason::AccountDeleted, fn () => $sessions->registry()->revokeAll($user));
             $user->authenticators()->delete();
             $user->devices()->delete();
             Keyring::pendingChangeModel()::query()->ownedBy($user)->delete();

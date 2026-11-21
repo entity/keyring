@@ -9,11 +9,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\DiscoverableFactor;
 use Keyring\Contracts\Responses\LogoutResponse;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\LoggedOut;
 use Keyring\Factors\Password;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
+use Keyring\Sessions\Sessions;
 
 class AuthenticatedSessionController
 {
@@ -54,9 +56,9 @@ class AuthenticatedSessionController
         return $this->keyring->attempt($request, $factor);
     }
 
-    public function destroy(Request $request, SignIn $signIn): mixed
+    public function destroy(Request $request, SignIn $signIn, Sessions $sessions): mixed
     {
-        if ($user = $signIn->out($request)) {
+        if ($user = $sessions->because(SessionEndReason::LoggedOut, fn () => $signIn->out($request))) {
             LoggedOut::dispatch($user);
         }
 

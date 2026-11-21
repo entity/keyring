@@ -192,12 +192,18 @@ class SignIn
         $guard = $this->keyring->guard();
         $user = $guard->user();
 
-        $this->sessions->end($request);
-        $onlyThisBrowser && $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
-        $this->assurance->flush();
+        // Signed out whatever happens to the registry: a revocation that
+        // fails is thrown on, but never leaves the browser signed in with no
+        // record, for the next request to register afresh.
+        try {
+            $this->sessions->end($request);
+        } finally {
+            $onlyThisBrowser && $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
+            $this->assurance->flush();
 
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         return $user;
     }
