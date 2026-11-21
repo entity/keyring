@@ -565,10 +565,9 @@ class Sessions
 
         // The guard is signed out whatever becomes of the record: a
         // registry that can't be reached is reported, not thrown from the
-        // middle of the app's sign-out.
-        // logoutCurrentDevice() leaves the "remember me" token as it was,
-        // and the record that would have refused it is still open, so the
-        // token is cycled instead.
+        // middle of the app's sign-out. The record that would refuse the
+        // "remember me" cookies is still open then, and logoutCurrentDevice()
+        // leaves the token as it was, so it's cycled here instead.
         rescue(fn () => $this->end($request), function () use ($event) {
             if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
                 rescue(fn () => $this->cycleRememberToken($event->user));
