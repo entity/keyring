@@ -11,7 +11,6 @@ use Illuminate\Database\DatabaseTransactionRecord;
 use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
-use Keyring\Contracts\SweepsSessions;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\EveryoneSignedOut;
 use Keyring\Events\RegisteredSessionEnded;

@@ -467,14 +467,6 @@
             "assess",
             "checkpoints"
         ],
-        "Keyring\\Contracts\\SweepsSessions": [
-            "announced",
-            "canSweep",
-            "everyoneAnnounced",
-            "everyoneUnannounced",
-            "sweep",
-            "unannounced"
-        ],
         "Keyring\\Contracts\\TrustsAuthenticators": [
             "roots"
         ],

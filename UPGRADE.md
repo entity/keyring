@@ -133,7 +133,7 @@ Once the migration has run, `keyring:prune` changes, whether or not you turn the
 
 The sweep is off until you set `sessions.sweep_every`.
 
-A custom driver keeps working, and `keyring:sweep` says it has nothing to sweep. To have it swept, implement `Keyring\Contracts\SweepsSessions`, and keep each revocation's reason (`AnnouncingSessionRegistry::reason()`) as you revoke.
+A custom driver keeps working, and `keyring:sweep` says it has nothing to sweep.
 
 `RegisteredSessionEnded` may now repeat for the same handle. Make listeners idempotent by handle.
 

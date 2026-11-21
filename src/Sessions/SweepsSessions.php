@@ -2,10 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Keyring\Contracts;
+namespace Keyring\Sessions;
 
 use Illuminate\Support\Collection;
-use Keyring\Sessions\EndedSession;
 
 /**
  * A session registry driver that keeps track of which ended sessions have
@@ -13,6 +12,11 @@ use Keyring\Sessions\EndedSession;
  * request to end them, and announce again any whose announcement was lost.
  * The database driver is one. The SessionRegistry contract doesn't need
  * it: a driver without it is announced as it ends sessions, and that's all.
+ *
+ * Not a contract yet: only the database driver keeps track this way, and
+ * how it notes retries may change without an upgrade note.
+ *
+ * @internal
  */
 interface SweepsSessions
 {

@@ -12,7 +12,6 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
-use Keyring\Contracts\SweepsSessions;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Support\WithoutBindings;
 
