@@ -11,9 +11,6 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\DeadlockException;
-use Illuminate\Database\DetectsConcurrencyErrors;
-use Illuminate\Database\DetectsLostConnections;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -36,6 +33,7 @@ use Keyring\Support\KeyedHash;
 use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
 use LogicException;
+use PDOException;
 use Throwable;
 
 /**
@@ -43,9 +41,6 @@ use Throwable;
  */
 class Sessions
 {
-    use DetectsConcurrencyErrors;
-    use DetectsLostConnections;
-
     public const string KEY = 'keyring.session';
 
     /**
@@ -104,12 +99,11 @@ class Sessions
      * counts the sessions without the other's.
      *
      * A revocation that fails takes the whole sign in with it. On the
-     * database driver the row lock's transaction is rolled back, the new
-     * record included. On a driver that announces straight away the
-     * failure is thrown once the lock is let go (holdingThenThrow), so the
-     * sessions ended before it, and what their listeners wrote, are kept,
-     * and the new record is revoked again, unannounced, so it doesn't count
-     * toward the limit.
+     * database driver sharing the user's connection, the row lock's
+     * transaction is rolled back, the new record included. On a driver
+     * that announces straight away, the new record is revoked again,
+     * unannounced, before the lock is let go, so it doesn't count toward
+     * the limit, and the sessions ended before the failure stay ended.
      */
     protected function register(Authenticatable $user, RegisteredSession $session): void
     {
@@ -122,23 +116,28 @@ class Sessions
         $this->holdingThenThrow($user, function () use ($user, $session, $max) {
             $this->registry->save($session);
 
-            $now = now()->getTimestamp();
+            try {
+                $now = now()->getTimestamp();
 
-            $this->registry->forUser($user)
-                ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
-                ->sortBy([
-                    // One that has idled out is over already, so it goes first.
-                    fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
-                    fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
-                ])
-                ->skip(max(0, (int) $max - 1))
-                ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
-        }, heldBack: function () use ($session) {
-            // Thrown after the lock was let go, the new record is still
-            // there. Revoked on the driver underneath, unannounced, as
-            // nobody ever used the session.
-            if ($this->registry instanceof AnnouncingSessionRegistry) {
-                rescue(fn () => $this->registry->inner()->revoke($session->id));
+                $this->registry->forUser($user)
+                    ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
+                    ->sortBy([
+                        // One that has idled out is over already, so it goes first.
+                        fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
+                        fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
+                    ])
+                    ->skip(max(0, (int) $max - 1))
+                    ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
+            } catch (Throwable $e) {
+                // No rollback takes the new record back on a driver that
+                // announces straight away. It's revoked while the lock is
+                // still held, so no other sign in counts it, and on the
+                // driver underneath, unannounced, as nobody used the session.
+                if ($this->registry instanceof AnnouncingSessionRegistry && $this->registry->announcesStraightAway()) {
+                    rescue(fn () => $this->registry->inner()->revoke($session->id));
+                }
+
+                throw $e;
             }
         });
     }
@@ -173,24 +172,23 @@ class Sessions
      * keeps only what happened. Inside a transaction of the app's own, the
      * failure, once thrown, still rolls that back unless the app catches it.
      *
-     * On the database driver the failure is thrown from inside, as the
-     * change is all or nothing: the revocations it made and the
-     * announcements waiting on them are rolled back together. So is a
-     * failure that means the connection's transaction is gone, a deadlock
-     * or a lost connection, on any driver: committing it would run its
-     * after-commit callbacks for work that was rolled back.
+     * On the database driver sharing the user's connection, the failure is
+     * thrown from inside, as the change is all or nothing: the revocations
+     * it made and the announcements waiting on them are rolled back
+     * together. So is any database failure, on any driver (canThrowLater):
+     * it may have left the transaction unusable, and committing it would
+     * run its after-commit callbacks for work that was rolled back.
      *
      * @template TResult
      *
      * @param  Closure(): TResult  $change
      * @param  (Closure(): void)|null  $then  Run whether or not the change failed.
-     * @param  (Closure(): void)|null  $heldBack  Run when the change's failure was held until the lock was let go, after $then.
      * @return TResult
      */
-    protected function holdingThenThrow(Authenticatable $user, Closure $change, ?Closure $then = null, ?Closure $heldBack = null): mixed
+    protected function holdingThenThrow(Authenticatable $user, Closure $change, ?Closure $then = null): mixed
     {
         try {
-            $outcome = $this->holding($user, function () use ($change, $heldBack): Closure {
+            $outcome = $this->holding($user, function () use ($change): Closure {
                 try {
                     $result = $change();
 
@@ -200,11 +198,7 @@ class Sessions
                         throw $e;
                     }
 
-                    return function () use ($e, $heldBack): never {
-                        $heldBack?->__invoke();
-
-                        throw $e;
-                    };
+                    return fn () => throw $e;
                 }
             });
         } catch (Throwable $e) {
@@ -222,8 +216,13 @@ class Sessions
 
     /**
      * Whether a change's failure can wait until the user's row is let go:
-     * only when the registry announces straight away, and the failure
-     * leaves the transaction it was in good to commit.
+     * only when the registry announces straight away, and the failure came
+     * from nowhere near a database (no PDOException, which Laravel's
+     * QueryException and DeadlockException are too, anywhere in its
+     * chain). Any failed query may have left the
+     * connection's transaction unusable: on PostgreSQL a COMMIT after one
+     * silently rolls back, and Laravel would still run its after-commit
+     * callbacks.
      */
     protected function canThrowLater(Throwable $e): bool
     {
@@ -232,7 +231,7 @@ class Sessions
         }
 
         for ($cause = $e; $cause !== null; $cause = $cause->getPrevious()) {
-            if ($cause instanceof DeadlockException || $this->causedByConcurrencyError($cause) || $this->causedByLostConnection($cause)) {
+            if ($cause instanceof PDOException) {
                 return false;
             }
         }
@@ -801,12 +800,18 @@ class Sessions
     public function signOutOthers(Request $request, Authenticatable $user): int
     {
         // A copy of this session's cookie is shut out even when the
-        // registry fails part way, as the sessions it ended stay ended.
+        // registry fails part way, as the sessions it ended stay ended. The
+        // registry's failure is the one thrown, so a deadlock still reaches
+        // a transaction of the app's that would retry it.
         try {
             $count = $this->because(SessionEndReason::SignedOutEverywhere, fn () => $this->signOutEverywhere($user, except: $this->current($request)?->id));
-        } finally {
-            $this->rotate($request);
+        } catch (Throwable $e) {
+            rescue(fn () => $this->rotate($request));
+
+            throw $e;
         }
+
+        $this->rotate($request);
 
         SessionsRevoked::dispatch($user, $count);
 

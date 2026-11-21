@@ -20,6 +20,7 @@ use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Cookies;
 use Keyring\Support\Duration;
+use Throwable;
 
 /**
  * Recognises devices by a long-lived, httpOnly cookie (stored hashed), with
@@ -166,11 +167,17 @@ class DeviceManager
         if ($user = $device->owner()) {
             // The token is cycled even when the registry fails part way, so
             // no "remember me" cookie brings a session on the device back.
+            // The registry's failure is the one thrown, so a deadlock still
+            // reaches a transaction of the app's that would retry it.
             try {
                 $this->sessions->because($reported ? SessionEndReason::DeviceReported : SessionEndReason::DeviceRevoked, fn () => $this->sessions->revokeDevice($user, $device->id));
-            } finally {
-                $this->sessions->cycleRememberToken($user);
+            } catch (Throwable $e) {
+                rescue(fn () => $this->sessions->cycleRememberToken($user));
+
+                throw $e;
             }
+
+            $this->sessions->cycleRememberToken($user);
 
             DeviceRevoked::dispatch($user, $device, $reported);
         }
