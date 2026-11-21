@@ -145,6 +145,8 @@ Only a page the browser navigated to is remembered. That's a `GET` with `Sec-Fet
 
 Browsers only send `Sec-Fetch-*` headers over HTTPS or to `localhost`. On a plain-HTTP development host, such as `http://myapp.test`, a Blade app gets no `continue`. Inertia visits still do.
 
+To keep other pages out, such as a `prompt=none` authorize request that your app answers with an error, bind your own `Keyring\Login\Detours` and override its `remember()` method. See [Replacing a Controller or Service](extending.md#replacing-a-controller-or-service).
+
 ## No Downgrade
 
 `noDowngrade()` stops users with a phishing-resistant authenticator from being talked into a weaker one. When a user has any passkey or security key, the requirement gains `phishingResistant()`. "Try another way" then offers only their other passkeys and security keys, plus recovery codes.
