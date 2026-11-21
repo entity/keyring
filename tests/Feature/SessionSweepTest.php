@@ -482,6 +482,21 @@ describe('announcing again', function () {
             ->and(DB::table('keyring_sessions')->whereNull('announced_at')->count())->toBe(0);
     });
 
+    it('counts a failure once for each record failed together at different tries', function () {
+        $sessions = collect([1, 2])->map(fn () => swept($this->user));
+        app(SessionRegistry::class)->revokeAll($this->user);
+        foreach ($sessions as $i => $session) {
+            DB::table('keyring_sessions')->where('id', $session->id)->update(['announced_at' => null, 'announce_attempts' => $i + 1]);
+        }
+        $at = now()->getTimestamp();
+
+        app(SessionRegistry::class)->inner()->announced([], $sessions->pluck('id')->all(), $at);
+
+        // Each one step further along the back-off, none skipping one.
+        expect(sweepRow($sessions[0]->id))->toMatchObject(['announce_attempts' => 2, 'announce_after' => $at + Sweep::retryAfter(2)])
+            ->and(sweepRow($sessions[1]->id))->toMatchObject(['announce_attempts' => 3, 'announce_after' => $at + Sweep::retryAfter(3)]);
+    });
+
     it('keeps why a session ended in the same write that revokes it', function () {
         $sessions = collect([1, 2])->map(fn () => swept($this->user));
         $queries = new Collection;
