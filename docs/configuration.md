@@ -326,12 +326,13 @@ The `levels` option sets the score thresholds. The `recent_change` option sets h
     'refusals' => 20,
     'refusals_per' => '1h',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
+    'unlisted' => [],
 ],
 
 'prune_at' => '03:00',
 ```
 
-The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in.
+The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in. The `unlisted` option lists the entry types that `Keyring::activity` leaves out, for entries about a user that aren't something the user did. An entry that isn't a string is ignored, and so is one of Keyring's own entry types. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity).
 
 The table is turned on by `Features::securityLog()`, which is on by default. Without it, the same events are written to the log `channel` instead. `null` means your default channel. Without the table, "was this you?" alerts and the `RepeatedFactorFailures`, `SuccessAfterFailures`, and `CredentialStuffing` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
 
@@ -450,7 +451,8 @@ The `Keyring\Facades\Keyring` facade is the entry point for everything you set i
 | `Keyring::signsInAfterRegistering($user, $request)` | Whether registering signs this user in, for a registration flow of your own. |
 | `Keyring::hidesRegisteredAddresses()` | Whether registration answers the same for a taken address, which it does unless `registration.reveal_taken` is on. |
 | `Keyring::withoutProtection($callback, reason: ...)` | Changes protected attributes outside Keyring's flows. See [Protected Changes](protected-changes.md#bypassing-protection). |
-| `Keyring::activity($user, $limit = 25)` | Recent security log entries. |
+| `Keyring::activity($user, $limit = 25)` | Recent security log entries, leaving out the types in `security_log.unlisted`. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
+| `Keyring::unlistedActivityTypes()` | The entry types `Keyring::activity` leaves out, for an activity query of your own. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |
 | `Keyring::user()` | The user signed in to Keyring's guard. Throws an `AuthenticationException` when there isn't one. |
 | `Keyring::fake()` | Passes or fails factors in tests. See [Testing](testing.md). |

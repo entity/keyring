@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
@@ -258,6 +259,79 @@ it('classifies each entry by severity', function () {
         'exported_everything' => Severity::Critical,
     ]);
 });
+
+it('leaves the types in security_log.unlisted off a user\'s activity, without them taking up its limit', function () {
+    config(['keyring.security_log.unlisted' => ['token_issued']]);
+    $log = app(SecurityLog::class);
+    $log->record('signed_in', $this->user);
+    $log->record('exported_data', $this->user);
+    $log->record('token_issued', $this->user);
+    $log->record('token_issued', $this->user);
+
+    expect(Keyring::activity($this->user, 2)->pluck('type')->all())->toEqualCanonicalizing(['signed_in', 'exported_data']);
+});
+
+// Entries an integration writes about a user that aren't something they
+// did. They're only kept off the list the user is shown.
+it('still counts unlisted entries, and alerts on them when the app lists them in alerts', function () {
+    config(['keyring.security_log.unlisted' => ['token_issued'], 'keyring.security_log.alerts' => ['token_issued']]);
+    $log = app(SecurityLog::class);
+    $log->record('token_issued', $this->user);
+
+    expect($log->count($this->user, 'token_issued', 60))->toBe(1)
+        ->and($log->pullAlerts($this->user)->pluck('type')->all())->toBe(['token_issued']);
+});
+
+// Read when the page is built, from whatever the app's config holds. A
+// config cached before the option existed doesn't have it. In the NOT IN,
+// a null would leave out every entry, and so would a 0 on MySQL, which
+// compares the types to it as numbers.
+it('leaves out only the types security_log.unlisted names, whatever else is there', function (array $option, array $listed) {
+    config(['keyring.security_log' => [...Arr::except(config('keyring.security_log'), 'unlisted'), ...$option]]);
+    app(SecurityLog::class)->record('signed_in', $this->user);
+    app(SecurityLog::class)->record('token_issued', $this->user);
+    app(SecurityLog::class)->record('token_revoked', $this->user);
+
+    expect(Keyring::activity($this->user)->pluck('type')->all())->toEqualCanonicalizing($listed);
+})->with([
+    'missing, from a config cached before the option' => [[], ['signed_in', 'token_issued', 'token_revoked']],
+    'null' => [['unlisted' => null], ['signed_in', 'token_issued', 'token_revoked']],
+    'a type, not a list' => [['unlisted' => 'token_issued'], ['signed_in', 'token_issued', 'token_revoked']],
+    'a null between two types' => [['unlisted' => ['token_issued', null, 'token_revoked']], ['signed_in']],
+    'a 0 between two types' => [['unlisted' => ['token_issued', 0, 'token_revoked']], ['signed_in']],
+    'a list between two types' => [['unlisted' => ['token_issued', ['signed_in'], 'token_revoked']], ['signed_in']],
+]);
+
+// For an app that builds its activity page from a query of its own.
+it('gives the types activity leaves out, as a list', function () {
+    config(['keyring.security_log.unlisted' => ['token_issued', null, 'token_revoked']]);
+
+    expect(Keyring::unlistedActivityTypes())->toBe(['token_issued', 'token_revoked']);
+});
+
+// Packages push to the list without the app seeing it. One that logged its
+// back-channel logouts as signed_out and listed that would take the user's
+// own sign outs off their page too. So would any spelling the database
+// takes for it: asked of MySQL 8.4, utf8mb4_unicode_ci (which the tests
+// use) takes all but the sharp s for "signed_out", utf8mb4_general_ci the
+// capitals, the space, the accent and the sharp s, and utf8mb4_0900_ai_ci
+// all but the space and the sharp s. PostgreSQL and SQLite take none.
+it('never leaves out an entry type keyring writes itself, however it is spelled', function (string $spelling) {
+    config(['keyring.security_log.unlisted' => [$spelling, 'token_issued']]);
+    app(SecurityLog::class)->record('signed_out', $this->user);
+    app(SecurityLog::class)->record('token_issued', $this->user);
+
+    expect(Keyring::activity($this->user)->pluck('type')->all())->toBe(['signed_out'])
+        ->and(Keyring::unlistedActivityTypes())->toBe(['token_issued']);
+})->with([
+    'as it is' => 'signed_out',
+    'in capitals' => 'Signed_Out',
+    'with a space after it' => 'signed_out ',
+    'with an accent' => 'sígned_out',
+    'in full-width letters' => 'ｓｉｇｎｅｄ＿ｏｕｔ',
+    'with a character that does not show' => "signed\u{200B}_out",
+    'with a sharp s' => 'ßigned_out',
+]);
 
 // Every query fails, as if the table were gone, without DDL that MySQL would commit.
 #[Table('keyring_events_missing')]

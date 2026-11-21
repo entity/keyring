@@ -21,6 +21,7 @@ use Keyring\Enums\Severity;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
+use Keyring\Support\Collation;
 use Keyring\Support\Duration;
 use Throwable;
 
@@ -35,6 +36,21 @@ class SecurityLog
      * context, when the app hasn't given it one.
      */
     public const string REQUEST_ID = 'keyring_request_id';
+
+    /**
+     * Every entry type Keyring writes, in the order the docs list them. An
+     * app's or a package's own types are any others.
+     */
+    public const array TYPES = [
+        'signed_in', 'confirmed', 'factor_failed', 'second_factor_failed', 'locked_out', 'rate_limited',
+        'account_locked', 'signed_out', 'authenticator_added', 'authenticator_removed', 'recovery_codes_generated',
+        'recovery_code_used', 'new_device', 'device_revoked', 'device_reported', 'sessions_revoked', 'session_ended',
+        'session_resumed', 'remember_me_reused', 'email_change_requested', 'email_changed', 'email_change_reverted',
+        'password_changed', 'password_reset', 'protection_bypassed', 'clone_suspected', 'risk_step_up',
+        'risk_reauthenticate', 'risk_notified', 'risk_password_change', 'risk_denied', 'risk_locked',
+        'risk_revoked_sessions', 'access_refused', 'enrollment_refused', 'authenticator_removal_refused',
+        'link_refused', 'verification_refused', 'refusals_limited',
+    ];
 
     public function __construct(
         protected KeyringManager $keyring,
@@ -118,13 +134,49 @@ class SecurityLog
     }
 
     /**
-     * Recent security activity, newest first, for a settings page.
+     * Recent security activity, newest first, for a settings page. Leaves
+     * out the unlistedActivityTypes(): entries about the user that aren't
+     * something they did.
      *
      * @return Collection<int, SecurityEvent>
      */
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
-        return $this->query($user)->latest('created_at')->latest('id')->limit($limit)->get();
+        return $this->query($user)
+            ->whereNotIn('type', $this->unlistedActivityTypes())
+            ->latest('created_at')
+            ->latest('id')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * The types activity() leaves out, from "security_log.unlisted", for an
+     * app's own activity query too. It's read while a page is built, so
+     * anything but an array, from a config cached before the option existed
+     * say, leaves out nothing rather than breaking the page. An entry that
+     * isn't a string is passed over, since a null would leave out every
+     * entry, and so would a 0 on MySQL. Only that entry: several packages
+     * may add to the list, and one bad entry shouldn't undo the others.
+     * Keyring's own types are passed over too, in any spelling a database
+     * would take for them: on MySQL, Laravel's default collation takes
+     * "Signed_Out " for "signed_out". A package adds its types where the
+     * app doesn't see them, and one of Keyring's there would take the
+     * user's real sign ins or sign outs off their page.
+     *
+     * @return list<string>
+     */
+    public function unlistedActivityTypes(): array
+    {
+        $types = config('keyring.security_log.unlisted');
+
+        if (! is_array($types)) {
+            return [];
+        }
+
+        $keyrings = array_map(Collation::fold(...), self::TYPES);
+
+        return array_values(array_filter($types, fn (mixed $type) => is_string($type) && ! in_array(Collation::fold($type), $keyrings, true)));
     }
 
     /**

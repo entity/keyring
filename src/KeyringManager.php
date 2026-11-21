@@ -216,13 +216,26 @@ class KeyringManager
     }
 
     /**
-     * Recent security activity for a settings page.
+     * Recent security activity for a settings page, leaving out the
+     * unlistedActivityTypes().
      *
      * @return Collection<int, SecurityEvent>
      */
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
         return app(SecurityLog::class)->activity($user, $limit);
+    }
+
+    /**
+     * The entry types activity() leaves out, for an activity query of the
+     * app's own: the strings in "security_log.unlisted", without Keyring's
+     * own types.
+     *
+     * @return list<string>
+     */
+    public function unlistedActivityTypes(): array
+    {
+        return app(SecurityLog::class)->unlistedActivityTypes();
     }
 
     /**

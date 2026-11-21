@@ -117,7 +117,8 @@
                 "email_change_reverted",
                 "clone_suspected",
                 "remember_me_reused"
-            ]
+            ],
+            "unlisted": []
         },
         "prune_at": "03:00",
         "pending_logins": {
@@ -282,6 +283,7 @@
         "signsInAfterRegistering(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Illuminate\\Http\\Request $request): bool",
         "statusMessage(mixed $status): ?string",
         "steps(): array",
+        "unlistedActivityTypes(): array",
         "unlock(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, ?string $factor = null): void",
         "updateUserPasswordsUsing(string $action): static",
         "useAuthenticatorModel(string $model): static",

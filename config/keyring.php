@@ -403,6 +403,11 @@ return [
 
         // Shown once as "was this you?" at the next sign in (keyring.alerts).
         'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
+
+        // Left out of Keyring::activity(): entries about a user that aren't
+        // something they did. Still theirs, so they go when the user does.
+        // Keep it a list: packages push their own types to it.
+        'unlisted' => [],
     ],
 
     /*

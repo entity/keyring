@@ -42,6 +42,7 @@ The security log is turned on by default. The `Features::securityLog()` feature 
     'refusals' => 20,
     'refusals_per' => '1h',
     'alerts' => ['second_factor_failed', 'device_reported', 'email_change_reverted', 'clone_suspected', 'remember_me_reused'],
+    'unlisted' => [],
 ],
 ```
 
@@ -197,6 +198,31 @@ return Inertia::render('settings/security', [
     ]),
 ]);
 ```
+
+Some entries are about a user without being something the user did. For example, a package that issues tokens to another app's server might log each one with the user it was issued for. On the user's activity page, those entries would look like activity they don't recognise, from a server's address. List their types in `security_log.unlisted`, and `Keyring::activity` leaves them out:
+
+```php
+'security_log' => [
+    // ...
+    'unlisted' => ['acme.token_issued'],
+],
+```
+
+A package can add its own types when it boots, so the apps that install it don't need to know them. It should start each type with its own name, as in `acme.token_issued`, so its types can't clash with Keyring's or your app's:
+
+```php
+config()->push('keyring.security_log.unlisted', 'acme.token_issued');
+```
+
+Your app may add types from a service provider of its own too. Push them the same way: setting the option there replaces what packages have already pushed, since their providers boot first. In `config/keyring.php`, keep the option a list even for one type. A string there leaves nothing out, and the first package to push to it throws an error.
+
+Keyring's own [entry types](#entry-types) are never left out, even when they're listed, and that includes any spelling your database takes for one: on MySQL, Laravel's default collation takes `Signed_Out` or `signed_out ` for `signed_out`. A package adds its types where your app doesn't see them, and one of Keyring's there would hide the user's real sign ins or sign outs.
+
+Unlisted entries are still the user's. They're deleted when the user is force deleted, and kept for `keep_for` like any other entry. Only `Keyring::activity` leaves them out:
+
+- ["Was this you?" alerts](#was-this-you-alerts) come from the `alerts` list alone. An unlisted type isn't an alert unless you add it there too.
+- A line written to [your application's log](#without-the-table) still names the user.
+- Your own queries on `SecurityEvent` still find them. If you build the activity page from a query of your own, add `->whereNotIn('type', Keyring::unlistedActivityTypes())` to it. That's the same list `Keyring::activity` uses, without Keyring's own types or anything that isn't a string. A `null` read straight from the config would hide every entry.
 
 ### Pruning
 
