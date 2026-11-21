@@ -9,6 +9,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Contracts\SweepsSessions;
@@ -26,7 +27,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     /** How many IDs one statement names: SQLite takes the fewest. */
     protected const int CHUNK = 500;
 
-    /** Whether the sweep's notes are kept, once asked (notes). */
+    /** Whether the sweep's notes are kept, once found to be (notes). */
     protected ?bool $notes = null;
 
     public function __construct(
@@ -85,24 +86,26 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        // Settled before this method's transaction. Inside a caller's
-        // (RowLock::hold) the queries that settle it run in a savepoint, so
-        // one that fails leaves that transaction usable (notes).
-        $reason = $this->reason();
+        return $this->noting(function () use ($id) {
+            // Settled before this method's transaction. Inside a caller's
+            // (RowLock::hold) the queries that settle it run in a savepoint,
+            // so one that fails leaves that transaction usable (notes).
+            $reason = $this->reason();
 
-        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id, $reason) {
-            $row = $this->query()->lockForUpdate()->find($id);
-            $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
+            return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id, $reason) {
+                $row = $this->query()->lockForUpdate()->find($id);
+                $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
-            if ($session === null || $session->revokedAt !== null) {
-                return null;
-            }
+                if ($session === null || $session->revokedAt !== null) {
+                    return null;
+                }
 
-            $now = now()->getTimestamp();
-            $revoked = $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$reason]) === 1;
+                $now = now()->getTimestamp();
+                $revoked = $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$reason]) === 1;
 
-            return $revoked ? $session->with(['revokedAt' => $now]) : null;
-        }));
+                return $revoked ? $session->with(['revokedAt' => $now]) : null;
+            }));
+        });
     }
 
     /**
@@ -159,19 +162,21 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     protected function revokeFound(Builder $query): Collection
     {
-        $reason = $this->reason();
+        return $this->noting(function () use ($query) {
+            $reason = $this->reason();
 
-        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($query, $reason) {
-            $now = now()->getTimestamp();
+            return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($query, $reason) {
+                $now = now()->getTimestamp();
 
-            $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
+                $found = (clone $query)->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
 
-            $found->pluck('id')->chunk(self::CHUNK)->each(
-                fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now, ...$reason]),
-            );
+                $found->pluck('id')->chunk(self::CHUNK)->each(
+                    fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now, ...$reason]),
+                );
 
-            return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
-        }));
+                return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
+            }));
+        });
     }
 
     /**
@@ -190,23 +195,25 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     {
         $now = now()->getTimestamp();
 
-        // EveryoneSignedOut announces them all at once, so they're marked
-        // for it, and not for announcing one by one. They count as announced
-        // once it has gone out (announcedEveryone), and the sweep sends it
-        // again if it didn't.
-        $announced = $this->notes() ? ['end_reason' => self::EVERYONE] : [];
+        $this->noting(function () use ($now) {
+            // EveryoneSignedOut announces them all at once, so they're marked
+            // for it, and not for announcing one by one. They count as
+            // announced once it has gone out (announcedEveryone), and the
+            // sweep sends it again if it didn't.
+            $announced = $this->notes() ? ['end_reason' => self::EVERYONE] : [];
 
-        do {
-            $ids = $this->query()
-                ->useWritePdo()
-                ->whereNull('revoked_at')
-                ->where('authenticated_at', '<=', $now)
-                ->where('expires_at', '>', $now)
-                ->limit(1000)
-                ->pluck('id');
+            do {
+                $ids = $this->query()
+                    ->useWritePdo()
+                    ->whereNull('revoked_at')
+                    ->where('authenticated_at', '<=', $now)
+                    ->where('expires_at', '>', $now)
+                    ->limit(1000)
+                    ->pluck('id');
 
-            $this->withoutBindings(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$announced]));
-        } while ($ids->isNotEmpty());
+                $this->withoutBindings(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$announced]));
+            } while ($ids->isNotEmpty());
+        });
     }
 
     /**
@@ -244,36 +251,40 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     }
 
     /**
-     * Asks the database itself. Finding the columns settles it for this
-     * process, and clears what the cache said for the others: a migrated
-     * table is never taken for one that isn't for longer than the cache
-     * keeps that (Sweep::UNMIGRATED_FOR).
+     * Asks the database itself, and keeps the answer, either way, in the
+     * cache for every process (Sweep::SCHEMA_CACHED_FOR). keyring:sweep and
+     * keyring:prune come here, so wherever they run, a stale answer is put
+     * right within one run.
      */
     public function canSweep(): bool
     {
-        $can = $this->connection instanceof Connection
-            && $this->connection->getSchemaBuilder()->hasColumns($this->table, self::SWEEP_COLUMNS);
+        $can = $this->hasSweepColumns();
 
-        if ($can) {
-            $this->notes = true;
-            rescue(fn () => cache()->forget($this->unmigrated()), report: false);
-        }
+        $this->notes = $can ?: null;
+        rescue(fn () => cache()->put($this->schemaKey(), $can, Sweep::SCHEMA_CACHED_FOR), report: false);
 
         return $can;
     }
 
+    protected function hasSweepColumns(): bool
+    {
+        return $this->connection instanceof Connection
+            && $this->connection->getSchemaBuilder()->hasColumns($this->table, self::SWEEP_COLUMNS);
+    }
+
     /**
      * Whether to write the notes the sweep reads: why each record ended as
-     * it's revoked, and which were announced. Once the columns are found
-     * that holds for the process. While they're missing, a process asks the
-     * database once, and keeps the answer in the cache for a few minutes
-     * (Sweep::UNMIGRATED_FOR), which every process then takes on trust: a
-     * request that ends a session makes no schema query. So once the
+     * it's revoked, and which were announced. The first process that needs
+     * to know asks the database, and keeps the answer, yes or no, in the
+     * cache for a few minutes (Sweep::SCHEMA_CACHED_FOR). Every process then
+     * takes the cache's word, so a request that ends a session makes no
+     * schema query. A yes holds for the process from then on. So once the
      * migration has run, notes start within those minutes, and at once
      * where keyring:sweep or keyring:prune runs, which ask the database
      * themselves. A record revoked in those minutes has no note, and the
-     * sweep announces it a second time. The warning that the migration is
-     * missing is logged once a day.
+     * sweep announces it a second time. Once it's rolled back, a revocation
+     * that finds the columns gone is made again without them (noting). The
+     * warning that the migration is missing is logged once a day.
      *
      * Its queries run in a savepoint when a transaction is open on the
      * registry's connection, so one that fails (a database cache store on
@@ -286,21 +297,66 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             return $this->notes;
         }
 
-        if ($this->contained(fn () => cache()->has($this->unmigrated()), false)) {
-            return false;
+        $can = $this->contained(fn () => cache()->get($this->schemaKey()), null);
+
+        if (! is_bool($can)) {
+            $can = $this->contained(fn () => $this->hasSweepColumns(), false);
+            $this->contained(fn () => cache()->put($this->schemaKey(), $can, Sweep::SCHEMA_CACHED_FOR), null);
         }
 
-        if ($this->contained(fn () => $this->canSweep(), false)) {
-            return true;
+        if ($can) {
+            return $this->notes = true;
         }
 
-        $this->contained(fn () => cache()->put($this->unmigrated(), true, Sweep::UNMIGRATED_FOR), null);
-
-        if ($this->contained(fn () => cache()->add($this->unmigrated().':warned', true, Sweep::GIVE_UP_AFTER), true)) {
+        if ($this->contained(fn () => cache()->add($this->schemaKey().':warned', true, Sweep::GIVE_UP_AFTER), true)) {
             rescue(fn () => logger()->warning("The [{$this->table}] table is missing the columns Keyring notes announced sessions in. Sessions end and are announced as usual, but none is announced again if its announcement is lost, and keyring:sweep won't run. Publish and run Keyring's migrations: php artisan keyring:install, then php artisan migrate."), report: false);
         }
 
         return false;
+    }
+
+    /**
+     * Run a revocation, and once more without the notes when it failed for
+     * their columns being gone: the migration was rolled back after this
+     * process, or the cache, found them. What the cache said is forgotten,
+     * so the retry asks the database again. A sign-out never fails for the
+     * sweep's sake. The first try was rolled back, to a savepoint inside a
+     * caller's transaction, so nothing of it is left.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $revoke
+     * @return TResult
+     */
+    protected function noting(Closure $revoke): mixed
+    {
+        try {
+            return $revoke();
+        } catch (QueryException $e) {
+            if ($this->notes !== true || ! $this->lostColumns($e)) {
+                throw $e;
+            }
+
+            $this->notes = null;
+            $this->contained(fn () => cache()->forget($this->schemaKey()), null);
+
+            return $revoke();
+        }
+    }
+
+    /**
+     * Whether a query failed for naming one of the sweep's columns that the
+     * table doesn't have: MySQL's and PostgreSQL's "undefined column", or
+     * SQLite's words for it.
+     */
+    protected function lostColumns(QueryException $e): bool
+    {
+        $message = $e->getMessage();
+        $undefined = in_array($e->errorInfo[0] ?? null, ['42S22', '42703'], true)
+            || str_contains($message, 'no such column')
+            || str_contains($message, 'has no column named');
+
+        return $undefined && array_any(self::SWEEP_COLUMNS, fn (string $column) => str_contains($message, $column));
     }
 
     /**
@@ -323,18 +379,22 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
         );
     }
 
-    protected function unmigrated(): string
+    protected function schemaKey(): string
     {
-        return self::unmigratedKey($this->connection instanceof Connection ? $this->connection->getName() : null, $this->table);
+        return self::schemaCacheKey($this->connection, $this->table);
     }
 
     /**
-     * Where the cache keeps that a sessions table is still waiting for the
-     * migration the sweep needs.
+     * Where the cache keeps whether a sessions table has the columns the
+     * sweep needs: one key for each table, on each database.
      */
-    public static function unmigratedKey(?string $connection, string $table): string
+    public static function schemaCacheKey(ConnectionInterface $connection, string $table): string
     {
-        return 'keyring:sessions:unmigrated:'.sha1(($connection ?? '').'|'.$table);
+        $where = $connection instanceof Connection
+            ? [$connection->getName(), $connection->getDatabaseName(), $connection->getTablePrefix()]
+            : [];
+
+        return 'keyring:sessions:sweepable:'.sha1(implode('|', [...$where, $table]));
     }
 
     /**

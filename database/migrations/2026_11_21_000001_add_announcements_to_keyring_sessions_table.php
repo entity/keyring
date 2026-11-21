@@ -45,8 +45,8 @@ return new class extends Migration
 
         DB::connection($this->getConnection())->table($name)->whereNotNull('revoked_at')->update(['announced_at' => DB::raw('revoked_at')]);
 
-        // Start noting at once, where a process noted that this was missing.
-        rescue(fn () => Cache::forget(DatabaseSessionRegistry::unmigratedKey(DB::connection($this->getConnection())->getName(), $name)), report: false);
+        // Start noting at once, whatever the cache says.
+        $this->forgetSchema($name);
     }
 
     public function down(): void
@@ -59,5 +59,19 @@ return new class extends Migration
             $table->dropIndex($name.'_sweep_unannounced_index');
             $table->dropColumn(['announced_at', 'end_reason', 'announce_attempts', 'announce_after']);
         });
+
+        // Stop noting at once, whatever the cache says. A process that has
+        // found the columns still writes to them, fails, and revokes again
+        // without them.
+        $this->forgetSchema($name);
+    }
+
+    /**
+     * Forget what the cache says about the table's columns, so the next
+     * process to need them asks the database.
+     */
+    protected function forgetSchema(string $name): void
+    {
+        rescue(fn () => Cache::forget(DatabaseSessionRegistry::schemaCacheKey(DB::connection($this->getConnection()), $name)), report: false);
     }
 };

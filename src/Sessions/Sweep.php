@@ -28,8 +28,8 @@ final class Sweep
     /** How long after its revocation the sweep keeps trying to announce a record. After that pruning may forget it. */
     public const int GIVE_UP_AFTER = 86400;
 
-    /** How long the cache keeps that a sessions table is still to be migrated, which every process takes on trust: a request never asks the database. */
-    public const int UNMIGRATED_FOR = 300;
+    /** How long the cache keeps whether a sessions table has the sweep's columns, which every process takes on trust: a request never asks the database. */
+    public const int SCHEMA_CACHED_FOR = 300;
 
     /** The longest "sessions.sweep_every" may be, in minutes, well inside GIVE_UP_AFTER. */
     public const int LONGEST = 720;

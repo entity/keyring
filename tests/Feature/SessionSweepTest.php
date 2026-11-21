@@ -516,7 +516,7 @@ describe('a stale note that the migration is missing', function () {
     beforeEach(function () {
         // Left by a process that looked before the migration ran, in a
         // cache the migration couldn't clear.
-        cache()->put(DatabaseSessionRegistry::unmigratedKey(DB::connection()->getName(), 'keyring_sessions'), true, 300);
+        cache()->put(DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions'), false, 300);
     });
 
     it('costs one second announcement at most, then the sweep sets it right', function () {
@@ -526,7 +526,7 @@ describe('a stale note that the migration is missing', function () {
         app(SessionRegistry::class)->revoke($session->id);
         expect(sweepRow($session->id)->end_reason)->toBeNull();
 
-        // The sweep asks the database, clears the note, and announces the
+        // The sweep asks the database, puts the cache right, and announces the
         // session again, once.
         $this->travel(Sweep::GRACE + 1)->seconds();
         $this->artisan('keyring:sweep')->assertSuccessful();
@@ -534,7 +534,7 @@ describe('a stale note that the migration is missing', function () {
 
         expect($this->announced)->toHaveCount(2)
             ->and(sweepRow($session->id)->announced_at)->not->toBeNull()
-            ->and(cache()->has(DatabaseSessionRegistry::unmigratedKey(DB::connection()->getName(), 'keyring_sessions')))->toBeFalse();
+            ->and(cache()->get(DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions')))->toBeTrue();
     });
 
     it('still tries a failed announcement again until the listener takes it', function () {
@@ -639,6 +639,72 @@ describe('before the migration has run', function () {
             ->and(app(SessionRegistry::class)->find($expired->id))->toBeNull()
             ->and($queries->all())->toBe(['delete from "keyring_sessions" where "expires_at" <= ? or ("revoked_at" is not null and "replaced_by" is null)']);
     })->skip(fn () => DB::connection()->getDriverName() !== 'sqlite', 'The SQL is compared as SQLite writes it.');
+});
+
+describe('once the migration has run', function () {
+    beforeEach(function () {
+        $this->schemaQueries = new Collection;
+        DB::listen(fn ($query) => (str_contains($query->sql, 'information_schema') || str_contains($query->sql, 'pg_attribute') || str_contains($query->sql, 'pragma') || str_contains($query->sql, 'sqlite_master')) && $this->schemaQueries->push($query->sql));
+        $this->migration = require __DIR__.'/../../database/migrations/2026_11_21_000001_add_announcements_to_keyring_sessions_table.php';
+    });
+
+    it('keeps the answer, so a fresh process revokes with no schema query', function () {
+        $sessions = collect([1, 2, 3])->map(fn () => swept($this->user));
+
+        app(SessionRegistry::class)->revoke($sessions[0]->id);
+        expect($this->schemaQueries)->not->toBeEmpty();
+
+        // New processes: nothing kept in them from the one before.
+        foreach ([1, 2] as $i) {
+            app(SessionRegistryManager::class)->forgetDrivers();
+            $this->schemaQueries->splice(0);
+            app(SessionRegistry::class)->revoke($sessions[$i]->id);
+
+            expect($this->schemaQueries)->toBeEmpty()
+                ->and(sweepRow($sessions[$i]->id)->end_reason)->toBe('revoked');
+        }
+    });
+
+    it('stops noting when it is rolled back, and still signs out', function () {
+        app(SessionRegistry::class)->revoke(swept($this->user)->id);
+        $session = swept($this->user);
+
+        $this->migration->down();
+        app(SessionRegistryManager::class)->forgetDrivers();
+
+        expect(app(SessionRegistry::class)->revoke($session->id)?->revokedAt)->not->toBeNull()
+            ->and($this->announced)->toHaveCount(2)
+            ->and(cache()->get(DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions')))->toBeFalse();
+    });
+
+    it('signs out again without the notes where a process found the columns before they went', function (Closure $revoke, int $ended) {
+        $registry = app(SessionRegistry::class);
+        $registry->revoke(swept($this->user)->id);
+        $key = DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions');
+
+        // Rolled back where the cache that said yes couldn't be cleared.
+        $this->migration->down();
+
+        // This process found the columns itself, the next takes the cache's word.
+        foreach ([$registry, app(SessionRegistryManager::class)->forgetDrivers()->driver()] as $registry) {
+            cache()->put($key, true, 300);
+            $session = swept($this->user);
+
+            expect($revoke($registry, $session, $this->user))->toBe($ended)
+                ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull()
+                // Forgotten, and asked again.
+                ->and(cache()->get($key))->toBeFalse();
+        }
+    })->with([
+        'one session' => [fn (SessionRegistry $registry, RegisteredSession $session) => $registry->revoke($session->id) === null ? 0 : 1, 1],
+        'a user\'s sessions' => [fn (SessionRegistry $registry, RegisteredSession $session, User $user) => $registry->revokeAll($user)->count(), 1],
+        'everyone' => [function (SessionRegistry $registry) {
+            $registry->revokeEveryone();
+
+            return 0;
+        }, 0],
+    ]);
+
 });
 
 it('counts what was revoked before the migration as announced', function () {
