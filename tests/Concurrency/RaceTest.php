@@ -456,6 +456,70 @@ it('signs out a session that signed in after the caller\'s transaction began', f
         ->and($registry->forUser($user))->toBeEmpty();
 });
 
+/**
+ * Records of the user's that the sweep would end, each with its handle.
+ *
+ * @return array<string, string>
+ */
+function timedOutSessions(User $user, int $count): array
+{
+    $then = now()->getTimestamp() - 3 * 3600;
+
+    return collect(range(1, $count))->mapWithKeys(function (int $i) use ($user, $then) {
+        $session = new RegisteredSession("timed-out-{$i}", (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $then, $then, $then + 86400);
+        app(SessionRegistry::class)->save($session);
+
+        return [$session->id => app(Sessions::class)->handle($session)];
+    })->all();
+}
+
+// Each locks what it ends, in ID order, so the second waits for the first,
+// then finds them ended: each is announced once between the two.
+it('announces each timed-out session once when two sweeps run at once', function () {
+    $handles = timedOutSessions(taylor(), 3);
+
+    $results = contend(sessionRow('timed-out-2'), [['sweep', 0], ['sweep', 0]]);
+
+    expect(collect($results)->flatten()->sort()->values()->all())->toBe(collect($handles)->sort()->values()->all())
+        ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
+});
+
+// A request that used the session while the sweep waited for it wins: the
+// sweep looks again once it has the row, and leaves it.
+it('leaves a session a request used while the sweep waited for it', function () {
+    timedOutSessions(taylor(), 1);
+
+    [$announced] = contend(sessionRow('timed-out-1'), [['sweep', 0]], fn () => DB::table('keyring_sessions')->where('id', 'timed-out-1')->update(['last_activity_at' => now()->getTimestamp()]));
+
+    expect($announced)->toBe([])
+        ->and(DB::table('keyring_sessions')->where('id', 'timed-out-1')->value('revoked_at'))->toBeNull();
+});
+
+// One signed out while the sweep waits is that sign-out's to announce.
+it('leaves a session signed out while the sweep waited for it to the sign-out', function () {
+    $handles = timedOutSessions(taylor(), 2);
+    $signedOut = new Collection;
+    Event::listen(fn (RegisteredSessionEnded $event) => $signedOut->push($event->handle));
+
+    [$swept] = contend(sessionRow('timed-out-1'), [['sweep', 0]], fn () => app(SessionRegistry::class)->revoke('timed-out-1'));
+
+    expect($signedOut->all())->toBe([$handles['timed-out-1']])
+        ->and($swept)->toBe([$handles['timed-out-2']]);
+});
+
+// A sign in past sessions.max ends the account's idle sessions in ID order,
+// as the sweep does, so the two wait for each other rather than deadlock,
+// and each session is ended, and announced, by one of them.
+it('announces each session once when the sweep and a sign in past the limit end the same ones', function () {
+    $user = taylor();
+    $handles = timedOutSessions($user, 3);
+
+    $results = contend(sessionRow('timed-out-2'), [['sweep', 0], ['start-session-announcing', $user->id, '1']]);
+
+    expect(collect($results)->flatten()->sort()->values()->all())->toBe(collect($handles)->sort()->values()->all())
+        ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(1);
+});
+
 // On the cache driver a revocation that lands while "remember me" moves the
 // same record either waits for the move, and finds the session carried on,
 // or ends it, and says so: never ends it with nothing announced.

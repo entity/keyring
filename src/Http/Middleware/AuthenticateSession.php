@@ -133,6 +133,10 @@ class AuthenticateSession
     protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
         return match (true) {
+            // Revoked for timing out, as the sweep does, says so, as the
+            // same visit would had nothing swept it first. Not a record
+            // "remember me" carried on from, which is revoked for a reuse.
+            $session->replacedBy === null && $this->sessions->timedOut($session) => $session->expiresAt <= $session->revokedAt ? 'expired' : 'idle',
             $session->revokedAt !== null => 'revoked',
             $session->expiresAt <= $now => 'expired',
             ! $session->belongsTo($user) => 'other_user',
@@ -292,7 +296,19 @@ class AuthenticateSession
         // Null when it had already ended some other way: there's nothing
         // left to end.
         if ($current = $this->sessions->because(SessionEndReason::Reused, fn () => $this->sessions->endLatest($user, $session))) {
+            // The used one too, so sending it again is refused as revoked,
+            // and the reuse is said once.
+            $this->sessions->registry()->revoke($session->id);
+
             RememberMeReused::dispatch($user, $current, $this->sessions->handle($current));
+        } elseif (($latest = $this->sessions->latest($this->sessions->registry()->find($session->id))) !== null && $this->sessions->timedOut($latest)) {
+            // The session it was carried on to has since timed out, maybe
+            // ended by the sweep, which is no reason to keep quiet: the
+            // cookie was still used twice. The used one is revoked, so
+            // sending it again is refused as revoked and said only once.
+            $this->sessions->registry()->revoke($session->id);
+
+            RememberMeReused::dispatch($user, $latest, $this->sessions->handle($latest));
         }
 
         return $this->signOut($request, 'reused');

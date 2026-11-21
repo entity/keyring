@@ -24,6 +24,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use Throwable;
@@ -425,6 +426,23 @@ trait KeyringConformance
         $this->assertCount(1, $announced, 'Signing out should announce the session that ended, once. Nothing is announced when a SessionRegistry is bound in the container in place of Keyring\'s: register your driver with SessionRegistryManager::extend() instead. Nor while a transaction your test opened itself is still open: the announcement waits for it to commit. Nor when something that wraps the registry, with app()->extend(SessionRegistry::class, ...), doesn\'t pass revoke() on to the registry it was given.');
         $this->assertSame($handle, $announced->first()->handle, 'The session that ended should be announced by the handle it had.');
         $this->assertSame(SessionEndReason::LoggedOut, $announced->first()->reason, 'Signing out should be announced as logged_out.');
+    }
+
+    /**
+     * The database driver notes which ended sessions were announced, so
+     * keyring:sweep can announce any that were lost. Without the migration
+     * that adds those columns, sessions still end and are announced, but
+     * nothing is noted, and the sweep refuses to run.
+     */
+    public function test_keyring_can_note_which_ended_sessions_were_announced(): void
+    {
+        $sweeper = app(SessionRegistryManager::class)->driver()->sweeper();
+
+        if ($sweeper === null) {
+            $this->markTestSkipped('The session registry driver keeps no note of announcements: only the database driver does.');
+        }
+
+        $this->assertTrue($sweeper->canSweep(), 'The sessions table is missing the columns that note which ended sessions were announced (announced_at, end_reason, announce_attempts, announce_after). Publish and run Keyring\'s migrations: php artisan keyring:install, then php artisan migrate.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void

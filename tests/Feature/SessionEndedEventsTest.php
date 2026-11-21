@@ -1401,7 +1401,8 @@ describe('the cache driver failing part way inside the user\'s row lock', functi
 
     it('keeps what listeners wrote for a session the limit ended before the next one failed', function () {
         config(['keyring.sessions.max' => 1]);
-        $handle = app(Sessions::class)->handle(sessionElsewhere($this->user, activeAgo: 10));
+        // Ended in ID order, so this one's comes first.
+        $handle = app(Sessions::class)->handle(sessionElsewhere($this->user, activeAgo: 10, id: str_repeat('0', 40)));
         sessionElsewhere($this->user, activeAgo: 20, id: $this->failing);
 
         $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();

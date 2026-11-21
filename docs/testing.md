@@ -283,6 +283,7 @@ The suite checks that:
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
 - signing out announces the session that ended, once, with a [`RegisteredSessionEnded`](devices-and-sessions.md#hearing-about-ended-sessions). It fails when a `SessionRegistry` is bound in the container in place of the one Keyring's manager gives, which nothing announces,
+- the `database` driver's table has the columns that note which ended sessions were announced (`announced_at`, `end_reason`, `announce_attempts`, `announce_after`), so [`keyring:sweep`](devices-and-sessions.md#sweeping-ended-sessions) can run. It's skipped on other drivers,
 - the session registry keeps the record a session started on (`origin`) when the session moves, so the session keeps its [handle](devices-and-sessions.md#listing-and-ending-sessions). It fails when the `database` driver's table is missing the column, or when a [driver of your own](devices-and-sessions.md#writing-a-driver) doesn't store it,
 - every route that uses the `auth` middleware for Keyring's guard also runs [`keyring.session`](devices-and-sessions.md#the-session-middleware), so a session that was revoked or timed out stops working there,
 - passwords of 64 characters are allowed: `passwords.max` is at least 64, and the hasher isn't bcrypt, which stops at 72 bytes,

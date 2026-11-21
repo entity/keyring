@@ -116,6 +116,27 @@ Listeners that aren't queued see both events as before.
 
 A queued listener for `AuthenticatorRemoved` now gets the user fetched again by ID, as with every other event, so the job fails with a `ModelNotFoundException` if the user was deleted before it ran. The authenticator comes without its `secret`.
 
+### Sweeping Ended Sessions
+
+A new migration adds `announced_at`, `end_reason`, `announce_attempts`, and `announce_after` to `keyring_sessions`, with three indexes for the sweep. Run `keyring:install` again to publish it, then migrate:
+
+```bash
+php artisan keyring:install
+php artisan migrate
+```
+
+It marks every session revoked before it as announced, so the first sweep doesn't announce them again. Pruning keeps only the last day's revocations, so that's usually a small update. On a large table, plan for it: if pruning has never run, it touches every revoked row, and on PostgreSQL creating the indexes blocks writes to the table while they build.
+
+Until it has run, everything works as before: sessions end and are announced, and Keyring logs a warning, once a day, that the columns are missing. `keyring:sweep` refuses to run, and `keyring:prune` deletes as it always has. The conformance suite has a check that fails until you migrate. Once it has run, Keyring starts noting announcements within five minutes, long-lived processes such as Octane and queue workers included. If you roll the migration back, it can take up to five minutes to be noticed under FPM, and Octane and queue workers that found the columns don't notice until they restart. Until then a sign-out that finds the columns gone is made again without them, so signing out keeps working. The `cache` driver needs no migration, and has nothing to sweep.
+
+Once the migration has run, `keyring:prune` changes, whether or not you turn the sweep on: it no longer deletes a session that has expired but that nothing ended until a day after its expiry, or one that was revoked but not yet announced until the sweep gives up on it a day later. It also keeps a session the sweep ended for timing out as long as it would have kept it unended, until a day after its expiry, so a browser that comes back is still told it timed out. So an expired record that nobody ended lives up to a day longer, and so does one the sweep ended.
+
+The sweep is off until you set `sessions.sweep_every`.
+
+A custom driver keeps working, and `keyring:sweep` says it has nothing to sweep.
+
+`RegisteredSessionEnded` may now repeat for the same handle. Make listeners idempotent by handle.
+
 ## From 0.1 to 0.2
 
 There's nothing to change. The new `CredentialStuffing` risk signal is off until you add it to your provider.

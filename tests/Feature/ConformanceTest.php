@@ -231,6 +231,31 @@ class ConformanceTest extends TestCase
         $this->test_keyring_announces_each_session_that_ends();
     }
 
+    public function test_the_suite_fails_when_the_migration_that_notes_announcements_was_not_run(): void
+    {
+        (require __DIR__.'/../../database/migrations/2026_11_21_000001_add_announcements_to_keyring_sessions_table.php')->down();
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('Publish and run Keyring\'s migrations');
+
+        $this->test_keyring_can_note_which_ended_sessions_were_announced();
+    }
+
+    public function test_the_suite_skips_noting_announcements_on_a_driver_that_keeps_none(): void
+    {
+        config(['keyring.sessions.driver' => 'cache']);
+
+        try {
+            $this->test_keyring_can_note_which_ended_sessions_were_announced();
+        } catch (SkippedTest $skipped) {
+            $this->assertStringContainsString('only the database driver does', $skipped->getMessage());
+
+            return;
+        }
+
+        $this->fail('The check ran on a driver that keeps no note of announcements.');
+    }
+
     protected function keyringAcknowledgesBcryptLimit(): bool
     {
         return $this->acknowledgesBcrypt;

@@ -11,6 +11,7 @@ declare(strict_types=1);
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Cache\Repository;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Sleep;
@@ -120,6 +121,29 @@ try {
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
         'revoke' => app(SessionRegistry::class)->revoke($id)?->id,
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
+        'start-session-announcing' => (function () use ($id, $value) {
+            config(['keyring.sessions.max' => (int) $value]);
+            $announced = [];
+            Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {
+                $announced[] = $event->handle;
+            });
+
+            $request = Request::create('/');
+            $request->setLaravelSession(app('session.store'));
+            app(Sessions::class)->start($request, User::findOrFail($id), null, Assurance::AAL1);
+
+            return $announced;
+        })(),
+        'sweep' => (function () {
+            $announced = [];
+            Event::listen(function (RegisteredSessionEnded $event) use (&$announced) {
+                $announced[] = $event->handle;
+            });
+
+            Artisan::call('keyring:sweep');
+
+            return $announced;
+        })(),
         'cache-replace-paused' => (function () use ($id) {
             // Moves a session on the cache driver, and stops between adding
             // the key that says it moved and checking nothing revoked it,

@@ -44,6 +44,7 @@ use Keyring\Notifications\SendSecurityNotifications;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
+use Keyring\Sessions\Sweep;
 use Keyring\Support\Duration;
 use Keyring\Support\PasswordRules;
 use Keyring\Support\TooManyAttempts;
@@ -308,6 +309,22 @@ class KeyringServiceProvider extends ServiceProvider
     protected function schedulePruning(): void
     {
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+            // Before the prune, which leaves what the sweep has still to do.
+            // One at a time, on one server: two would wait for each other's
+            // rows, and the second find nothing left. The lock that says one
+            // is running lasts a few runs, not Laravel's day, so a server
+            // that dies mid-sweep doesn't stop the sweep for longer than it
+            // keeps trying for. A setting it can't use only leaves it off,
+            // with a warning: it never stops the app's whole schedule.
+            // Once a day: the schedule is read every minute.
+            if (($problem = Sweep::problem()) !== null && rescue(fn () => cache()->add('keyring:sweep:problem:'.sha1($problem), true, Sweep::GIVE_UP_AFTER), true, report: false)) {
+                rescue(fn () => logger()->warning($problem), report: false);
+            }
+
+            if (($every = Sweep::every()) !== null) {
+                $schedule->command(Console\SweepCommand::class)->cron(Sweep::cron($every))->withoutOverlapping(Sweep::lockFor($every))->onOneServer();
+            }
+
             if (($at = config('keyring.prune_at')) !== null) {
                 $schedule->command(Console\PruneCommand::class)->dailyAt($at);
             }
@@ -316,7 +333,7 @@ class KeyringServiceProvider extends ServiceProvider
 
     protected function registerPublishing(): void
     {
-        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class, Console\PruneCommand::class, Console\SignOutCommand::class]);
+        $this->commands([Console\InstallCommand::class, Console\ImportCommand::class, Console\PruneCommand::class, Console\SignOutCommand::class, Console\SweepCommand::class]);
 
         $this->publishes([__DIR__.'/../config/keyring.php' => config_path('keyring.php')], 'keyring-config');
         $this->publishesMigrations([__DIR__.'/../database/migrations' => database_path('migrations')], 'keyring-migrations');

@@ -127,6 +127,15 @@ class Sessions
                         fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
                     ])
                     ->skip(max(0, (int) $max - 1))
+                    // By ID, byte by byte. That's the order the sweep and
+                    // revokeAll() lock rows in where the database sorts IDs the
+                    // same way (SQLite, or a binary or "C" collation). Where it
+                    // sorts them otherwise (MySQL's utf8mb4_*_ci, PostgreSQL's
+                    // locale collations), this and a sweep ending the same
+                    // sessions can deadlock now and then: the database ends one,
+                    // the sweep tries again, and the sign in fails as it would
+                    // on any database error.
+                    ->sortBy(fn (RegisteredSession $other) => $other->id, SORT_STRING)
                     ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
             } catch (Throwable $e) {
                 // No rollback takes the new record back on a driver that
@@ -743,9 +752,31 @@ class Sessions
      */
     public function idledOut(RegisteredSession $session, ?int $now = null): bool
     {
-        $idle = $session->remembered ? config('keyring.sessions.remember_idle') : config('keyring.sessions.idle');
+        $idle = $this->idleLimit($session->remembered);
 
-        return $idle !== null && ($now ?? now()->getTimestamp()) - $session->lastActivityAt > Duration::seconds($idle);
+        return $idle !== null && ($now ?? now()->getTimestamp()) - $session->lastActivityAt > $idle;
+    }
+
+    /**
+     * Seconds a session may go unused before it ends, for one that's
+     * remembered or not. Null for no limit. The sweep ends sessions by this
+     * too, so it ends what the session middleware would.
+     */
+    public function idleLimit(bool $remembered): ?int
+    {
+        $idle = $remembered ? config('keyring.sessions.remember_idle') : config('keyring.sessions.idle');
+
+        return $idle === null ? null : Duration::seconds($idle);
+    }
+
+    /**
+     * Whether a record that has ended did so by timing out: revoked once it
+     * had expired, or had gone unused for too long, as the sweep and the
+     * session middleware end them.
+     */
+    public function timedOut(RegisteredSession $session): bool
+    {
+        return $session->revokedAt !== null && ($session->expiresAt <= $session->revokedAt || $this->idledOut($session, $session->revokedAt));
     }
 
     /**
