@@ -347,7 +347,7 @@ it('carries on as a guest when a remembered browser comes back and :dataset', fu
     expect($this->ended->all())->toBe([$reason]);
 
     $this->flushSession();
-    rememberedBrowser(cookiesAfter($response, $cookies))->get($response->headers->get('Location'))->assertOk()->assertSee('guest');
+    rememberedBrowser(cookiesAfter($response, $cookies))->get($response->headers->get('Location'))->assertOk()->assertSee('guest signed-out');
 
     $this->assertGuest();
     expect($this->ended->all())->toBe([$reason]);
@@ -370,7 +370,7 @@ it('carries on as a guest on the cookie session driver', function () {
     expect($this->ended->all())->toBe(['revoked']);
 
     $this->flushSession();
-    rememberedBrowser(cookiesAfter($response, $cookies))->get('/welcome')->assertOk()->assertSee('guest');
+    rememberedBrowser(cookiesAfter($response, $cookies))->get('/welcome')->assertOk()->assertSee('guest signed-out');
 
     $this->assertGuest();
     expect($this->ended->all())->toBe(['revoked']);
