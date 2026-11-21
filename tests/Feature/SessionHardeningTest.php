@@ -8,8 +8,10 @@ use Illuminate\Cache\ApcWrapper;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
@@ -27,8 +29,10 @@ use Keyring\Risk\Checkpoint;
 use Keyring\Risk\Finding;
 use Keyring\Risk\Signals\RepeatedFactorFailures;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SingleSignOn;
 
@@ -391,6 +395,41 @@ it('signs out a session whose registry record expired instead of registering it 
     $this->assertGuest();
 });
 
+it('signs out on the next request when ending an expired session fails, without registering it again', function () {
+    config(['keyring.sessions.absolute' => '1h']);
+    signInWith();
+    $registered = session(Sessions::KEY);
+
+    // The registry fails once, as the expired session is being ended.
+    app(SessionRegistryManager::class)->extend('flaky', fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+    {
+        public bool $failed = false;
+
+        public function revoke(string $id): ?RegisteredSession
+        {
+            if (! $this->failed) {
+                $this->failed = true;
+
+                throw new RuntimeException('The database went away.');
+            }
+
+            return parent::revoke($id);
+        }
+    });
+    config(['keyring.sessions.driver' => 'flaky']);
+
+    $this->travel(62)->minutes();
+
+    $this->get('/home')->assertServerError();
+    expect(session(Sessions::KEY))->toBe($registered);
+
+    $this->get('/home')->assertRedirect('/login');
+    $this->assertGuest();
+    expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+        ->and(DB::table('keyring_sessions')->count())->toBe(1)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
+});
+
 it('keeps a revoked session revoked after the cache is cleared', function () {
     config(['keyring.sessions.driver' => 'cache']);
     signInWith();
@@ -643,4 +682,119 @@ it('answers a signed-out json request with a 401, and remembers where a page vis
 
     $this->get('/home')->assertRedirect('/login');
     expect(session('url.intended'))->toEndWith('/home');
+});
+
+describe('a sign-out the app does itself', function () {
+    beforeEach(function () {
+        Route::middleware('web')->post('/app/logout', function (Request $request) {
+            auth()->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/logout-this-device', function (Request $request) {
+            auth()->logoutCurrentDevice();
+            $request->session()->invalidate();
+
+            return response()->noContent();
+        });
+
+        // One that leaves the session as it was, and signs the user back in on it.
+        Route::middleware('web')->post('/app/logout-only', fn () => tap(response()->noContent(), fn () => auth()->logout()));
+        Route::middleware('web')->post('/app/login', fn () => tap(response()->noContent(), fn () => auth()->login(test()->user)));
+    });
+
+    it('ends the session for a copy of its cookie too', function (string $driver, string $uri) {
+        config(['keyring.sessions.driver' => $driver, 'session.driver' => 'cookie']);
+        app('session')->forgetDrivers();
+        app()->forgetInstance('session.store');
+
+        $copied = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
+        $registered = session(Sessions::KEY);
+
+        $this->withCredentials()->withCookies($copied)->post($uri)->assertNoContent();
+
+        expect(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull()
+            ->and(app(Sessions::class)->active($this->user))->toBeEmpty();
+
+        session()->flush();
+        app('auth')->forgetGuards();
+        $this->withCredentials()->withCookies($copied)->getJson(route('keyring.devices.index'))->assertUnauthorized();
+    })->with('drivers')->with(['/app/logout', '/app/logout-this-device']);
+
+    it('leaves nothing the session proved for the next sign in on it', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $registered = session(Sessions::KEY);
+
+        expect(session(SessionAssurance::KEY))->not->toBeEmpty();
+
+        $this->post('/app/logout-only')->assertNoContent();
+
+        expect(session(Sessions::KEY))->toBeNull()
+            ->and(session(SessionAssurance::KEY))->toBeNull()
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
+
+        $this->post('/app/login')->assertNoContent();
+
+        expect(session(Sessions::KEY))->not->toBeNull()->not->toBe($registered)
+            ->and(session(SessionAssurance::KEY))->toBeNull()
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::None);
+    });
+
+    it('leaves the session alone when another guard signs out', function () {
+        config(['auth.guards.staff' => ['driver' => 'session', 'provider' => 'users']]);
+        Route::middleware('web')->post('/staff/logout', fn () => tap(response()->noContent(), fn () => auth('staff')->logout()));
+
+        signInWith();
+        $registered = session(Sessions::KEY);
+        $verified = session(SessionAssurance::KEY);
+
+        $this->post('/staff/logout')->assertNoContent();
+
+        $this->assertAuthenticatedAs($this->user);
+        expect(session(Sessions::KEY))->toBe($registered)
+            ->and(session(SessionAssurance::KEY))->toBe($verified)
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+        $this->get('/home')->assertOk();
+    });
+
+    it('does nothing without a session to end, as in a queued job or a command', function () {
+        signInWith();
+        $registered = session(Sessions::KEY);
+
+        app()->instance('request', Request::create('/'));
+        Auth::guard('web')->logout();
+
+        expect(session(Sessions::KEY))->toBe($registered)
+            ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+    });
+
+    it('still signs out when the registry can\'t be reached, and reports it', function () {
+        Exceptions::fake();
+        signInWith();
+        $registered = session(Sessions::KEY);
+        session()->put('auth.password_confirmed_at', now()->getTimestamp());
+
+        app(SessionRegistryManager::class)->extend('unreachable', fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revoke(string $id): never
+            {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+        $driver = config('keyring.sessions.driver');
+        config(['keyring.sessions.driver' => 'unreachable']);
+
+        $this->post('/app/logout-only')->assertNoContent();
+
+        $this->assertGuest();
+        expect(session()->has('keyring'))->toBeFalse()
+            ->and(session()->has('auth.password_confirmed_at'))->toBeFalse();
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The database went away.');
+
+        config(['keyring.sessions.driver' => $driver]);
+        expect(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
+    });
 });
