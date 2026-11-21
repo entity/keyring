@@ -6,7 +6,9 @@ namespace Keyring\Sessions;
 
 use Closure;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Events\CurrentDeviceLogout;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
@@ -438,16 +440,26 @@ class Sessions
         }
     }
 
+    /**
+     * The session's ID is only forgotten once its record is revoked. A
+     * registry that throws leaves it in place, so the next request finds
+     * the record still open and signs out again, rather than finding a
+     * signed-in session with no record and registering it afresh.
+     */
     public function end(Request $request): void
     {
-        $id = $request->session()->pull(self::KEY);
+        $id = $request->session()->get(self::KEY);
 
-        if (is_string($id)) {
-            $this->registry->revoke($id);
+        try {
+            if (is_string($id)) {
+                $this->registry->revoke($id);
+            }
+
+            $request->session()->forget(self::KEY);
+        } finally {
+            $request->session()->forget(self::REMEMBERED);
+            $this->forgetRememberCookie($request);
         }
-
-        $request->session()->forget(self::REMEMBERED);
-        $this->forgetRememberCookie($request);
     }
 
     /**
@@ -543,6 +555,40 @@ class Sessions
     }
 
     /**
+     * End the session with a sign-out the app does itself: Auth::logout(),
+     * logoutCurrentDevice(), or a package that calls them. The guard only
+     * forgets who is signed in. Left at that, the session's record would
+     * stay good until it timed out, so a copy of a cookie session, or of
+     * the "remember me" cookies, would carry on signed in, and a session
+     * the app didn't also invalidate would hand what it proved to whoever
+     * signed in on it next.
+     *
+     * Keyring's own sign-out (SignIn::out) has ended the record by the time
+     * the guard announces it, and this finds nothing left to do.
+     */
+    public function signedOut(Logout|CurrentDeviceLogout $event): void
+    {
+        $request = request();
+
+        if ($event->guard !== config('keyring.guard') || ! $request->hasSession()) {
+            return;
+        }
+
+        // The guard is signed out whatever becomes of the record: a
+        // registry that can't be reached is reported, not thrown from the
+        // middle of the app's sign-out. The record that would refuse the
+        // "remember me" cookies is still open then, and logoutCurrentDevice()
+        // leaves the token as it was, so it's cycled here instead.
+        rescue(fn () => $this->end($request), function () use ($event) {
+            if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
+                rescue(fn () => $this->cycleRememberToken($event->user));
+            }
+        });
+
+        $request->session()->forget(['keyring', 'auth.password_confirmed_at']);
+    }
+
+    /**
      * "sessions.remember_cookie", or remembered_session with the prefix the
      * app's setup allows: __Host-remembered_session over HTTPS. Like the
      * device cookie's, the name says nothing of what set it.
@@ -622,7 +668,7 @@ class Sessions
     public function signOutEverywhere(Authenticatable $user, ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
-        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except));
+        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except))->count();
 
         $this->cycleRememberToken($user);
         $this->distrustDevices($user, except: $keptDevice);
@@ -655,7 +701,7 @@ class Sessions
      */
     public function revokeDevice(Authenticatable $user, string $deviceId): int
     {
-        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId));
+        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId))->count();
     }
 
     public function cycleRememberToken(Authenticatable $user): void

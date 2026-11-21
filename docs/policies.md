@@ -5,6 +5,7 @@
 - [Assurance Levels](#assurance-levels)
 - [Only When Enrolled](#only-when-enrolled)
 - [Requiring a Second Factor](#requiring-a-second-factor)
+    - [Carrying On Afterwards](#carrying-on-afterwards)
 - [No Downgrade](#no-downgrade)
 - [Deciding Per User and Attempt](#deciding-per-user-and-attempt)
 - [How the Policy Is Applied](#how-the-policy-is-applied)
@@ -127,6 +128,24 @@ Users still sign in with what they have. After that, every request under the mid
 Recovery codes don't count, and neither do email codes, because they aren't a factor. A user who signs in with a password and an emailed code is sent to add a real one. The same rule decides which accounts may use the [shorter minimum password length](configuration.md#passwords). To ask for an attested key that stays on its device instead, use `keyring.enrolled:aal3`. For a key that stays on its device, attested or not, use `keyring.enrolled:aal2,device-bound`.
 
 The enrollment page is always let through, and so are the routes users need to get there and back out. Those are Keyring's own (adding authenticators and confirming), `logout`, email verification, and changing the password. Keep anything else that the enrollment page calls outside the middleware.
+
+### Carrying On Afterwards
+
+Keyring remembers the page a user was going to when it sent them to enroll. This happens with `keyring.enrolled`, with [step-up](step-up.md#raising-assurance) when the account can't reach the level, and from the [confirm page](step-up.md#the-confirm-flow) when there's nothing to confirm with. In that last case, it's the page the confirmation was for. Once they've added a sign-in method, the `authenticator-added` [status response](sign-in-flow.md#status-responses) carries that page as `continue`.
+
+Keyring doesn't redirect there itself, because the security page may be showing new recovery codes. Show a "Continue" link instead. When the response came with recovery codes, wait until they're saved. A second authenticator comes without any, so show the link straight away:
+
+```vue
+<a v-if="keyringResult?.continue && (!keyringResult.recoveryCodes || codesSaved)" :href="keyringResult.continue">Continue</a>
+```
+
+Here `keyringResult` is `Keyring::result()`, shared as in [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). JSON callers find `continue` in the response body. New recovery codes on their own never carry it, since they don't meet any requirement.
+
+Only a page the browser navigated to is remembered. That's a `GET` with `Sec-Fetch-Mode: navigate` and, when the browser sends it, `Sec-Fetch-Dest: document`, so a page loaded in a frame doesn't count. An Inertia visit counts too, unless it's a partial reload. A prefetch or prerender never counts, whether Inertia's, the browser's (`Sec-Purpose: prefetch`) or a `Purpose: prefetch` one. Images, `fetch()` calls, `HEAD` requests, form posts, JSON requests, Keyring's own pages and the enrollment page itself never replace it. When the user was sent there from the confirm page, the page the confirmation was for is only used if a confirmation was actually in progress. It's only handed back on your app's own origin, to the user it was saved for, within an hour. Signing in forgets it.
+
+Browsers only send `Sec-Fetch-*` headers over HTTPS or to `localhost`. On a plain-HTTP development host, such as `http://myapp.test`, a Blade app gets no `continue`. Inertia visits still do.
+
+To keep other pages out, such as a `prompt=none` authorize request that your app answers with an error, bind your own `Keyring\Login\Detours` and override its `put()` method. See [Replacing a Controller or Service](extending.md#replacing-a-controller-or-service).
 
 ## No Downgrade
 

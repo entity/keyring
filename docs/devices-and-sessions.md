@@ -17,6 +17,7 @@
     - [Writing a Driver](#writing-a-driver)
     - [How Many Sessions](#how-many-sessions)
     - [The Session Middleware](#the-session-middleware)
+    - [Pages That Also Serve Guests](#pages-that-also-serve-guests)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
 - [Keyring's Cookies](#keyrings-cookies)
@@ -363,10 +364,10 @@ Then set `sessions.driver` to `custom`. Keyring calls `replace`, `revokeAll`, an
 | `find($id)` | Returns the session, or `null`, with every field it was saved with. `RegisteredSession::fromArray()` reads what `toArray()` gave, and a record saved without `origin` comes back with none. A driver that loses `origin` gives a session a new handle each time it moves. |
 | `forUser($user)` | Returns the user's sessions that haven't expired, been revoked, or been replaced, most recent first. A session belongs to a user by more than its ID. Match on the record's `userType` (`RegisteredSession::typeOf($user)`, the connection and table the ID is one of) and its `userId`, here and in `revokeAll` and `revokeDevice`. Otherwise, two user models with the same IDs would share sessions. `$session->belongsTo($user)` checks both. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names match those on `RegisteredSession`. `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
-| `revoke($id)` | Revokes one session. |
+| `revoke($id)` | Revokes one session. Returns the record as it now stands, with `revokedAt` set, or `null` when it revoked nothing: there's no such record, or it was revoked already. A record that was replaced but not revoked is still revoked and returned, and its `replacedBy` says where the session went. Of two calls for the same record at the same moment, only one may return it. The database driver reads the row with a lock and revokes it in one transaction, and the cache driver returns it when its `add()` of the revoked key won. A record the cache driver finds revoked already, by its own keys or by `revokeEveryone()`, returns `null`, and has its revoked key and record written again with the time it already had. |
 | `replace($id, $successor, $revoke = false)` | Moves a session to a new record. It stores `$successor`, and it sets the old record's `replacedBy` and `replacedAt` fields. It also revokes the old record when `$revoke` is true. It only does this for a record that is neither revoked nor replaced, and it returns whether it did. Of two calls for the same record at the same moment, exactly one may return `true`. The other must not leave its record behind, because "remember me" being single use depends on this. The database driver uses one conditional `UPDATE` in a transaction, and the cache driver uses the store's `add()`. |
-| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns how many, not counting replaced records. `Sessions::signOutEverywhere` calls this, then also changes the remember token, stops trusting the other devices, and cancels a pending email change. So call that one from your own code. |
-| `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns how many. |
+| `revokeAll($user, $except = null)` | Revokes every session of the user but one. Returns a `Collection` of the records it revoked, each as it now stands, and none that were replaced or revoked already. Every record it revokes must be in what it returns. A driver may also return one another call ended at the same moment, but never leave out one it revoked. The database driver reads the records with a lock, then revokes them by ID in the same transaction, so what it returns is exactly what it revoked, even inside your own transaction that read the table earlier. On that driver, what's returned may include records that had expired but were never revoked. `Sessions::signOutEverywhere` calls this, then also changes the remember token, stops trusting the other devices, and cancels a pending email change. So call that one from your own code. It returns how many records were revoked. |
+| `revokeDevice($user, $deviceId)` | Revokes the user's sessions on one device. Returns the records it revoked, as `revokeAll` does. |
 | `revokeEveryone()` | Revokes every user's sessions that signed in up to now, for [`keyring:sign-out --all`](#for-administrators). A session that is moving to a new record (`replace`) while this runs must end up revoked there too. Otherwise, "remember me" would carry it past the sign-out. The database driver revokes in rounds until none are left. The cache driver can't list every user's records, so it keeps the moment and treats every session that signed in by then as revoked. |
 | `prune()` | Deletes sessions that have expired or been revoked, for `keyring:prune`. Returns how many. A replaced record is kept until it expires, whether or not it has been revoked, because that's how a used "remember me" cookie is told apart from one that was never issued. A store that expires records itself can return `0`. |
 
@@ -414,7 +415,28 @@ A second middleware, `keyring.password`, is added to the `web` group after it. I
 
 A session whose record has gone missing is signed out rather than registered again. This means clearing records can't restart a session's window.
 
+A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so on Keyring's guard, in a request with a session, `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route. If the registry can't be reached, the user is still signed out and the error is reported. After `logoutCurrentDevice()`, the user's "remember me" token is then changed, as `Auth::logout()` already does, so a kept copy of the cookie stops working.
+
 A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
+
+### Pages That Also Serve Guests
+
+Some pages work for guests too, like a public page that shows more when you're signed in, or an OIDC authorize endpoint that has to answer `prompt=none` itself. Sending those to the login page when a session ends is wrong. List their route names in `sessions.continue_as_guest`, in any form `Request::routeIs()` takes, wildcards included:
+
+```php
+'sessions' => [
+    // ...
+    'continue_as_guest' => ['welcome', 'oauth.authorize', 'docs.*'],
+],
+```
+
+When a session ends on a `GET` page visit to one of those routes, the browser is signed out and `SessionEnded` is dispatched as usual. The browser is then redirected back to the URL it asked for, so it asks for the page again as a guest. The query string is kept, though its parameters may come back in a different order. The redirect sends `Clear-Site-Data` and clears the session and "remember me" cookies, as signing out does. The `signed-out` status is flashed, as on the way to the login page, so a page that shows statuses can say why. The page it's redirected to uses the flash up. No intended URL is saved, so the next sign in doesn't come back to this request. JSON requests still get the `401`. `HEAD`, `POST`, and other methods are signed out as before. This happens before your own [`SignedOutResponse`](sign-in-flow.md#responses) is used, so binding one doesn't change it.
+
+This is the same for every reason a session ends, a ["remember me" cookie used twice](#a-cookie-used-twice) (`reused`) and a [risk response](risk.md#responding-to-risk) (`risk`) included. For those two the login page wouldn't reliably reach the owner anyway: it goes to whichever browser asks next, and the owner's browser, whose session then ends as `revoked`, carries on as a guest. The owner is asked about a reused cookie by its ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) the next time they sign in, and `SessionEnded` and the security log record the reason either way.
+
+An Inertia visit gets a `409` with an `X-Inertia-Location` header instead of a redirect, which makes Inertia load the page in full. A redirect would be followed with the same headers, so a partial reload or a poll would get back only the props it asked for, and the page would still show the user as signed in. A prefetch gets the same answer. Inertia keeps that answer until the link is followed, and only then loads the page.
+
+Only list pages that render for a guest. The route has to let guests in, because one behind `auth` sends the guest to log in anyway. A broad pattern like `*` also matches Keyring's own pages. A route without a name can't be listed. If any entry in the list isn't a non-empty string, Keyring ignores the whole list, and the visit goes to log in as before.
 
 ### "Remember Me"
 

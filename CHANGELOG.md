@@ -7,6 +7,21 @@
 - A session keeps its handle when it moves to a new record: when "remember me" carries it on, when a risk response asks it to verify again, and with `rotate` on the `cookie` session driver. Each record names the one the session started on (`origin`), and the handle comes from that. Sessions that started before the upgrade keep the handles they had. Needs a new migration, see the [upgrade guide](UPGRADE.md).
 - `Sessions::stillSignedIn($user, $handle)`, for code that knows a session by its handle to ask whether the user is still signed in on it. It applies `Keyring::allowSignInWhen()` and the session's timeouts, and it changes nothing.
 - A conformance check that the session registry keeps `origin` when a session moves, so a missing migration or a custom driver that drops it is caught in your tests.
+- The session registry says which records it revoked. `revoke()` returns the record it revoked, or `null` when it revoked nothing, and `revokeAll()` and `revokeDevice()` return the records they revoked instead of a count. Custom registry drivers need to return them too: see the [upgrade guide](UPGRADE.md#from-02-to-03). `Sessions::signOutEverywhere()`, `Sessions::revokeDevice()` and the `SessionsRevoked` event still give a count.
+- The conformance suite checks that the configured registry returns the records it revoked.
+- `sessions.continue_as_guest` lists routes that also serve guests. A page visit to one whose session has ended is signed out and asked for again as a guest, rather than sent to log in, whatever the reason it ended. The `signed-out` status is flashed and no intended URL is saved. JSON requests still get a `401`.
+- A sign-out your app does itself with `Auth::logout()` or `Auth::logoutCurrentDevice()`, on Keyring's guard in a request with a session, now ends the registered session too, with its "remember me" cookie and what the session proved. Before, the record stayed good until it timed out. On the `cookie` session driver, a copy of the session stayed signed in, and after `logoutCurrentDevice()`, so did a copy of its "remember me" cookies.
+
+### Policies and Step-Up
+
+- `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. Asking for nothing, or for a moment more than a few seconds in the future, throws.
+- The docs explain how to read what a session proved, for claims like `amr`, `acr`, and `auth_time`.
+- `SessionAssurance::level()` and `countingToward()` take a timestamp, to count only what was proved since then with each level still on its own clock, so claims built for `max_age` don't report a level that lapsed.
+- Users sent to enroll by `keyring.enrolled`, by step-up, or by the confirm page with nothing to confirm with now get the page they were going to back as `continue` on the `authenticator-added` status. Users held for a new password are redirected there by `password-updated`. Only top-level navigations and Inertia visits are remembered, and only on the app's own origin, for the same user, within an hour. Bind your own `Keyring\Login\Detours` and override `put()` to keep other pages out, such as `prompt=none` authorize requests.
+
+### Extending
+
+- `StepUp` makes the decisions for the `keyring` and `keyring.fresh` middleware, and its constructor also takes a `DeviceManager`. What `keyring.fresh` asks for is `StepUp::freshRequirement()`, no longer the middleware's own `requirement()`. See the upgrade guide.
 
 ### Security
 

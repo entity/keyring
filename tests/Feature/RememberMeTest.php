@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -24,8 +25,10 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Risk\Action;
 use Keyring\Risk\RiskLocks;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\KeyedHash;
 use Keyring\Tests\Fixtures\User;
@@ -1180,7 +1183,7 @@ describe('replacing a session\'s record', function () {
 
         expect($registry->find('old')->replacedBy)->toBe('new')
             ->and($registry->forUser($this->user)->map->id->all())->toBe(['new'])
-            ->and($registry->revokeAll($this->user))->toBe(1);
+            ->and($registry->revokeAll($this->user)->map->id->all())->toBe(['new']);
     })->with('session registries');
 
     it('carries a session on from a record once, and tells a request that read it earlier so', function (string $driver) {
@@ -1232,3 +1235,57 @@ it('brings nothing back where a session ends with the level it signed in at', fu
     expectKeptCookiesRefused($cookies);
     expect(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
 });
+
+it('refuses the kept cookies after a sign-out the app did itself, :dataset', function (bool $unreachable) {
+    // The guard's own sign-out for one browser leaves the "remember me"
+    // token as it was, so Laravel's cookie alone would still sign in.
+    Route::middleware('web')->post('/app/logout', function () {
+        Auth::logoutCurrentDevice();
+        session()->invalidate();
+
+        return response()->noContent();
+    });
+
+    $cookies = rememberedSignIn();
+    $driver = config('keyring.sessions.driver');
+
+    // A registry that can't be reached leaves the record open, so the
+    // token is cycled instead.
+    if ($unreachable) {
+        Exceptions::fake();
+        app(SessionRegistryManager::class)->extend('unreachable', fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revoke(string $id): never
+            {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+        config(['keyring.sessions.driver' => 'unreachable']);
+    }
+
+    browser($cookies)->post('/app/logout')->assertNoContent()->assertCookieExpired('remembered_session');
+
+    config(['keyring.sessions.driver' => $driver]);
+
+    if (! $unreachable) {
+        expectKeptCookiesRefused($cookies);
+
+        return;
+    }
+
+    // The record is still open, but Laravel's cookie no longer signs
+    // anyone in, so there's nothing for Keyring to carry on from.
+    $this->flushSession();
+    browser($cookies)->get('/home')->assertRedirect('/login');
+    $this->assertGuest();
+
+    $this->flushSession();
+    browser($cookies)->getJson('/home')->assertUnauthorized();
+    $this->assertGuest();
+
+    expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The database went away.');
+})->with([
+    'with the registry reachable' => false,
+    'when the registry can\'t be reached' => true,
+]);

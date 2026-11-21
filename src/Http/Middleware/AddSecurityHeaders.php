@@ -6,6 +6,7 @@ namespace Keyring\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Keyring\Http\Responses\ChoosesFormat;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -35,6 +36,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AddSecurityHeaders
 {
+    use ChoosesFormat;
+
     /**
      * The pages emailed links open, and the route each one's form posts to.
      */
@@ -50,6 +53,10 @@ class AddSecurityHeaders
     {
         $response = $next($request);
 
+        // Inertia loads the next page in full. The app is still running in
+        // the page the link opened, and swapping the next page in would leave
+        // it sending no Referer from every page after, signed in or not.
+        // Anything flashed for that page is in the session already.
         if ($this->leavesEmailedLink($request, $response)) {
             $response = $this->loadInFull((string) $response->headers->get('Location'));
         }
@@ -92,16 +99,5 @@ class AddSecurityHeaders
             && $request->hasHeader('X-Inertia')
             && $request->routeIs(...array_values(self::EMAILED_LINKS))
             && $response->headers->get('Location') !== url()->previous();
-    }
-
-    /**
-     * What Inertia answers with a full page visit. The app is still running
-     * in the page the link opened, and swapping the next page in would leave
-     * it sending no Referer from every page after, signed in or not. Anything
-     * flashed for that page is in the session already.
-     */
-    protected function loadInFull(string $url): Response
-    {
-        return new Response(status: Response::HTTP_CONFLICT, headers: ['X-Inertia-Location' => $url]);
     }
 }

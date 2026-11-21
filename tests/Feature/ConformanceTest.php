@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Tests\Feature;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\Unguarded;
 use Illuminate\Database\Eloquent\Model;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Keyring\Contracts\SessionRegistry;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
@@ -389,6 +391,90 @@ class ConformanceTest extends TestCase
             'protected attributes' => ['test_keyring_protects_email_and_password', 'Features::updatePasswords() protects the password'],
             'fresh verification' => ['test_keyring_requires_a_fresh_verification_to_change_sign_in_methods', 'turn on Features::manageAuthenticators()'],
             'enrolling' => ['test_keyring_lets_every_enrollable_factor_begin_enrolling', 'turn on Features::manageAuthenticators()'],
+        ];
+    }
+
+    #[DataProvider('registriesThatDoNotReturnWhatTheyRevoke')]
+    public function test_the_suite_fails_when_the_registry_does_not_return_what_it_revoked(string $broken, string $message): void
+    {
+        app()->instance(SessionRegistry::class, new class(app('db')->connection(), $broken) extends DatabaseSessionRegistry
+        {
+            /** @var Collection<int, RegisteredSession> */
+            private Collection $last;
+
+            /** @var Collection<int, RegisteredSession> */
+            private Collection $lastOnDevice;
+
+            public function __construct(ConnectionInterface $connection, private readonly string $broken)
+            {
+                parent::__construct($connection);
+            }
+
+            public function revoke(string $id): ?RegisteredSession
+            {
+                $revoked = parent::revoke($id);
+
+                return match ($this->broken) {
+                    'nothing from revoke' => null,
+                    'revoke as it was read' => $revoked?->with(['revokedAt' => null]),
+                    'revoke every time' => $revoked ?? $this->find($id),
+                    default => $revoked,
+                };
+            }
+
+            public function revokeDevice(Authenticatable $user, string $deviceId): Collection
+            {
+                $revoked = parent::revokeDevice($user, $deviceId);
+
+                return $this->lastOnDevice = match ($this->broken) {
+                    'nothing from revokeDevice' => new Collection,
+                    'revokeDevice as they were read' => $revoked->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => null])),
+                    'revokeDevice every time' => $revoked->isEmpty() ? $this->lastOnDevice : $revoked,
+                    default => $revoked,
+                };
+            }
+
+            public function revokeAll(Authenticatable $user, ?string $except = null): Collection
+            {
+                $revoked = parent::revokeAll($user, $except);
+
+                return $this->last = match ($this->broken) {
+                    'nothing from revokeAll' => new Collection,
+                    'revokeAll past the one kept' => $revoked->merge(parent::revokeAll($user)),
+                    'revokeAll as they were read' => $revoked->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => null])),
+                    'revokeAll every time' => $revoked->isEmpty() ? $this->last : $revoked,
+                    default => $revoked,
+                };
+            }
+        });
+
+        try {
+            $this->test_keyring_registry_returns_the_sessions_it_revokes();
+        } catch (AssertionFailedError $failure) {
+            $this->assertStringContainsString($message, $failure->getMessage());
+
+            return;
+        }
+
+        $this->fail('A registry that doesn\'t return what it revoked went unnoticed.');
+    }
+
+    /**
+     * @return array<string, list<string>>
+     */
+    public static function registriesThatDoNotReturnWhatTheyRevoke(): array
+    {
+        return [
+            'nothing from revoke' => ['nothing from revoke', 'revoke() should return the record it revoked'],
+            'the record from revoke as it was' => ['revoke as it was read', 'revoke() should return the record as it now stands'],
+            'the record from revoke every time' => ['revoke every time', 'revoke() should return null for a record that was revoked already'],
+            'nothing from revokeAll' => ['nothing from revokeAll', 'revokeAll() should return every record it revoked'],
+            'the records from revokeAll as they were' => ['revokeAll as they were read', 'revokeAll() should return each record as it now stands'],
+            'the records from revokeAll every time' => ['revokeAll every time', 'revokeAll() should return nothing when it revoked nothing'],
+            'the one kept from revokeAll' => ['revokeAll past the one kept', 'nor the one it was told to leave'],
+            'nothing from revokeDevice' => ['nothing from revokeDevice', 'revokeDevice() should return every record it revoked on the device'],
+            'the records from revokeDevice as they were' => ['revokeDevice as they were read', 'revokeDevice() should return each record as it now stands'],
+            'the records from revokeDevice every time' => ['revokeDevice every time', 'revokeDevice() should return nothing when it revoked nothing'],
         ];
     }
 

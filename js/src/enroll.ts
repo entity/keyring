@@ -27,7 +27,7 @@ export async function confirmEnrollment(factor: string, enrollment: Record<strin
     ? { ...data, credential: await createCredential(enrollment.options) }
     : data
 
-  return json<{ authenticator: Authenticator, recoveryCodes?: string[] }>('POST', routes.confirmEnrollment(factor), payload)
+  return json<{ authenticator: Authenticator, recoveryCodes?: string[], continue?: string }>('POST', routes.confirmEnrollment(factor), payload)
 }
 
 /**

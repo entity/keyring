@@ -37,6 +37,7 @@ class SignIn
         protected DeviceManager $devices,
         protected Sessions $sessions,
         protected SecurityLog $log,
+        protected Detours $detours,
     ) {}
 
     public function complete(Request $request, Attempt $attempt): void
@@ -56,6 +57,7 @@ class SignIn
         try {
             $request->session()->regenerate(true);
             $this->assurance->reset($attempt->verifications);
+            $this->detours->forget($request);
 
             $device = $this->devices->signIn(
                 $request,

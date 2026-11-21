@@ -3,11 +3,13 @@
 declare(strict_types=1);
 
 use Illuminate\Auth\GenericUser;
+use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -364,7 +366,7 @@ describe('a sign in that fails after the guard is signed in', function () {
         // browser was on, and the new one when the sign in is undone.
         app()->bind(SessionRegistry::class, fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
         {
-            public function revoke(string $id): void
+            public function revoke(string $id): ?RegisteredSession
             {
                 throw new RuntimeException('The database went away.');
             }
@@ -1938,6 +1940,209 @@ it('never queries the devices table when devices are off, but to end trust', fun
     expect($queries)->not->toBeEmpty()
         ->and($devices)->toHaveCount(1)
         ->and($devices[0])->toMatch('/^update .keyring_devices. set .trusted_until. = \?/');
+});
+
+// What a registry revokes is what it says it revoked, so whatever reports
+// sessions ending (an event for each, say) misses none.
+describe('the records the registry says it revoked', function () {
+    beforeEach(function () {
+        $this->session = function (string $id, array $with = [], ?Model $user = null): RegisteredSession {
+            $user ??= $this->user;
+            $now = now()->getTimestamp();
+
+            return tap(
+                new RegisteredSession($id, (string) $user->getKey(), RegisteredSession::typeOf($user), 'web', 'device', Assurance::AAL1, null, null, $now - 600, $now - 300, $now + 3600)->with($with),
+                fn (RegisteredSession $session) => app(SessionRegistry::class)->save($session),
+            );
+        };
+
+        $this->ids = fn (Collection $sessions) => $sessions->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all();
+    });
+
+    it('returns the record revoke() revoked, and nothing once it was', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+
+        $revoked = $registry->revoke('phone');
+
+        expect($revoked->id)->toBe('phone')
+            ->and($revoked->revokedAt)->toBe(now()->getTimestamp())
+            ->and($revoked->revokedAt)->toBe($registry->find('phone')->revokedAt)
+            ->and($revoked->replacedBy)->toBeNull();
+
+        $this->travel(1)->minutes();
+
+        expect($registry->revoke('phone'))->toBeNull()
+            ->and($registry->revoke('unknown'))->toBeNull()
+            ->and($registry->find('phone')->revokedAt)->toBe($revoked->revokedAt);
+    })->with('registries');
+
+    it('returns a record that had moved on, saying where to', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $registry->replace('moved', ($this->session)('moved')->with(['id' => 'moved-on']));
+
+        $revoked = $registry->revoke('moved');
+
+        expect($revoked->id)->toBe('moved')
+            ->and($revoked->replacedBy)->toBe('moved-on')
+            ->and($revoked->revokedAt)->toBe(now()->getTimestamp())
+            ->and($registry->find('moved')->revokedAt)->not->toBeNull()
+            ->and($registry->find('moved-on')->revokedAt)->toBeNull();
+    })->with('registries');
+
+    it('returns the records revokeAll() ended, and only those', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        foreach (['here', 'phone', 'tablet', 'revoked'] as $id) {
+            ($this->session)($id);
+        }
+        $registry->revoke('revoked');
+        $registry->replace('moved', ($this->session)('moved')->with(['id' => 'moved-on']));
+        ($this->session)('theirs', user: staff());
+        ($this->session)('abigail', user: User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']));
+
+        $revoked = $registry->revokeAll($this->user, except: 'here');
+
+        expect(($this->ids)($revoked))->toBe(['moved-on', 'phone', 'tablet'])
+            ->and($revoked->every(fn (RegisteredSession $session) => $session->revokedAt === now()->getTimestamp()))->toBeTrue()
+            ->and($revoked->keys()->all())->toBe([0, 1, 2])
+            ->and($registry->forUser($this->user)->map->id->all())->toBe(['here'])
+            ->and($registry->find('theirs')->revokedAt)->toBeNull()
+            ->and($registry->find('abigail')->revokedAt)->toBeNull()
+            ->and($registry->revokeAll($this->user, except: 'here'))->toBeEmpty()
+            ->and(($this->ids)($registry->revokeAll($this->user)))->toBe(['here'])
+            ->and($registry->revokeAll($this->user))->toBeEmpty();
+    })->with('registries');
+
+    it('returns the records revokeDevice() ended, and only those', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+        ($this->session)('tablet');
+        ($this->session)('laptop', ['deviceId' => 'another']);
+        ($this->session)('theirs', user: staff());
+
+        $revoked = $registry->revokeDevice($this->user, 'device');
+
+        expect(($this->ids)($revoked))->toBe(['phone', 'tablet'])
+            ->and($revoked->every(fn (RegisteredSession $session) => $session->revokedAt === now()->getTimestamp()))->toBeTrue()
+            ->and($registry->forUser($this->user)->map->id->all())->toBe(['laptop'])
+            ->and($registry->find('theirs')->revokedAt)->toBeNull()
+            ->and($registry->revokeDevice($this->user, 'device'))->toBeEmpty();
+    })->with('registries');
+
+    // As it always has: the database driver matches a record by whether it
+    // was revoked, not whether it has expired.
+    it('revokes and returns an expired record that was never revoked, on the database driver', function (Closure $revoke) {
+        $registry = app(SessionRegistry::class);
+        ($this->session)('expired', ['expiresAt' => now()->subMinute()->getTimestamp()]);
+
+        expect(($this->ids)($revoke($registry, $this->user)))->toBe(['expired'])
+            ->and($registry->find('expired')->revokedAt)->toBe(now()->getTimestamp());
+    })->with([
+        'every session' => [fn (SessionRegistry $registry, Model $user) => $registry->revokeAll($user)],
+        'a device\'s sessions' => [fn (SessionRegistry $registry, Model $user) => $registry->revokeDevice($user, 'device')],
+    ]);
+
+    it('returns every record when a user has more than it revokes in one statement', function () {
+        $now = now()->getTimestamp();
+        DB::table('keyring_sessions')->insert(array_map(fn (int $n) => new RegisteredSession("session-{$n}", (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now - ($n % 2) * 7200)->toArray(), range(1, 1001)));
+
+        expect(app(SessionRegistry::class)->revokeAll($this->user))->toHaveCount(1001)
+            ->and(DB::table('keyring_sessions')->whereNull('revoked_at')->count())->toBe(0);
+    });
+
+    it('returns nothing for a record everyone was signed out of, and leaves when it ended alone, on the cache driver', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+        $registry->revokeEveryone();
+        $ended = now()->getTimestamp();
+
+        $this->travel(1)->minutes();
+
+        expect($registry->revoke('phone'))->toBeNull()
+            ->and($registry->revokeAll($this->user))->toBeEmpty()
+            ->and($registry->find('phone')->revokedAt)->toBe($ended);
+    });
+
+    it('returns nothing to the second of two revokes that read the record at once, on the cache driver', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+
+        // The other request revokes it just after this one read it.
+        Event::listen(CacheMissed::class, function (CacheMissed $event) use ($registry) {
+            if ($event->key === 'keyring:sessions:phone:revoked' && Cache::missing('raced')) {
+                Cache::put('raced', true);
+                $registry->revoke('phone');
+            }
+        });
+
+        expect($registry->revoke('phone'))->toBeNull()
+            ->and($registry->find('phone')->revokedAt)->not->toBeNull();
+    });
+
+    // That a session ended is kept in its record and in a key beside it. A
+    // revoke that finds it ended already writes both again, with the time
+    // it ended, so a store that dropped one of them gets it back.
+    it('puts back what says a record was revoked, without moving when, on the cache driver', function (string $lost) {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+        $ended = $registry->revoke('phone')->revokedAt;
+
+        $lost === 'key'
+            ? Cache::forget('keyring:sessions:phone:revoked')
+            : Cache::put('keyring:sessions:phone', [...Cache::get('keyring:sessions:phone'), 'revoked_at' => null], 3600);
+
+        $this->travel(1)->minutes();
+
+        expect($registry->revoke('phone'))->toBeNull()
+            ->and(Cache::get('keyring:sessions:phone:revoked'))->toBe($ended)
+            ->and(Cache::get('keyring:sessions:phone')['revoked_at'])->toBe($ended);
+    })->with(['its revoked key' => 'key', 'its record\'s stamp' => 'stamp']);
+
+    it('keeps a record revoked that only signing everyone out covered, once it was revoked again, on the cache driver', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        $registry = app(SessionRegistry::class);
+        ($this->session)('phone');
+        $registry->revokeEveryone();
+        $ended = now()->getTimestamp();
+
+        $this->travel(1)->minutes();
+        expect($registry->revoke('phone'))->toBeNull();
+
+        Cache::forget('keyring:sessions:everyone:revoked');
+
+        expect($registry->find('phone')->revokedAt)->toBe($ended)
+            ->and($registry->forUser($this->user))->toBeEmpty();
+    });
+
+    it('counts the sessions a sign-out everywhere else ended as it always has', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        Event::fake([SessionsRevoked::class]);
+        $registry = app(SessionRegistry::class);
+
+        login();
+        ($this->session)('phone');
+        ($this->session)('tablet');
+        ($this->session)('revoked');
+        $registry->revoke('revoked');
+        $registry->replace('moved', ($this->session)('moved')->with(['id' => 'moved-on']));
+
+        $this->deleteJson(route('keyring.sessions.destroy-others'), ['password' => 'password'])->assertOk();
+
+        Event::assertDispatched(SessionsRevoked::class, fn (SessionsRevoked $event) => $event->count === 3 && $event->user->is($this->user));
+        expect(app(Sessions::class)->revokeDevice($this->user, 'device'))->toBe(0);
+
+        ($this->session)('laptop');
+        ($this->session)('desktop');
+
+        expect(app(Sessions::class)->revokeDevice($this->user, 'device'))->toBe(2);
+    })->with('registries');
 });
 
 function riskySignal(Checkpoint $checkpoint): Signal
