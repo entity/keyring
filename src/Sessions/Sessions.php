@@ -186,9 +186,9 @@ class Sessions
      * Carry a remembered session on in the new session its "remember me"
      * cookie signed in, under a new record and a new cookie. The cookie that
      * came is used up: a copy of it brings nothing back. The new record is a
-     * copy of the old, so it keeps the limits it started with, but its
-     * address and browser are this request's. The cookie proved nothing, so
-     * the level starts again.
+     * copy of the old, so it keeps the limits it started with and the record
+     * it started on (origin), but its address and browser are this
+     * request's. The cookie proved nothing, so the level starts again.
      *
      * Null when the record couldn't be replaced: a request sent alongside
      * this one used the cookie first, or the session was just revoked.
@@ -197,6 +197,7 @@ class Sessions
     {
         $current = $session->with([
             'id' => Str::random(40),
+            'origin' => $session->origin(),
             'assurance' => Assurance::None,
             'ip' => $this->keyring->recordedIp($request),
             'userAgent' => UserAgent::from($request),
@@ -319,22 +320,58 @@ class Sessions
      * What a session goes by outside the server. Its registry ID is what the
      * "remember me" cookie carries, so that never reaches a page: whoever
      * could read it there could come back as the session. The handle is a
-     * keyed hash of the ID. It picks the session out from its user's others
-     * and leads nowhere else: not back to the ID, and to nothing at all in a
-     * cookie.
+     * keyed hash of the ID of the record the session started on (origin),
+     * so it stays the same when the session moves to a new record. It picks
+     * the session out from its user's others and leads nowhere else: not
+     * back to an ID, and to nothing at all in a cookie.
      */
     public function handle(RegisteredSession $session): string
     {
-        return KeyedHash::make(KeyedHash::SESSION_HANDLES, $session->id);
+        return $this->handles($session)[0];
+    }
+
+    /**
+     * Every handle the session goes by: under the current app key first,
+     * then under each of the previous keys (APP_PREVIOUS_KEYS), so a handle
+     * kept from before the key was rotated still names its session.
+     *
+     * @return non-empty-list<string>
+     */
+    public function handles(RegisteredSession $session): array
+    {
+        return KeyedHash::candidates(KeyedHash::SESSION_HANDLES, $session->origin());
     }
 
     /**
      * The user's session with this handle, if it's one that can still be
-     * carried on. Only ever looked for among the user's own.
+     * carried on. Only ever looked for among the user's own. A handle given
+     * under a previous app key still counts. Each of the session's handles
+     * is compared whichever matches, so how long it takes doesn't say which.
      */
     public function find(Authenticatable $user, string $handle): ?RegisteredSession
     {
-        return $this->active($user)->first(fn (RegisteredSession $session) => hash_equals($this->handle($session), $handle));
+        return $this->active($user)->first(fn (RegisteredSession $session) => array_reduce(
+            $this->handles($session),
+            fn (bool $found, string $candidate) => hash_equals($candidate, $handle) || $found,
+            false,
+        ));
+    }
+
+    /**
+     * Whether the user is still signed in on the session with this handle,
+     * for code that knows a session by its handle and nothing else. Only
+     * while the app still lets the user sign in (Keyring::allowSignInWhen),
+     * and the session can still be carried on, under Keyring's guard.
+     * Asking changes nothing: it doesn't count as activity, so it never
+     * keeps a session from idling out.
+     */
+    public function stillSignedIn(Authenticatable $user, string $handle): bool
+    {
+        if (! $user instanceof Model || ! $this->keyring->allowsSignIn($user)) {
+            return false;
+        }
+
+        return $this->find($user, $handle)?->guard === config('keyring.guard');
     }
 
     /**
@@ -440,7 +477,7 @@ class Sessions
             return;
         }
 
-        $current = $session->with(['id' => Str::random(40), ...$changes]);
+        $current = $session->with(['id' => Str::random(40), 'origin' => $session->origin(), ...$changes]);
 
         // One that has ended, or moved on without this request, isn't brought back.
         if (! $this->holding($user, fn () => $this->registry->replace($session->id, $current, revoke: true))) {

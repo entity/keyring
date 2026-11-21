@@ -207,11 +207,15 @@ it('signs out a copy of a cookie session after :dataset, and keeps the user sign
 
     $copied = sessionCookies($this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']));
     $registered = session(Sessions::KEY);
+    $handle = app(Sessions::class)->handle(app(SessionRegistry::class)->find($registered));
 
     $current = sessionCookies($this->withCredentials()->withCookies($copied)->{$method}($uri, $data)->assertOk());
 
+    // A new record, but the same session: it keeps its handle.
     expect(session(Sessions::KEY))->not->toBe($registered)
-        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull()
+        ->and(app(Sessions::class)->handle(app(SessionRegistry::class)->find(session(Sessions::KEY))))->toBe($handle)
+        ->and(app(Sessions::class)->find($this->user, $handle)->id)->toBe(session(Sessions::KEY));
 
     session()->flush();
     app('auth')->forgetGuards();
@@ -297,11 +301,16 @@ describe('a browser that signs in while it is signed in', function () {
 
         signInWith();
         $registered = session(Sessions::KEY);
+        $handle = app(Sessions::class)->handle(app(SessionRegistry::class)->find($registered));
 
         $this->post('/sso/callback')->assertRedirect('/dashboard');
 
+        // It's a new session, not the old one moved, so it has a handle of its own.
         expect(app(SessionRegistry::class)->forUser($this->user)->map->id->all())->toBe([session(Sessions::KEY)])
-            ->and(session(Sessions::KEY))->not->toBe($registered);
+            ->and(session(Sessions::KEY))->not->toBe($registered)
+            ->and(app(Sessions::class)->handle(app(SessionRegistry::class)->find(session(Sessions::KEY))))->not->toBe($handle)
+            ->and(app(Sessions::class)->find($this->user, $handle))->toBeNull()
+            ->and(app(Sessions::class)->stillSignedIn($this->user, $handle))->toBeFalse();
     })->with('drivers');
 });
 

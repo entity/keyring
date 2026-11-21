@@ -2,8 +2,11 @@
 
 ## Unreleased
 
-### Fixed
+### Sessions and Devices
 
+- A session keeps its handle when it moves to a new record: when "remember me" carries it on, when a risk response asks it to verify again, and with `rotate` on the `cookie` session driver. Each record names the one the session started on (`origin`), and the handle comes from that. Sessions that started before the upgrade keep the handles they had. Needs a new migration, see the [upgrade guide](UPGRADE.md).
+- `Sessions::stillSignedIn($user, $handle)`, for code that knows a session by its handle to ask whether the user is still signed in on it. It applies `Keyring::allowSignInWhen()` and the session's timeouts, and it changes nothing.
+- A conformance check that the session registry keeps `origin` when a session moves, so a missing migration or a custom driver that drops it is caught in your tests.
 - A sign-out your app does itself, with `Auth::logout()` or `Auth::logoutCurrentDevice()`, now ends the registered session too, with its "remember me" cookie and what the session proved. Before, the record stayed good until it timed out, so a copy of the session or of its "remember me" cookies stayed signed in.
 
 ## v0.2.0 - 2026-11-20

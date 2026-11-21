@@ -24,6 +24,13 @@ class DatabaseSessionRegistry implements SessionRegistry
         // record that replaced it.
         $row = $session->toArray();
 
+        // A record a session started on has no origin to write. Leaving the
+        // column out keeps signing in working on a table that's still
+        // waiting for the migration that adds it.
+        if ($row['origin'] === null) {
+            unset($row['origin']);
+        }
+
         $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at'])));
     }
 
