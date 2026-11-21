@@ -216,7 +216,8 @@ class KeyringManager
     }
 
     /**
-     * Recent security activity for a settings page.
+     * Recent security activity for a settings page, leaving out the types in
+     * "security_log.unlisted".
      *
      * @return Collection<int, SecurityEvent>
      */

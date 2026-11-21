@@ -117,7 +117,8 @@
                 "email_change_reverted",
                 "clone_suspected",
                 "remember_me_reused"
-            ]
+            ],
+            "unlisted": []
         },
         "prune_at": "03:00",
         "pending_logins": {

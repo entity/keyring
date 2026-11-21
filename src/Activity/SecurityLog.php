@@ -118,13 +118,37 @@ class SecurityLog
     }
 
     /**
-     * Recent security activity, newest first, for a settings page.
+     * Recent security activity, newest first, for a settings page. Leaves
+     * out the types in "security_log.unlisted": entries about the user that
+     * aren't something they did.
      *
      * @return Collection<int, SecurityEvent>
      */
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
-        return $this->query($user)->latest('created_at')->latest('id')->limit($limit)->get();
+        return $this->query($user)
+            ->whereNotIn('type', $this->unlisted())
+            ->latest('created_at')
+            ->latest('id')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * The types activity() leaves out. It's read while a page is built, so
+     * anything but an array, from a config cached before the option existed
+     * say, leaves out nothing rather than breaking the page. An entry that
+     * isn't a string is passed over, since a null would leave out every
+     * entry, and so would a 0 on MySQL. Only that entry: several packages
+     * may add to the list, and one bad entry shouldn't undo the others.
+     *
+     * @return array<string>
+     */
+    protected function unlisted(): array
+    {
+        $types = config('keyring.security_log.unlisted');
+
+        return is_array($types) ? array_filter($types, is_string(...)) : [];
     }
 
     /**
