@@ -775,14 +775,17 @@ describe('a sign-out the app does itself', function () {
         Exceptions::fake();
         signInWith();
         $registered = session(Sessions::KEY);
+        session()->put('auth.password_confirmed_at', now()->getTimestamp());
 
-        app()->bind(SessionRegistry::class, fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        app(SessionRegistryManager::class)->extend('unreachable', fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
         {
-            public function revoke(string $id): void
+            public function revoke(string $id): never
             {
                 throw new RuntimeException('The database went away.');
             }
         });
+        $driver = config('keyring.sessions.driver');
+        config(['keyring.sessions.driver' => 'unreachable']);
 
         $this->post('/app/logout-only')->assertNoContent();
 
@@ -791,7 +794,7 @@ describe('a sign-out the app does itself', function () {
             ->and(session()->has('auth.password_confirmed_at'))->toBeFalse();
         Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The database went away.');
 
-        app()->forgetInstance(SessionRegistry::class);
+        config(['keyring.sessions.driver' => $driver]);
         expect(app(SessionRegistry::class)->find($registered)->revokedAt)->toBeNull();
     });
 });
