@@ -304,7 +304,12 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 
         $can = $this->contained(fn () => cache()->get($this->schemaKey()), null);
 
-        if (! is_bool($can)) {
+        // The process that found the columns missing has warned already.
+        if ($can === false) {
+            return false;
+        }
+
+        if ($can !== true) {
             $can = $this->contained(fn () => $this->hasSweepColumns(), false);
             $this->contained(fn () => cache()->put($this->schemaKey(), $can, Sweep::SCHEMA_CACHED_FOR), null);
         }
@@ -324,8 +329,10 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      * Run a revocation, and once more without the notes when it failed for
      * their columns being gone: the migration was rolled back after this
      * process, or the cache, found them. What the cache said is forgotten,
-     * so the retry asks the database again. A sign-out never fails for the
-     * sweep's sake.
+     * so the next revocation asks the database again. The retry notes
+     * nothing, whatever the cache says by then: a forget that failed, or
+     * another process that still says yes, can't send it to the missing
+     * columns too. A sign-out never fails for the sweep's sake.
      *
      * Inside a caller's transaction the first try is a savepoint of its own,
      * so its failure rolls back only that try: on PostgreSQL a failed
@@ -350,21 +357,27 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
                 throw $e;
             }
 
-            $this->notes = null;
             $this->contained(fn () => cache()->forget($this->schemaKey()), null);
+            $this->notes = false;
 
-            return $revoke();
+            try {
+                return $revoke();
+            } finally {
+                $this->notes = null;
+            }
         }
     }
 
     /**
      * Whether a query failed for naming one of the sweep's columns that the
      * table doesn't have: MySQL's and PostgreSQL's "undefined column", or
-     * SQLite's words for it.
+     * SQLite's words for it. Read from the database's own error, not the
+     * exception's message, which has the SQL in it and so always names the
+     * columns.
      */
     protected function lostColumns(QueryException $e): bool
     {
-        $message = $e->getMessage();
+        $message = (string) $e->getPrevious()?->getMessage();
         $undefined = in_array($e->errorInfo[0] ?? null, ['42S22', '42703'], true)
             || str_contains($message, 'no such column')
             || str_contains($message, 'has no column named');

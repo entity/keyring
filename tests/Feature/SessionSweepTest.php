@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Illuminate\Cache\Events\KeyForgotten;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -638,6 +640,15 @@ describe('before the migration has run', function () {
             ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
     });
 
+    it('takes the cache\'s no without a word, the warning being said already', function () {
+        Log::spy();
+        cache()->put(DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions'), false, 300);
+
+        app(SessionRegistry::class)->revoke(swept($this->user)->id);
+
+        Log::shouldNotHaveReceived('warning');
+    });
+
     it('refuses to sweep, and says how to fix it', function () {
         $this->artisan('keyring:sweep')->expectsOutputToContain('Publish and run Keyring\'s migrations')->assertFailed();
     });
@@ -716,6 +727,35 @@ describe('once the migration has run', function () {
 
             return 0;
         }, 0],
+    ]);
+
+    it('notes nothing on the retry, whatever the cache says by then', function () {
+        config(['keyring.sessions.table' => 'unswept_sessions']);
+        app(SessionRegistryManager::class)->forgetDrivers();
+        $key = DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'unswept_sessions');
+        cache()->put($key, true, 300);
+        // Another process says yes again the moment it's forgotten.
+        Event::listen(fn (KeyForgotten $event) => $event->key === $key && cache()->put($key, true, 300));
+        $session = swept($this->user);
+
+        expect(app(SessionRegistry::class)->revoke($session->id)?->revokedAt)->not->toBeNull();
+    });
+
+    it('only takes a failure naming a missing column of the sweep\'s for the columns being gone', function (string $error, bool $lost) {
+        $registry = new class(DB::connection()) extends DatabaseSessionRegistry
+        {
+            public function lost(QueryException $e): bool
+            {
+                return $this->lostColumns($e);
+            }
+        };
+        $sql = 'update "keyring_sessions" set "revoked_at" = ?, "end_reason" = ? where "id" = ?';
+
+        expect($registry->lost(new QueryException('testing', $sql, [], new PDOException($error))))->toBe($lost);
+    })->with([
+        'a sweep column' => ['no such column: end_reason', true],
+        'another column' => ['no such column: revoked_at', false],
+        'something else' => ['database is locked', false],
     ]);
 });
 
