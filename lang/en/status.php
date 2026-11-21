@@ -19,6 +19,7 @@ return [
     'email-change-requested' => 'Check your inbox to confirm the new address.',
     'email-change-reverted' => 'Your old email address is back and every session was signed out. Please reset your password.',
     'email-changed' => 'Your email address has been changed.',
+    'email-verified' => 'Your email address is verified.',
     'enroll-first' => 'Set up another way to sign in, like an authenticator app or a passkey, before going on.',
     'enrollment-started' => 'Finish setting up your new sign-in method.',
     'password-reset' => 'Your password has been reset. Please sign in.',

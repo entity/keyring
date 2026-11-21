@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Keyring\Http\Controllers;
 
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -13,6 +13,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Events\FactorChallenged;
 use Keyring\Features;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
+use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Login\AttemptStore;
@@ -23,6 +24,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
 use Keyring\Pipeline\Verifier;
 use Keyring\Support\Throttle;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * One controller for every factor and both purposes (login and step-up).
@@ -30,7 +32,7 @@ use Keyring\Support\Throttle;
  */
 class ChallengeController
 {
-    use RespondsWithStatus;
+    use ChoosesFormat, RespondsWithStatus;
 
     // A route keeps its controller once it has made one, and in a worker
     // that serves many requests that can be longer than a request lasts.
@@ -232,7 +234,7 @@ class ChallengeController
      * A code was guessed too many times, so drop the attempt: the only way on
      * is to start again.
      */
-    protected function startOver(Request $request, Purpose $purpose): RedirectResponse
+    protected function startOver(Request $request, Purpose $purpose): Response
     {
         $this->attempts->forget($purpose);
 
@@ -243,19 +245,40 @@ class ChallengeController
      * Back to the start, with the reason on a field that page has: the
      * username on the login page, and whatever the confirm page asks for next.
      */
-    protected function expired(Request $request, Purpose $purpose, ?string $message = null): RedirectResponse
+    protected function expired(Request $request, Purpose $purpose, ?string $message = null): Response
     {
         $message ??= __('keyring::keyring.expired');
 
         if ($purpose === Purpose::Login) {
-            return to_route('login')->withErrors([$this->keyring->username() => $message]);
+            return $this->startAgain($request, 'login', [$this->keyring->username() => $message]);
         }
 
         $attempt = $this->confirming($request);
         $next = $this->choose($attempt, $attempt->options(), null, null);
 
-        return to_route('keyring.confirm.challenge')
-            ->withErrors([$next?->factor()->errorKey() ?? $this->keyring->username() => $message]);
+        return $this->startAgain($request, 'keyring.confirm.challenge', [$next?->factor()->errorKey() ?? $this->keyring->username() => $message]);
+    }
+
+    /**
+     * Back to a page with the reason on one of its fields. A JSON client
+     * gets the error as a validation error would put it, with the page to
+     * go to by name: followed, the redirect would answer its request with
+     * that page as though it had gone through, and the error would be lost.
+     *
+     * @param  array<string, string>  $errors
+     */
+    protected function startAgain(Request $request, string $route, array $errors): Response
+    {
+        if (! $this->wantsJson($request)) {
+            return to_route($route)->withErrors($errors);
+        }
+
+        return new JsonResponse([
+            'message' => Arr::first($errors),
+            'errors' => array_map(fn (string $message) => [$message], $errors),
+            'page' => $route === 'login' ? 'login' : 'confirm',
+            'redirect' => route($route),
+        ], 422);
     }
 
     /**

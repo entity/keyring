@@ -89,7 +89,7 @@ it('sends the client on to the challenge page when the policy asks for more', fu
 
     postFromLaravelClient(['credential' => credentialFromLaravelClient($this->key, optionsForLaravelClient()), 'remember' => false])
         ->assertStatus(202)
-        ->assertExactJson(['status' => 'challenge', 'redirect' => route('keyring.login.challenge')]);
+        ->assertExactJson(['status' => 'challenge', 'page' => 'challenge', 'redirect' => route('keyring.login.challenge')]);
 
     $this->assertGuest();
 });
