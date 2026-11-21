@@ -414,7 +414,7 @@ A second middleware, `keyring.password`, is added to the `web` group after it. I
 
 A session whose record has gone missing is signed out rather than registered again. This means clearing records can't restart a session's window.
 
-A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route.
+A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so on Keyring's guard, in a request with a session, `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route. If the registry can't be reached, the user is still signed out and the error is reported. After `logoutCurrentDevice()`, the user's "remember me" token is then changed, as `Auth::logout()` already does, so a kept copy of the cookie stops working.
 
 A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
 
