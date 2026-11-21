@@ -357,6 +357,27 @@ it('asks a user without a password for none when removing the last second factor
         ->and($this->user->keyring->refresh()->all()->pluck('factor')->all())->toBe(['sso']);
 });
 
+it('gives a virtual authenticator its user\'s type and ID, so it can look them up again', function () {
+    Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SingleSignOn::class]);
+
+    $all = $this->user->keyring->all()->filter->isVirtual();
+
+    expect($all->pluck('factor')->sort()->values()->all())->toBe(['password', 'sso']);
+
+    foreach ($all as $authenticator) {
+        $copy = $authenticator->withoutRelations();
+
+        expect($authenticator->exists)->toBeFalse()
+            ->and($authenticator->authenticatable_type)->toBe($this->user->getMorphClass())
+            ->and($authenticator->authenticatable_id)->toBe($this->user->getKey())
+            ->and($authenticator->owner()?->is($this->user))->toBeTrue()
+            ->and($copy->relationLoaded('authenticatable'))->toBeFalse()
+            ->and($copy->user()->is($this->user))->toBeTrue();
+    }
+
+    expect(Authenticator::query()->count())->toBe(0);
+});
+
 it('refuses to remove the last factor the policy needs', function () {
     Keyring::require(Requirement::aal2());
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
