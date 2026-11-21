@@ -21,7 +21,8 @@
 
 ### Logging and Emails
 
-- A queued listener for `FactorChallenged` or `FactorVerified` now runs for a password. A password has no stored authenticator, so the job failed with a `ModelNotFoundException`. The password's authenticator is now queued as it is, without the user loaded with it, and a stored authenticator is still queued by its ID.
+- A queued listener for `FactorChallenged` or `FactorVerified` now runs for an unsaved authenticator, such as the password's. It has nothing stored, so the job failed with a `ModelNotFoundException`. It's now queued as it is, without the user loaded with it, and a stored authenticator is still queued by its ID.
+- An unsaved authenticator, such as the password's, now has its user's `authenticatable_type` and `authenticatable_id` set, so `owner()` finds the user, and `user()` looks them up again when they aren't loaded. Before, `owner()` ran a query Postgres refuses.
 
 ### Extending
 
