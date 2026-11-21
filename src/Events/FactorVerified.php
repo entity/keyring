@@ -17,11 +17,28 @@ use Keyring\Models\Authenticator;
  */
 class FactorVerified
 {
-    use Dispatchable, SerializesModels;
+    use Dispatchable, SerializesModels {
+        SerializesModels::__serialize as protected serializeModels;
+    }
 
     public function __construct(
         public readonly Attempt $attempt,
         public readonly Authenticator $authenticator,
         public readonly Verification $verification,
     ) {}
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function __serialize(): array
+    {
+        if ($this->authenticator->exists) {
+            return $this->serializeModels();
+        }
+
+        // An unsaved authenticator, such as the password's, couldn't be
+        // found again by its ID. It's kept as it is instead, without its
+        // secret or the user loaded with it.
+        return [...$this->serializeModels(), 'authenticator' => $this->authenticator->forQueue()];
+    }
 }

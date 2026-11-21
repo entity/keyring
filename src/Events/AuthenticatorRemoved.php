@@ -7,7 +7,6 @@ namespace Keyring\Events;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Arr;
 use Keyring\Models\Authenticator;
 
 /**
@@ -34,12 +33,6 @@ class AuthenticatorRemoved
      */
     public function __serialize(): array
     {
-        // A new instance and not a copy: a copy would keep the record's
-        // earlier values too, a secret saved just before it was deleted
-        // among them.
-        $authenticator = $this->authenticator->newInstance(exists: $this->authenticator->exists)
-            ->setRawAttributes(Arr::except($this->authenticator->getAttributes(), ['secret']), sync: true);
-
-        return [...$this->serializeModels(), 'authenticator' => $authenticator];
+        return [...$this->serializeModels(), 'authenticator' => $this->authenticator->forQueue()];
     }
 }

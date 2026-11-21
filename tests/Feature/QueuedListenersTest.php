@@ -14,9 +14,12 @@ use Keyring\Enums\Purpose;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\Authenticated;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\FactorChallenged;
+use Keyring\Events\FactorVerified;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionResumed;
+use Keyring\Facades\Keyring;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
@@ -489,4 +492,109 @@ it('queues a removed authenticator without a secret it saved before it was delet
         ->and($event->authenticator->exists)->toBeFalse()
         ->and($event->authenticator->getChanges())->toBe([])
         ->and($event->authenticator->getOriginal())->not->toHaveKey('secret');
+});
+
+it('queues a verified password, which has no stored authenticator, as it is', function () {
+    Event::listen(FactorVerified::class, QueuedKeyringListener::class);
+
+    test()->flushSession();
+    browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true])->assertRedirect();
+
+    $user = $this->user->fresh();
+    $command = queuedCommand(FactorVerified::class);
+
+    expect($user->remember_token)->not->toBeEmpty()
+        ->and($command)->not->toContain($user->getAuthPassword())
+        ->and($command)->not->toContain($user->remember_token);
+
+    $event = queuedEvent(FactorVerified::class);
+
+    expect($event->authenticator->isVirtual())->toBeTrue()
+        ->and($event->authenticator->factor)->toBe('password')
+        ->and($event->authenticator->name)->toBe('Password')
+        ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse()
+        ->and($event->authenticator->user()->is($user))->toBeTrue()
+        ->and($event->verification->factor)->toBe('password')
+        ->and($event->attempt->user()->is($user))->toBeTrue();
+});
+
+it('queues a challenged password as it is', function () {
+    Event::listen(FactorChallenged::class, QueuedKeyringListener::class);
+
+    $user = $this->user->fresh();
+    $password = Authenticator::virtual(Keyring::factor('password'), $user, 'Password');
+
+    FactorChallenged::dispatch(Attempt::start(Purpose::Confirm, $user), $password);
+
+    expect(queuedCommand(FactorChallenged::class))->not->toContain($user->getAuthPassword());
+
+    $event = queuedEvent(FactorChallenged::class);
+
+    expect($event->authenticator->isVirtual())->toBeTrue()
+        ->and($event->authenticator->factor)->toBe('password')
+        ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse();
+});
+
+it('queues an authenticator that isn\'t stored without its secret or its user', function (string $class) {
+    Event::listen($class, QueuedKeyringListener::class);
+
+    $user = $this->user->fresh();
+    $authenticator = Authenticator::factory()->totp()->for($user, 'authenticatable')->make();
+    $secret = $authenticator->secret;
+    $stored = $authenticator->getAttributes()['secret'];
+
+    $class === FactorVerified::class
+        ? FactorVerified::dispatch(Attempt::start(Purpose::Login, $user), $authenticator, Verification::of($authenticator))
+        : FactorChallenged::dispatch(Attempt::start(Purpose::Login, $user), $authenticator);
+
+    $command = queuedCommand($class);
+
+    expect($command)->not->toContain($stored)
+        ->and($command)->not->toContain($secret)
+        ->and($command)->not->toContain($user->getAuthPassword());
+
+    $event = queuedEvent($class);
+
+    expect($event->authenticator->exists)->toBeFalse()
+        ->and($event->authenticator->factor)->toBe('totp')
+        ->and($event->authenticator->name)->toBe($authenticator->name)
+        ->and($event->authenticator->secret)->toBeNull()
+        ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse();
+})->with([FactorChallenged::class, FactorVerified::class]);
+
+it('still queues a stored authenticator by its ID', function () {
+    Event::listen(FactorChallenged::class, QueuedKeyringListener::class);
+    Event::listen(FactorVerified::class, QueuedKeyringListener::class);
+
+    $user = $this->user->fresh();
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+
+    test()->flushSession();
+    browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+
+    // Only the second factor's jobs are wanted here.
+    DB::table('jobs')->delete();
+
+    $this->inertia()->get(route('keyring.login.challenge'))->assertOk();
+    $this->flushHeaders();
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect();
+    $this->assertAuthenticatedAs($user);
+
+    // Renamed after it was queued, the listener gets it from the database.
+    $totp->forceFill(['name' => 'Renamed'])->save();
+
+    foreach ([FactorChallenged::class, FactorVerified::class] as $class) {
+        $command = queuedCommand($class);
+
+        expect($command)->toContain('ModelIdentifier')
+            ->and($command)->toContain($totp->id)
+            ->and($command)->not->toContain($totp->getAttributes()['secret'])
+            ->and($command)->not->toContain($totp->secret);
+
+        $event = queuedEvent($class);
+
+        expect($event->authenticator->exists)->toBeTrue()
+            ->and($event->authenticator->is($totp))->toBeTrue()
+            ->and($event->authenticator->name)->toBe('Renamed');
+    }
 });

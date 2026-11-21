@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Arr;
 use Keyring\Contracts\Factor;
 use Keyring\Database\Factories\AuthenticatorFactory;
 use Keyring\Facades\Keyring;
@@ -81,12 +82,29 @@ class Authenticator extends Model
      */
     public static function virtual(Factor $factor, Authenticatable&Model $user, string $name): self
     {
-        return new (Keyring::authenticatorModel())([
+        $authenticator = new (Keyring::authenticatorModel())([
             'id' => $factor->key(),
             'factor' => $factor->key(),
             'name' => $name,
             'confirmed_at' => $user->getAttribute('created_at'),
-        ])->setRelation('authenticatable', $user);
+        ]);
+
+        // With the owner's type and ID set, as a stored one has, a copy
+        // without the user loaded can look them up again.
+        $authenticator->authenticatable()->associate($user);
+
+        return $authenticator;
+    }
+
+    /**
+     * A copy to put on the queue: a new instance and not a clone, so it has
+     * none of the earlier values a clone keeps (a secret saved just before
+     * it was deleted among them), no secret, and nothing loaded with it.
+     */
+    public function forQueue(): static
+    {
+        return $this->newInstance(exists: $this->exists)
+            ->setRawAttributes(Arr::except($this->getAttributes(), ['secret']), sync: true);
     }
 
     /**
