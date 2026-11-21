@@ -53,7 +53,9 @@ class StepUp
      * so a confirm in two steps only meets moments up to its first step. A
      * moment that moves on with every request can send them round forever.
      *
-     * @throws AuthenticationException for a guest
+     * @throws AuthenticationException when $since is given and nobody is
+     *                                 signed in to Keyring's guard; a level
+     *                                 alone is judged from the session
      * @throws InvalidArgumentException when nothing is asked, the level is
      *                                  none, or $since is further in the
      *                                  future than CLOCK_LEEWAY
