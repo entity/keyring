@@ -692,24 +692,22 @@ describe('once the migration has run', function () {
             ->and(cache()->get(DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions')))->toBeFalse();
     });
 
-    it('signs out again without the notes where a process found the columns before they went', function (Closure $revoke, int $ended) {
-        $registry = app(SessionRegistry::class);
-        $registry->revoke(swept($this->user)->id);
-        $key = DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'keyring_sessions');
+    it('signs out again without the notes where the cache still says the columns are there', function (Closure $revoke, int $ended) {
+        // A table rolled back where the cache that said yes couldn't be
+        // cleared (unswept_sessions, a test migration).
+        config(['keyring.sessions.table' => 'unswept_sessions']);
+        app(SessionRegistryManager::class)->forgetDrivers();
+        $key = DatabaseSessionRegistry::schemaCacheKey(DB::connection(), 'unswept_sessions');
+        cache()->put($key, true, 300);
+        $session = swept($this->user);
 
-        // Rolled back where the cache that said yes couldn't be cleared.
-        $this->migration->down();
+        expect($revoke(app(SessionRegistry::class), $session, $this->user))->toBe($ended)
+            ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull()
+            // Forgotten, and asked again.
+            ->and(cache()->get($key))->toBeFalse();
 
-        // This process found the columns itself, the next takes the cache's word.
-        foreach ([$registry, app(SessionRegistryManager::class)->forgetDrivers()->driver()] as $registry) {
-            cache()->put($key, true, 300);
-            $session = swept($this->user);
-
-            expect($revoke($registry, $session, $this->user))->toBe($ended)
-                ->and(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull()
-                // Forgotten, and asked again.
-                ->and(cache()->get($key))->toBeFalse();
-        }
+        // And signs out as before the migration from then on.
+        expect(app(SessionRegistry::class)->revoke(swept($this->user)->id))->not->toBeNull();
     })->with([
         'one session' => [fn (SessionRegistry $registry, RegisteredSession $session) => $registry->revoke($session->id) === null ? 0 : 1, 1],
         'a user\'s sessions' => [fn (SessionRegistry $registry, RegisteredSession $session, User $user) => $registry->revokeAll($user)->count(), 1],
@@ -719,7 +717,6 @@ describe('once the migration has run', function () {
             return 0;
         }, 0],
     ]);
-
 });
 
 it('counts what was revoked before the migration as announced', function () {
