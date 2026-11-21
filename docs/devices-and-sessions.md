@@ -11,6 +11,7 @@
     - [Your Own Device Model](#your-own-device-model)
 - [Listing and Revoking Devices](#listing-and-revoking-devices)
 - [Listing and Ending Sessions](#listing-and-ending-sessions)
+    - [Is It Still Signed In?](#is-it-still-signed-in)
 - [The Session Registry](#the-session-registry)
     - [Drivers](#drivers)
     - [Writing a Driver](#writing-a-driver)
@@ -268,7 +269,7 @@ Laravel keeps one "remember me" token per user. Changing it signs out every reme
 
 `device` is the ID of the session's [device](#listing-and-revoking-devices). It's `null` when the session has no device or when devices are off, so a page can show sessions under their devices. `lastActiveAt` is kept to the minute. A session that has been revoked, has expired, has [idled out](#timeouts), or has moved to another record isn't listed.
 
-`id` is a handle, not the session's registry ID. The registry ID is what the ["remember me" cookie](#remember-me) carries, so it never leaves the server by any other route. A page that could read it could hand someone the session. The handle is an HMAC-SHA256 of that ID under your `APP_KEY`. It can't be turned back into the ID, and it's the wrong length to be mistaken for one. The only thing that accepts it is the route below, which looks for it among the signed-in user's own sessions. A session that moves to a new record gets a new handle, so fetch the list again before acting on an old one.
+`id` is a handle, not the session's registry ID. The registry ID is what the ["remember me" cookie](#remember-me) carries, so it never leaves the server by any other route. A page that could read it could hand someone the session. The handle is an HMAC-SHA256, under your `APP_KEY`, of the ID of the record the session started on. It can't be turned back into an ID, and it's the wrong length to be mistaken for one. The only things that accept it are the route below and the methods that look for it among the user's own sessions. A session keeps its handle when it [moves to a new record](#the-session-registry), so a handle you kept still names the same session after "remember me" carries it on or a step-up gives it a new record. Changing `APP_KEY` changes every handle the list gives. A handle given under a key you've moved to `APP_PREVIOUS_KEYS` still works, until you take that key out of the list.
 
 `DELETE /user/sessions/{session}` ends the session with that handle. Its record is revoked, so that browser is signed out on its next request, and its "remember me" cookie brings nothing back. The response is a [status response](sign-in-flow.md#status-responses) with `session-revoked`. `SessionsRevoked` is dispatched with a count of one. The user's "remember me" token is left alone, so their other remembered browsers stay signed in.
 
@@ -292,11 +293,38 @@ $session = $sessions->find($user, $handle);  // null unless it's one of the user
 $sessions->revoke($user, $session);
 ```
 
+### Is It Still Signed In?
+
+Other code sometimes knows a session by its handle and needs to know whether it still counts. A single sign-on provider that signed a client in on the session is one example. Ask `stillSignedIn`:
+
+```php
+use Keyring\Sessions\Sessions;
+
+if (! app(Sessions::class)->stillSignedIn($user, $handle)) {
+    // The user has signed out of that session, or it has ended.
+}
+```
+
+It's `true` only when your application still lets the user sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)), and the handle is one of the user's own sessions on Keyring's guard that can still be carried on. A session that was revoked, has expired, or has [idled out](#timeouts) gives `false`. So does anything that isn't one of the user's handles. A session that has moved to a new record keeps its handle, so the answer doesn't change when it moves.
+
+Asking changes nothing. It doesn't count as activity, so it never keeps a session from idling out, and it doesn't sign anyone out. The session middleware still does that on the session's next request.
+
+Some things are only judged on the browser's own requests, so `stillSignedIn` doesn't check them:
+
+- [`sessions.end_on_lapse`](#ending-a-session-with-its-level), [risk locks](risk.md#actions), and the risk signals that run on each request. A session that one of these ends stays `true` until its browser's next request.
+- The session's [assurance level](policies.md#assurance-levels). `true` says the user is signed in, not how strongly.
+
+It can't see Laravel's own session either, because no request comes back to say it has ended. A session that isn't remembered is over once Laravel's session is (past `session.lifetime`, or on `expire_on_close`), but its record stays good until it [idles out](#timeouts), so `stillSignedIn` keeps answering `true` until then. With `sessions.idle` at `null`, that's when it hits `absolute`, 30 days by default. Keep `idle` no longer than `session.lifetime` if the answer shouldn't outlast Laravel's session. Even then, with `expire_on_close` or a browser that drops its cookies, it can answer `true` for up to `idle` after the browser has gone.
+
+It needs an Eloquent user, and returns `false` for any other. And where registration hides who has an account, a user who hasn't verified their email address can only be signed in from the browser that followed the verification link. Asked from any other request, such as a server-to-server call, `stillSignedIn` answers `false` for them.
+
+Keep the handle, not the registry ID. The ID is what the "remember me" cookie carries, so it must never leave the server.
+
 ## The Session Registry
 
 Every signed-in session gets a record in Keyring's registry. Each record has its own random ID, along with the user, the device, the assurance level, the IP address, the user agent, whether "remember me" was ticked, and its timestamps. Laravel's session ID is never stored. The registry ID lives inside the session.
 
-A session can move to a new record. This happens when ["remember me"](#remember-me) carries it on, when a [risk response](risk.md#actions) asks it to verify again, and with `rotate` on the `cookie` session driver, which includes every step-up. The old record then names the new one (`replacedBy`, `replacedAt`) and stops being a session. It isn't listed, counted, or revoked with the user's sessions.
+A session can move to a new record. This happens when ["remember me"](#remember-me) carries it on, when a [risk response](risk.md#actions) asks it to verify again, and with `rotate` on the `cookie` session driver, which includes every step-up. The old record then names the new one (`replacedBy`, `replacedAt`) and stops being a session. It isn't listed, counted, or revoked with the user's sessions. Every record a session moves to also names the record it started on (`origin`). The session's [handle](#listing-and-ending-sessions) comes from that, so it stays the same. The first record has no `origin` of its own, and `$session->origin()` returns its ID.
 
 Because Keyring checks the registry on every request, revoking a session takes effect on its next request, whichever session driver you use.
 
@@ -312,7 +340,7 @@ Because Keyring checks the registry on every request, revoking a session takes e
 ],
 ```
 
-- **`database`** (the default) uses the `keyring_sessions` table on `connection`.
+- **`database`** (the default) uses the `keyring_sessions` table on `connection`. Its `origin` column comes from a migration of its own. If you installed Keyring before that migration came, see the [upgrade guide](../UPGRADE.md).
 - **`cache`** uses the cache store named in `store`, and it needs no table. Use a persistent store. If the cache is cleared, every session's record is gone, and everyone is signed out on their next request. Revocations are kept under their own keys, so a request that saves a stale copy of a session can't undo one.
 
 ### Writing a Driver
@@ -331,8 +359,8 @@ Then set `sessions.driver` to `custom`. Keyring calls `replace`, `revokeAll`, an
 
 | Method | Does |
 |---|---|
-| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime, or what a record was replaced by. |
-| `find($id)` | Returns the session, or `null`. |
+| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime, or what a record was replaced by. Store every field, `origin` included: `$session->toArray()` has them all. |
+| `find($id)` | Returns the session, or `null`, with every field it was saved with. `RegisteredSession::fromArray()` reads what `toArray()` gave, and a record saved without `origin` comes back with none. A driver that loses `origin` gives a session a new handle each time it moves. |
 | `forUser($user)` | Returns the user's sessions that haven't expired, been revoked, or been replaced, most recent first. A session belongs to a user by more than its ID. Match on the record's `userType` (`RegisteredSession::typeOf($user)`, the connection and table the ID is one of) and its `userId`, here and in `revokeAll` and `revokeDevice`. Otherwise, two user models with the same IDs would share sessions. `$session->belongsTo($user)` checks both. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names match those on `RegisteredSession`. `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
 | `revoke($id)` | Revokes one session. |

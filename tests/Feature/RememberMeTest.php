@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
@@ -26,6 +27,7 @@ use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\KeyedHash;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -541,6 +543,81 @@ it('moves "remember me" to the new record when a session is given one', function
     expect(app(SessionRegistry::class)->find($new)->replacedBy)->toBe(session(Sessions::KEY))
         ->and(SecurityEvent::query()->where('type', 'remember_me_reused')->exists())->toBeFalse();
 })->with('session registries');
+
+describe('a session\'s handle', function () {
+    it('stays the same when "remember me" carries the session on, and when a step-up gives it another record', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $sessions = app(Sessions::class);
+
+        $cookies = rememberedSignIn();
+        $first = $registry->find(session(Sessions::KEY));
+        $handle = $sessions->handle($first);
+
+        // Laravel's own session has gone, and the cookie carries it on.
+        $this->travel(3)->hours();
+        $response = comeBack($cookies)->assertOk();
+        $resumed = $registry->find(session(Sessions::KEY));
+
+        expect($resumed->id)->not->toBe($first->id)
+            ->and($resumed->origin)->toBe($first->id)
+            ->and($sessions->handle($resumed))->toBe($handle);
+
+        $this->getJson(route('keyring.sessions.index'))->assertJsonCount(1, 'sessions')->assertJsonPath('sessions.0.id', $handle);
+
+        // A step-up answer to the session changing browser swaps its record again.
+        Keyring::risk()->signals([SessionFingerprintChanged::class]);
+        $response = browser([...$cookies, ...keptCookies($response)], CHROME)->get('/home')->assertOk();
+        $stepped = $registry->find(session(Sessions::KEY));
+
+        expect($stepped->id)->not->toBe($resumed->id)
+            ->and($stepped->origin)->toBe($first->id)
+            ->and($sessions->handle($stepped))->toBe($handle)
+            ->and($sessions->find($this->user, $handle)->id)->toBe($stepped->id)
+            ->and($sessions->stillSignedIn($this->user, $handle))->toBeTrue();
+
+        // Ended by that handle from another browser, it's the record the
+        // session is on now that's revoked, and its browser is signed out.
+        $remembered = [...$cookies, ...keptCookies($response)];
+        Keyring::risk()->signals([]);
+        rememberedSignIn(FIREFOX);
+
+        $this->deleteJson(route('keyring.sessions.destroy', $handle))->assertOk()->assertJsonPath('status', 'session-revoked');
+
+        expect($registry->find($stepped->id)->revokedAt)->not->toBeNull()
+            ->and($sessions->stillSignedIn($this->user, $handle))->toBeFalse();
+
+        comeBack($remembered, CHROME)->assertRedirect('/login');
+    })->with('session registries');
+
+    it('is still the one a record from before origins were kept had, after the session moves', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $sessions = app(Sessions::class);
+
+        $cookies = rememberedSignIn();
+        $id = session(Sessions::KEY);
+
+        // The cache driver's records from then have no origin at all.
+        if ($driver === 'cache') {
+            Cache::put('keyring:sessions:'.$id, Arr::except(Cache::get('keyring:sessions:'.$id), 'origin'), now()->addDay());
+        }
+
+        $old = $registry->find($id);
+        $handle = KeyedHash::make(KeyedHash::SESSION_HANDLES, $id);
+
+        expect($old->origin)->toBeNull()
+            ->and($sessions->handle($old))->toBe($handle);
+
+        $this->travel(3)->hours();
+        comeBack($cookies)->assertOk();
+        $resumed = $registry->find(session(Sessions::KEY));
+
+        expect($resumed->id)->not->toBe($id)
+            ->and($resumed->origin)->toBe($id)
+            ->and($sessions->handle($resumed))->toBe($handle);
+    })->with('session registries');
+});
 
 it('does not start remembering a session when it is given a new record', function () {
     Keyring::risk()->signals([SessionFingerprintChanged::class]);
