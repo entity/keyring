@@ -371,11 +371,16 @@ class AuthenticateSession
         // A prefetch gets the same answer: Inertia keeps it until the link
         // is followed, and only then loads the page.
         //
-        // Not when it ended because someone else may hold the session: the
-        // owner is told on the login page, rather than carrying on as a
-        // guest with no sign of why.
-        if (! in_array($reason, ['reused', 'risk'], true) && $this->continuesAsGuest($request)) {
+        // For every reason, "reused" and "risk" too: the login page would go
+        // to whichever browser asked next, not always the owner's, and an
+        // authorize request with prompt=none mustn't be shown one. The
+        // status SignedOutResponse would give is flashed, on the new
+        // session, so a page that shows statuses can say why. The request
+        // the browser is sent back to uses it up. No intended URL is saved.
+        if ($this->continuesAsGuest($request)) {
             $url = $request->fullUrl();
+
+            $request->session()->flash('status', 'signed-out');
 
             // As on sign out: nothing the session cached stays in the browser.
             return $this->clearSiteData($request->hasHeader('X-Inertia') ? $this->loadInFull($url) : redirect()->to($url));

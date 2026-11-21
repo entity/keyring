@@ -20,7 +20,7 @@ use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
-    $page = fn () => Auth::check() ? 'signed in' : 'guest';
+    $page = fn () => (Auth::check() ? 'signed in' : 'guest').' '.session('status', 'no status');
 
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home')->name('home');
     Route::middleware('web')->get('/welcome', $page)->name('welcome');
@@ -174,7 +174,8 @@ function visitAfterEnding(string $reason, array $cookies, string $uri, array $he
 
 dataset('reasons', ['revoked', 'expired', 'idle', 'lapsed', 'other_user', 'not_allowed', 'risk', 'locked', 'reused']);
 
-// Someone else may hold the session, so its owner hears about it.
+// Someone else may hold the session, so the login page might not reach
+// its owner, and a listed authorize route mustn't show one.
 dataset('security reasons', ['risk', 'locked', 'reused']);
 
 /**
@@ -193,7 +194,7 @@ it('asks for a listed page again as a guest when the session ended as :dataset',
     $response = visitAfterEnding($reason, $cookies, '/welcome?b=2&a=1')
         ->assertRedirect('/welcome?a=1&b=2')
         ->assertHeader('Clear-Site-Data', '"cache", "storage"')
-        ->assertSessionMissing('status');
+        ->assertSessionHas('status', 'signed-out');
 
     $this->assertGuest();
     expect(session()->has('url.intended'))->toBeFalse()
@@ -206,32 +207,51 @@ it('asks for a listed page again as a guest when the session ended as :dataset',
         $cookies = guestCookies($response);
     }
 
-    visitAfterEnding($reason, $cookies, $response->headers->get('Location'))->assertOk()->assertSee('guest');
+    visitAfterEnding($reason, $cookies, $response->headers->get('Location'))->assertOk()->assertSee('guest signed-out');
 
     $this->assertGuest();
     expect($this->ended->all())->toBe([endedReason($reason)]);
-})->with(['revoked', 'expired', 'idle', 'lapsed', 'other_user', 'not_allowed']);
+})->with('reasons');
 
-it('sends a listed page to log in as before when the session ended as :dataset on :dataset', function (string $reason, array $headers) {
+it('carries on as a guest when the session ended as :dataset on :dataset', function (string $reason, array $headers) {
     $cookies = endSessionFor($reason);
 
     $response = visitAfterEnding($reason, $cookies, '/welcome?b=2&a=1', $headers)
-        ->assertRedirect('/login')
         ->assertHeader('Clear-Site-Data', '"cache", "storage"')
-        ->assertHeaderMissing('X-Inertia-Location')
         ->assertSessionHas('status', 'signed-out');
+
+    $location = $headers === []
+        ? $response->assertRedirect('/welcome?a=1&b=2')->headers->get('Location')
+        : $response->assertConflict()->assertHeader('X-Inertia-Location', 'http://localhost/welcome?a=1&b=2')->headers->get('X-Inertia-Location');
 
     if ($cookies !== []) {
         $response->assertCookieExpired(Auth::guard()->getRecallerName())->assertCookieExpired('remembered_session');
+        $cookies = guestCookies($response);
     }
 
     $this->assertGuest();
-    expect(session('url.intended'))->toEndWith('/welcome?a=1&b=2')
+    expect(session()->has('url.intended'))->toBeFalse()
         ->and($this->ended->all())->toBe([endedReason($reason)]);
+
+    visitAfterEnding($reason, $cookies, $location)->assertOk()->assertSee('guest signed-out');
+
+    $this->assertGuest();
+    expect($this->ended->all())->toBe([endedReason($reason)]);
 })->with('security reasons')->with([
     'a page visit' => [[]],
     'an inertia visit' => [inertiaVisit()],
 ]);
+
+// The status is for the page it's sent back to, not every page after.
+it('has the page it sends back to use up the signed-out status', function () {
+    endSessionFor('revoked');
+
+    $this->get('/welcome')->assertRedirect('/welcome')->assertSessionHas('status', 'signed-out');
+    $this->get('/welcome')->assertOk()->assertSee('guest signed-out');
+    $this->get('/welcome')->assertOk()->assertSee('guest no status');
+
+    expect($this->ended->all())->toBe(['revoked']);
+});
 
 it('sends an unlisted page to log in as before when the session ended as :dataset', function (string $reason) {
     $cookies = endSessionFor($reason);
@@ -291,13 +311,14 @@ it('has inertia load a listed page in full for :dataset', function (array $heade
         ->assertHeader('X-Inertia-Location', 'http://localhost/welcome?a=1&b=2')
         ->assertHeaderMissing('Location')
         ->assertHeader('Clear-Site-Data', '"cache", "storage"')
-        ->assertSessionMissing('status');
+        ->assertSessionHas('status', 'signed-out');
 
     $this->assertGuest();
     expect(session()->has('url.intended'))->toBeFalse()
         ->and($this->ended->all())->toBe(['revoked']);
 
-    $this->flushHeaders()->get('/welcome?a=1&b=2')->assertOk()->assertSee('guest');
+    $this->flushHeaders()->get('/welcome?a=1&b=2')->assertOk()->assertSee('guest signed-out');
+    $this->get('/welcome?a=1&b=2')->assertOk()->assertSee('guest no status');
     expect($this->ended->all())->toBe(['revoked']);
 })->with([
     'a visit' => [[]],
@@ -320,7 +341,8 @@ it('carries on as a guest when a remembered browser comes back and :dataset', fu
         ->assertRedirect('/welcome?a=1&b=2')
         ->assertHeader('Clear-Site-Data', '"cache", "storage"')
         ->assertCookieExpired(Auth::guard()->getRecallerName())
-        ->assertCookieExpired('remembered_session');
+        ->assertCookieExpired('remembered_session')
+        ->assertSessionHas('status', 'signed-out');
 
     expect($this->ended->all())->toBe([$reason]);
 
