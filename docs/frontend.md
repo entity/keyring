@@ -15,6 +15,10 @@
 - [JSON Requests](#json-requests)
 - [WebAuthn Helpers](#webauthn-helpers)
 - [Changing Routes](#changing-routes)
+- [Frontends on Another Origin](#frontends-on-another-origin)
+    - [Cookies and CSRF](#cookies-and-csrf)
+    - [Signing In Without Inertia](#signing-in-without-inertia)
+    - [Rendering on the Server](#rendering-on-the-server)
 - [Flash Messages and Alerts](#flash-messages-and-alerts)
 - [Without Inertia](#without-inertia)
 
@@ -30,7 +34,7 @@ The package is plain ES modules, so it works with any bundler. Its main entry po
 
 | Import | Contains |
 |---|---|
-| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes, and types. No framework code. |
+| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `passkeyCredential()`, `json()` and `configureRequests()`, routes, and types. No framework code. |
 | `@keyringjs/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
 | `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
@@ -351,7 +355,7 @@ The same applies to your own routes protected by `keyring:aal2` or `keyring.fres
 
 ## JSON Requests
 
-The `json(method, url, body?)` function is a small `fetch` wrapper that the helpers use. It sends `Accept: application/json`, `X-Requested-With`, and Laravel's `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`. This way, Keyring answers with JSON, and CSRF protection passes. You may use it for Keyring's other JSON routes:
+The `json(method, url, body?)` function is a small `fetch` wrapper that the helpers use. It sends `Accept: application/json`, `X-Requested-With`, and Laravel's `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`. This way, Keyring answers with JSON, and CSRF protection passes. The token only goes to the page's own origin, or to the [`baseUrl`](#frontends-on-another-origin) when you set one, never to a full URL on some other origin. You may use it for Keyring's other JSON routes:
 
 ```ts
 import { json } from '@keyringjs/keyring'
@@ -362,6 +366,8 @@ await json('PUT', '/user/password', { current_password, password, password_confi
 ```
 
 On a non-2xx response, it throws a `KeyringRequestError` with `status`, `message`, `errors` (Laravel's validation errors), and `data` (the whole body).
+
+The requests use `credentials: 'same-origin'`, which is what an application Laravel serves needs. A frontend on another origin can change that with [`configureRequests()`](#frontends-on-another-origin).
 
 ## WebAuthn Helpers
 
@@ -409,6 +415,85 @@ Keyring's own paths put a factor's key or an ID into the URL as one encoded path
 
 Update any paths your own pages link to directly, such as `/login` or `/register`.
 
+## Frontends on Another Origin
+
+By default, the package sends its requests to the page's own origin, which is right when Laravel serves the frontend. When it doesn't, such as a Nuxt or Next application on `app.example.com` calling Laravel on `api.example.com`, tell the package where Laravel is, once, at startup:
+
+```ts
+import { configureRequests } from '@keyringjs/keyring'
+
+configureRequests({
+  baseUrl: 'https://api.example.com',
+  csrfCookie: '/sanctum/csrf-cookie',
+})
+```
+
+Laravel needs setting up for this too: Sanctum's stateful API, CORS that allows credentials, a `SESSION_DOMAIN` both hosts share, and the frontend's origin for passkeys. [Headless Frontends](headless.md) covers the Laravel side.
+
+| Option | |
+|---|---|
+| `baseUrl` | Where Laravel is. Every path `json()` sends goes there, Keyring's routes and your own calls such as `json('GET', '/user/devices')` alike. It may include a path, such as `https://example.com/backend`. A full URL given to `json()` still goes where it says. It must be an absolute `http` or `https` URL without credentials, a query or a fragment, or `configureRequests()` throws a `TypeError`. `null` goes back to the page's origin. |
+| `credentials` | The `credentials` option of each `fetch`. By default it's `include` when `baseUrl` is on another origin than the page, or when there's no page, as when rendering on the server. Otherwise it's `same-origin`, as before. |
+| `csrfCookie` | A URL that sets the `XSRF-TOKEN` cookie, resolved against `baseUrl` like any path. When it's set and the cookie isn't there, `json()` fetches it before any request but a `GET`, once for requests made together. Off by default. If fetching it fails, the request throws a `KeyringRequestError` with that response's status. |
+| `fetch` | A function to call instead of the global `fetch`, taking a URL and the init and resolving to a `Response`. See [Rendering on the Server](#rendering-on-the-server). |
+
+Only the options you pass change. Passing one as `undefined` puts it back to its default.
+
+`routes` still holds paths, so `routes.login` is still `/login`, and `json()` adds `baseUrl` when it sends one. `configureRoutes()` works as before: set the `prefix` with it if you changed Keyring's, and the base URL is added in front of the prefix.
+
+### Cookies and CSRF
+
+Keyring signs users in with Laravel's session cookie, so the browser has to send that cookie to `api.example.com`. With `credentials: 'include'`, it does, as long as Laravel's CORS config has `supports_credentials` turned on and names your frontend's origin.
+
+Laravel checks a CSRF token on every request but a `GET`. Sanctum's SPA flow gets that token from `GET /sanctum/csrf-cookie`, which sets an `XSRF-TOKEN` cookie. `json()` reads that cookie from `document.cookie` and sends it back as `X-XSRF-TOKEN`. Two things follow from that:
+
+- The frontend can only read the cookie when Laravel sets it for a domain both hosts share, with `SESSION_DOMAIN=.example.com`. If the two are on unrelated domains, such as `app.com` and `api.net`, browsers treat Laravel's cookies as third-party cookies, and session sign in doesn't work. Put them on one domain, or use tokens instead.
+- Before the first `POST`, the cookie has to exist. The `csrfCookie` option fetches it for you. Without that option, fetch it yourself first:
+
+```ts
+await fetch('https://api.example.com/sanctum/csrf-cookie', { credentials: 'include' })
+```
+
+Laravel sends a fresh `XSRF-TOKEN` cookie with its responses, so once it exists, there's nothing more to do when the token changes, such as after signing in. A `419` status means the token was missing or didn't match, which usually means one of the two points above. The package doesn't depend on Sanctum: any route that sets the `XSRF-TOKEN` cookie works as `csrfCookie`.
+
+### Signing In Without Inertia
+
+The `inertia`, `vue`, and `react` entry points post with Inertia's router, so a frontend that doesn't use Inertia uses the main entry point and `json()`. `passkeyCredential()` and `isAbort()` are in the main entry point too, so a passkey sign in looks like this:
+
+```ts
+import { isAbort, json, passkeyCredential, routes } from '@keyringjs/keyring'
+
+try {
+  const credential = await passkeyCredential('passkey')
+  const answer = await json('POST', routes.loginWith('passkey'), { credential, remember: false })
+  // Sign in done, or a challenge to show next. Headless Frontends describes the answer.
+} catch (error) {
+  if (!isAbort(error)) showError(error)
+}
+```
+
+The challenge page works the same way. Run `getCredential(challenge.options)` for a passkey or security key, then post the `code` or `password` the factor needs, `trust`, the `authenticator` ID, and any `credential` to `routes.verify(purpose, factor)` with `json()`. [Headless Frontends](headless.md) describes what each of Keyring's pages answers with JSON.
+
+Some JSON answers carry a URL on Laravel's side, such as the `redirect` in a step-up `423` or `continue` after enrolling. Point those at the matching page of your frontend, rather than sending the browser to `api.example.com`. Keyring only remembers pages on its own origin to send the user back to, so your frontend keeps track of where the user was.
+
+### Rendering on the Server
+
+On the server, there's no `document`, so `json()` sends no XSRF token there and doesn't fetch `csrfCookie`. The browser's cookies aren't there either, so a request made during server rendering is a guest's unless you forward them. The simplest approach is to call the package's helpers in the browser only, such as in `onMounted` or a client-only plugin.
+
+The `fetch` option is useful for anything that's the same for every request, such as an internal URL to reach Laravel, a fixed header, or logging:
+
+```ts
+configureRequests({
+  baseUrl: 'https://api.example.com',
+  fetch: (url, init) => fetch(url, { ...init, headers: { ...init.headers, 'Accept-Language': 'en' } }),
+})
+```
+
+> [!WARNING]
+> `configureRequests()` sets one configuration for the whole JavaScript process. On a server that renders pages for many users at once, never pass a `fetch` that adds one user's cookies, since another user's render may use it. Forward cookies for a single request with your framework's own request-scoped fetch, such as Nuxt's `useRequestFetch()`, and call Keyring's routes with it directly.
+
+Don't pass Nuxt's `$fetch` or ofetch as `fetch`. They resolve to the parsed body rather than a `Response`.
+
 ## Flash Messages and Alerts
 
 Keyring's non-JSON responses flash a `status` slug to the session. JSON responses include it as `status`, along with a readable `message`. Examples include `code-sent`, `password-updated`, `device-revoked`, and `email-change-requested`. Extra data, such as new recovery codes, is flashed encrypted, so read it with `Keyring::result` rather than from the session. See [Status Responses](sign-in-flow.md#status-responses).
@@ -436,4 +521,4 @@ After a user was sent to enroll, `Keyring::result('continue')` holds the page th
 
 ## Without Inertia
 
-Without Inertia, Keyring renders Blade views named `auth.login`, `auth.challenge`, and so on, with the props passed as view data. You may write those views yourself, or point pages anywhere you like with [`Keyring::page`](sign-in-flow.md#pages). The browser package's WebAuthn and enrollment helpers work without Inertia. The challenge helpers and the `vue` and `react` entry points do need it.
+Without Inertia, Keyring renders Blade views named `auth.login`, `auth.challenge`, and so on, with the props passed as view data. You may write those views yourself, or point pages anywhere you like with [`Keyring::page`](sign-in-flow.md#pages). The browser package's WebAuthn, enrollment, session, and passkey sign in helpers work without Inertia. The challenge helpers and the `vue` and `react` entry points do need it. A frontend that Laravel doesn't serve at all is covered in [Frontends on Another Origin](#frontends-on-another-origin).
