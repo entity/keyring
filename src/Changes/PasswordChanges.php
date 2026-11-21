@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
 use Keyring\Risk\RiskLocks;
@@ -86,7 +87,7 @@ class PasswordChanges
         $this->throttle->clearAccount($user);
 
         if ($signOutOthers) {
-            $this->sessions->signOutEverywhere($user, except: $currentSession);
+            $this->sessions->because(SessionEndReason::PasswordChanged, fn () => $this->sessions->signOutEverywhere($user, except: $currentSession));
         }
 
         PasswordChanged::dispatch($user);
@@ -108,7 +109,7 @@ class PasswordChanges
     public function reset(Authenticatable&Model $user, Closure $save, #[\SensitiveParameter] ?string $new = null): void
     {
         $this->save($user, $save, new: $new, keepHold: true);
-        $this->sessions->signOutEverywhere($user);
+        $this->sessions->because(SessionEndReason::PasswordReset, fn () => $this->sessions->signOutEverywhere($user));
         $this->locks->unlock($user);
         $this->throttle->clearAccount($user);
 

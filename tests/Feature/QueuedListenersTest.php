@@ -7,13 +7,14 @@ use Illuminate\Queue\Jobs\SyncJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\Authenticated;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Events\RememberMeReused;
 use Keyring\Events\SessionResumed;
 use Keyring\Login\Attempt;
@@ -47,17 +48,8 @@ beforeEach(function () {
     $this->user = taylor();
 
     // The database queue, so a queued listener's job sits in a table where
-    // the test can read what it holds.
+    // the test can read what it holds (jobs, a test migration).
     config(['queue.default' => 'database']);
-    Schema::create('jobs', function ($table) {
-        $table->id();
-        $table->string('queue');
-        $table->longText('payload');
-        $table->unsignedTinyInteger('attempts');
-        $table->unsignedInteger('reserved_at')->nullable();
-        $table->unsignedInteger('available_at');
-        $table->unsignedInteger('created_at');
-    });
 });
 
 /**
@@ -216,6 +208,35 @@ it('queues a reused "remember me" cookie\'s ended session with its handle in pla
         ->and($event->session)->toEqual($seen[0]->session->withoutIds())
         ->and($event->handle)->toBe($seen[0]->handle)
         ->and($event->handle)->toBe(app(Sessions::class)->handle($record));
+});
+
+it('queues an ended session by its handle, without any of its registry IDs', function () {
+    Event::listen(RegisteredSessionEnded::class, QueuedKeyringListener::class);
+    $seen = [];
+    Event::listen(function (RegisteredSessionEnded $event) use (&$seen) {
+        $seen[] = $event;
+    });
+
+    // A session "remember me" carried on, so its record has one it replaced
+    // and one it started on.
+    [$signedIn, $resumed] = signInAndResume();
+    $record = app(SessionRegistry::class)->find($resumed['remembered_session']);
+
+    browser($resumed)->post('/logout')->assertRedirect();
+
+    $command = queuedCommand(RegisteredSessionEnded::class);
+
+    expect($seen)->toHaveCount(1)
+        ->and($command)->not->toContain($record->id)
+        ->and($command)->not->toContain($signedIn['remembered_session']);
+
+    expectNoRegistryIds($command);
+
+    $event = queuedEvent(RegisteredSessionEnded::class);
+
+    expect($event)->toEqual($seen[0])
+        ->and($event->handle)->toBe(app(Sessions::class)->handle($record))
+        ->and($event->reason)->toBe(SessionEndReason::LoggedOut);
 });
 
 dataset('session events', [

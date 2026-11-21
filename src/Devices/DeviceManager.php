@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\DeviceRevoked;
 use Keyring\Features;
 use Keyring\KeyringManager;
@@ -19,6 +20,7 @@ use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Cookies;
 use Keyring\Support\Duration;
+use Throwable;
 
 /**
  * Recognises devices by a long-lived, httpOnly cookie (stored hashed), with
@@ -127,7 +129,7 @@ class DeviceManager
             ->pluck('id');
 
         foreach ($oldest as $id) {
-            $this->sessions->revokeDevice($user, $id);
+            $this->sessions->because(SessionEndReason::DeviceLimit, fn () => $this->sessions->revokeDevice($user, $id));
         }
 
         $this->keyring->deviceModel()::query()->whereKey($oldest->all())->delete();
@@ -163,7 +165,18 @@ class DeviceManager
         $device->forceFill(['revoked_at' => now(), 'trusted_until' => null])->save();
 
         if ($user = $device->owner()) {
-            $this->sessions->revokeDevice($user, $device->id);
+            // The token is cycled even when the registry fails part way, so
+            // no "remember me" cookie brings a session on the device back.
+            // The registry's failure is the one thrown, so a deadlock still
+            // reaches a transaction of the app's that would retry it.
+            try {
+                $this->sessions->because($reported ? SessionEndReason::DeviceReported : SessionEndReason::DeviceRevoked, fn () => $this->sessions->revokeDevice($user, $device->id));
+            } catch (Throwable $e) {
+                rescue(fn () => $this->sessions->cycleRememberToken($user));
+
+                throw $e;
+            }
+
             $this->sessions->cycleRememberToken($user);
 
             DeviceRevoked::dispatch($user, $device, $reported);

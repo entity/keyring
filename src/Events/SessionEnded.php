@@ -18,7 +18,9 @@ class SessionEnded
     use Dispatchable, SerializesModels;
 
     /**
-     * @param  'revoked'|'expired'|'idle'|'other_user'|'reused'|'risk'|'not_allowed'  $reason
+     * Keyring's own reasons are 'revoked', 'expired', 'idle', 'other_user',
+     * 'reused', 'risk' and 'not_allowed'. A subclass of the session
+     * middleware may sign out for one of its own.
      */
     public function __construct(
         public readonly Authenticatable $user,

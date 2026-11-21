@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Devices\DeviceManager;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -45,7 +46,7 @@ class DeviceController
         $this->devices->revoke($device);
 
         if ($current) {
-            $signIn->out($request);
+            $this->sessions->because(SessionEndReason::DeviceRevoked, fn () => $signIn->out($request));
 
             return $this->status('device-revoked', redirect: route('login'));
         }

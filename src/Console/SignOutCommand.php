@@ -12,6 +12,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\SessionEndReason;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Facades\Keyring;
 use Keyring\Sessions\Sessions;
@@ -77,7 +78,7 @@ class SignOutCommand extends Command
         }
 
         $user = $found->sole();
-        $count = $sessions->signOutEverywhere($user);
+        $count = $sessions->because(SessionEndReason::SignedOutEverywhere, fn () => $sessions->signOutEverywhere($user));
 
         SessionsRevoked::dispatch($user, $count);
 
