@@ -315,6 +315,8 @@ Some things are only judged on the browser's own requests, so `stillSignedIn` do
 - [`sessions.end_on_lapse`](#ending-a-session-with-its-level), [risk locks](risk.md#actions), and the risk signals that run on each request. A session that one of these ends stays `true` until its browser's next request.
 - The session's [assurance level](policies.md#assurance-levels). `true` says the user is signed in, not how strongly.
 
+It can't see Laravel's own session either, because no request comes back to say it has ended. A session that isn't remembered is over once Laravel's session is (past `session.lifetime`, or on `expire_on_close`), but its record stays good until it [idles out](#timeouts), so `stillSignedIn` keeps answering `true` until then. With `sessions.idle` at `null`, that's when it hits `absolute`, 30 days by default. Keep `idle` no longer than `session.lifetime` if the answer shouldn't outlast Laravel's session. Even then, with `expire_on_close` or a browser that drops its cookies, it can answer `true` for up to `idle` after the browser has gone.
+
 It needs an Eloquent user, and returns `false` for any other. And where registration hides who has an account, a user who hasn't verified their email address can only be signed in from the browser that followed the verification link. Asked from any other request, such as a server-to-server call, `stillSignedIn` answers `false` for them.
 
 Keep the handle, not the registry ID. The ID is what the "remember me" cookie carries, so it must never leave the server.

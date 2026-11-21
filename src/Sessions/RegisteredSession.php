@@ -52,7 +52,9 @@ final readonly class RegisteredSession
 
     /**
      * The ID of the record this session started on, which every record it
-     * moves to keeps.
+     * moves to keeps. It's a registry ID: on a remembered session that
+     * hasn't moved, it's the value of the "remember me" cookie. Keep it on
+     * the server, and use Sessions::handle() anywhere else.
      */
     public function origin(): string
     {

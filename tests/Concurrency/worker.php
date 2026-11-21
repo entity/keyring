@@ -118,6 +118,7 @@ try {
             return app(Sessions::class)->endLatest(User::findOrFail($session->userId), $session)?->id;
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
+        'revoke' => app(SessionRegistry::class)->revoke($id)?->id,
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
         'cache-replace-paused' => (function () use ($id) {
             // Moves a session on the cache driver, and stops between adding

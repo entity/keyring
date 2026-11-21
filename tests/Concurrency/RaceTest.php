@@ -349,6 +349,19 @@ it('signs out a session that moved to a new record while everyone was being sign
         ->and($registry->forUser($user))->toBeEmpty();
 });
 
+// The record is read with a lock, so the second waits for the first, then
+// finds it revoked: only one of them is given it.
+it('gives a record two revokes reach at once to one of them', function () {
+    $user = taylor();
+    $now = now()->getTimestamp();
+    app(SessionRegistry::class)->save(new RegisteredSession('phone', (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+    $results = contend(sessionRow('phone'), [['revoke', 'phone'], ['revoke', 'phone']]);
+
+    expect(outcomes($results, 'phone'))->toBe(1)
+        ->and(outcomes($results, null))->toBe(1);
+});
+
 // The records are read with a lock, so of two at once the second waits for
 // the first, then finds them revoked: each is reported once, by one of them.
 it('reports every record two sign-outs at once revoke, once between them', function () {
