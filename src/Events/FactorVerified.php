@@ -6,7 +6,6 @@ namespace Keyring\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Arr;
 use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -37,12 +36,9 @@ class FactorVerified
             return $this->serializeModels();
         }
 
-        // A password has no stored authenticator, so queued by its ID it
-        // couldn't be found again. It's kept as it is instead, without the
-        // user loaded with it or a secret.
-        $authenticator = $this->authenticator->newInstance()
-            ->setRawAttributes(Arr::except($this->authenticator->getAttributes(), ['secret']), sync: true);
-
-        return [...$this->serializeModels(), 'authenticator' => $authenticator];
+        // An unsaved authenticator, such as the password's, couldn't be
+        // found again by its ID. It's kept as it is instead, without its
+        // secret or the user loaded with it.
+        return [...$this->serializeModels(), 'authenticator' => $this->authenticator->forQueue()];
     }
 }
