@@ -319,8 +319,16 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      * their columns being gone: the migration was rolled back after this
      * process, or the cache, found them. What the cache said is forgotten,
      * so the retry asks the database again. A sign-out never fails for the
-     * sweep's sake. The first try was rolled back, to a savepoint inside a
-     * caller's transaction, so nothing of it is left.
+     * sweep's sake.
+     *
+     * Inside a caller's transaction the first try is a savepoint of its own,
+     * so its failure rolls back only that try: on PostgreSQL a failed
+     * statement aborts the whole transaction, and the retry, and whatever
+     * the caller does next, would be refused. Outside one, revoke() and
+     * revokeFound() roll back their own transaction, and revokeEveryone()
+     * fails on its first update, which names the columns, before it has
+     * written anything. It isn't put in a transaction there: its rounds
+     * would then hold every row they revoke until the last.
      *
      * @template TResult
      *
@@ -330,7 +338,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     protected function noting(Closure $revoke): mixed
     {
         try {
-            return $revoke();
+            return $this->connection->transactionLevel() > 0 ? $this->connection->transaction($revoke) : $revoke();
         } catch (QueryException $e) {
             if ($this->notes !== true || ! $this->lostColumns($e)) {
                 throw $e;
