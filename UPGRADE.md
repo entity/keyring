@@ -66,7 +66,7 @@ If a subclass of `Keyring\Http\Middleware\AuthenticateSession` overrides `signOu
 The contract's methods mark the parameters that hold a registry ID with `#[\SensitiveParameter]`. A driver without the attribute still works, but its stack traces show those IDs. Adding it is recommended.
 ### Published Config
 
-If you published `config/keyring.php`, you may add `'continue_as_guest' => []` to `sessions`. Leaving it out is the same as an empty list.
+If you published `config/keyring.php`, you may add `'continue_as_guest' => []` to `sessions` and `'unlisted' => []` to `security_log`. Leaving either out is the same as an empty list.
 
 ### Guests on Step-Up Routes
 
