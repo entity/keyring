@@ -405,7 +405,7 @@ it('signs out on the next request when ending an expired session fails, without 
     {
         public bool $failed = false;
 
-        public function revoke(string $id): void
+        public function revoke(string $id): ?RegisteredSession
         {
             if (! $this->failed) {
                 $this->failed = true;
@@ -413,7 +413,7 @@ it('signs out on the next request when ending an expired session fails, without 
                 throw new RuntimeException('The database went away.');
             }
 
-            parent::revoke($id);
+            return parent::revoke($id);
         }
     });
     config(['keyring.sessions.driver' => 'flaky']);
