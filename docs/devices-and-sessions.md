@@ -580,7 +580,9 @@ The events are in `Keyring\Events`:
 | `DeviceRevoked` | `user`, `device`, `reported` (whether it came from the "this wasn't me" link) |
 | `SessionsRevoked` | `user`, `count`. After signing out everywhere else, ending one session, an administrator's `keyring:sign-out` for one user, or the first request refused for an account the application keeps out. |
 | `SessionEnded` | `user`, `reason` (`revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed`) |
-| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
-| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as) |
+| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended), `handle` |
+| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as), `handle` |
 | `AccessRefused` | `user`, `resource` (`device`), `id`. A request to sign out a device that isn't the user's, answered with a 404. |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`). A "this wasn't me" link that was refused. |
+
+`handle` is the session's [handle](#listing-and-ending-sessions). A listener in the request sees the record's registry ID as well, but it's the value of the "remember me" cookie, so a queued listener gets the record with a blank `id` and a null `replacedBy`, and has only the handle to go by.

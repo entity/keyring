@@ -262,7 +262,7 @@ class AuthenticateSession
 
         $this->assurance->touch();
 
-        SessionResumed::dispatch($user, $current->with(['deviceId' => $device->id ?? $current->deviceId]));
+        SessionResumed::dispatch($user, $current->with(['deviceId' => $device->id ?? $current->deviceId]), $this->sessions->handle($current));
 
         if ($device?->wasRecentlyCreated) {
             NewDeviceSignedIn::dispatch($user, $device);
@@ -288,7 +288,7 @@ class AuthenticateSession
         // Null when it had already ended some other way: there's nothing
         // left to end.
         if ($current = $this->sessions->endLatest($user, $session)) {
-            RememberMeReused::dispatch($user, $current);
+            RememberMeReused::dispatch($user, $current, $this->sessions->handle($current));
         }
 
         return $this->signOut($request, 'reused');

@@ -24,7 +24,11 @@ Event::listen(function (Authenticated $event) {
 
 The `user` property is always an instance of your user model. Keyring fires events whether or not a feature that reacts to them is turned on. The [security log](security-log-and-emails.md) and the [security emails](security-log-and-emails.md#security-emails) are listeners for these same events, so your own listeners don't need either one.
 
-No event has a password, code, or token among its properties. However, `Attempting`, `FactorFailed`, and `Lockout` do carry the request as it arrived, including whatever the user typed. Don't log or serialise that request in full, and don't queue a listener for those three events.
+No event has a password, code, or token among its properties. The exceptions are `Attempting`, `FactorFailed`, and `Lockout`, which carry the request as it arrived, including whatever the user typed. Don't log or serialise that request in full, and don't queue a listener for those three events.
+
+The other events don't put a password hash, a secret, or a "remember me" value on your queue. A queued listener gets the `user` back from the database by its ID, as with any Laravel event that uses `SerializesModels`. An `attempt` is queued as its plain data and looks its user up again when you call `user()`. `AuthenticatorRemoved` queues the deleted authenticator without its `secret`. `FactorChallenged` and `FactorVerified` queue their `authenticator` by its ID, so for a password, which has no stored authenticator, a queued listener can't get it back and the job fails.
+
+`SessionResumed` and `RememberMeReused` carry a `RegisteredSession` whose `id` is the ["remember me" cookie](devices-and-sessions.md#remember-me)'s value. A listener in the request sees it, but a queued listener gets the record with a blank `id` and a null `replacedBy`. Both events carry the session's `handle` as well, the same one the [sessions list](devices-and-sessions.md#listing-and-ending-sessions) shows, so use that to tell sessions apart. `Sessions::find($user, $handle)` turns it back into the session while it's still active. Only serialising the event leaves the ID out. Anything that reads the event's properties directly, such as Telescope's event watcher or a `dump()` or `json_encode()` of the event, still sees it.
 
 ## Signing In and Confirming
 
@@ -50,8 +54,8 @@ No event has a password, code, or token among its properties. However, `Attempti
 | `DeviceRevoked` | A device was signed out. | `user`, `device`, `reported` (true when it came from the "this wasn't me" link) |
 | `SessionsRevoked` | Sessions were signed out. This happens with "sign out everywhere else", when one session is ended from the sessions list, when an administrator runs `keyring:sign-out` for the user, or on the first request refused for an account [the application keeps out](sign-in-flow.md#who-may-sign-in). | `user`, `count` |
 | `SessionEnded` | Keyring signed a session out on its own. | `user`, `reason`: `revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed` |
-| `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved. | `user`, `session` (the `RegisteredSession` it carries on as) |
-| `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). This means two browsers held the same cookies, so the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended. Its device, IP address, and user agent belong to whoever used the cookie first.) |
+| `SessionResumed` | ["Remember me"](devices-and-sessions.md#remember-me) signed a browser back in after its session had gone unused. Nothing was proved. | `user`, `session` (the `RegisteredSession` it carries on as), `handle` (the session's handle) |
+| `RememberMeReused` | A ["remember me" cookie was used twice](devices-and-sessions.md#a-cookie-used-twice). This means two browsers held the same cookies, so the session was ended for both. | `user`, `session` (the `RegisteredSession` that was ended. Its device, IP address, and user agent belong to whoever used the cookie first.), `handle` (the session's handle) |
 
 A user who signs out on purpose triggers `LoggedOut`, not `SessionEnded`. The request that brought a used cookie also gets a `SessionEnded` with `reused`. `RememberMeReused` fires once, and only when there was still a session to end. See [Devices & Sessions](devices-and-sessions.md#events).
 

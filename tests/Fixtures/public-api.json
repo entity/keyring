@@ -595,6 +595,7 @@
             "user"
         ],
         "Keyring\\Events\\RememberMeReused": [
+            "handle",
             "session",
             "user"
         ],
@@ -609,6 +610,7 @@
             "user"
         ],
         "Keyring\\Events\\SessionResumed": [
+            "handle",
             "session",
             "user"
         ],

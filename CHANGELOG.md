@@ -1,5 +1,15 @@
 # Release Notes
 
+## Unreleased
+
+### Security
+
+- A queued listener for `SessionResumed` or `RememberMeReused` no longer puts the session's registry ID on the queue. That ID is the value of the "remember me" cookie, so for `SessionResumed` it was a live one. Queued, the session's record now has a blank `id` and no `replacedBy`, and both events carry the session's `handle` to go by instead, the same one the sessions list shows. Listeners in the request see the record as before.
+- Queueing a listener for an event that carries a sign in or step-up (`Authenticated`, `Confirmed`, `FactorChallenged`, `FactorVerified`, `VerificationRefused`) no longer puts the user's password hash and remember token on the queue. The attempt is queued as the plain data it keeps in the session and looks its user up again when asked.
+- `AuthenticatorRemoved` now queues the user by ID like every other event, and the removed authenticator without its secret.
+
+See the [upgrade guide](UPGRADE.md) before you deploy this with jobs still on the queue.
+
 ## v0.2.0 - 2026-11-20
 
 ### Rate Limits and Risk

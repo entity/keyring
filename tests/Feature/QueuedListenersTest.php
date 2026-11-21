@@ -1,0 +1,322 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\Jobs\SyncJob;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
+use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
+use Keyring\Enums\Purpose;
+use Keyring\Events\Authenticated;
+use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\RememberMeReused;
+use Keyring\Events\SessionResumed;
+use Keyring\Login\Attempt;
+use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
+use Keyring\Models\Authenticator;
+use Keyring\Risk\Finding;
+use Keyring\Risk\Risk;
+use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\User;
+
+/**
+ * A listener the application queues. What it's handed is whatever the
+ * event became after a trip through the queue's payload.
+ */
+final class QueuedKeyringListener implements ShouldQueue
+{
+    /** @var list<object> */
+    public static array $handled = [];
+
+    public function handle(object $event): void
+    {
+        self::$handled[] = $event;
+    }
+}
+
+beforeEach(function () {
+    Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
+    $this->freezeSecond();
+    $this->user = taylor();
+
+    // The database queue, so a queued listener's job sits in a table where
+    // the test can read what it holds.
+    config(['queue.default' => 'database']);
+    Schema::create('jobs', function ($table) {
+        $table->id();
+        $table->string('queue');
+        $table->longText('payload');
+        $table->unsignedTinyInteger('attempts');
+        $table->unsignedInteger('reserved_at')->nullable();
+        $table->unsignedInteger('available_at');
+        $table->unsignedInteger('created_at');
+    });
+});
+
+/**
+ * Sign in with "remember me" ticked, then come back after Laravel's own
+ * session has gone, so "remember me" resumes it.
+ *
+ * @return array{0: array<string, string>, 1: array<string, string>} the cookies from the sign in, and from coming back
+ */
+function signInAndResume(string $agent = FIREFOX): array
+{
+    test()->flushSession();
+    $signedIn = keptCookies(browser(agent: $agent)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true])->assertRedirect());
+
+    test()->travel(3)->hours();
+    test()->flushSession();
+    $back = browser($signedIn, $agent)->get('/home')->assertOk();
+
+    return [$signedIn, [...$signedIn, ...keptCookies($back)]];
+}
+
+/**
+ * The payload of the job queued for an event, as it's stored.
+ */
+function queuedPayload(string $event): string
+{
+    $payloads = DB::table('jobs')->pluck('payload')
+        ->filter(fn (string $payload) => str_contains(json_decode($payload, true)['data']['command'], $event));
+
+    expect($payloads)->toHaveCount(1);
+
+    return $payloads->sole();
+}
+
+/**
+ * The serialised job queued for an event, unescaped from the payload's JSON.
+ */
+function queuedCommand(string $event): string
+{
+    return json_decode(queuedPayload($event), true)['data']['command'];
+}
+
+/**
+ * The event a queue worker hands the listener, once it has run the job.
+ *
+ * @template T of object
+ *
+ * @param  class-string<T>  $event
+ * @return T
+ */
+function queuedEvent(string $event): object
+{
+    QueuedKeyringListener::$handled = [];
+
+    new SyncJob(app(), queuedPayload($event), 'database', 'default')->fire();
+
+    expect(QueuedKeyringListener::$handled)->toHaveCount(1)
+        ->and(QueuedKeyringListener::$handled[0])->toBeInstanceOf($event);
+
+    return QueuedKeyringListener::$handled[0];
+}
+
+it('queues a resumed session with its handle in place of its registry ID', function () {
+    Event::listen(SessionResumed::class, QueuedKeyringListener::class);
+    $seen = [];
+    Event::listen(function (SessionResumed $event) use (&$seen) {
+        $seen[] = $event;
+    });
+
+    [$signedIn, $resumed] = signInAndResume();
+    $live = $resumed['remembered_session'];
+    $record = app(SessionRegistry::class)->find($live);
+    $sessions = app(Sessions::class);
+
+    // A listener in the request sees the record as it is.
+    expect($seen)->toHaveCount(1)
+        ->and($seen[0]->session->id)->toBe($live)
+        ->and($seen[0]->handle)->toBe($sessions->handle($record));
+
+    // Neither the live ID nor the one it replaced is anywhere in the job.
+    $command = queuedCommand(SessionResumed::class);
+
+    expect($live)->toBe(session(Sessions::KEY))
+        ->and($command)->not->toContain($live)
+        ->and($command)->not->toContain($signedIn['remembered_session']);
+
+    // The listener gets the user back, the rest of the record, and a handle
+    // that finds the session.
+    $event = queuedEvent(SessionResumed::class);
+
+    expect($event->user)->toBeInstanceOf(User::class)
+        ->and($event->user->is($this->user))->toBeTrue()
+        ->and($event->session)->toEqual($record->with(['id' => '', 'replacedBy' => null]))
+        ->and($event->handle)->toBe($sessions->handle($record))
+        ->and($sessions->find($event->user, $event->handle))->toEqual($record);
+});
+
+it('queues a reused "remember me" cookie\'s ended session with its handle in place of its registry ID', function () {
+    Event::listen(RememberMeReused::class, QueuedKeyringListener::class);
+    $seen = [];
+    Event::listen(function (RememberMeReused $event) use (&$seen) {
+        $seen[] = $event;
+    });
+
+    // A copy of the cookies is used first, in another browser, then the
+    // owner's browser sends them again.
+    test()->flushSession();
+    $cookies = keptCookies(browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true])->assertRedirect());
+
+    test()->flushSession();
+    $copy = keptCookies(browser($cookies, CHROME)->get('/home')->assertOk());
+    $ended = session(Sessions::KEY);
+
+    $this->travel(10)->seconds();
+    test()->flushSession();
+    browser($cookies)->get('/home')->assertRedirect('/login');
+
+    $record = app(SessionRegistry::class)->find($ended);
+    $command = queuedCommand(RememberMeReused::class);
+
+    expect($record->revokedAt)->not->toBeNull()
+        ->and($seen)->toHaveCount(1)
+        ->and($seen[0]->session->id)->toBe($ended)
+        ->and($command)->not->toContain($ended)
+        ->and($command)->not->toContain($copy['remembered_session'])
+        ->and($command)->not->toContain($cookies['remembered_session']);
+
+    // The session has ended, so Sessions::find() no longer leads to it, but
+    // the handle is still the one its pages showed.
+    $event = queuedEvent(RememberMeReused::class);
+
+    expect($event->user->is($this->user))->toBeTrue()
+        ->and($event->session)->toEqual($seen[0]->session->with(['id' => '', 'replacedBy' => null]))
+        ->and($event->handle)->toBe($seen[0]->handle)
+        ->and($event->handle)->toBe(app(Sessions::class)->handle($record));
+});
+
+it('fills in the handle of a session event dispatched without one', function () {
+    $record = new RegisteredSession(
+        id: str_repeat('a', 40), userId: (string) $this->user->id, userType: RegisteredSession::typeOf($this->user), guard: 'web',
+        deviceId: null, assurance: Assurance::None, ip: null, userAgent: null,
+        authenticatedAt: 0, lastActivityAt: 0, expiresAt: 0, replacedBy: str_repeat('b', 40),
+    );
+
+    $event = unserialize(serialize(new SessionResumed($this->user, $record)));
+
+    expect(serialize(new SessionResumed($this->user, $record)))->not->toContain(str_repeat('a', 40))->not->toContain(str_repeat('b', 40))
+        ->and($event->session->id)->toBe('')
+        ->and($event->session->replacedBy)->toBeNull()
+        ->and($event->handle)->toBe(app(Sessions::class)->handle($record));
+});
+
+it('queues a sign in without the user\'s password hash or remember token', function () {
+    Event::listen(Authenticated::class, QueuedKeyringListener::class);
+
+    test()->flushSession();
+    browser()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password', 'remember' => true])->assertRedirect();
+
+    $user = $this->user->fresh();
+    $command = queuedCommand(Authenticated::class);
+
+    expect($user->remember_token)->not->toBeEmpty()
+        ->and($command)->not->toContain($user->getAuthPassword())
+        ->and($command)->not->toContain($user->remember_token);
+
+    // The attempt looks its user up again when it's asked for.
+    $event = queuedEvent(Authenticated::class);
+
+    expect($event->user->is($user))->toBeTrue()
+        ->and($event->attempt->purpose)->toBe(Purpose::Login)
+        ->and($event->attempt->user()->is($user))->toBeTrue()
+        ->and($event->attempt->keyring()->all()->pluck('factor')->all())->toContain('password');
+});
+
+it('serialises an attempt as the same plain data it keeps in the session', function () {
+    $user = $this->user->fresh();
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+    $attempt = Attempt::start(Purpose::Confirm, $user, remember: true, requirement: Requirement::aal2(), verifications: [
+        new Verification(factor: 'password', authenticator: null, categories: [Category::Knowledge], at: now()->getTimestamp()),
+    ]);
+    $attempt->record(Verification::of($totp));
+    $attempt->present($totp);
+    $attempt->put('webauthn', 'options', '{}');
+    $attempt->resolveDevice('device-1');
+    $attempt->risk = new Risk([new Finding('new_device', 20, 'A device the account has not used.')]);
+    $attempt->trustDevice = true;
+    $attempt->stepUp = true;
+    $attempt->exhausted = true;
+    $attempt->keyring();
+
+    $serialised = serialize($attempt);
+    $copy = unserialize($serialised);
+
+    expect($serialised)->not->toContain($user->getAuthPassword())
+        ->and($copy->toArray())->toBe($attempt->toArray())
+        ->and($copy->verifications)->toEqual($attempt->verifications)
+        ->and($copy->requirement)->toEqual($attempt->requirement)
+        ->and($copy->risk)->toEqual($attempt->risk)
+        ->and($copy->complete)->toBeTrue()
+        ->and($copy->presented('totp'))->toBe($totp->id)
+        ->and($copy->user()->is($user))->toBeTrue()
+        ->and($copy->user())->not->toBe($user);
+});
+
+it('queues a removed authenticator without its secret or the user\'s password hash', function () {
+    Event::listen(AuthenticatorRemoved::class, QueuedKeyringListener::class);
+
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $secret = $totp->secret;
+    $stored = $totp->getAttributes()['secret'];
+    $totp->load('authenticatable');
+    $totp->delete();
+
+    AuthenticatorRemoved::dispatch($this->user, $totp);
+
+    $command = queuedCommand(AuthenticatorRemoved::class);
+
+    expect($command)->not->toContain($stored)
+        ->and($command)->not->toContain($secret)
+        ->and($command)->not->toContain($this->user->getAuthPassword());
+
+    // The user comes back from the database. The authenticator is deleted,
+    // so it comes as it was, less its secret.
+    $event = queuedEvent(AuthenticatorRemoved::class);
+
+    expect($event->user->is($this->user))->toBeTrue()
+        ->and($event->authenticator->id)->toBe($totp->id)
+        ->and($event->authenticator->name)->toBe($totp->name)
+        ->and($event->authenticator->factor)->toBe('totp')
+        ->and($event->authenticator->secret)->toBeNull()
+        ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse()
+        ->and($totp->secret)->toBe($secret);
+});
+
+it('queues a removed authenticator without a secret it saved before it was deleted', function () {
+    Event::listen(AuthenticatorRemoved::class, QueuedKeyringListener::class);
+
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $before = $totp->getAttributes()['secret'];
+
+    // The same instance has its secret changed and saved, then is deleted,
+    // so Eloquent still remembers both values on it.
+    $totp->secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+    $totp->save();
+    $after = $totp->getAttributes()['secret'];
+    $totp->delete();
+
+    AuthenticatorRemoved::dispatch($this->user, $totp);
+
+    $command = queuedCommand(AuthenticatorRemoved::class);
+
+    expect($before)->not->toBe($after)
+        ->and($command)->not->toContain($before)
+        ->and($command)->not->toContain($after)
+        ->and($command)->not->toContain('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP');
+
+    $event = queuedEvent(AuthenticatorRemoved::class);
+
+    expect($event->authenticator->id)->toBe($totp->id)
+        ->and($event->authenticator->exists)->toBeFalse()
+        ->and($event->authenticator->getChanges())->toBe([])
+        ->and($event->authenticator->getOriginal())->not->toHaveKey('secret');
+});
