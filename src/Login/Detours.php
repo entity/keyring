@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Login;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Uri;
@@ -105,6 +106,8 @@ class Detours
 
         $saved = $request->session()->pull($key);
         $user = $this->keyring->guard()->user();
+        // Only an Eloquent user has authenticators to meet a requirement with.
+        $model = $user instanceof Model ? $user : null;
 
         if (! is_array($saved) || ! $user instanceof Authenticatable) {
             return null;
@@ -127,11 +130,11 @@ class Detours
 
         $requirement = $this->requirementIn($saved['requirement']);
 
-        if ($requirement === null) {
+        if ($requirement === null || $model === null) {
             return null;
         }
 
-        if ($this->keyring->for($user)->withoutFallbacks()->canMeet($requirement)) {
+        if ($this->keyring->for($model)->withoutFallbacks()->canMeet($requirement)) {
             return $url;
         }
 
