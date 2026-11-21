@@ -7,7 +7,6 @@ use Illuminate\Queue\Jobs\SyncJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Schema;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
@@ -49,17 +48,8 @@ beforeEach(function () {
     $this->user = taylor();
 
     // The database queue, so a queued listener's job sits in a table where
-    // the test can read what it holds.
+    // the test can read what it holds (jobs, a test migration).
     config(['queue.default' => 'database']);
-    Schema::create('jobs', function ($table) {
-        $table->id();
-        $table->string('queue');
-        $table->longText('payload');
-        $table->unsignedTinyInteger('attempts');
-        $table->unsignedInteger('reserved_at')->nullable();
-        $table->unsignedInteger('available_at');
-        $table->unsignedInteger('created_at');
-    });
 });
 
 /**
