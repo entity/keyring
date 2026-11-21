@@ -46,6 +46,10 @@
 
 - `StepUp` makes the decisions for the `keyring` and `keyring.fresh` middleware, and its constructor also takes a `DeviceManager`. What `keyring.fresh` asks for is `StepUp::freshRequirement()`, no longer the middleware's own `requirement()`. See the upgrade guide.
 
+### Browser Package
+
+- `@keyringjs/keyring` 0.1.1. `confirmEnrollment()` and `enroll()` include `continue` in their return type, for the page the user was going to before they were sent to enroll.
+
 ### Security
 
 - A queued listener for `SessionResumed` or `RememberMeReused` no longer puts the session's registry ID on the queue. That ID is the value of the "remember me" cookie, so for `SessionResumed` it was a live one. Queued, the session's record now has a blank `id` and no `replacedBy` or `origin`, and both events always carry the session's `handle` to go by instead, the same one the sessions list shows. Listeners in the request see the record as before.
