@@ -54,9 +54,7 @@ class StepUp
      * so a confirm in two steps only meets moments up to its first step. A
      * moment that moves on with every request can send them round forever.
      *
-     * @throws AuthenticationException when $since is given and nobody is
-     *                                 signed in to Keyring's guard; a level
-     *                                 alone is judged from the session
+     * @throws AuthenticationException when nobody is signed in to Keyring's guard
      * @throws InvalidArgumentException when nothing is asked, the level is
      *                                  none, or $since is further in the
      *                                  future than CLOCK_LEEWAY
@@ -76,7 +74,7 @@ class StepUp
      * user to enroll. For a request that must not show anything, such as an
      * OpenID Connect prompt=none, which answers login_required instead.
      *
-     * @throws AuthenticationException for a guest
+     * @throws AuthenticationException when nobody is signed in to Keyring's guard
      * @throws InvalidArgumentException as unlessMet() does
      */
     public function meets(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): bool
@@ -256,7 +254,7 @@ class StepUp
      * Whether the session has reached the level, and what still counts
      * toward it meets the requirement.
      *
-     * @throws AuthenticationException for a guest
+     * @throws AuthenticationException when nobody is signed in to Keyring's guard
      */
     protected function reached(Assurance $level, Requirement $requirement): bool
     {

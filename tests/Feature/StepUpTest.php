@@ -1148,6 +1148,7 @@ describe('asking from a controller', function () {
                 $level = in_array('aal2', explode(' ', $validated['acr_values'] ?? ''), true) ? Assurance::AAL2 : null;
                 $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
                 $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
+                $silent = in_array('none', explode(' ', $validated['prompt'] ?? ''), true);
 
                 $hash = hash('sha256', json_encode([
                     $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
@@ -1159,7 +1160,7 @@ describe('asking from a controller', function () {
                 $stored = $flow === null ? null : $flows->get($flow);
                 $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
 
-                if (($freshProof || $maxAge !== null) && $started === null) {
+                if (($freshProof || $maxAge !== null) && ! $silent && $started === null) {
                     $flow = Str::random(40);
                     $request->session()->put('oidc.flows', [
                         ...$flows->sortByDesc('at')->take(4)->all(),
@@ -1169,19 +1170,29 @@ describe('asking from a controller', function () {
                     return redirect($request->fullUrlWithQuery(['flow' => $flow]));
                 }
 
+                if ($silent && Keyring::guard()->guest()) {
+                    return 'login_required';
+                }
+
                 if (Keyring::guard()->guest()) {
                     throw new AuthenticationException(guards: [config('keyring.guard')]);
                 }
 
+                $arrived = $started ?? now()->getTimestamp();
+
                 $since = match (true) {
-                    $freshProof => Carbon::createFromTimestamp($started),
-                    $maxAge !== null => Carbon::createFromTimestamp(min($started, now()->getTimestamp() - $maxAge)),
+                    $freshProof => Carbon::createFromTimestamp($arrived),
+                    $maxAge !== null => Carbon::createFromTimestamp(min($arrived, now()->getTimestamp() - $maxAge)),
                     default => null,
                 };
 
-                $response = $level !== null || $since !== null
-                    ? $stepUp->unlessMet($request, $level, $since)
-                    : null;
+                $asked = $level !== null || $since !== null;
+
+                if ($silent && $asked && ! $stepUp->meets($request, $level, $since)) {
+                    return 'login_required';
+                }
+
+                $response = $asked ? $stepUp->unlessMet($request, $level, $since) : null;
 
                 if ($response !== null) {
                     return $response;
@@ -1368,6 +1379,21 @@ describe('asking from a controller', function () {
                 $this->get('/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback')
                     ->assertRedirect(route('login'));
             });
+        });
+
+        it('answers prompt=none without showing a page, storing a moment, or saving where to come back to', function () {
+            $silently = fn (string $query) => $this->get("/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback&prompt=none&{$query}");
+
+            $silently('max_age=60')->assertOk()->assertSee('login_required');
+
+            signIn();
+            $this->travel(2)->minutes();
+
+            $silently('max_age=60')->assertOk()->assertSee('login_required')
+                ->assertSessionMissing(['oidc.flows', 'url.intended']);
+            expect(app(AttemptStore::class)->current(Purpose::Confirm))->toBeNull();
+
+            $silently('max_age=600')->assertOk()->assertSee('authorized');
         });
     });
 
