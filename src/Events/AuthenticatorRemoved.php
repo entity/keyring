@@ -21,7 +21,7 @@ use Keyring\Models\Authenticator;
 class AuthenticatorRemoved
 {
     use Dispatchable, SerializesModels {
-        SerializesModels::__serialize as serializeModels;
+        SerializesModels::__serialize as protected serializeModels;
     }
 
     public function __construct(
