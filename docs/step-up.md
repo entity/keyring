@@ -3,6 +3,10 @@
 - [Introduction](#introduction)
 - [Raising Assurance](#raising-assurance)
 - [Fresh Verification](#fresh-verification)
+- [Asking From a Controller](#asking-from-a-controller)
+    - [Passing a Fixed Moment](#passing-a-fixed-moment)
+    - [An Example](#an-example)
+- [Reading What Was Proved](#reading-what-was-proved)
 - [The Confirm Flow](#the-confirm-flow)
 - [JSON Requests](#json-requests)
 - [Laravel's Password Confirmation](#laravels-password-confirmation)
@@ -77,6 +81,186 @@ NIST SP 800-63B-4 (Sec. 4.1.2.1) binds a new authenticator at the highest level 
 - Signing in counts as a verification, so a fresh login is also fresh for step-up. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
 
 Keyring uses `keyring.fresh:15m` on its own sensitive routes. It applies this through the `changes_middleware` config option, on top of `auth:{guard}`. Those routes cover managing authenticators, ending sessions, signing out devices, changing the password, and starting an email change.
+
+## Asking From a Controller
+
+An integration, such as an OpenID Connect provider, may need to decide what to ask for from the request itself, from parameters like `acr_values` and `max_age`. Route middleware can't do that, so `Keyring\Login\StepUp` makes the same decision from a controller:
+
+```php
+public function unlessMet(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): ?Response
+```
+
+It returns `null` when the user has already proved what's asked, and the request may carry on. Otherwise, it returns the response the middleware would give: a redirect to the confirm page, a `423` for JSON requests, or [enrolling first](#raising-assurance) for a user who can't reach what's asked.
+
+- `$level` works like `keyring:{level}`. The session must have reached that [assurance level](policies.md#assurance-levels), and the confirm asks only for what's missing. The `device-bound` and `phishing-resistant` names are only for the middleware.
+- `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. A proof made in the same second as the moment counts. See [Fresh Verification](#fresh-verification) for what that means. A moment on its own doesn't look at whether a level lapsed: a password and an authenticator app proved 90 minutes ago meet a moment a day ago, though AAL2 lapsed after an hour idle. Pass `$level` too when the level the session holds now matters.
+- With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier. A recovery code is taken beside another factor whenever the level alone would take one, and never in place of the key AAL3 asks for.
+
+When it's asked for a moment and nobody is signed in to Keyring's guard, `unlessMet` throws an `AuthenticationException`, which Laravel answers by sending the browser to sign in. A level alone is judged from what the session proved, so check for a guest yourself first, as the [example](#an-example) does. It throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
+
+### Passing a Fixed Moment
+
+A confirmation counts for any moment before it, so once the user confirms, the check is met. Each factor is stamped when it's proved, though, so a confirm with two steps only meets moments up to its first step. The password is older than the code the user typed after it.
+
+A moment that moves on with every request can't be met. If you pass `now()` each time, the user confirms, comes back a moment later, and is asked again. That's what `max_age=0` would do if you turned it into `now()->subSeconds(0)`. Any `max_age` does the same once a confirm takes longer than it. With `max_age=60`, a user who proves the password and then takes 90 seconds to find their phone comes back with a password older than `now()->subSeconds(60)`, and is sent to confirm again, every time.
+
+So whenever there's a `max_age`, or a `prompt=login`, store the moment the authorization request arrived. `max_age=0` and `prompt=login` ask for a proof made during this authorization, so pass the stored moment itself. Any other `max_age` asks for a proof made in the last `max_age` seconds, as OpenID Connect counts it, so pass `max_age` seconds before now, or the stored moment if that's earlier. A proof made during this authorization still counts however long the confirm takes, and one made before it must be within `max_age` of now. Keep the moment for that one authorization request:
+
+- Store it under an ID that only this request carries, and add the ID to the URL the user comes back to. A single key for the whole session would let a moment left by an abandoned flow satisfy a later `prompt=login` without asking. Two tabs would also share it.
+- Store a hash of the authorization request beside it (`client_id`, `redirect_uri`, `state`, and `nonce`), and only take the moment for a request with the same hash. Otherwise, someone at the browser could start a `prompt=login` flow, leave it, wait for the user to confirm something else, and replay the ID with other parameters.
+- Let it expire after a few minutes, and keep only a few per session. Every visit to an authorization URL with `max_age` or `prompt=login`, from any site, stores another.
+- A request without an ID, or with one you don't have a moment for, starts a new authorization. Store a new moment for it.
+- Forget the moment once the authorization ends.
+
+Store the moment before a guest signs in, so don't put this route behind `auth`. Without it, the controller stores the moment and then sends the guest to sign in, so their sign-in comes after the moment and counts toward it. Behind `auth`, the guest signs in before the controller runs, and the moment comes after their sign-in. With two steps at sign in, the password is older than that moment, and `prompt=login` would send them to confirm right after they signed in.
+
+### An Example
+
+This controller reads `acr_values`, `max_age`, and `prompt`. Values from outside are checked before they reach `unlessMet`. A negative `max_age` would otherwise be a moment in the future, and throw. The route isn't behind `auth`, so the controller sends a guest to sign in itself, once the moment is stored. A request that asks for nothing would otherwise reach the authorization code without anyone signed in.
+
+```php
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
+use Keyring\Enums\Assurance;
+use Keyring\Facades\Keyring;
+use Keyring\Login\StepUp;
+
+class AuthorizeController
+{
+    public function __invoke(Request $request, StepUp $stepUp)
+    {
+        $validated = $request->validate([
+            'acr_values' => ['nullable', 'string', 'max:255'],
+            'max_age' => ['nullable', 'integer', 'min:0', 'max:31536000'],
+            'prompt' => ['nullable', 'string', 'max:255'],
+            'flow' => ['nullable', 'string', 'max:64'],
+            'client_id' => ['required', 'string', 'max:255'],
+            'redirect_uri' => ['required', 'string', 'max:2048'],
+            'state' => ['nullable', 'string', 'max:1024'],
+            'nonce' => ['nullable', 'string', 'max:1024'],
+        ]);
+
+        $level = in_array('aal2', explode(' ', $validated['acr_values'] ?? ''), true) ? Assurance::AAL2 : null;
+        $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
+        $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
+
+        // The moment this authorization started, stored under an ID only
+        // this authorization request carries, with a hash of the request
+        // so the ID can't be replayed with others. prompt=login asks for a
+        // proof since then, and max_age takes one since then too, so a slow
+        // confirm doesn't send the user round again.
+        $hash = hash('sha256', json_encode([
+            $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
+        ], JSON_THROW_ON_ERROR));
+        $flows = collect($request->session()->get('oidc.flows', []))
+            ->filter(fn (mixed $flow) => is_array($flow) && $flow['at'] > now()->subMinutes(10)->getTimestamp());
+
+        $flow = $validated['flow'] ?? null;
+        $stored = $flow === null ? null : $flows->get($flow);
+        $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
+
+        if (($freshProof || $maxAge !== null) && $started === null) {
+            $flow = Str::random(40);
+            $request->session()->put('oidc.flows', [
+                ...$flows->sortByDesc('at')->take(4)->all(),
+                $flow => ['at' => now()->getTimestamp(), 'request' => $hash],
+            ]);
+
+            return redirect($request->fullUrlWithQuery(['flow' => $flow]));
+        }
+
+        // Signing in comes after the moment, so it counts toward it.
+        if (Keyring::guard()->guest()) {
+            throw new AuthenticationException(guards: [config('keyring.guard')]);
+        }
+
+        $since = match (true) {
+            $freshProof => Carbon::createFromTimestamp($started),
+            $maxAge !== null => Carbon::createFromTimestamp(min($started, now()->getTimestamp() - $maxAge)),
+            default => null,
+        };
+
+        $response = $level !== null || $since !== null
+            ? $stepUp->unlessMet($request, $level, $since)
+            : null;
+
+        if ($response !== null) {
+            return $response;
+        }
+
+        if ($started !== null) {
+            $request->session()->forget("oidc.flows.{$flow}");
+        }
+
+        // Issue the authorization code, with the claims from below...
+    }
+}
+```
+
+A flow ID that's expired, unknown, or was stored for another request isn't used. The request starts a new authorization instead, so the user confirms again.
+
+`validate()` keeps the example short. A real provider sends an `invalid_request` error back to the client instead. Map outside values to a level yourself, and decide what to do with ones you don't know. `Assurance::fromName()` throws an `InvalidArgumentException` for a name it doesn't know.
+
+## Reading What Was Proved
+
+An integration may also need to say how the user authenticated, for example as `amr`, `acr`, and `auth_time` in an ID token. Read that from `Keyring\Sessions\SessionAssurance`:
+
+- `level(int $since = 0)` returns the highest `Assurance` the session holds right now. Given a Unix timestamp, it counts only what was proved since then.
+- `countingToward(Assurance $level, int $since = 0)` returns the verifications that still count toward that level. Those are the ones made within the level's overall limit, and since inactivity last [lapsed](devices-and-sessions.md#timeouts) it. Given a Unix timestamp, it returns only those made since then too.
+- `all()` returns every verification recorded in the session whose authenticator still exists. That includes verifications that no longer count toward any level, such as a code proved a day ago, or before the session sat idle past its limit. Reporting from `all()` overstates what the session holds. A session could report `mfa` after its second factor stopped counting. Use `countingToward()` for what you report.
+
+Each item is a `Keyring\Login\Verification`, with these public properties:
+
+| Property | Type | Meaning |
+|---|---|---|
+| `factor` | `string` | The factor's key, such as `password`, `totp`, `passkey`, or `recovery`. |
+| `authenticator` | `?string` | The ID of the user's authenticator (the stored sign-in method, not a session record), or `null` for a factor with no stored authenticator, such as the password. |
+| `categories` | `list<Category>` | What it proved, as `Keyring\Enums\Category` cases: `Knowledge`, `Possession`, `Inherence`, or `Address` for an emailed code, which isn't an authentication factor. |
+| `phishingResistant` | `bool` | Whether it was a passkey or security key. |
+| `at` | `int` | When it was verified, as a Unix timestamp. |
+| `deviceBound` | `bool` | Whether the key can't leave its device. |
+| `attested` | `bool` | Whether the key was added with a verified attestation. |
+
+To ask whether a set of verifications meets a requirement, use `Requirement::isMetBy(array $verifications): bool`. `Requirement::factors(2)` counts distinct authentication categories, so two codes of the same kind aren't multi-factor. `Assurance::of(array $verifications)` returns the highest level a set of verifications reaches.
+
+Report `auth_time` as the oldest `at` among the verifications you build `amr` from, not the newest. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
+
+When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. `level()` and `countingToward()` take a Unix timestamp for that. They count only what was proved since then, with each level still on its own clock. Don't work the level out again with `Assurance::of()` from what counts toward a lower level. Say AAL2 lapsed after an hour idle, and the session is at AAL1. What counts toward AAL1 still holds the authenticator app proved before the lapse, so `Assurance::of()` would give AAL2. For the same reason, only report `mfa` at AAL2 or higher, and at AAL1 only report the one factor that holds it. Listing the authenticator app beside the password would read as two factors to a client that looks at `amr`. For example:
+
+```php
+use Keyring\Enums\Assurance;
+use Keyring\Login\Requirement;
+use Keyring\Login\Verification;
+use Keyring\Sessions\SessionAssurance;
+
+$assurance = app(SessionAssurance::class);
+$from = $since?->getTimestamp() ?? 0;
+
+$level = $assurance->level($from);
+$proved = $level === Assurance::None ? [] : $assurance->countingToward($level, $from);
+
+// One factor holds AAL1: report the newest, not a second factor that
+// stopped counting toward AAL2 when it lapsed.
+if ($level === Assurance::AAL1) {
+    usort($proved, fn (Verification $a, Verification $b) => $b->at <=> $a->at);
+    $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
+}
+
+$claims = [
+    'acr' => $level === Assurance::None ? null : strtolower($level->name),
+    'amr' => [
+        ...array_values(array_unique(array_column($proved, 'factor'))),
+        ...($level->atLeast(Assurance::AAL2) ? ['mfa'] : []),
+    ],
+    'auth_time' => $proved === [] ? null : min(array_column($proved, 'at')),
+];
+```
+
+Work the claims out in the authorization request, while the user's browser session is there, and keep them with the authorization code. `SessionAssurance` reads that session. The token endpoint is called by the client, with no session, so it would read nothing.
+
+Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect. Tell your clients to read `acr` for the level, and not to work it out from `amr`. An `otp` in `amr` says a code was proved, not that it still counts as a second factor.
 
 ## The Confirm Flow
 
