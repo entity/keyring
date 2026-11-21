@@ -398,7 +398,7 @@ If no sweep runs for a day, the revocations of that day whose events were lost a
 
 One run announces again at most `sweep_limit` sessions, then ends at most `sweep_limit` more. Each half has its own allowance, so a backlog of timeouts can't hold up a lost announcement. That keeps the first run, after an upgrade or after you turn the sweep on, from announcing thousands of sessions in one go. The command says how many it ended and announced, and whether it left some for the next run. It never loops until none are left. `sweep_limit` is at most 10000.
 
-A request beats the sweep. The sweep finds what has timed out, locks those rows by their IDs, and decides again from the locked rows. A request that used a session a moment ago keeps it.
+A request beats the sweep. The sweep finds what has timed out, locks those rows by their IDs, and decides again from the locked rows. A request that used a session a moment ago keeps it. A browser that comes back after the sweep ended its session is signed out as `idle` or `expired`, in `SessionEnded` and the security log, as it would be had nothing swept it first. The same goes for a session revoked after it had timed out, by `signOutEverywhere` say.
 
 A listener that throws is reported, and the event is tried again later: five minutes after the first try, then ten, then twenty, and so on, doubling, until the day is out. That's about nine tries in all, so an outage of a few hours loses nothing, and a listener that always fails costs a handful of tries, not one every sweep. Laravel stops at the first listener that throws, so the ones behind a broken listener don't hear the event until it's tried again. Put a listener that may fail last, or queue it.
 

@@ -16,6 +16,8 @@ use Keyring\Enums\Assurance;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\EveryoneSignedOut;
 use Keyring\Events\RegisteredSessionEnded;
+use Keyring\Events\SessionEnded;
+use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\AnnouncingSessionRegistry;
 use Keyring\Sessions\CacheSessionRegistry;
 use Keyring\Sessions\DatabaseSessionRegistry;
@@ -796,16 +798,39 @@ describe('scheduling', function () {
     ]);
 });
 
-it('ends what the middleware would, and the middleware agrees afterwards', function () {
+it('ends what the middleware would, and the middleware agrees afterwards', function (array $config, int $away, string $reason) {
+    config($config);
+    $ended = new Collection;
+    Event::listen(fn (SessionEnded $event) => $ended->push($event->reason));
     $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
     $here = app(SessionRegistry::class)->find(session(Sessions::KEY));
 
-    $this->travel(7201)->seconds();
+    $this->travel($away)->seconds();
     $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions')->assertSuccessful();
 
     $this->get('/home')->assertRedirect('/login');
 
-    expect(announcedReasons())->toBe([handleFor($here) => 'idle']);
+    // Told why it timed out, as it would be had nothing swept it first,
+    // and announced once.
+    expect(announcedReasons())->toBe([handleFor($here) => $reason])
+        ->and($ended->all())->toBe([$reason])
+        ->and(SecurityEvent::query()->where('type', 'session_ended')->sole()->meta['reason'])->toBe($reason);
+})->with([
+    'idle' => [[], 7201, 'idle'],
+    'expired' => [['keyring.sessions.absolute' => '1h'], 3601, 'expired'],
+]);
+
+it('tells a browser whose session timed out unswept, then was signed out everywhere, that it idled out', function () {
+    $ended = new Collection;
+    Event::listen(fn (SessionEnded $event) => $ended->push($event->reason));
+    $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+
+    $this->travel(7201)->seconds();
+    app(Sessions::class)->signOutEverywhere($this->user);
+
+    $this->get('/home')->assertRedirect('/login');
+
+    expect($ended->all())->toBe(['idle']);
 });
 
 it('is the one driver the manager hands out, wrapped', function () {

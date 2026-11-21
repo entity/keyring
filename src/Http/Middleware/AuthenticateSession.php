@@ -133,6 +133,10 @@ class AuthenticateSession
     protected function ended(RegisteredSession $session, Authenticatable $user, int $now): ?string
     {
         return match (true) {
+            // Revoked for timing out, as the sweep does, says so, as the
+            // same visit would had nothing swept it first. Not a record
+            // "remember me" carried on from, which is revoked for a reuse.
+            $session->replacedBy === null && $this->sessions->timedOut($session) => $session->expiresAt <= $session->revokedAt ? 'expired' : 'idle',
             $session->revokedAt !== null => 'revoked',
             $session->expiresAt <= $now => 'expired',
             ! $session->belongsTo($user) => 'other_user',

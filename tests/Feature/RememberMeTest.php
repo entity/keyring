@@ -7,6 +7,7 @@ use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
@@ -18,6 +19,7 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Events\RememberMeReused;
 use Keyring\Facades\Keyring;
 use Keyring\Models\Device;
@@ -239,9 +241,28 @@ it('refuses "remember me" cookies whose session passed a limit while the browser
     expect(sessionEndedReasons())->toBe($reasons);
 })->with('session registries')->with([
     'the absolute limit' => ['absolute', 121, ['expired', 'expired']],
-    // Idling out revokes the record, as it does when the session itself is seen to.
-    'the idle limit' => ['idle', 11, ['idle', 'revoked']],
+    // Idling out revokes the record, as it does when the session itself is
+    // seen to, and the next visit is still told it idled out.
+    'the idle limit' => ['idle', 11, ['idle', 'idle']],
 ]);
+
+it('tells a remembered browser coming back after the sweep ended its session that it idled out', function () {
+    config(['keyring.sessions.remember_idle' => '10m']);
+    $announced = new Collection;
+    Event::listen(fn (RegisteredSessionEnded $event) => $announced->push($event->reason->value));
+    $cookies = rememberedSignIn();
+
+    $this->travel(11)->minutes();
+    $this->artisan('keyring:sweep')->expectsOutputToContain('Ended 1 timed-out sessions')->assertSuccessful();
+
+    comeBack($cookies)->assertRedirect('/login')->assertCookieExpired('remembered_session');
+    $this->assertGuest();
+
+    // Announced once, by the sweep. The visit only says why.
+    expect(sessionEndedReasons())->toBe(['idle'])
+        ->and($announced->all())->toBe(['idle'])
+        ->and(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+});
 
 it('refuses kept "remember me" cookies after a risk response ended their session', function (string $driver, Action $action) {
     config(['keyring.sessions.driver' => $driver]);
