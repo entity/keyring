@@ -541,7 +541,7 @@ Other requests are redirected, either back or to `redirect`. The slug is flashed
 
 Two statuses can say where the user was going when Keyring sent them away. That happens when they were sent to [add a sign-in method](policies.md#carrying-on-afterwards) or [held to choose a new password](protected-changes.md#carrying-on-afterwards):
 
-- `authenticator-added` carries it as `continue` in its data. It's data rather than a redirect, so a page showing new recovery codes stays up until the user has saved them. The key is left out when there's nowhere to carry on to.
+- `authenticator-added` carries it as `continue` in its data. It's data rather than a redirect, so a page showing new recovery codes stays up until the user has saved them. The key is left out when there's nowhere to carry on to, and when the account still can't meet what sent the user to enroll, such as after adding an email code where a second factor is asked for. The page is kept for the sign-in method that does.
 - `password-updated` uses it as `redirect`, but only when the user was held for a new password. A password change the user chose goes back, as before.
 
 ```json

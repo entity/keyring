@@ -292,7 +292,7 @@ await removeAuthenticator(added.authenticator.id)
 | `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
-If `recoveryCodes` comes back, show the codes and ask the user to save them. If `continue` comes back too, it's the page the user was going to when Keyring sent them to enroll. Offer it as a "Continue" link once the codes are saved. See [Carrying On Afterwards](policies.md#carrying-on-afterwards).
+If `recoveryCodes` comes back, show the codes and ask the user to save them. If `continue` comes back too, it's the page the user was going to when Keyring sent them to enroll, and the account can now meet what sent them. Offer it as a "Continue" link once the codes are saved. See [Carrying On Afterwards](policies.md#carrying-on-afterwards).
 
 ## Sessions
 
@@ -432,7 +432,7 @@ public function share(Request $request): array
 
 The `login`, `forgot-password`, and `verify-email` pages already receive the translated message as their `status` prop.
 
-After a user was sent to enroll, `Keyring::result('continue')` holds the page they were going to, for Inertia and Blade pages alike. Like the rest of the result, it's only there on the request right after `authenticator-added`, so read it on the page that response sends the user back to. JSON clients get `continue` in the body of the `authenticator-added` response instead. After a held password change, Inertia and Blade are redirected there, and JSON clients get it as `redirect`. Keyring only remembers pages the browser navigates to. A separate SPA that calls Keyring with JSON keeps track of its own route, and won't get one.
+After a user was sent to enroll, `Keyring::result('continue')` holds the page they were going to once they've added a sign-in method that gets them in, for Inertia and Blade pages alike. One that still leaves them short, such as an email code where a second factor is asked for, leaves it out and keeps the page for the next. Like the rest of the result, it's only there on the request right after `authenticator-added`, so read it on the page that response sends the user back to. JSON clients get `continue` in the body of the `authenticator-added` response instead. After a held password change, Inertia and Blade are redirected there, and JSON clients get it as `redirect`. Keyring only remembers pages the browser navigates to. A separate SPA that calls Keyring with JSON keeps track of its own route, and won't get one.
 
 ## Without Inertia
 

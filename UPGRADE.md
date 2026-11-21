@@ -4,6 +4,16 @@ This guide lists anything you need to change when updating from one release to t
 
 What counts as a change you'd need to act on is in the README's [What's Stable](README.md#whats-stable). A test (`tests/Feature/PublicApiTest.php`) fails when a config default changes, or a route, middleware alias, facade method, contract, event or email type is renamed or removed, so one can't change without an entry here.
 
+## Unreleased
+
+### Detours Keep the Requirement
+
+Only apps that extend these classes need to change anything:
+
+- `StepUp::enrollFirst()` takes an optional `?Requirement $requirement` as its third argument, and `Detours::remember()` one as its fourth. A subclass that overrides either needs that argument too.
+- `Detours::put()` keeps its arguments. It saves the requirement from `$this->requiring` beside the page, so an override that calls the parent needs no change. One that writes to the session itself saves pages without a requirement, which come back with the next sign-in method added, as before.
+- `Detours::pull()` leaves a page saved, and returns `null`, while the signed-in account can't meet the requirement saved with it.
+
 ## From 0.2 to 0.3
 
 ### Run the New Sessions Migration
