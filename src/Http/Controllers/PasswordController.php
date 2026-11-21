@@ -7,10 +7,12 @@ namespace Keyring\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Keyring\Changes\PasswordChanges;
+use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
+use Keyring\Login\Detours;
 use Keyring\Rules\CurrentPassword;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Input;
@@ -30,7 +32,7 @@ class PasswordController
      * what the app's action checks: a fresh verification can be a passkey,
      * and a session left open on a shared computer has one too.
      */
-    public function update(Request $request, UpdatesUserPasswords $updater, PasswordChanges $passwords, Sessions $sessions): StatusResponse
+    public function update(Request $request, UpdatesUserPasswords $updater, PasswordChanges $passwords, Sessions $sessions, PasswordHolds $holds, Detours $detours): StatusResponse
     {
         $user = $this->keyring->user();
 
@@ -40,6 +42,9 @@ class PasswordController
             'sign_out_others' => ['sometimes', 'boolean'],
             'current_password' => Rule::when(filled($user->getAuthPassword()), ['required', 'string', new CurrentPassword($user)]),
         ]);
+
+        // Asked before the change, which lifts the hold.
+        $held = $holds->holds($user);
 
         $passwords->change(
             $user,
@@ -53,6 +58,11 @@ class PasswordController
 
         $sessions->rotate($request);
 
-        return $this->status('password-updated');
+        // Held, they carry on to where they were going when it stopped
+        // them. A change they chose leaves them where they are, and drops
+        // whatever an earlier hold saved.
+        $continue = $detours->pull($request, Detours::PASSWORD_CHANGE);
+
+        return $this->status('password-updated', redirect: $held ? $continue : null);
     }
 }

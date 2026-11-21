@@ -16,7 +16,7 @@ The pages below are grouped by topic.
 - [Factors](factors.md): the built-in factors, and how to write your own.
 - [Policies](policies.md): deciding what each user must prove.
 - [The Sign In Flow](sign-in-flow.md): login, the challenge page, the verification pipeline, responses, and pages.
-- [Step-Up](step-up.md): asking signed-in users to prove who they are again.
+- [Step-Up](step-up.md): asking signed-in users to prove who they are again, from middleware or a controller, and reading what they proved.
 - [Passkeys & Security Keys](passkeys.md): WebAuthn settings, and what Keyring does and doesn't check.
 
 ## Account Security

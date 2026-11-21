@@ -55,9 +55,32 @@ class DatabaseSessionRegistry implements SessionRegistry
         $this->query()->where('id', $id)->update(RegisteredSession::columns($changes));
     }
 
-    public function revoke(string $id): void
+    /**
+     * The row is read with a lock and revoked in the same transaction, so
+     * nothing changes it in between: of two calls the second waits, then
+     * finds it revoked and returns null. The update only matches a record
+     * that isn't revoked yet, as a second guard. A locking read is always
+     * made on the write connection, and sees the latest committed row even
+     * inside a caller's MySQL transaction that took its snapshot earlier. It
+     * can't deadlock with replace() or revokeEveryone(): this takes one lock
+     * (the row, or on MySQL the gap where a missing one would be) and
+     * nothing after it, so it never holds one while waiting for another.
+     */
+    public function revoke(string $id): ?RegisteredSession
     {
-        $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => now()->getTimestamp()]);
+        return $this->connection->transaction(function () use ($id) {
+            $row = $this->query()->lockForUpdate()->find($id);
+            $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
+
+            if ($session === null || $session->revokedAt !== null) {
+                return null;
+            }
+
+            $now = now()->getTimestamp();
+            $revoked = $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now]) === 1;
+
+            return $revoked ? $session->with(['revokedAt' => $now]) : null;
+        });
     }
 
     /**
@@ -84,18 +107,47 @@ class DatabaseSessionRegistry implements SessionRegistry
         });
     }
 
-    public function revokeAll(Authenticatable $user, ?string $except = null): int
+    public function revokeAll(Authenticatable $user, ?string $except = null): Collection
     {
-        return $this->activeFor($user)
-            ->when($except, fn (Builder $query) => $query->where('id', '!=', $except))
-            ->update(['revoked_at' => now()->getTimestamp()]);
+        return $this->revokeFound($this->activeFor($user)->when($except, fn (Builder $query) => $query->where('id', '!=', $except)));
     }
 
-    public function revokeDevice(Authenticatable $user, string $deviceId): int
+    public function revokeDevice(Authenticatable $user, string $deviceId): Collection
     {
-        return $this->activeFor($user)
-            ->where('device_id', $deviceId)
-            ->update(['revoked_at' => now()->getTimestamp()]);
+        return $this->revokeFound($this->activeFor($user)->where('device_id', $deviceId));
+    }
+
+    /**
+     * Find the records with a lock, then revoke them by ID in the same
+     * transaction, a thousand at a time as revokeEveryone() does, so a user
+     * with years of expired records that were never pruned doesn't make one
+     * statement too big. A locking read is always made on the write
+     * connection, and reads the latest committed rows, not the snapshot of
+     * a caller's MySQL transaction that started earlier: a session signed
+     * in since then is found and revoked. It takes the locks the single
+     * UPDATE this used to be took (on MySQL, the user's range of the
+     * index), so a sign in for this user waits until it's done, and the
+     * rows can't change between the read and the update. So the records
+     * returned are exactly the ones revoked, and the update matches what
+     * the single UPDATE matched. Of two calls at once the second waits, and
+     * then finds nothing left to revoke. Rows are read in ID order, so two
+     * calls on PostgreSQL lock the rows they share in the same order.
+     *
+     * @return Collection<int, RegisteredSession>
+     */
+    protected function revokeFound(Builder $query): Collection
+    {
+        return $this->connection->transaction(function () use ($query) {
+            $now = now()->getTimestamp();
+
+            $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
+
+            $found->pluck('id')->chunk(1000)->each(
+                fn (Collection $ids) => $this->query()->whereIn('id', $ids->values())->whereNull('revoked_at')->whereNull('replaced_by')->update(['revoked_at' => $now]),
+            );
+
+            return $found->map(fn (RegisteredSession $session) => $session->with(['revokedAt' => $now]));
+        });
     }
 
     /**
