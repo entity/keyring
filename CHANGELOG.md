@@ -40,7 +40,7 @@
 
 - A queued listener for `FactorChallenged` or `FactorVerified` now runs for an unsaved authenticator, such as the password's. It has nothing stored, so the job failed with a `ModelNotFoundException`. It's now queued as it is, without the user loaded with it, and a stored authenticator is still queued by its ID.
 - An unsaved authenticator, such as the password's, now has its user's `authenticatable_type` and `authenticatable_id` set, so `owner()` finds the user, and `user()` looks them up again when they aren't loaded. Before, `owner()` ran a query Postgres refuses.
-- `security_log.unlisted` lists entry types that `Keyring::activity()` leaves out, for entries a package writes about a user that aren't something the user did, such as a token issued to another app's server. They're still the user's entries: alerts, the log channel and a force delete treat them as before. `Keyring::unlistedTypes()` gives the same types for an activity query of your own. Keyring's own types are never left out.
+- `security_log.unlisted` lists entry types that `Keyring::activity()` leaves out, for entries a package writes about a user that aren't something the user did, such as a token issued to another app's server. They're still the user's entries: alerts, the log channel and a force delete treat them as before. `Keyring::unlistedActivityTypes()` gives the same types for an activity query of your own. Keyring's own types are never left out.
 
 ### Extending
 

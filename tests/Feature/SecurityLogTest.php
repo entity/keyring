@@ -306,7 +306,7 @@ it('leaves out only the types security_log.unlisted names, whatever else is ther
 it('gives the types activity leaves out, as a list', function () {
     config(['keyring.security_log.unlisted' => ['token_issued', null, 'token_revoked']]);
 
-    expect(Keyring::unlistedTypes())->toBe(['token_issued', 'token_revoked']);
+    expect(Keyring::unlistedActivityTypes())->toBe(['token_issued', 'token_revoked']);
 });
 
 // Packages push to the list without the app seeing it. One that logged its
@@ -322,7 +322,7 @@ it('never leaves out an entry type keyring writes itself, however it is spelled'
     app(SecurityLog::class)->record('token_issued', $this->user);
 
     expect(Keyring::activity($this->user)->pluck('type')->all())->toBe(['signed_out'])
-        ->and(Keyring::unlistedTypes())->toBe(['token_issued']);
+        ->and(Keyring::unlistedActivityTypes())->toBe(['token_issued']);
 })->with([
     'as it is' => 'signed_out',
     'in capitals' => 'Signed_Out',

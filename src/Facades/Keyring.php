@@ -33,7 +33,7 @@ use Keyring\KeyringManager;
  * @method static \Keyring\KeyringManager updateUserPasswordsUsing(string $action)
  * @method static \Keyring\KeyringManager validateEmailChangesUsing(string $action)
  * @method static \Illuminate\Support\Collection<int, \Keyring\Models\SecurityEvent> activity(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user, int $limit = 25)
- * @method static list<string> unlistedTypes()
+ * @method static list<string> unlistedActivityTypes()
  * @method static string|null statusMessage(mixed $status)
  * @method static mixed result(string|null $key = null, mixed $default = null)
  * @method static \Keyring\KeyringManager respondWith(string $contract, \Closure|string $implementation)

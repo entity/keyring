@@ -217,7 +217,7 @@ class KeyringManager
 
     /**
      * Recent security activity for a settings page, leaving out the
-     * unlistedTypes().
+     * unlistedActivityTypes().
      *
      * @return Collection<int, SecurityEvent>
      */
@@ -233,9 +233,9 @@ class KeyringManager
      *
      * @return list<string>
      */
-    public function unlistedTypes(): array
+    public function unlistedActivityTypes(): array
     {
-        return app(SecurityLog::class)->unlistedTypes();
+        return app(SecurityLog::class)->unlistedActivityTypes();
     }
 
     /**

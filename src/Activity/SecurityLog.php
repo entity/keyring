@@ -135,15 +135,15 @@ class SecurityLog
 
     /**
      * Recent security activity, newest first, for a settings page. Leaves
-     * out the unlistedTypes(): entries about the user that aren't something
-     * they did.
+     * out the unlistedActivityTypes(): entries about the user that aren't
+     * something they did.
      *
      * @return Collection<int, SecurityEvent>
      */
     public function activity(Authenticatable&Model $user, int $limit = 25): Collection
     {
         return $this->query($user)
-            ->whereNotIn('type', $this->unlistedTypes())
+            ->whereNotIn('type', $this->unlistedActivityTypes())
             ->latest('created_at')
             ->latest('id')
             ->limit($limit)
@@ -166,7 +166,7 @@ class SecurityLog
      *
      * @return list<string>
      */
-    public function unlistedTypes(): array
+    public function unlistedActivityTypes(): array
     {
         $types = config('keyring.security_log.unlisted');
 
