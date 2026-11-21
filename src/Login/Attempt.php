@@ -246,10 +246,13 @@ final class Attempt
      */
     public function __unserialize(array $data): void
     {
-        $attempt = self::fromArray($data);
+        // Queued by 0.2 or earlier, it's the object's own properties, with
+        // the user it had looked up. Only the non-private ones are taken,
+        // so user() looks the user up again.
+        $attempt = array_key_exists('user_id', $data) ? self::fromArray($data) : (object) $data;
 
         foreach (new \ReflectionClass(self::class)->getProperties() as $property) {
-            if (! $property->isStatic() && ! $property->isVirtual()) {
+            if (! $property->isStatic() && ! $property->isVirtual() && ! $property->isPrivate()) {
                 $this->{$property->name} = $attempt->{$property->name};
             }
         }

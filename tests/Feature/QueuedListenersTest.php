@@ -314,6 +314,102 @@ it('serialises an attempt as the same plain data it keeps in the session', funct
         ->and($copy->user())->not->toBe($user);
 });
 
+/**
+ * An attempt serialised as 0.2 and earlier serialised it. They had no
+ * __serialize(), so PHP stored the object's own properties, private ones
+ * under their mangled names, the same as an array cast gives. The names
+ * are checked against 0.2's, so this notices if the properties change.
+ */
+function serialisedByOldVersion(Attempt $attempt): string
+{
+    $properties = (array) $attempt;
+    $private = fn (string $name) => "\0".Attempt::class."\0".$name;
+
+    expect(array_keys($properties))->toEqualCanonicalizing([
+        'id', 'purpose', 'guard', 'userId', 'expiresAt', 'remember', 'verifications', 'requirement', 'state', 'presented',
+        $private('resolvedUser'), $private('resolvedKeyring'), 'trustDevice', 'deviceId', 'deviceResolved', 'risk', 'stepUp', 'exhausted',
+    ])->and($properties['purpose'])->toBeInstanceOf(Purpose::class);
+
+    return preg_replace('/^a:(\d+):/', 'O:'.strlen(Attempt::class).':"'.Attempt::class.'":$1:', serialize($properties));
+}
+
+/**
+ * A sign in waiting on its last step, with the user it looked up cached.
+ */
+function attemptWithEverything(User $user): Attempt
+{
+    $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create();
+    $attempt = Attempt::start(Purpose::Login, $user, remember: true, requirement: Requirement::aal2(), verifications: [
+        new Verification(factor: 'password', authenticator: null, categories: [Category::Knowledge], at: now()->getTimestamp()),
+    ]);
+    $attempt->record(Verification::of($totp));
+    $attempt->present($totp);
+    $attempt->resolveDevice('device-1');
+    $attempt->risk = new Risk([new Finding('new_device', 20, 'A device the account has not used.')]);
+    $attempt->trustDevice = true;
+    $attempt->stepUp = true;
+
+    return $attempt;
+}
+
+it('restores a job queued by 0.2 for an event with an attempt, and looks the user up again', function () {
+    Event::listen(Authenticated::class, QueuedKeyringListener::class);
+
+    // Nothing in it is serialised twice, so the old attempt has no
+    // back-references and can be swapped into a job of this version's.
+    $user = $this->user->fresh();
+    $attempt = Attempt::start(Purpose::Login, $user, remember: true, verifications: [
+        new Verification(factor: 'password', authenticator: null, categories: [Category::Knowledge], at: now()->getTimestamp()),
+    ]);
+    $attempt->resolveDevice('device-1');
+    $old = serialisedByOldVersion($attempt);
+
+    expect($old)->toContain($user->getAuthPassword());
+
+    // Queue the event as this version does, then swap the attempt in the
+    // job for the one 0.2 would have queued.
+    Authenticated::dispatch($user, $attempt);
+
+    $job = DB::table('jobs')->sole();
+    $payload = json_decode($job->payload, true);
+    $new = serialize($attempt);
+
+    expect(substr_count($payload['data']['command'], $new))->toBe(1);
+
+    $payload['data']['command'] = str_replace($new, $old, $payload['data']['command']);
+    DB::table('jobs')->where('id', $job->id)->update(['payload' => json_encode($payload)]);
+
+    // The user it had cached is dropped, so the attempt finds the user as
+    // the database has it now.
+    $user->update(['name' => 'Taylor Otwell']);
+
+    $event = queuedEvent(Authenticated::class);
+
+    expect($event->attempt->toArray())->toBe($attempt->toArray())
+        ->and($event->user->is($user))->toBeTrue()
+        ->and($event->attempt->user()->is($user))->toBeTrue()
+        ->and($event->attempt->user()->name)->toBe('Taylor Otwell');
+});
+
+it('restores an attempt serialised by 0.2 with its keyring looked up, and looks both up again', function () {
+    $user = $this->user->fresh();
+    $attempt = attemptWithEverything($user);
+    $attempt->keyring();
+
+    // The cached keyring holds the user again, so this is unserialised on
+    // its own: its back-references only hold in a stream of its own.
+    $old = serialisedByOldVersion($attempt);
+    $user->update(['name' => 'Taylor Otwell']);
+    $copy = unserialize($old);
+
+    expect($copy->toArray())->toBe($attempt->toArray())
+        ->and($copy->complete)->toBeTrue()
+        ->and($copy->user()->is($user))->toBeTrue()
+        ->and($copy->user()->name)->toBe('Taylor Otwell')
+        ->and($copy->keyring()->user->name)->toBe('Taylor Otwell')
+        ->and($copy->keyring()->all()->pluck('factor')->all())->toContain('totp');
+});
+
 it('queues a removed authenticator without its secret or the user\'s password hash', function () {
     Event::listen(AuthenticatorRemoved::class, QueuedKeyringListener::class);
 
