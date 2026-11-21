@@ -1156,6 +1156,16 @@ describe('asking from a controller', function () {
                 ->headers->get('Location');
         }
 
+        /**
+         * The flow ID a URL carries.
+         */
+        function flowOf(string $url): string
+        {
+            parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+            return $query['flow'];
+        }
+
         it('lets a slow second factor through a short max_age, taking a proof made since the flow started', function () {
             signIn();
             $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
@@ -1204,6 +1214,86 @@ describe('asking from a controller', function () {
             $this->travel(9)->minutes();
 
             $this->get($url)->assertRedirect(route('keyring.confirm.challenge'));
+        });
+
+        it('asks a proof since the flow started for max_age=0', function () {
+            signIn();
+            $this->travel(1)->minutes();
+
+            $url = startAuthorizing('max_age=0');
+            $this->get($url)->assertRedirect(route('keyring.confirm.challenge'));
+
+            $this->travel(2)->minutes();
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+                ->assertRedirectContains(parse_url($url, PHP_URL_PATH));
+
+            $this->get($url)->assertOk()->assertSee('authorized');
+        });
+
+        it('asks a signed-in user to confirm for prompt=login', function () {
+            signIn();
+            $this->travel(1)->minutes();
+
+            $url = startAuthorizing('prompt=login');
+            $this->get($url)->assertRedirect(route('keyring.confirm.challenge'));
+
+            $this->travel(2)->minutes();
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+                ->assertRedirectContains(parse_url($url, PHP_URL_PATH));
+
+            $this->get($url)->assertOk()->assertSee('authorized');
+        });
+
+        it('starts a new flow for another state, rather than reusing one', function () {
+            signIn();
+            $this->travel(1)->minutes();
+
+            $url = startAuthorizing('prompt=login&state=a');
+            $this->get($url);
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+            $this->travel(1)->seconds();
+
+            $replayed = str_replace('state=a', 'state=b', $url);
+            $next = $this->get($replayed)->assertRedirectContains('flow=')->headers->get('Location');
+
+            expect(flowOf($next))->not->toBe(flowOf($url));
+            $this->get($next)->assertRedirect(route('keyring.confirm.challenge'));
+            $this->get($url)->assertOk()->assertSee('authorized');
+        });
+
+        it('starts a new flow from a finished flow\'s URL', function () {
+            signIn();
+            $this->travel(1)->minutes();
+
+            $url = startAuthorizing('prompt=login');
+            $this->get($url);
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+            $this->get($url)->assertOk()->assertSee('authorized');
+            $this->travel(1)->seconds();
+
+            $next = $this->get($url)->assertRedirectContains('flow=')->headers->get('Location');
+
+            expect(flowOf($next))->not->toBe(flowOf($url));
+            $this->get($next)->assertRedirect(route('keyring.confirm.challenge'));
+        });
+
+        it('sends a guest back to the flow\'s URL once they sign in', function () {
+            $url = startAuthorizing('prompt=login');
+            $this->get($url)->assertRedirect(route('login'));
+
+            // Laravel sorts the query it keeps, so compare it as parsed.
+            $intended = session('url.intended');
+            expect(parse_url($intended, PHP_URL_PATH))->toBe(parse_url($url, PHP_URL_PATH));
+            parse_str(parse_url($intended, PHP_URL_QUERY), $kept);
+            parse_str(parse_url($url, PHP_URL_QUERY), $expected);
+            expect($kept)->toEqualCanonicalizing($expected);
+
+            $next = $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->headers->get('Location');
+            parse_str(parse_url($next, PHP_URL_QUERY), $returned);
+            expect(parse_url($next, PHP_URL_PATH))->toBe(parse_url($url, PHP_URL_PATH))
+                ->and($returned)->toEqualCanonicalizing($expected);
+
+            $this->get($url)->assertOk()->assertSee('authorized');
         });
 
         describe('with keyring.guard set to another guard', function () {
