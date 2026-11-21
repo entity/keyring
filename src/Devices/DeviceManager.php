@@ -164,8 +164,13 @@ class DeviceManager
         $device->forceFill(['revoked_at' => now(), 'trusted_until' => null])->save();
 
         if ($user = $device->owner()) {
-            $this->sessions->because($reported ? SessionEndReason::DeviceReported : SessionEndReason::DeviceRevoked, fn () => $this->sessions->revokeDevice($user, $device->id));
-            $this->sessions->cycleRememberToken($user);
+            // The token is cycled even when the registry fails part way, so
+            // no "remember me" cookie brings a session on the device back.
+            try {
+                $this->sessions->because($reported ? SessionEndReason::DeviceReported : SessionEndReason::DeviceRevoked, fn () => $this->sessions->revokeDevice($user, $device->id));
+            } finally {
+                $this->sessions->cycleRememberToken($user);
+            }
 
             DeviceRevoked::dispatch($user, $device, $reported);
         }

@@ -297,6 +297,15 @@ class AnnouncingSessionRegistry implements SessionRegistry
     }
 
     /**
+     * Whether a session ended now is announced straight away, rather than
+     * once a transaction on the registry's connection commits.
+     */
+    public function announcesStraightAway(): bool
+    {
+        return $this->transaction() === null;
+    }
+
+    /**
      * The innermost transaction open on the registry's connection, if the
      * driver is the database one. One a test wraps itself in doesn't count,
      * as it doesn't for Laravel's own callbacks. A connection split into

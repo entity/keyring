@@ -1315,15 +1315,79 @@ describe('the cache driver failing part way inside the user\'s row lock', functi
     });
 
     it('keeps what listeners wrote for the sessions signing out everywhere did end, and still closes the ways back in', function () {
-        $this->user->forceFill(['remember_token' => 'before'])->save();
-        $handles = collect([1, 2])->map(fn () => app(Sessions::class)->handle(sessionElsewhere($this->user)));
+        $here = signInHere();
+        requestEmailChange();
+        $this->user->refresh()->forceFill(['remember_token' => 'before'])->save();
+        $this->user->devices()->update(['trusted_until' => now()->addDay()]);
+        $handles = collect([1, 2])->map(fn () => app(Sessions::class)->handle(sessionElsewhere($this->user)))->prepend(handleOf($here));
         sessionElsewhere($this->user, id: $this->failing);
 
         expect(fn () => app(Sessions::class)->signOutEverywhere($this->user))->toThrow(RuntimeException::class, 'The store failed.');
 
-        expect(DB::table('heard_endings')->orderBy('id')->pluck('handle')->all())->toBe($handles->all())
-            ->and($this->user->fresh()->remember_token)->not->toBe('before');
+        expect(DB::table('heard_endings')->pluck('handle')->all())->toEqualCanonicalizing($handles->all())
+            ->and($this->user->fresh()->remember_token)->not->toBe('before')
+            ->and($this->user->devices()->whereNotNull('trusted_until')->exists())->toBeFalse()
+            ->and(PendingChange::sole()->cancelled_at)->not->toBeNull();
     });
+
+    it('still gives this session a new ID when signing out everywhere else fails', function () {
+        $here = sessionElsewhere($this->user);
+        sessionElsewhere($this->user, id: $this->failing);
+        $request = Request::create('/');
+        $request->setLaravelSession($session = app('session')->driver());
+        $session->start();
+        $session->put(Sessions::KEY, $here->id);
+        $before = $session->getId();
+
+        expect(fn () => app(Sessions::class)->signOutOthers($request, $this->user))->toThrow(RuntimeException::class, 'The store failed.');
+
+        expect($session->getId())->not->toBe($before);
+    });
+
+    it('still cycles the remember token when signing a device out fails', function () {
+        $device = $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'phone')]);
+        $this->user->forceFill(['remember_token' => 'before'])->save();
+        $handle = app(Sessions::class)->handle(sessionElsewhere($this->user, device: $device->id));
+        sessionElsewhere($this->user, device: $device->id, id: $this->failing);
+
+        expect(fn () => app(DeviceManager::class)->revoke($device))->toThrow(RuntimeException::class, 'The store failed.');
+
+        expect($this->user->fresh()->remember_token)->not->toBe('before')
+            ->and($device->fresh()->revoked_at)->not->toBeNull()
+            ->and(DB::table('heard_endings')->pluck('handle')->all())->toBe([$handle]);
+    });
+
+    it('rolls back what listeners wrote when the failure means the transaction is gone, and still closes the ways back in', function (Throwable $failure) {
+        $failing = $this->failing;
+        app(SessionRegistryManager::class)->extend('dead-cache', fn () => new class(Cache::store('array'), $failing, $failure) extends CacheSessionRegistry
+        {
+            public function __construct(Repository $cache, private readonly string $failing, private readonly Throwable $failure)
+            {
+                parent::__construct($cache);
+            }
+
+            public function revoke(#[SensitiveParameter] string $id): ?RegisteredSession
+            {
+                return $id === $this->failing ? throw $this->failure : parent::revoke($id);
+            }
+        });
+        config(['keyring.sessions.driver' => 'dead-cache']);
+        $this->user->forceFill(['remember_token' => 'before'])->save();
+        $ended = sessionElsewhere($this->user);
+        sessionElsewhere($this->user, id: $this->failing);
+
+        expect(fn () => app(Sessions::class)->signOutEverywhere($this->user))->toThrow($failure::class);
+
+        // The cache can't take its revocation back, but nothing the
+        // listener wrote in the dead transaction is kept.
+        expect(DB::table('heard_endings')->count())->toBe(0)
+            ->and(app(SessionRegistry::class)->find($ended->id)->revokedAt)->not->toBeNull()
+            ->and($this->user->fresh()->remember_token)->not->toBe('before');
+    })->with([
+        'a deadlock' => [fn () => new DeadlockException('Deadlock found when trying to get lock')],
+        'a concurrency error' => [fn () => new PDOException('Lock wait timeout exceeded; try restarting transaction')],
+        'a lost connection' => [fn () => new RuntimeException('Failed.', 0, new PDOException('server has gone away'))],
+    ]);
 
     it('keeps what listeners wrote for the sessions ending a device did end', function () {
         $handles = collect([1, 2])->map(fn () => app(Sessions::class)->handle(sessionElsewhere($this->user, device: 'phone')));
@@ -1341,8 +1405,65 @@ describe('the cache driver failing part way inside the user\'s row lock', functi
 
         $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();
 
+        // The session that failed to end is the only one left: the new
+        // record is revoked again, unannounced, so it doesn't count.
+        $this->assertGuest();
         expect(DB::table('heard_endings')->get(['handle', 'reason'])->map(fn (object $row) => (array) $row)->all())
-            ->toBe([['handle' => $handle, 'reason' => SessionEndReason::SessionLimit->value]]);
+            ->toBe([['handle' => $handle, 'reason' => SessionEndReason::SessionLimit->value]])
+            ->and(app(SessionRegistry::class)->forUser($this->user)->pluck('id')->all())->toBe([$this->failing]);
+    });
+});
+
+describe('the database driver failing part way inside the user\'s row lock', function () {
+    beforeEach(function () {
+        $this->failing = $failing = Str::random(40);
+        app(SessionRegistryManager::class)->extend('failing-database', fn () => new class(DB::connection(), 'keyring_sessions', $failing) extends DatabaseSessionRegistry
+        {
+            public function __construct(ConnectionInterface $connection, string $table, private readonly string $failing)
+            {
+                parent::__construct($connection, $table);
+            }
+
+            public function revoke(#[SensitiveParameter] string $id): ?RegisteredSession
+            {
+                return $id === $this->failing ? throw new RuntimeException('The database failed.') : parent::revoke($id);
+            }
+
+            // Fails once it has revoked them, as a failure after the
+            // statement would.
+            public function revokeAll(Authenticatable $user, #[SensitiveParameter] ?string $except = null): Collection
+            {
+                parent::revokeAll($user, $except);
+
+                throw new RuntimeException('The database failed.');
+            }
+        });
+        config(['keyring.sessions.driver' => 'failing-database']);
+    });
+
+    it('rolls back the whole sign in when the limit fails to end a session', function () {
+        config(['keyring.sessions.max' => 1]);
+        $first = sessionElsewhere($this->user, activeAgo: 10);
+        sessionElsewhere($this->user, activeAgo: 20, id: $this->failing);
+
+        $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();
+
+        $this->assertGuest();
+        expect($this->announced)->toBeEmpty()
+            ->and(DB::table('keyring_sessions')->count())->toBe(2)
+            ->and(app(SessionRegistry::class)->find($first->id)->revokedAt)->toBeNull()
+            ->and(app(SessionRegistry::class)->forUser($this->user)->pluck('id')->sort()->values()->all())->toBe(collect([$first->id, $this->failing])->sort()->values()->all());
+    });
+
+    it('rolls back signing out everywhere, and still closes the ways back in', function () {
+        $this->user->forceFill(['remember_token' => 'before'])->save();
+        $first = sessionElsewhere($this->user);
+
+        expect(fn () => app(Sessions::class)->signOutEverywhere($this->user))->toThrow(RuntimeException::class, 'The database failed.');
+
+        expect($this->announced)->toBeEmpty()
+            ->and(app(SessionRegistry::class)->find($first->id)->revokedAt)->toBeNull()
+            ->and($this->user->fresh()->remember_token)->not->toBe('before');
     });
 });
 
