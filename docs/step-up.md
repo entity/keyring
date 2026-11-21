@@ -104,7 +104,7 @@ A confirmation counts for any moment before it, so once the user confirms, the c
 
 A moment that moves on with every request can't be met. If you pass `now()` each time, the user confirms, comes back a moment later, and is asked again. That's what `max_age=0` would do if you turned it into `now()->subSeconds(0)`. Any `max_age` does the same once a confirm takes longer than it. With `max_age=60`, a user who proves the password and then takes 90 seconds to find their phone comes back with a password older than `now()->subSeconds(60)`, and is sent to confirm again, every time.
 
-So whenever there's a `max_age`, or a `prompt=login`, store the moment the authorization request arrived, and count back from that moment each time. `max_age` asks for a proof made in the `max_age` seconds before the request, as OpenID Connect counts it. `max_age=0` and `prompt=login` ask for a proof made during this authorization, so pass the stored moment itself. Keep it for that one authorization request:
+So whenever there's a `max_age`, or a `prompt=login`, store the moment the authorization request arrived. `max_age=0` and `prompt=login` ask for a proof made during this authorization, so pass the stored moment itself. Any other `max_age` asks for a proof made in the last `max_age` seconds, as OpenID Connect counts it, so pass `max_age` seconds before now, or the stored moment if that's earlier. A proof made during this authorization still counts however long the confirm takes, and one made before it must be within `max_age` of now. Keep the moment for that one authorization request:
 
 - Store it under an ID that only this request carries, and add the ID to the URL the user comes back to. A single key for the whole session would let a moment left by an abandoned flow satisfy a later `prompt=login` without asking. Two tabs would also share it.
 - Store a hash of the authorization request beside it (`client_id`, `redirect_uri`, `state`, and `nonce`), and only take the moment for a request with the same hash. Otherwise, someone at the browser could start a `prompt=login` flow, leave it, wait for the user to confirm something else, and replay the ID with other parameters.
@@ -146,10 +146,11 @@ class AuthorizeController
         $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
         $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
 
-        // The moment this authorization started, for max_age to count back
-        // from and prompt=login to ask for a proof since, stored under an ID
-        // only this authorization request carries, with a hash of the
-        // request so the ID can't be replayed with others.
+        // The moment this authorization started, stored under an ID only
+        // this authorization request carries, with a hash of the request
+        // so the ID can't be replayed with others. prompt=login asks for a
+        // proof since then, and max_age takes one since then too, so a slow
+        // confirm doesn't send the user round again.
         $hash = hash('sha256', json_encode([
             $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
         ], JSON_THROW_ON_ERROR));
@@ -177,7 +178,7 @@ class AuthorizeController
 
         $since = match (true) {
             $freshProof => Carbon::createFromTimestamp($started),
-            $maxAge !== null => Carbon::createFromTimestamp($started - $maxAge),
+            $maxAge !== null => Carbon::createFromTimestamp(min($started, now()->getTimestamp() - $maxAge)),
             default => null,
         };
 

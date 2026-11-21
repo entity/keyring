@@ -1126,7 +1126,7 @@ describe('asking from a controller', function () {
 
                 $since = match (true) {
                     $freshProof => Carbon::createFromTimestamp($started),
-                    $maxAge !== null => Carbon::createFromTimestamp($started - $maxAge),
+                    $maxAge !== null => Carbon::createFromTimestamp(min($started, now()->getTimestamp() - $maxAge)),
                     default => null,
                 };
 
@@ -1156,7 +1156,7 @@ describe('asking from a controller', function () {
                 ->headers->get('Location');
         }
 
-        it('lets a slow second factor through a short max_age, counting back from when the request arrived', function () {
+        it('lets a slow second factor through a short max_age, taking a proof made since the flow started', function () {
             signIn();
             $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
             $this->travel(5)->minutes();
@@ -1194,6 +1194,17 @@ describe('asking from a controller', function () {
             'max_age' => 'max_age=60',
             'prompt=login' => 'prompt=login',
         ]);
+
+        it('sends a password proved before the flow to confirm once it is older than max_age', function () {
+            signIn();
+            $this->travel(50)->seconds();
+
+            // Within max_age of the flow starting, but not of the visit.
+            $url = startAuthorizing('max_age=60');
+            $this->travel(9)->minutes();
+
+            $this->get($url)->assertRedirect(route('keyring.confirm.challenge'));
+        });
 
         describe('with keyring.guard set to another guard', function () {
             beforeEach(function () {
