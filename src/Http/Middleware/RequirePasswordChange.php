@@ -11,6 +11,7 @@ use Illuminate\Support\Uri;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Responses\PasswordChangeRequiredResponse;
 use Keyring\KeyringManager;
+use Keyring\Login\Detours;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -32,6 +33,7 @@ class RequirePasswordChange
     public function __construct(
         protected KeyringManager $keyring,
         protected PasswordHolds $holds,
+        protected Detours $detours,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -41,6 +43,10 @@ class RequirePasswordChange
         if (! $user instanceof Model || ! $request->hasSession() || $this->isExcepted($request) || ! $this->holds->holdsSession($user)) {
             return $next($request);
         }
+
+        // Saved here rather than in the response, so an app's own response
+        // gets it too: the new password carries them on to it.
+        $this->detours->remember($request, Detours::PASSWORD_CHANGE);
 
         return $this->keyring->response(PasswordChangeRequiredResponse::class)->toResponse($request);
     }

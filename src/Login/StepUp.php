@@ -36,6 +36,7 @@ class StepUp
         protected SessionAssurance $assurance,
         protected KeyringManager $keyring,
         protected DeviceManager $devices,
+        protected Detours $detours,
     ) {}
 
     /**
@@ -151,10 +152,17 @@ class StepUp
 
     /**
      * Send a user who hasn't set up what's needed to keyring.enrollment_url,
-     * or answer 403 when there isn't one.
+     * or answer 403 when there isn't one. Where they were going is saved,
+     * for the enrollment to hand back as "continue".
+     *
+     * @param  string|null  $continue  where to carry on to instead of this
+     *                                 page, for one of Keyring's own pages
+     *                                 that was there on another's behalf
      */
-    public function enrollFirst(Request $request): Response
+    public function enrollFirst(Request $request, ?string $continue = null): Response
     {
+        $this->detours->remember($request, Detours::ENROLLMENT, $continue);
+
         return $this->keyring->response(EnrollmentRequiredResponse::class)->toResponse($request);
     }
 
