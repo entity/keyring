@@ -32,6 +32,7 @@ use Keyring\Risk\Signals\SessionFingerprintChanged;
 use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\SingleSignOn;
 
@@ -392,6 +393,41 @@ it('signs out a session whose registry record expired instead of registering it 
 
     $this->get('/home')->assertRedirect('/login');
     $this->assertGuest();
+});
+
+it('signs out on the next request when ending an expired session fails, without registering it again', function () {
+    config(['keyring.sessions.absolute' => '1h']);
+    signInWith();
+    $registered = session(Sessions::KEY);
+
+    // The registry fails once, as the expired session is being ended.
+    app(SessionRegistryManager::class)->extend('flaky', fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+    {
+        public bool $failed = false;
+
+        public function revoke(string $id): void
+        {
+            if (! $this->failed) {
+                $this->failed = true;
+
+                throw new RuntimeException('The database went away.');
+            }
+
+            parent::revoke($id);
+        }
+    });
+    config(['keyring.sessions.driver' => 'flaky']);
+
+    $this->travel(62)->minutes();
+
+    $this->get('/home')->assertServerError();
+    expect(session(Sessions::KEY))->toBe($registered);
+
+    $this->get('/home')->assertRedirect('/login');
+    $this->assertGuest();
+    expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+        ->and(DB::table('keyring_sessions')->count())->toBe(1)
+        ->and(app(SessionRegistry::class)->find($registered)->revokedAt)->not->toBeNull();
 });
 
 it('keeps a revoked session revoked after the cache is cleared', function () {

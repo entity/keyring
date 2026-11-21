@@ -429,16 +429,26 @@ class Sessions
         }
     }
 
+    /**
+     * The session's ID is only forgotten once its record is revoked. A
+     * registry that throws leaves it in place, so the next request finds
+     * the record still open and signs out again, rather than finding a
+     * signed-in session with no record and registering it afresh.
+     */
     public function end(Request $request): void
     {
-        $id = $request->session()->pull(self::KEY);
+        $id = $request->session()->get(self::KEY);
 
-        if (is_string($id)) {
-            $this->registry->revoke($id);
+        try {
+            if (is_string($id)) {
+                $this->registry->revoke($id);
+            }
+
+            $request->session()->forget(self::KEY);
+        } finally {
+            $request->session()->forget(self::REMEMBERED);
+            $this->forgetRememberCookie($request);
         }
-
-        $request->session()->forget(self::REMEMBERED);
-        $this->forgetRememberCookie($request);
     }
 
     /**
