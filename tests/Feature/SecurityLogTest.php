@@ -309,6 +309,18 @@ it('gives the types activity leaves out, as a list', function () {
     expect(Keyring::unlistedTypes())->toBe(['token_issued', 'token_revoked']);
 });
 
+// Packages push to the list without the app seeing it. One that logged its
+// back-channel logouts as signed_out and listed that would take the user's
+// own sign outs off their page too.
+it('never leaves out an entry type keyring writes itself', function () {
+    config(['keyring.security_log.unlisted' => ['signed_out', 'token_issued']]);
+    app(SecurityLog::class)->record('signed_out', $this->user);
+    app(SecurityLog::class)->record('token_issued', $this->user);
+
+    expect(Keyring::unlistedTypes())->toBe(['token_issued'])
+        ->and(Keyring::activity($this->user)->pluck('type')->all())->toBe(['signed_out']);
+});
+
 // Every query fails, as if the table were gone, without DDL that MySQL would commit.
 #[Table('keyring_events_missing')]
 class MissingSecurityEvent extends SecurityEvent {}

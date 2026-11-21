@@ -36,6 +36,21 @@ class SecurityLog
      */
     public const string REQUEST_ID = 'keyring_request_id';
 
+    /**
+     * Every entry type Keyring writes, in the order the docs list them. An
+     * app's or a package's own types are any others.
+     */
+    public const array TYPES = [
+        'signed_in', 'confirmed', 'factor_failed', 'second_factor_failed', 'locked_out', 'rate_limited',
+        'account_locked', 'signed_out', 'authenticator_added', 'authenticator_removed', 'recovery_codes_generated',
+        'recovery_code_used', 'new_device', 'device_revoked', 'device_reported', 'sessions_revoked', 'session_ended',
+        'session_resumed', 'remember_me_reused', 'email_change_requested', 'email_changed', 'email_change_reverted',
+        'password_changed', 'password_reset', 'protection_bypassed', 'clone_suspected', 'risk_step_up',
+        'risk_reauthenticate', 'risk_notified', 'risk_password_change', 'risk_denied', 'risk_locked',
+        'risk_revoked_sessions', 'access_refused', 'enrollment_refused', 'authenticator_removal_refused',
+        'link_refused', 'verification_refused', 'refusals_limited',
+    ];
+
     public function __construct(
         protected KeyringManager $keyring,
     ) {}
@@ -142,6 +157,9 @@ class SecurityLog
      * isn't a string is passed over, since a null would leave out every
      * entry, and so would a 0 on MySQL. Only that entry: several packages
      * may add to the list, and one bad entry shouldn't undo the others.
+     * Keyring's own types are passed over too. A package adds its types
+     * where the app doesn't see them, and one of Keyring's there would take
+     * the user's real sign ins or sign outs off their page.
      *
      * @return list<string>
      */
@@ -149,7 +167,11 @@ class SecurityLog
     {
         $types = config('keyring.security_log.unlisted');
 
-        return is_array($types) ? array_values(array_filter($types, is_string(...))) : [];
+        if (! is_array($types)) {
+            return [];
+        }
+
+        return array_values(array_diff(array_filter($types, is_string(...)), self::TYPES));
     }
 
     /**

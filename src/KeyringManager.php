@@ -228,7 +228,8 @@ class KeyringManager
 
     /**
      * The entry types activity() leaves out, for an activity query of the
-     * app's own: the strings in "security_log.unlisted".
+     * app's own: the strings in "security_log.unlisted", without Keyring's
+     * own types.
      *
      * @return list<string>
      */

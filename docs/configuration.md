@@ -332,7 +332,7 @@ The `levels` option sets the score thresholds. The `recent_change` option sets h
 'prune_at' => '03:00',
 ```
 
-The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in. The `unlisted` option lists the entry types that `Keyring::activity` leaves out, for entries about a user that aren't something the user did. An entry that isn't a string is ignored. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity).
+The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in. The `unlisted` option lists the entry types that `Keyring::activity` leaves out, for entries about a user that aren't something the user did. An entry that isn't a string is ignored, and so is one of Keyring's own entry types. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity).
 
 The table is turned on by `Features::securityLog()`, which is on by default. Without it, the same events are written to the log `channel` instead. `null` means your default channel. Without the table, "was this you?" alerts and the `RepeatedFactorFailures`, `SuccessAfterFailures`, and `CredentialStuffing` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
 

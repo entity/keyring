@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Str;
+use Keyring\Activity\SecurityLog;
 use Keyring\Enums\Severity;
 
-it('lists every entry type in the docs with the severity it is logged at', function () {
+it('lists every entry type in the docs and in SecurityLog::TYPES, with the severity it is logged at', function () {
     preg_match_all('/^\| (`[^|]+) \| (info|notice|warning|critical) \|/m', file_get_contents(__DIR__.'/../../docs/security-log-and-emails.md'), $rows, PREG_SET_ORDER);
 
     $documented = collect($rows)->flatMap(fn (array $row) => array_fill_keys(Str::matchAll('/`([a-z_]+)`/', $row[1])->all(), $row[2]));
@@ -16,5 +17,6 @@ it('lists every entry type in the docs with the severity it is logged at', funct
 
     expect($recorded->diff($documented->keys())->values()->all())->toBe([])
         ->and($documented->keys()->diff($recorded)->values()->all())->toBe([])
-        ->and($documented->filter(fn (string $severity, string $type) => Severity::of($type)->value !== $severity)->all())->toBe([]);
+        ->and($documented->filter(fn (string $severity, string $type) => Severity::of($type)->value !== $severity)->all())->toBe([])
+        ->and(collect(SecurityLog::TYPES)->sort()->values()->all())->toBe($recorded->sort()->values()->all());
 });
