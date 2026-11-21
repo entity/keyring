@@ -30,6 +30,7 @@ use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
+use Throwable;
 
 /**
  * Starts, finds and ends registered sessions for the current request.
@@ -91,7 +92,9 @@ class Sessions
      * past that, whichever has gone unused longest ends. Refusing the sign
      * in instead would let whoever holds an account's sessions keep its
      * owner out. Two sign ins at once take turns (holding), so neither
-     * counts the sessions without the other's.
+     * counts the sessions without the other's. A revocation that fails is
+     * thrown once the lock is let go (holdingThenThrow), so the ones before
+     * it, and what their listeners wrote, are kept.
      */
     protected function register(Authenticatable $user, RegisteredSession $session): void
     {
@@ -101,7 +104,7 @@ class Sessions
             return;
         }
 
-        $this->holding($user, function () use ($user, $session, $max) {
+        $this->holdingThenThrow($user, function () use ($user, $session, $max) {
             $this->registry->save($session);
 
             $now = now()->getTimestamp();
@@ -132,6 +135,46 @@ class Sessions
     protected function holding(Authenticatable $user, Closure $change): mixed
     {
         return $user instanceof Model ? RowLock::hold($user, fn () => $change()) : $change();
+    }
+
+    /**
+     * holding(), with a failure of the change thrown only once the user's
+     * row is let go, after the callback has run. The row lock is a
+     * transaction on the user's connection, and on a driver that announces
+     * straight away (AnnouncingSessionRegistry) a synchronous listener runs
+     * inside it: thrown from inside, a failure part way through would roll
+     * back what the listeners wrote for the sessions that did end, a job
+     * on a database queue included. All the transaction does is hold the
+     * lock, so committing it keeps only what happened.
+     *
+     * On the database driver nothing changes: each of its revocations is a
+     * transaction of its own, rolled back before it throws.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $change
+     * @param  (Closure(): void)|null  $then  Run whether or not the change failed.
+     * @return TResult
+     */
+    protected function holdingThenThrow(Authenticatable $user, Closure $change, ?Closure $then = null): mixed
+    {
+        $outcome = $this->holding($user, function () use ($change): Closure {
+            try {
+                $result = $change();
+
+                return fn () => $result;
+            } catch (Throwable $e) {
+                return fn () => throw $e;
+            }
+        });
+
+        try {
+            $then?->__invoke();
+        } finally {
+            $result = $outcome();
+        }
+
+        return $result;
     }
 
     /**
@@ -610,20 +653,23 @@ class Sessions
      * per user, so cycling it stops every "remember me" cookie, no other
      * device stays trusted, and an email change waiting for confirmation is
      * cancelled, though its "this wasn't me" link keeps working.
+     *
+     * When the registry fails part way, the rest is still done before the
+     * failure is thrown: the sessions it ended stay ended, and the ways back
+     * in close as they would have.
      */
     public function signOutEverywhere(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
-        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except))->count();
 
-        $this->cycleRememberToken($user);
-        $this->distrustDevices($user, except: $keptDevice);
+        return $this->holdingThenThrow($user, fn () => $this->registry->revokeAll($user, $except), function () use ($user, $keptDevice) {
+            $this->cycleRememberToken($user);
+            $this->distrustDevices($user, except: $keptDevice);
 
-        if ($user instanceof Model) {
-            $this->emailChanges->cancel($user);
-        }
-
-        return $count;
+            if ($user instanceof Model) {
+                $this->emailChanges->cancel($user);
+            }
+        })->count();
     }
 
     /**
@@ -647,7 +693,7 @@ class Sessions
      */
     public function revokeDevice(Authenticatable $user, string $deviceId): int
     {
-        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId))->count();
+        return $this->holdingThenThrow($user, fn () => $this->registry->revokeDevice($user, $deviceId))->count();
     }
 
     public function cycleRememberToken(Authenticatable $user): void

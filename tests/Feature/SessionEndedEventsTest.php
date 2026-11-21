@@ -1186,6 +1186,75 @@ describe('a sign-out that fails part way', function () {
     });
 });
 
+/**
+ * Put the cache driver in place, on a store of its own, with revoking this
+ * record failing.
+ */
+function cacheFailingOn(string $failing): void
+{
+    $driver = new class(Cache::store('array'), $failing) extends CacheSessionRegistry
+    {
+        public function __construct(Repository $cache, private readonly string $failing)
+        {
+            parent::__construct($cache);
+        }
+
+        public function revoke(string $id): ?RegisteredSession
+        {
+            return $id === $this->failing ? throw new RuntimeException('The store failed.') : parent::revoke($id);
+        }
+    };
+    app(SessionRegistryManager::class)->extend('failing-cache', fn () => $driver);
+    config(['keyring.sessions.driver' => 'failing-cache']);
+}
+
+describe('the cache driver failing part way inside the user\'s row lock', function () {
+    beforeEach(function () {
+        // A listener that keeps what it heard on the user's connection, as
+        // a job on a database queue would.
+        Schema::create('heard_endings', function (Blueprint $table) {
+            $table->id();
+            $table->string('handle');
+            $table->string('reason');
+        });
+        Event::listen(fn (RegisteredSessionEnded $event) => DB::table('heard_endings')->insert(['handle' => $event->handle, 'reason' => $event->reason->value]));
+
+        $this->failing = Str::random(40);
+        cacheFailingOn($this->failing);
+    });
+
+    it('keeps what listeners wrote for the sessions signing out everywhere did end, and still closes the ways back in', function () {
+        $this->user->forceFill(['remember_token' => 'before'])->save();
+        $handles = collect([1, 2])->map(fn () => app(Sessions::class)->handle(sessionElsewhere($this->user)));
+        sessionElsewhere($this->user, id: $this->failing);
+
+        expect(fn () => app(Sessions::class)->signOutEverywhere($this->user))->toThrow(RuntimeException::class, 'The store failed.');
+
+        expect(DB::table('heard_endings')->orderBy('id')->pluck('handle')->all())->toBe($handles->all())
+            ->and($this->user->fresh()->remember_token)->not->toBe('before');
+    });
+
+    it('keeps what listeners wrote for the sessions ending a device did end', function () {
+        $handles = collect([1, 2])->map(fn () => app(Sessions::class)->handle(sessionElsewhere($this->user, device: 'phone')));
+        sessionElsewhere($this->user, device: 'phone', id: $this->failing);
+
+        expect(fn () => app(Sessions::class)->revokeDevice($this->user, 'phone'))->toThrow(RuntimeException::class, 'The store failed.');
+
+        expect(DB::table('heard_endings')->orderBy('id')->pluck('handle')->all())->toBe($handles->all());
+    });
+
+    it('keeps what listeners wrote for a session the limit ended before the next one failed', function () {
+        config(['keyring.sessions.max' => 1]);
+        $handle = app(Sessions::class)->handle(sessionElsewhere($this->user, activeAgo: 10));
+        sessionElsewhere($this->user, activeAgo: 20, id: $this->failing);
+
+        $this->withHeader('User-Agent', FIREFOX)->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertServerError();
+
+        expect(DB::table('heard_endings')->get(['handle', 'reason'])->map(fn (object $row) => (array) $row)->all())
+            ->toBe([['handle' => $handle, 'reason' => SessionEndReason::SessionLimit->value]]);
+    });
+});
+
 describe('more transactions', function () {
     it('announces everyone signed out once its transaction commits, and not when it is rolled back', function () {
         $session = sessionElsewhere($this->user);
