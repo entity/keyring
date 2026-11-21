@@ -1,8 +1,12 @@
 import { router } from '@inertiajs/core'
-import { json } from './http.js'
+import { passkeyCredential } from './login.js'
 import { routes } from './routes.js'
 import type { AuthenticatorSummary, ChallengeProps } from './types.js'
-import { getCredential, supportsAutofill } from './webauthn.js'
+import { getCredential, isAbort, supportsAutofill } from './webauthn.js'
+
+// These two need no Inertia, so the main entry point has them too.
+export { passkeyCredential } from './login.js'
+export { isAbort } from './webauthn.js'
 
 /**
  * The framework-free half of the challenge page and passkey sign in. The
@@ -82,33 +86,12 @@ export function keyPrompt(): (props: ChallengeProps) => Promise<Record<string, a
   }
 }
 
-/** Fetch usernameless options and run the browser prompt (or autofill). */
-export async function passkeyCredential(factor: string, options: { autofill?: boolean, signal?: AbortSignal } = {}): Promise<Record<string, any>> {
-  const login = await json<{ options: Record<string, any> }>('GET', routes.loginOptions(factor))
-
-  // Replaced while the options were on their way: nothing to ask the browser.
-  options.signal?.throwIfAborted()
-
-  return getCredential(login.options, options)
-}
-
 /** Sign in with a credential from passkeyCredential(). */
 export function signInWith(factor: string, credential: Record<string, any>, remember: boolean, callbacks: { onError: (message: string | null) => void, onFinish: () => void }): void {
   router.post(routes.loginWith(factor), { credential, remember }, {
     onError: errors => callbacks.onError(Object.values(errors)[0] ?? null),
     onFinish: callbacks.onFinish,
   })
-}
-
-/**
- * The user closed the prompt, or a newer request replaced this one. Browsers
- * report a closed prompt and a timeout as NotAllowedError, which is also what
- * they throw when WebAuthn isn't allowed at all (a cross-origin iframe without
- * the publickey-credentials permission, or no user gesture in Safari), so
- * check those first if a prompt never appears.
- */
-export function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && (error.name === 'AbortError' || error.name === 'NotAllowedError')
 }
 
 export function errorMessage(error: unknown): string {
