@@ -1549,6 +1549,14 @@ describe('asking from a controller', function () {
             'a level and a moment' => [Assurance::AAL2, '-1 minute'],
         ]);
 
+        it('answers false where unlessMet() answers 403, with no enrollment URL to send the user to', function () {
+            config(['keyring.enrollment_url' => null]);
+            signIn();
+
+            $this->get('/authorize?acr=aal3')->assertForbidden();
+            $this->get('/authorize?acr=aal3&prompt=none')->assertOk()->assertSee('login_required');
+        });
+
         it('answers a silent request without a later confirm landing on it', function () {
             signIn();
             $this->travel(2)->minutes();
