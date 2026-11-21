@@ -609,6 +609,12 @@ class Sessions
      *
      * Keyring's own sign-out (SignIn::out) has ended the record by the time
      * the guard announces it, and this finds nothing left to do.
+     *
+     * The record is announced as logged_out, unless the app gave a reason
+     * of its own around the sign-out with because(). That includes Laravel's
+     * auth.session middleware, which signs a browser out with
+     * logoutCurrentDevice() when the user's password hash no longer matches
+     * the one the session started with.
      */
     public function signedOut(Logout|CurrentDeviceLogout $event): void
     {
@@ -623,7 +629,7 @@ class Sessions
         // middle of the app's sign-out. The record that would refuse the
         // "remember me" cookies is still open then, and logoutCurrentDevice()
         // leaves the token as it was, so it's cycled here instead.
-        rescue(fn () => $this->end($request), function () use ($event) {
+        rescue(fn () => $this->unlessGiven(SessionEndReason::LoggedOut, fn () => $this->end($request)), function () use ($event) {
             if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
                 rescue(fn () => $this->cycleRememberToken($event->user));
             }
@@ -811,6 +817,21 @@ class Sessions
     public function because(SessionEndReason $reason, Closure $callback): mixed
     {
         return AnnouncingSessionRegistry::because($reason, $callback);
+    }
+
+    /**
+     * Run the callback with every session it ends announced for this
+     * reason, unless the code around it gave one already (because()), which
+     * wins.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    public function unlessGiven(SessionEndReason $reason, Closure $callback): mixed
+    {
+        return AnnouncingSessionRegistry::unlessGiven($reason, $callback);
     }
 
     public function registry(): SessionRegistry

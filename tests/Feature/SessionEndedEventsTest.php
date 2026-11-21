@@ -16,6 +16,7 @@ use Illuminate\Encryption\MissingAppKeyException;
 use Illuminate\Http\Request;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -506,6 +507,83 @@ describe('every way a session ends', function () {
     })->with('session drivers');
 });
 
+describe('a sign-out the app does itself', function () {
+    beforeEach(function () {
+        Route::middleware('web')->post('/app/logout', function (Request $request) {
+            Auth::logout();
+            $request->session()->invalidate();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/logout-this-device', function (Request $request) {
+            Auth::logoutCurrentDevice();
+            $request->session()->invalidate();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/logout-for-risk', fn () => tap(response()->noContent(), fn () => app(Sessions::class)->because(SessionEndReason::Risk, fn () => Auth::logout())));
+    });
+
+    it('announces it once as signing out', function (string $driver, string $uri) {
+        config(['keyring.sessions.driver' => $driver]);
+        $handle = handleOf(signInHere());
+
+        $this->post($uri)->assertNoContent();
+
+        expectEnded($handle, SessionEndReason::LoggedOut);
+        expect($this->announced)->toHaveCount(1);
+    })->with('session drivers')->with(['/app/logout', '/app/logout-this-device']);
+
+    it('announces it for the reason the app gave around it', function () {
+        $handle = handleOf(signInHere());
+
+        $this->post('/app/logout-for-risk')->assertNoContent();
+
+        expectEnded($handle, SessionEndReason::Risk);
+        expect($this->announced)->toHaveCount(1);
+    });
+
+    it('announces nothing when another guard signs out', function () {
+        config(['auth.guards.staff' => ['driver' => 'session', 'provider' => 'users']]);
+        Route::middleware('web')->post('/staff/logout', fn () => tap(response()->noContent(), fn () => Auth::guard('staff')->logout()));
+        signInHere();
+
+        $this->post('/staff/logout')->assertNoContent();
+
+        expect($this->announced)->toBeEmpty();
+    });
+
+    it('announces nothing without a session to end', function () {
+        signInHere();
+
+        app()->instance('request', Request::create('/'));
+        Auth::guard('web')->logout();
+
+        expect($this->announced)->toBeEmpty();
+    });
+
+    it('announces nothing when the registry fails to revoke the session', function () {
+        Exceptions::fake();
+        $here = signInHere();
+        app(SessionRegistryManager::class)->extend('unrevoking', fn () => new class(DB::connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revoke(#[SensitiveParameter] string $id): never
+            {
+                throw new RuntimeException('The registry is down.');
+            }
+        });
+        config(['keyring.sessions.driver' => 'unrevoking']);
+
+        $this->post('/app/logout')->assertNoContent();
+
+        expect($this->announced)->toBeEmpty()
+            ->and(DB::table('keyring_sessions')->where('id', $here)->value('revoked_at'))->toBeNull();
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The registry is down.');
+    });
+});
+
 describe('what is not an ending', function () {
     it('announces nothing for a record revoked already, moved, or pruned', function (string $driver) {
         config(['keyring.sessions.driver' => $driver]);
@@ -869,6 +947,19 @@ describe('the reason', function () {
         DB::transaction(fn () => $registry->because(SessionEndReason::Risk, fn () => $registry->revoke($session->id)));
 
         expect($this->announced->sole()->reason)->toBe(SessionEndReason::Risk);
+    });
+
+    it('is one given only when none is in force already', function () {
+        $registry = app(SessionRegistry::class);
+        $sessions = app(Sessions::class);
+
+        $seen = [
+            $sessions->unlessGiven(SessionEndReason::LoggedOut, fn () => $registry->reason()),
+            $sessions->because(SessionEndReason::Risk, fn () => $sessions->unlessGiven(SessionEndReason::LoggedOut, fn () => $registry->reason())),
+            $registry->reason(),
+        ];
+
+        expect($seen)->toBe([SessionEndReason::LoggedOut, SessionEndReason::Risk, SessionEndReason::Revoked]);
     });
 
     it('still runs the callback when the registry bound in its place doesn\'t announce', function () {

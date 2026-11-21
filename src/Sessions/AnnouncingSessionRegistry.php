@@ -86,6 +86,21 @@ class AnnouncingSessionRegistry implements SessionRegistry
     }
 
     /**
+     * Run the callback with this reason only when none is in force already,
+     * so a reason the code around it gave, nearer to why the session ended,
+     * still wins.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    public static function unlessGiven(SessionEndReason $reason, Closure $callback): mixed
+    {
+        return static::$reason === null ? static::because($reason, $callback) : $callback();
+    }
+
+    /**
      * The reason a session ended now would be announced with.
      */
     public static function reason(): SessionEndReason

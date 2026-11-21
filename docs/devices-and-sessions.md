@@ -324,7 +324,7 @@ Keep the handle, not the registry ID. The ID is what the "remember me" cookie ca
 
 ### Hearing About Ended Sessions
 
-To be told when a session ends, rather than asking, listen for `Keyring\Events\RegisteredSessionEnded`. There's one for every registered session that ends, whoever ended it and wherever: signing out, signing out everywhere, ending one session or a device, the device and session limits, a deleted user, a risk response, a password change or reset, an email change or its undo, and the session middleware finding a session idle, expired, used twice, or kept out. See [Events](events.md#why-a-registered-session-ended) for its properties and every reason.
+To be told when a session ends, rather than asking, listen for `Keyring\Events\RegisteredSessionEnded`. There's one for every registered session that ends, whoever ended it and wherever: signing out, your app's own `Auth::logout()` or `Auth::logoutCurrentDevice()` on Keyring's guard, signing out everywhere, ending one session or a device, the device and session limits, a deleted user, a risk response, a password change or reset, an email change or its undo, and the session middleware finding a session idle, expired, used twice, or kept out. See [Events](events.md#why-a-registered-session-ended) for its properties and every reason.
 
 ```php
 use Illuminate\Support\Facades\Event;
