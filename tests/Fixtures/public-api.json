@@ -74,7 +74,8 @@
             "end_on_lapse": false,
             "middleware": true,
             "remember_cookie": null,
-            "remember_grace": "10s"
+            "remember_grace": "10s",
+            "continue_as_guest": []
         },
         "protected": [],
         "email_changes": {
@@ -608,6 +609,7 @@
             "userType"
         ],
         "Keyring\\Events\\RememberMeReused": [
+            "handle",
             "session",
             "user"
         ],
@@ -622,6 +624,7 @@
             "user"
         ],
         "Keyring\\Events\\SessionResumed": [
+            "handle",
             "session",
             "user"
         ],

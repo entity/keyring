@@ -147,22 +147,26 @@ class SessionAssurance
     }
 
     /**
-     * The highest level the session holds right now.
+     * The highest level the session holds right now. Given a timestamp, the
+     * highest it holds from what was proved since then alone, each level
+     * still on its own clock: a level that lapsed isn't rebuilt from what
+     * counts toward a lower one.
      */
-    public function level(): Assurance
+    public function level(int $since = 0): Assurance
     {
-        return Assurance::highest($this->countingToward(...));
+        return Assurance::highest(fn (Assurance $level) => $this->countingToward($level, $since));
     }
 
     /**
      * The verifications that still count toward a level: those within its
-     * overall limit, and made since inactivity last lapsed it.
+     * overall limit, and made since inactivity last lapsed it. Given a
+     * timestamp, only those made since then too.
      *
      * @return list<Verification>
      */
-    public function countingToward(Assurance $level): array
+    public function countingToward(Assurance $level, int $since = 0): array
     {
-        return $this->since($this->countsFrom($level));
+        return $this->since(max($this->countsFrom($level), $since));
     }
 
     /**

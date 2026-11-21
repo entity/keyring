@@ -18,6 +18,27 @@
 - The database registry driver rethrows a failed query without its bindings, so record IDs, which are what "remember me" cookies hold, stay out of exception messages, logs and error trackers. `PartialRevocation` no longer repeats the failure's message.
 - On the `cache` driver, revoking a record and moving it with "remember me" take turns under the owner's lock (on a store with locks), so a sign-out that lands mid-move is never lost without an event. A revocation that can't have the lock within five seconds goes ahead without it. On a `database` cache store, a failed cache query is rethrown without the cache keys it named, which hold record IDs.
 - Signing out signs the browser out even when the session registry fails to revoke its record. The failure is still thrown, but the next request is a guest, where it used to be registered as a new session.
+- `sessions.continue_as_guest` lists routes that also serve guests. A page visit to one whose session has ended is signed out and asked for again as a guest, rather than sent to log in, whatever the reason it ended. The `signed-out` status is flashed and no intended URL is saved. JSON requests still get a `401`.
+- A sign-out your app does itself with `Auth::logout()` or `Auth::logoutCurrentDevice()`, on Keyring's guard in a request with a session, now ends the registered session too, with its "remember me" cookie and what the session proved. Before, the record stayed good until it timed out. On the `cookie` session driver, a copy of the session stayed signed in, and after `logoutCurrentDevice()`, so did a copy of its "remember me" cookies.
+
+### Policies and Step-Up
+
+- `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. Asking for nothing, or for a moment more than a few seconds in the future, throws.
+- The docs explain how to read what a session proved, for claims like `amr`, `acr`, and `auth_time`.
+- `SessionAssurance::level()` and `countingToward()` take a timestamp, to count only what was proved since then with each level still on its own clock, so claims built for `max_age` don't report a level that lapsed.
+- Users sent to enroll by `keyring.enrolled`, by step-up, or by the confirm page with nothing to confirm with now get the page they were going to back as `continue` on the `authenticator-added` status. Users held for a new password are redirected there by `password-updated`. Only top-level navigations and Inertia visits are remembered, and only on the app's own origin, for the same user, within an hour. Bind your own `Keyring\Login\Detours` and override `put()` to keep other pages out, such as `prompt=none` authorize requests.
+
+### Extending
+
+- `StepUp` makes the decisions for the `keyring` and `keyring.fresh` middleware, and its constructor also takes a `DeviceManager`. What `keyring.fresh` asks for is `StepUp::freshRequirement()`, no longer the middleware's own `requirement()`. See the upgrade guide.
+
+### Security
+
+- A queued listener for `SessionResumed` or `RememberMeReused` no longer puts the session's registry ID on the queue. That ID is the value of the "remember me" cookie, so for `SessionResumed` it was a live one. Queued, the session's record now has a blank `id` and no `replacedBy` or `origin`, and both events always carry the session's `handle` to go by instead, the same one the sessions list shows. Listeners in the request see the record as before.
+- Queueing a listener for an event that carries a sign in or step-up (`Authenticated`, `Confirmed`, `FactorChallenged`, `FactorVerified`, `VerificationRefused`) no longer puts the user's password hash and remember token on the queue. The attempt is queued as the plain data it keeps in the session and looks its user up again when asked.
+- `AuthenticatorRemoved` now queues the user by ID like every other event, and the removed authenticator without its secret.
+
+See the [upgrade guide](UPGRADE.md) before you deploy this with jobs still on the queue.
 
 ## v0.2.0 - 2026-11-20
 

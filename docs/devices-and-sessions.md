@@ -18,6 +18,7 @@
     - [Writing a Driver](#writing-a-driver)
     - [How Many Sessions](#how-many-sessions)
     - [The Session Middleware](#the-session-middleware)
+    - [Pages That Also Serve Guests](#pages-that-also-serve-guests)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
 - [Keyring's Cookies](#keyrings-cookies)
@@ -466,7 +467,28 @@ A second middleware, `keyring.password`, is added to the `web` group after it. I
 
 A session whose record has gone missing is signed out rather than registered again. This means clearing records can't restart a session's window.
 
+A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so on Keyring's guard, in a request with a session, `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route. If the registry can't be reached, the user is still signed out and the error is reported. After `logoutCurrentDevice()`, the user's "remember me" token is then changed, as `Auth::logout()` already does, so a kept copy of the cookie stops working.
+
 A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
+
+### Pages That Also Serve Guests
+
+Some pages work for guests too, like a public page that shows more when you're signed in, or an OIDC authorize endpoint that has to answer `prompt=none` itself. Sending those to the login page when a session ends is wrong. List their route names in `sessions.continue_as_guest`, in any form `Request::routeIs()` takes, wildcards included:
+
+```php
+'sessions' => [
+    // ...
+    'continue_as_guest' => ['welcome', 'oauth.authorize', 'docs.*'],
+],
+```
+
+When a session ends on a `GET` page visit to one of those routes, the browser is signed out and `SessionEnded` is dispatched as usual. The browser is then redirected back to the URL it asked for, so it asks for the page again as a guest. The query string is kept, though its parameters may come back in a different order. The redirect sends `Clear-Site-Data` and clears the session and "remember me" cookies, as signing out does. The `signed-out` status is flashed, as on the way to the login page, so a page that shows statuses can say why. The page it's redirected to uses the flash up. No intended URL is saved, so the next sign in doesn't come back to this request. JSON requests still get the `401`. `HEAD`, `POST`, and other methods are signed out as before. This happens before your own [`SignedOutResponse`](sign-in-flow.md#responses) is used, so binding one doesn't change it.
+
+This is the same for every reason a session ends, a ["remember me" cookie used twice](#a-cookie-used-twice) (`reused`) and a [risk response](risk.md#responding-to-risk) (`risk`) included. For those two the login page wouldn't reliably reach the owner anyway: it goes to whichever browser asks next, and the owner's browser, whose session then ends as `revoked`, carries on as a guest. The owner is asked about a reused cookie by its ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) the next time they sign in, and `SessionEnded` and the security log record the reason either way.
+
+An Inertia visit gets a `409` with an `X-Inertia-Location` header instead of a redirect, which makes Inertia load the page in full. A redirect would be followed with the same headers, so a partial reload or a poll would get back only the props it asked for, and the page would still show the user as signed in. A prefetch gets the same answer. Inertia keeps that answer until the link is followed, and only then loads the page.
+
+Only list pages that render for a guest. The route has to let guests in, because one behind `auth` sends the guest to log in anyway. A broad pattern like `*` also matches Keyring's own pages. A route without a name can't be listed. If any entry in the list isn't a non-empty string, Keyring ignores the whole list, and the visit goes to log in as before.
 
 ### "Remember Me"
 
@@ -662,7 +684,9 @@ The events are in `Keyring\Events`:
 | `SessionEnded` | `user`, `reason` (`revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed`) |
 | `RegisteredSessionEnded` | `handle`, `handles`, `userId`, `userType`, `guard`, `deviceId`, `endedAt`, `reason`. One for every registered session that ends. See [Hearing About Ended Sessions](#hearing-about-ended-sessions). |
 | `EveryoneSignedOut` | `at`. Every user's sessions ended at once. |
-| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
-| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as) |
+| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended), `handle` |
+| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as), `handle` |
 | `AccessRefused` | `user`, `resource` (`device`), `id`. A request to sign out a device that isn't the user's, answered with a 404. |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`). A "this wasn't me" link that was refused. |
+
+`handle` is the session's [handle](#listing-and-ending-sessions). A listener in the request sees the record's registry ID as well, but it's the value of the "remember me" cookie, so a queued listener gets the record with a blank `id` and a null `replacedBy`, and has only the handle to go by.

@@ -60,7 +60,31 @@ use Keyring\Http\Controllers\AuthenticatorController as KeyringAuthenticatorCont
 $this->app->bind(KeyringAuthenticatorController::class, AuthenticatorController::class);
 ```
 
-The services behind them work the same way. They include `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager`, `Keyring\Support\Throttle`, and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
+The services behind them work the same way. They include `Keyring\Login\SignIn`, `Keyring\Login\StepUp`, `Keyring\Login\Detours`, `Keyring\Changes\AuthenticatorChanges`, `EmailChanges` and `PasswordChanges`, `Keyring\Devices\DeviceManager`, `Keyring\Support\Throttle`, and `Keyring\WebAuthn\Ceremonies`. Their methods are public or protected, never private.
+
+`Detours` keeps the page a user was going to when Keyring sent them to enroll or to choose a new password, for them to [carry on to afterwards](policies.md#carrying-on-afterwards). Every page it saves goes through its `remember()` method, which checks it and then calls `put()` with the request, the key for the detour (`Detours::ENROLLMENT` or `Detours::PASSWORD_CHANGE`), and the URL being saved. Override `put()` to keep out pages you never want a user carried on to. Look at `$url`, not the request, because on the confirm page the request is the confirm page and `$url` is the page the confirmation was for. For example, an OpenID provider that answers a `prompt=none` authorize request with an error has nothing to come back to:
+
+```php
+namespace App\Login;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Uri;
+use Keyring\Login\Detours as KeyringDetours;
+
+class Detours extends KeyringDetours
+{
+    protected function put(Request $request, string $key, string $url): void
+    {
+        if (Uri::of($url)->query()->get('prompt') === 'none') {
+            return;
+        }
+
+        parent::put($request, $key, $url);
+    }
+}
+```
+
+Bind it with `$this->app->bind(KeyringDetours::class, Detours::class)`. A page you skip leaves what was saved before alone.
 
 Think of this as a last resort. A class you've replaced stops receiving Keyring's fixes for whatever you override. So prefer an option or hook from the table above when one does the job, and in a method you do override, call the parent's method for everything you aren't changing.
 

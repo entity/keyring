@@ -8,6 +8,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\Sessions;
 
 /**
  * A "remember me" cookie that had already been used, or a session still
@@ -15,13 +16,40 @@ use Keyring\Sessions\RegisteredSession;
  * browsers held the same ones, and the session was ended for both. The
  * record is the one that was ended: its device, address and browser are
  * those of whoever used the cookie first.
+ *
+ * Registry IDs stay in this request, as they do everywhere else. Queued,
+ * the event keeps the rest of the record without its registry IDs
+ * (RegisteredSession::withoutIds()), and the handle stands in for them: the
+ * same handle Sessions::handle() gives.
  */
 class RememberMeReused
 {
-    use Dispatchable, SerializesModels;
+    use Dispatchable, SerializesModels {
+        SerializesModels::__serialize as protected serializeModels;
+    }
+
+    /**
+     * The session's handle, worked out from the full record when the event
+     * is made, so a queued listener gets the same one.
+     */
+    public readonly string $handle;
 
     public function __construct(
         public readonly Authenticatable $user,
-        public readonly RegisteredSession $session,
-    ) {}
+        #[\SensitiveParameter] public readonly RegisteredSession $session,
+        ?string $handle = null,
+    ) {
+        $this->handle = $handle ?? app(Sessions::class)->handle($session);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function __serialize(): array
+    {
+        return [
+            ...$this->serializeModels(),
+            'session' => $this->session->withoutIds(),
+        ];
+    }
 }

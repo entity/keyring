@@ -33,12 +33,12 @@ class DatabaseSessionRegistry implements SessionRegistry
             unset($row['origin']);
         }
 
-        $this->withoutIds(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
+        $this->withoutBindings(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
     }
 
     public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        $row = $this->withoutIds(fn () => $this->query()->find($id));
+        $row = $this->withoutBindings(fn () => $this->query()->find($id));
 
         return $row === null ? null : RegisteredSession::fromArray((array) $row);
     }
@@ -54,7 +54,7 @@ class DatabaseSessionRegistry implements SessionRegistry
 
     public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
-        $this->withoutIds(fn () => $this->query()->where('id', $id)->update(RegisteredSession::columns($changes)));
+        $this->withoutBindings(fn () => $this->query()->where('id', $id)->update(RegisteredSession::columns($changes)));
     }
 
     /**
@@ -70,7 +70,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id) {
             $row = $this->query()->lockForUpdate()->find($id);
             $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
@@ -92,7 +92,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id, $successor, $revoke) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id, $successor, $revoke) {
             $now = now()->getTimestamp();
 
             $replaced = $this->query()->where('id', $id)->whereNull('revoked_at')->whereNull('replaced_by')->update([
@@ -139,7 +139,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      */
     protected function revokeFound(Builder $query): Collection
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($query) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($query) {
             $now = now()->getTimestamp();
 
             $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
@@ -177,7 +177,7 @@ class DatabaseSessionRegistry implements SessionRegistry
                 ->limit(1000)
                 ->pluck('id');
 
-            $this->withoutIds(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]));
+            $this->withoutBindings(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now]));
         } while ($ids->isNotEmpty());
     }
 
@@ -220,7 +220,7 @@ class DatabaseSessionRegistry implements SessionRegistry
      * @param  Closure(): TResult  $statements
      * @return TResult
      */
-    protected function withoutIds(Closure $statements): mixed
+    protected function withoutBindings(Closure $statements): mixed
     {
         return WithoutBindings::run($statements);
     }

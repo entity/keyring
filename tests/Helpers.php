@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Illuminate\Mail\Markdown;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -15,6 +17,7 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
+use Keyring\Tests\TestCase;
 use Keyring\WebAuthn\Ceremonies;
 use Keyring\WebAuthn\Profile;
 use Monolog\Handler\TestHandler;
@@ -208,5 +211,35 @@ function written(TestHandler $handler): array
         ->filter(fn (LogRecord $record) => str_starts_with($record->message, 'Keyring: '))
         ->map(fn (LogRecord $record) => [strtolower($record->level->name), substr($record->message, 9), $record->context])
         ->values()
+        ->all();
+}
+
+/**
+ * A request from a browser that holds these cookies and no others. The test
+ * client would otherwise send every cookie an earlier request was given, and
+ * every response would carry the ones queued for the responses before it.
+ *
+ * @param  array<string, string>  $cookies
+ */
+function browser(array $cookies = [], string $agent = FIREFOX): TestCase
+{
+    Cookie::flushQueuedCookies();
+    Auth::forgetGuards();
+
+    return test()->withHeader('User-Agent', $agent)
+        ->withCredentials()
+        ->withCookies([config('session.cookie') => '', Auth::guard()->getRecallerName() => '', 'remembered_session' => '', 'known_device' => '', ...$cookies]);
+}
+
+/**
+ * The long-lived cookies a response left the browser with.
+ *
+ * @return array<string, string>
+ */
+function keptCookies(TestResponse $response): array
+{
+    return collect([Auth::guard()->getRecallerName(), 'remembered_session', 'known_device'])
+        ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)?->getValue()])
+        ->filter()
         ->all();
 }
