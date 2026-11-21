@@ -412,12 +412,14 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 
     /**
      * Where the cache keeps whether a sessions table has the columns the
-     * sweep needs: one key for each table, in each database, whichever
-     * connection reaches it.
+     * sweep needs: one key for each table, with the connection's prefix,
+     * in each database, whichever connection reaches it.
      */
     public static function schemaCacheKey(ConnectionInterface $connection, string $table): string
     {
-        return 'keyring:sessions:sweepable:'.sha1($connection->getDatabaseName().'|'.$table);
+        $prefix = $connection instanceof Connection ? $connection->getTablePrefix() : '';
+
+        return 'keyring:sessions:sweepable:'.sha1($connection->getDatabaseName().'|'.$prefix.$table);
     }
 
     /**
