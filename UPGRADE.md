@@ -47,6 +47,10 @@ public function revokeDevice(Authenticatable $user, string $deviceId): Collectio
 
 If you published `config/keyring.php`, you may add `'continue_as_guest' => []` to `sessions`. Leaving it out is the same as an empty list.
 
+### Guests on Step-Up Routes
+
+`keyring:{level}` now sends a guest to sign in even when their session still holds what the last user proved, as `keyring.fresh` already did. A session keeps that when the guard can no longer load its user, say because the account was deleted, and a guest used to get through on it wherever the middleware wasn't placed after `auth`. Routes that place it after `auth`, as [Step-Up](docs/step-up.md#introduction) asks, see no change.
+
 ### Extending Step-Up
 
 These only matter if you extend or rebind `Keyring\Login\StepUp` or `Keyring\Sessions\SessionAssurance`, or extend Keyring's step-up middleware.
