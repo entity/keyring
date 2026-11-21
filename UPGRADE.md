@@ -6,6 +6,21 @@ What counts as a change you'd need to act on is in the README's [What's Stable](
 
 ## Unreleased
 
+### Published Config
+
+If you published `config/keyring.php`, you may add `'pages' => true`. Leaving it out is the same.
+
+### JSON Answers
+
+These only matter to code that reads Keyring's JSON, such as tests that compare whole bodies with `assertExactJson`.
+
+- A JSON request for a page, one that isn't an Inertia visit, gets `{"page": "...", "props": {...}}`. It used to get the Inertia root view, or the Blade view, as HTML. Inertia visits still get the component. A page you render with a closure through `Keyring::page` still answers as it did.
+- The challenge response, the `423` for step-up, the `401` for a session Keyring ended, and a status response whose `redirect` is one of Keyring's pages have a new `page` key. See [Responses](docs/sign-in-flow.md#responses).
+- A JSON request to a sign in or step-up that ran out, or used up its code guesses, gets a `422` with the error and `page`, where it used to be redirected to the login or confirm page.
+- The default `VerifiedResponse` answers JSON requests with `{"status": "email-verified", "message": "...", "justNow": ..., "redirect": "..."}`, where it always redirected. A response of your own bound with `Keyring::respondWith` is unchanged.
+
+The new `email-verified` status has its message in `lang/en/status.php`. If you published Keyring's translations, Keyring's English line is used until you add `'email-verified'` to yours.
+
 ### Detours Keep the Requirement
 
 Only apps that extend these classes need to change anything:

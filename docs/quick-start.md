@@ -47,7 +47,7 @@ A new user can't sign in until they've followed the verification link, so make s
 
 ## Your Pages
 
-Keyring is headless, meaning it handles the requests while you build the pages. When using Inertia, Keyring renders `auth/{page}` components. Otherwise, it renders Blade views named `auth.{page}`.
+Keyring is headless, meaning it handles the requests while you build the pages. When using Inertia, Keyring renders `auth/{page}` components. Otherwise, it renders Blade views named `auth.{page}`. For a frontend that Laravel doesn't serve, such as a Nuxt app, see [Headless Frontends](headless.md).
 
 If a view is missing, Keyring throws an error that names the file you need to create and the data it receives. The same is true of a missing Inertia component when Inertia's `pages.ensure_pages_exist` option is enabled.
 

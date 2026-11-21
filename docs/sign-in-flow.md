@@ -247,7 +247,7 @@ For WebAuthn, the browser may answer with any of the user's keys for that factor
 
 A wrong proof fails with `keyring::keyring.invalid`, shown on the factor's field (`password`, `code`, or `credential`). A wrong code keeps its guess count, so neither reloading the page nor sending a new code resets it.
 
-Once a pending attempt reaches a factor's limit (five guesses by default), nothing can finish it. Verifying then fails with `keyring::keyring.too_many_codes`. Opening the challenge page or sending a code ends the attempt and sends the user back to the start (`/login`, or `/confirm` for a step-up) with that message. An attempt that has timed out does the same, with `keyring::keyring.expired`. On `/login`, the message appears on the username field. On `/confirm`, it appears on the field of the factor the page asks for next, such as `password` or `code`. The account's limits keep counting these failures.
+Once a pending attempt reaches a factor's limit (five guesses by default), nothing can finish it. Verifying then fails with `keyring::keyring.too_many_codes`. Opening the challenge page or sending a code ends the attempt and sends the user back to the start (`/login`, or `/confirm` for a step-up) with that message. An attempt that has timed out does the same, with `keyring::keyring.expired`. On `/login`, the message appears on the username field. On `/confirm`, it appears on the field of the factor the page asks for next, such as `password` or `code`. The account's limits keep counting these failures. A JSON request isn't redirected. It gets the message as a `422` validation error, with the page to start again on as `page` (see [Responses](#responses)).
 
 ### Sending Codes
 
@@ -464,19 +464,30 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | Contract | When | Default |
 |---|---|---|
 | `AuthenticatedResponse` | The login or confirmation is complete. | Redirect to the intended URL or `home`. JSON: `{"status": "authenticated", "redirect": "..."}`. |
-| `ChallengeResponse` | Another factor is needed. | Redirect to the challenge page. JSON: `202` with `{"status": "challenge", "redirect": "..."}`. |
+| `ChallengeResponse` | Another factor is needed. | Redirect to the challenge page. JSON: `202` with `{"status": "challenge", "page": "challenge", "redirect": "..."}`, where `page` is `confirm` for step-up. |
 | `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login, otherwise `keyring::keyring.invalid` on the factor's field. |
 | `LockoutResponse` | Too many attempts. When an account's own limit refuses a typed username, the answer is `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message, or `keyring::keyring.locked` when a password reset is the way back in, or `keyring::keyring.factor_locked` for a second factor that has to be set up again. |
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
 | `RegisterResponse` | A new user registered and was signed in, with [`registration.reveal_taken`](#saying-when-an-address-is-taken). | The same as `AuthenticatedResponse`. |
 | `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
-| `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, which brings them back afterwards. JSON: `401`. Both send `Clear-Site-Data`. Not used for page visits to [routes that also serve guests](devices-and-sessions.md#pages-that-also-serve-guests). |
-| `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, which brings them back afterwards. JSON: `423` with `redirect`. |
+| `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, which brings them back afterwards. JSON: `401` with `"page": "login"`. Both send `Clear-Site-Data`. Not used for page visits to [routes that also serve guests](devices-and-sessions.md#pages-that-also-serve-guests). |
+| `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, which brings them back afterwards. JSON: `423` with `"page": "confirm"` and `redirect`. |
 | `EnrollmentRequiredResponse` | A route needs a sign-in method the user hasn't set up. | Redirect to `enrollment_url` with the `enroll-first` status, or `403` without one. JSON: `403`. |
 | `PasswordChangeRequiredResponse` | The user has to [choose a new password](protected-changes.md#requiring-a-password-change) before going on. | Redirect to `password_change_url` with the `change-password` status, or `403` without one. JSON: `403`. |
-| `VerifiedResponse` | The user's email address is verified. Built with `justNow`, which is true when the link they followed did the verifying. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. |
+| `VerifiedResponse` | The user's email address is verified. Built with `justNow`, which is true when the link they followed did the verifying. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. JSON: `{"status": "email-verified", "justNow": true, "redirect": "..."}`. |
 
-In this table, "JSON" means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits.
+In this table, "JSON" means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits. Whenever a JSON answer sends the browser to one of Keyring's [pages](#pages), it names the page as `page` beside the `redirect`, so a [frontend of your own](headless.md) can go to its page of that name without reading the URL.
+
+A sign in or step-up that ran out, or that used up its code guesses, sends a page visit back to the login or confirm page with the reason as a validation error. A JSON request gets that error as a `422`, in Laravel's validation shape, with `page` and `redirect` added:
+
+```json
+{
+  "message": "Your sign in timed out. Please start again.",
+  "errors": { "email": ["Your sign in timed out. Please start again."] },
+  "page": "login",
+  "redirect": "https://example.com/login"
+}
+```
 
 You may swap any response with `Keyring::respondWith`:
 
@@ -527,7 +538,7 @@ Every action that isn't a sign in or confirmation answers through `StatusRespons
 | `data` | Extra data, such as the new authenticator. Often empty. |
 | `redirect` | Where to go instead of back, or `null`. |
 
-JSON clients get the slug, its translated message, the redirect (when there is one), and the data, all side by side:
+JSON clients get the slug, its translated message, the redirect (when there is one), and the data, all side by side. When the redirect is one of Keyring's pages, such as the login page after a password reset, `page` names it:
 
 ```json
 {
@@ -556,7 +567,7 @@ Two statuses can say where the user was going when Keyring sent them away. That 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password`, and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
 
 You can swap it the same way as the others. Your class receives the same named arguments:
 
@@ -587,6 +598,17 @@ With Inertia installed, each page renders the component `auth/{name}`, such as `
 
 Inertia only notices a missing component in the browser, unless you turn on `pages.ensure_pages_exist` in `config/inertia.php`. With that option on, Keyring throws the same exception, naming the component.
 
+A JSON request for a page, one that expects JSON and isn't an Inertia visit, gets the page's name and props instead, with the status and headers the page would have had:
+
+```json
+{
+  "page": "reset-password",
+  "props": { "token": "...", "email": "taylor@example.com" }
+}
+```
+
+That's for a frontend Laravel doesn't serve, such as a Nuxt app, which builds each page itself. A JSON request never throws `MissingPage`, and isn't noted as the page to go back to. If every page lives in such a frontend, set [`pages`](configuration.md#pages) to `false`, and anything but JSON is answered with a `404`. See [Headless Frontends](headless.md).
+
 If a form on one of these pages fails validation, the user comes back to that page. Keyring notes each page it renders as the one to return to, for browsers that send no `Referer` at all, since Laravel doesn't remember an Inertia visit as the last page seen. You don't need Inertia's `store_previous_url` option for Keyring's pages.
 
 To change the component for a page, use `Keyring::page`:
@@ -601,7 +623,7 @@ Or you may pass a closure that receives the props and returns a response:
 Keyring::page('login', fn (array $props) => response()->view('marketing.login', $props));
 ```
 
-A closure can return anything a route can return, such as a response, a view, or a string.
+A closure can return anything a route can return, such as a response, a view, or a string. It answers JSON requests for the page too, and still renders with `pages` set to `false`, so a closure is also how you change what a JSON client gets.
 
 `challenge` and `confirm` are separate pages, so overriding `challenge` with `Keyring::page` doesn't change step-up. Override `confirm` too. A `confirm` page can render your `challenge` page with its props.
 

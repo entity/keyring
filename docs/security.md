@@ -231,6 +231,8 @@ Keyring::linkRootUsing(fn () => tenant()->url);
 
 Work the root out from something the server knows. The request's `Host` header is whatever the sender says. A link built from it would send a real reset token to the sender's site. The signature covers the path and query, so links keep working under any root.
 
+A frontend that Laravel doesn't serve sets the root to its own URL, and serves a page at each of Keyring's paths. Its pages then need `Referrer-Policy: no-referrer` and `Cache-Control: no-store` of their own, since Keyring's headers only reach Laravel's responses. See [Headless Frontends](headless.md#emailed-links).
+
 #### Tokens in Emailed Links
 
 An emailed link has to carry whatever makes it work, so its token or signature appears in the URL of the page it opens. OWASP ASVS 5.0.0 (14.2.1) asks for nothing sensitive in a URL, and for these links Keyring can't meet that. Keyring does what it can, as described above. The page changes nothing and posts the token in the body of the request that acts. The page is sent with `Referrer-Policy: no-referrer` and `Cache-Control: no-store`. Every link expires. A reset link stops working once it's used, or after `auth.passwords.*.expire`, which is 60 minutes in a new app. An email change's confirming links last 24 hours (`email_changes.confirmable_for`), and its undo link lasts a week (`revertable_for`). Each of them works once. A verification link lasts `auth.verification.expire`, which is 60 minutes. A "this wasn't me" link lasts a week (`devices.report_link_for`).
