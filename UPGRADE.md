@@ -68,13 +68,17 @@ The contract's methods mark the parameters that hold a registry ID with `#[\Sens
 
 If you published `config/keyring.php`, you may add `'continue_as_guest' => []` to `sessions`. Leaving it out is the same as an empty list.
 
+### Guests on Step-Up Routes
+
+`keyring:{level}` now sends a guest to sign in even when their session still holds what the last user proved, as `keyring.fresh` already did. A session keeps that when the guard can no longer load its user, say because the account was deleted, and a guest used to get through on it wherever the middleware wasn't placed after `auth`. Routes that place it after `auth`, as [Step-Up](docs/step-up.md#introduction) asks, see no change.
+
 ### Extending Step-Up
 
 These only matter if you extend or rebind `Keyring\Login\StepUp` or `Keyring\Sessions\SessionAssurance`, or extend Keyring's step-up middleware.
 
 - `StepUp`'s constructor also takes a `Keyring\Devices\DeviceManager`, after the `KeyringManager`. A subclass that calls `parent::__construct()` must pass it.
 - What `keyring.fresh` asks for moved from `RequireFreshVerification` to `StepUp::freshRequirement()`. The middleware's protected `requirement()` and `strongest()` methods are gone, so overriding them on a subclass of the middleware no longer has any effect. Override `freshRequirement()` or `strongest()` on `StepUp` instead.
-- `RequireAssurance` and `RequireFreshVerification` now only have the `$stepUp` property. The `$assurance`, `$keyring`, and `$devices` properties are gone, and the decisions they made are `StepUp::unlessReached()` and `StepUp::unlessFresh()`.
+- `RequireAssurance` and `RequireFreshVerification` now only have the `$stepUp` property. The `$assurance`, `$keyring`, and `$devices` properties are gone, and the decisions they made are `StepUp::unlessReached()` and `StepUp::unlessFresh()`. Each one asks a protected check first, `reached()` or `verifiedSince()`, and `StepUp::meets()` asks the same checks. To change what counts, override the checks, so `meets()` keeps giving the same answer as the middleware.
 - Both middleware constructors now take only the `StepUp`. A subclass that calls `parent::__construct()` with the old arguments must pass just that.
 - `SessionAssurance::level()` and `countingToward()` take an optional `int $since = 0`. A subclass that overrides either must add it, or PHP won't load the class.
 

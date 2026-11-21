@@ -43,6 +43,16 @@ function signIn(): void
     test()->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 }
 
+/**
+ * Delete the account that's signed in. Its session keeps what the user
+ * proved, and the next request finds nobody signed in.
+ */
+function deleteSignedInAccount(): void
+{
+    test()->user->delete();
+    app('auth')->forgetGuards();
+}
+
 it('lets an aal2 session straight through', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
@@ -107,6 +117,16 @@ it('drops a confirmation that another user started in the same session', functio
 
     expect($attempts->current(Purpose::Confirm))->toBeNull();
 });
+
+it('refuses a guest whose session still holds what the last user proved', function (string $middleware) {
+    Route::middleware(['web', $middleware])->get('/notes', fn () => 'notes');
+    signIn();
+    deleteSignedInAccount();
+    expect(session()->has(SessionAssurance::KEY))->toBeTrue();
+
+    $this->get('/notes')->assertRedirect('/login');
+    $this->getJson('/notes')->assertUnauthorized();
+})->with(['keyring:aal1', 'keyring.fresh']);
 
 it('stops counting an authenticator once it is removed, in every session it was used in', function () {
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
@@ -841,6 +861,11 @@ describe('asking from a controller', function () {
             $level = $request->has('acr') ? Assurance::fromName($request->string('acr')->value()) : null;
             $since = $request->has('max_age') ? now()->subSeconds($request->integer('max_age')) : null;
 
+            // prompt=none: answer without showing the user anything.
+            if ($request->query('prompt') === 'none') {
+                return $stepUp->meets($request, $level, $since) ? 'authorized' : 'login_required';
+            }
+
             return $stepUp->unlessMet($request, $level, $since) ?? 'authorized';
         });
 
@@ -931,8 +956,10 @@ describe('asking from a controller', function () {
 
         $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret, step: 1)])
             ->assertRedirect(route('keyring.confirm.challenge'));
+        $this->get('/authorize?max_age=900&prompt=none')->assertSee('login_required');
         $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
             ->assertRedirect('/authorize?max_age=900');
+        $this->get('/authorize?max_age=900&prompt=none')->assertSee('authorized');
     });
 
     it('asks for a level and a verification since a moment in one confirm', function () {
@@ -958,6 +985,8 @@ describe('asking from a controller', function () {
         signIn();
         $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
+        // The password proved at sign in is no longer the whole of a fresh proof.
+        $this->get('/authorize?max_age=600&prompt=none')->assertSee('login_required');
         $this->get('/authorize?max_age=600')->assertRedirect(route('keyring.confirm.challenge'));
         $this->get('/authorize?acr=aal2&max_age=600')->assertRedirect(route('keyring.confirm.challenge'));
 
@@ -983,6 +1012,7 @@ describe('asking from a controller', function () {
         signIn();
         $this->travel(11)->minutes();
 
+        $this->get('/authorize?acr=aal2&prompt=none')->assertSee('login_required');
         $this->get('/authorize?acr=aal2')->assertRedirect(route('keyring.confirm.challenge'));
         $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'recovery');
         $this->flushHeaders();
@@ -990,22 +1020,36 @@ describe('asking from a controller', function () {
             ->assertRedirect('/authorize?acr=aal2');
 
         $this->get('/authorize?acr=aal2')->assertOk();
+        $this->get('/authorize?acr=aal2&prompt=none')->assertSee('authorized');
     });
 
     it('takes a recovery code beside the password for a level and a fresh proof, as it does for the level alone', function () {
-        Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb'])->for($this->user, 'authenticatable')->create();
         signIn();
         $this->travel(11)->minutes();
 
         $this->get('/authorize?acr=aal2&max_age=600')->assertRedirect(route('keyring.confirm.challenge'));
         $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
             ->assertRedirect(route('keyring.confirm.challenge'));
+        $this->get('/authorize?acr=aal2&max_age=600&prompt=none')->assertSee('login_required');
         $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'recovery');
         $this->flushHeaders();
         $this->post(route('keyring.confirm.verify', 'recovery'), ['code' => 'aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])
             ->assertRedirect('/authorize?acr=aal2&max_age=600');
 
         $this->get('/authorize?acr=aal2&max_age=600')->assertOk();
+        $this->get('/authorize?acr=aal2&max_age=600&prompt=none')->assertSee('authorized');
+
+        // The plain confirm page takes the password alone. A moment alone is
+        // met by that, but the level asks for both factors since the moment.
+        $this->travel(5)->minutes();
+        $this->inertia()->get(route('keyring.confirm.challenge'));
+        $this->flushHeaders();
+        $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
+
+        $this->get('/authorize?max_age=60&prompt=none')->assertSee('authorized');
+        $this->get('/authorize?acr=aal2&max_age=60&prompt=none')->assertSee('login_required');
+        $this->get('/authorize?acr=aal2&max_age=60')->assertRedirect(route('keyring.confirm.challenge'));
     });
 
     it('lets a fresh proof through once the user confirms, rather than asking again', function () {
@@ -1041,10 +1085,12 @@ describe('asking from a controller', function () {
         $this->freezeSecond();
         signIn();
 
-        expect(app(StepUp::class)->unlessMet(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->toBeNull();
+        expect(app(StepUp::class)->meets(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->toBeTrue()
+            ->and(app(StepUp::class)->unlessMet(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->toBeNull();
 
         $this->travel(1)->seconds();
-        expect(app(StepUp::class)->unlessMet(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->not->toBeNull();
+        expect(app(StepUp::class)->meets(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->toBeFalse()
+            ->and(app(StepUp::class)->unlessMet(request(), since: now()->addSeconds(StepUp::CLOCK_LEEWAY)))->not->toBeNull();
     });
 
     it('asks for the level when it lapsed, though proofs since the moment would do', function () {
@@ -1057,6 +1103,8 @@ describe('asking from a controller', function () {
         $this->get('/authorize?max_age=7200')->assertOk();
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
 
+        $this->get('/authorize?max_age=7200&prompt=none')->assertSee('authorized');
+        $this->get('/authorize?acr=aal2&max_age=7200&prompt=none')->assertSee('login_required');
         $this->get('/authorize?acr=aal2&max_age=7200')->assertRedirect(route('keyring.confirm.challenge'));
         $this->getJson('/authorize?acr=aal2&max_age=7200')->assertStatus(423)
             ->assertJsonPath('redirect', route('keyring.confirm.challenge'));
@@ -1067,6 +1115,7 @@ describe('asking from a controller', function () {
         $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
             ->assertRedirect('/authorize?acr=aal2&max_age=7200');
         $this->get('/authorize?acr=aal2&max_age=7200')->assertOk();
+        $this->get('/authorize?acr=aal2&max_age=7200&prompt=none')->assertSee('authorized');
     });
 
     it('meets a moment alone after aal2 lapsed, so asks for the level only when told to', function () {
@@ -1099,6 +1148,7 @@ describe('asking from a controller', function () {
                 $level = in_array('aal2', explode(' ', $validated['acr_values'] ?? ''), true) ? Assurance::AAL2 : null;
                 $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
                 $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
+                $silent = in_array('none', explode(' ', $validated['prompt'] ?? ''), true);
 
                 $hash = hash('sha256', json_encode([
                     $validated['client_id'], $validated['redirect_uri'], $validated['state'] ?? null, $validated['nonce'] ?? null,
@@ -1110,7 +1160,7 @@ describe('asking from a controller', function () {
                 $stored = $flow === null ? null : $flows->get($flow);
                 $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
 
-                if (($freshProof || $maxAge !== null) && $started === null) {
+                if (($freshProof || $maxAge !== null) && ! $silent && $started === null) {
                     $flow = Str::random(40);
                     $request->session()->put('oidc.flows', [
                         ...$flows->sortByDesc('at')->take(4)->all(),
@@ -1120,19 +1170,27 @@ describe('asking from a controller', function () {
                     return redirect($request->fullUrlWithQuery(['flow' => $flow]));
                 }
 
+                if ($silent && Keyring::guard()->guest()) {
+                    return 'login_required';
+                }
+
                 if (Keyring::guard()->guest()) {
                     throw new AuthenticationException(guards: [config('keyring.guard')]);
                 }
 
+                $arrived = $started ?? now()->getTimestamp();
+
                 $since = match (true) {
-                    $freshProof => Carbon::createFromTimestamp($started),
-                    $maxAge !== null => Carbon::createFromTimestamp(min($started, now()->getTimestamp() - $maxAge)),
+                    $freshProof => Carbon::createFromTimestamp($arrived),
+                    $maxAge !== null => Carbon::createFromTimestamp(min($arrived, now()->getTimestamp() - $maxAge)),
                     default => null,
                 };
 
-                $response = $level !== null || $since !== null
-                    ? $stepUp->unlessMet($request, $level, $since)
-                    : null;
+                $response = match (true) {
+                    $level === null && $since === null => null,
+                    $silent => $stepUp->meets($request, $level, $since) ? null : response('login_required'),
+                    default => $stepUp->unlessMet($request, $level, $since),
+                };
 
                 if ($response !== null) {
                     return $response;
@@ -1320,6 +1378,29 @@ describe('asking from a controller', function () {
                     ->assertRedirect(route('login'));
             });
         });
+
+        it('answers prompt=none without showing a page, storing a moment, or saving where to come back to', function () {
+            $silently = fn (string $query) => $this->get("/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback&prompt=none&{$query}");
+
+            $silently('max_age=60')->assertOk()->assertSee('login_required');
+
+            signIn();
+            $this->travel(2)->minutes();
+
+            $silently('max_age=60')->assertOk()->assertSee('login_required')
+                ->assertSessionMissing(['oidc.flows', 'url.intended']);
+            expect(app(AttemptStore::class)->current(Purpose::Confirm))->toBeNull();
+
+            $silently('max_age=600')->assertOk()->assertSee('authorized');
+        });
+
+        it('answers prompt=none from meets() alone, even where a subclass answers unlessMet() differently', function () {
+            app()->bind(StepUp::class, AnsweringStepUp::class);
+            signIn();
+
+            $this->get('/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback&prompt=none&max_age=600')
+                ->assertOk()->assertSee('authorized');
+        });
     });
 
     describe('reading the claims as the docs do', function () {
@@ -1421,6 +1502,100 @@ describe('asking from a controller', function () {
         });
     });
 
+    describe('asking without starting a confirm', function () {
+        beforeEach(function () {
+            // Enrolling first is then a redirect unlessMet() returns, not a 403 it throws.
+            config(['keyring.enrollment_url' => '/settings/security']);
+        });
+
+        it('answers as unlessMet() does', function (?Assurance $level, ?string $since, bool $met) {
+            $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
+            signIn();
+            $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+            // Still at AAL2, with nothing proved in the last ten minutes.
+            $this->travel(11)->minutes();
+            $moment = $since === null ? null : Carbon::parse($since);
+
+            expect(app(StepUp::class)->meets(request(), $level, $moment))->toBe($met)
+                ->and(app(StepUp::class)->unlessMet(request(), $level, $moment) === null)->toBe($met);
+        })->with([
+            'a level the session holds' => [Assurance::AAL2, null, true],
+            'a level the account can never reach' => [Assurance::AAL3, null, false],
+            'a moment it verified since' => [null, '-15 minutes', true],
+            'a moment it hasn\'t verified since' => [null, '-10 minutes', false],
+            'a level and a moment, both met' => [Assurance::AAL2, '-15 minutes', true],
+            'a level it holds and a moment it hasn\'t verified since' => [Assurance::AAL2, '-10 minutes', false],
+            'a level it can never reach and a moment it verified since' => [Assurance::AAL3, '-15 minutes', false],
+        ]);
+
+        it('leaves the session as it was when the request falls short', function (?Assurance $level, ?string $since) {
+            signIn();
+            Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+            $this->travel(5)->minutes();
+            $moment = $since === null ? null : Carbon::parse($since);
+            $before = session()->all();
+
+            expect(app(StepUp::class)->meets(request(), $level, $moment))->toBeFalse()
+                ->and(session()->all())->toBe($before);
+
+            // Where unlessMet() starts a confirm or sends the user to enroll.
+            app(StepUp::class)->unlessMet(request(), $level, $moment);
+            expect(session()->all())->not->toBe($before);
+        })->with([
+            'a level it can reach by confirming' => [Assurance::AAL2, null],
+            'a level it can never reach' => [Assurance::AAL3, null],
+            'a moment' => [null, '-1 minute'],
+            'a level and a moment' => [Assurance::AAL2, '-1 minute'],
+        ]);
+
+        it('answers false where unlessMet() answers 403, with no enrollment URL to send the user to', function () {
+            config(['keyring.enrollment_url' => null]);
+            signIn();
+
+            $this->get('/authorize?acr=aal3')->assertForbidden();
+            $this->get('/authorize?acr=aal3&prompt=none')->assertOk()->assertSee('login_required');
+        });
+
+        it('answers a silent request without a later confirm landing on it', function () {
+            signIn();
+            $this->travel(2)->minutes();
+
+            $this->get('/authorize?max_age=60&prompt=none')->assertOk()->assertSee('login_required')
+                ->assertSessionMissing('url.intended');
+            expect(app(AttemptStore::class)->current(Purpose::Confirm))->toBeNull();
+
+            // A confirm the user starts themselves later takes them home.
+            $this->travel(8)->minutes();
+            $this->get(route('keyring.confirm.challenge'));
+            $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
+                ->assertRedirect(config('keyring.home'));
+
+            $this->get('/authorize?max_age=60&prompt=none')->assertSee('authorized');
+        });
+
+        it('refuses a guest as unlessMet() does, even when the session still holds what the last user proved', function (string $method) {
+            signIn();
+            deleteSignedInAccount();
+            expect(session()->has(SessionAssurance::KEY))->toBeTrue();
+
+            expect(fn () => app(StepUp::class)->{$method}(request(), Assurance::AAL1))->toThrow(AuthenticationException::class)
+                ->and(fn () => app(StepUp::class)->{$method}(request(), since: now()->subMinute()))->toThrow(AuthenticationException::class);
+        })->with(['unlessMet', 'meets']);
+
+        it('refuses a guest on Keyring\'s guard who is signed in to the default one', function (string $method) {
+            signIn();
+            config([
+                'auth.providers.staff' => ['driver' => 'eloquent', 'model' => Staff::class],
+                'auth.guards.staff' => ['driver' => 'session', 'provider' => 'staff'],
+                'keyring.guard' => 'staff',
+            ]);
+
+            expect(auth()->check())->toBeTrue()
+                ->and(fn () => app(StepUp::class)->{$method}(request(), Assurance::AAL1))->toThrow(AuthenticationException::class);
+        })->with(['unlessMet', 'meets']);
+    });
+
     it('resolves a subclass of the service from the container', function () {
         app()->bind(StepUp::class, AnsweringStepUp::class);
         signIn();
@@ -1438,12 +1613,12 @@ describe('asking from a controller', function () {
         'both' => [Assurance::AAL2, true],
     ]);
 
-    it('refuses what it could never answer', function (?Assurance $level, ?string $since, string $message) {
+    it('refuses what it could never answer', function (string $method, ?Assurance $level, ?string $since, string $message) {
         $this->freezeSecond();
 
-        expect(fn () => app(StepUp::class)->unlessMet(request(), $level, $since === null ? null : Carbon::parse($since)))
+        expect(fn () => app(StepUp::class)->{$method}(request(), $level, $since === null ? null : Carbon::parse($since)))
             ->toThrow(InvalidArgumentException::class, $message);
-    })->with([
+    })->with(['unlessMet', 'meets'])->with([
         'nothing to ask' => [null, null, 'Ask for a level, a verification since a moment, or both.'],
         'no level' => [Assurance::None, null, 'Ask for a level of at least AAL1.'],
         'no level, with a moment' => [Assurance::None, '-1 minute', 'Ask for a level of at least AAL1.'],

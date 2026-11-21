@@ -5,6 +5,7 @@
 - [Fresh Verification](#fresh-verification)
 - [Asking From a Controller](#asking-from-a-controller)
     - [Passing a Fixed Moment](#passing-a-fixed-moment)
+    - [Asking Without Starting a Confirm](#asking-without-starting-a-confirm)
     - [An Example](#an-example)
 - [Reading What Was Proved](#reading-what-was-proved)
 - [The Confirm Flow](#the-confirm-flow)
@@ -96,7 +97,7 @@ It returns `null` when the user has already proved what's asked, and the request
 - `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. A proof made in the same second as the moment counts. See [Fresh Verification](#fresh-verification) for what that means. A moment on its own doesn't look at whether a level lapsed: a password and an authenticator app proved 90 minutes ago meet a moment a day ago, though AAL2 lapsed after an hour idle. Pass `$level` too when the level the session holds now matters.
 - With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier. A recovery code is taken beside another factor whenever the level alone would take one, and never in place of the key AAL3 asks for.
 
-When it's asked for a moment and nobody is signed in to Keyring's guard, `unlessMet` throws an `AuthenticationException`, which Laravel answers by sending the browser to sign in. A level alone is judged from what the session proved, so check for a guest yourself first, as the [example](#an-example) does. It throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
+When nobody is signed in to Keyring's guard, `unlessMet` throws an `AuthenticationException`, which Laravel answers by sending the browser to sign in. It throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
 
 ### Passing a Fixed Moment
 
@@ -113,6 +114,20 @@ So whenever there's a `max_age`, or a `prompt=login`, store the moment the autho
 - Forget the moment once the authorization ends.
 
 Store the moment before a guest signs in, so don't put this route behind `auth`. Without it, the controller stores the moment and then sends the guest to sign in, so their sign-in comes after the moment and counts toward it. Behind `auth`, the guest signs in before the controller runs, and the moment comes after their sign-in. With two steps at sign in, the password is older than that moment, and `prompt=login` would send them to confirm right after they signed in.
+
+### Asking Without Starting a Confirm
+
+Some requests must get an answer without showing the user anything. An OpenID Connect request with `prompt=none` is one. When the session falls short, the provider sends `login_required` back to the client instead of showing a page. `unlessMet` can't answer that, because by the time it returns a response, it has started the step-up. A confirm attempt is waiting in the session, and the request is saved as the page to come back to. The next time the user confirms, they're sent to that silent request.
+
+`meets` asks the same question and starts nothing:
+
+```php
+public function meets(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): bool
+```
+
+It takes the same arguments as `unlessMet`, and throws the same `InvalidArgumentException` for ones it can't answer. It returns `true` when `unlessMet` would return `null`, and `false` when `unlessMet` would send the user to confirm or to enroll, or answer with a plain `403` because there's no `enrollment_url` to send them to. Either way, it leaves the session as it was.
+
+Like `unlessMet`, it throws an `AuthenticationException` when nobody is signed in to Keyring's guard. A request that mustn't show the sign-in page either should check for a guest first, as the example below does. A silent request never comes back from a confirm, so it stores no moment, and its `max_age` counts back from now.
 
 ### An Example
 
@@ -145,6 +160,7 @@ class AuthorizeController
         $level = in_array('aal2', explode(' ', $validated['acr_values'] ?? ''), true) ? Assurance::AAL2 : null;
         $maxAge = isset($validated['max_age']) ? (int) $validated['max_age'] : null;
         $freshProof = $maxAge === 0 || in_array('login', explode(' ', $validated['prompt'] ?? ''), true);
+        $silent = in_array('none', explode(' ', $validated['prompt'] ?? ''), true);
 
         // The moment this authorization started, stored under an ID only
         // this authorization request carries, with a hash of the request
@@ -161,7 +177,8 @@ class AuthorizeController
         $stored = $flow === null ? null : $flows->get($flow);
         $started = $stored !== null && hash_equals($stored['request'], $hash) ? $stored['at'] : null;
 
-        if (($freshProof || $maxAge !== null) && $started === null) {
+        // A silent request can't confirm, so it stores no moment.
+        if (($freshProof || $maxAge !== null) && ! $silent && $started === null) {
             $flow = Str::random(40);
             $request->session()->put('oidc.flows', [
                 ...$flows->sortByDesc('at')->take(4)->all(),
@@ -171,20 +188,33 @@ class AuthorizeController
             return redirect($request->fullUrlWithQuery(['flow' => $flow]));
         }
 
+        // prompt=none mustn't show the user anything, not even the sign-in page.
+        if ($silent && Keyring::guard()->guest()) {
+            return $this->loginRequired($validated);
+        }
+
         // Signing in comes after the moment, so it counts toward it.
         if (Keyring::guard()->guest()) {
             throw new AuthenticationException(guards: [config('keyring.guard')]);
         }
 
+        // A silent request stores no moment, so it counts from now, when
+        // it arrived.
+        $arrived = $started ?? now()->getTimestamp();
+
         $since = match (true) {
-            $freshProof => Carbon::createFromTimestamp($started),
-            $maxAge !== null => Carbon::createFromTimestamp(min($started, now()->getTimestamp() - $maxAge)),
+            $freshProof => Carbon::createFromTimestamp($arrived),
+            $maxAge !== null => Carbon::createFromTimestamp(min($arrived, now()->getTimestamp() - $maxAge)),
             default => null,
         };
 
-        $response = $level !== null || $since !== null
-            ? $stepUp->unlessMet($request, $level, $since)
-            : null;
+        // A silent request only asks meets(), which starts no confirm, so
+        // it's never saved as the page to come back to.
+        $response = match (true) {
+            $level === null && $since === null => null,
+            $silent => $stepUp->meets($request, $level, $since) ? null : $this->loginRequired($validated),
+            default => $stepUp->unlessMet($request, $level, $since),
+        };
 
         if ($response !== null) {
             return $response;
@@ -201,7 +231,7 @@ class AuthorizeController
 
 A flow ID that's expired, unknown, or was stored for another request isn't used. The request starts a new authorization instead, so the user confirms again.
 
-`validate()` keeps the example short. A real provider sends an `invalid_request` error back to the client instead. Map outside values to a level yourself, and decide what to do with ones you don't know. `Assurance::fromName()` throws an `InvalidArgumentException` for a name it doesn't know.
+`validate()` keeps the example short. A real provider sends an `invalid_request` error back to the client instead. `loginRequired()` stands for the same kind of error response, with `login_required`. Map outside values to a level yourself, and decide what to do with ones you don't know. `Assurance::fromName()` throws an `InvalidArgumentException` for a name it doesn't know.
 
 ## Reading What Was Proved
 
