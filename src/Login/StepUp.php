@@ -81,6 +81,9 @@ class StepUp
     {
         $asked = $this->asked($level, $since);
 
+        // Throws for a guest, as unlessReached() does.
+        $this->keyring->user();
+
         return $asked instanceof Assurance
             ? $this->reached($asked, Requirement::for($asked))
             : $this->verifiedSince($asked, $this->freshRequirement($request, $level), $level);
@@ -95,6 +98,11 @@ class StepUp
      */
     public function unlessReached(Request $request, Assurance $level, Requirement $requirement): ?Response
     {
+        // Throws for a guest. Their session can still hold what the last user
+        // proved, when the guard can no longer load that user, say because
+        // the account was deleted.
+        $this->keyring->user();
+
         if ($this->reached($level, $requirement)) {
             return null;
         }
@@ -253,18 +261,9 @@ class StepUp
     /**
      * Whether the session has reached the level, and what still counts
      * toward it meets the requirement.
-     *
-     * @throws AuthenticationException when nobody is signed in to Keyring's guard
      */
     protected function reached(Assurance $level, Requirement $requirement): bool
     {
-        // A guest's session can still hold what the last user proved, when
-        // the guard can no longer load that user, say because the account
-        // was deleted.
-        if ($this->keyring->guard()->guest()) {
-            throw new AuthenticationException(guards: [config('keyring.guard')]);
-        }
-
         return $this->assurance->level()->atLeast($level) && $requirement->isMetBy($this->assurance->countingToward($level));
     }
 

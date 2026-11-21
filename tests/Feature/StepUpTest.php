@@ -1574,6 +1574,18 @@ describe('asking from a controller', function () {
             expect(fn () => app(StepUp::class)->{$method}(request(), Assurance::AAL1))->toThrow(AuthenticationException::class)
                 ->and(fn () => app(StepUp::class)->{$method}(request(), since: now()->subMinute()))->toThrow(AuthenticationException::class);
         })->with(['unlessMet', 'meets']);
+
+        it('refuses a guest on Keyring\'s guard who is signed in to the default one', function (string $method) {
+            signIn();
+            config([
+                'auth.providers.staff' => ['driver' => 'eloquent', 'model' => Staff::class],
+                'auth.guards.staff' => ['driver' => 'session', 'provider' => 'staff'],
+                'keyring.guard' => 'staff',
+            ]);
+
+            expect(auth()->check())->toBeTrue()
+                ->and(fn () => app(StepUp::class)->{$method}(request(), Assurance::AAL1))->toThrow(AuthenticationException::class);
+        })->with(['unlessMet', 'meets']);
     });
 
     it('resolves a subclass of the service from the container', function () {
