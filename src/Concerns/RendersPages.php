@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Concerns;
 
 use Closure;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Lang;
 use Inertia\ComponentNotFoundException;
 use Inertia\ResponseFactory;
@@ -13,7 +14,8 @@ use Keyring\Http\Responses\StatusResponse;
 use Keyring\Support\EncryptedSession;
 
 /**
- * Keyring's pages, rendered by the app: Inertia components or Blade views.
+ * Keyring's pages, rendered by the app: Inertia components or Blade views,
+ * or the page's name and props as JSON for a frontend Laravel doesn't serve.
  */
 trait RendersPages
 {
@@ -33,19 +35,38 @@ trait RendersPages
     }
 
     /**
-     * Render one of Keyring's pages: Inertia when installed, Blade otherwise.
+     * Render one of Keyring's pages: a closure the app gave for it, then the
+     * page's name and props for a JSON request, then Inertia when installed
+     * and Blade otherwise. With keyring.pages off, for an app whose pages
+     * are all in a frontend of its own, those last two are a 404.
      *
      * @param  array<string, mixed>  $props
      */
     public function render(string $name, array $props = []): mixed
     {
-        $this->rememberPage();
+        // As ChoosesFormat decides for every other response. A frontend
+        // Laravel doesn't serve keeps its own place, so a JSON request isn't
+        // noted as the page to go back to, as Laravel doesn't note an XHR.
+        $request = request();
+        $json = $request->expectsJson() && ! $request->hasHeader('X-Inertia');
+
+        if (! $json) {
+            $this->rememberPage();
+        }
 
         $component = $this->pages[$name] ?? 'auth/'.$name;
 
+        // The app's own answer for the page, for JSON clients too: it may be
+        // how the app keeps a prop from being shown.
         if ($component instanceof Closure) {
             return $component($props);
         }
+
+        if ($json) {
+            return new JsonResponse(['page' => $name, 'props' => (object) $props]);
+        }
+
+        abort_if(config('keyring.pages') === false, 404);
 
         if (class_exists(ResponseFactory::class)) {
             try {

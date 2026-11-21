@@ -168,7 +168,9 @@ class InstallCommand extends Command
             $this->userModelHasKeyring() ? null : 'Add <comment>use Keyring\Concerns\HasKeyring;</comment> to your User model',
             in_array(Features::emailVerification(), $features, true) ? 'Make your User model implement <comment>MustVerifyEmail</comment>' : null,
             $migrations === 0 && $this->migrated() ? null : 'Run <comment>php artisan migrate</comment>',
-            'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs',
+            config('keyring.pages') === false
+                ? 'Build Keyring\'s pages in your frontend, see the "Headless Frontends" docs'
+                : 'Build the <comment>auth/*</comment> pages Keyring renders, see the "Quick Start" docs, or for a frontend Laravel doesn\'t serve, the "Headless Frontends" docs',
             $writesConfig ? 'Set <comment>support_contact</comment> in <comment>config/keyring.php</comment> to a page or an address users can reach you at: the emails then say who to contact if something wasn\'t them' : null,
             match (true) {
                 $enrolled && config('keyring.enrollment_url') === null && ! $writesConfig => 'Set <comment>enrollment_url</comment> in <comment>config/keyring.php</comment> to your page for adding a sign-in method: users are sent there until they have a second factor',

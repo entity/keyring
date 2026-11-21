@@ -21,6 +21,7 @@
             "web",
             "Keyring\\Http\\Middleware\\AddSecurityHeaders"
         ],
+        "pages": true,
         "webauthn": {
             "relying_party": {
                 "id": null

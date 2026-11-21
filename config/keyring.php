@@ -103,6 +103,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Pages
+    |--------------------------------------------------------------------------
+    |
+    | Keyring renders its pages (login, challenge, the pages emailed links
+    | open...) as Inertia components or Blade views, and answers a JSON
+    | request for one with the page's name and props. Set "pages" to false
+    | when every page is in a frontend Laravel doesn't serve, like a Nuxt
+    | app: anything but JSON is then answered with a 404.
+    |
+    */
+
+    'pages' => true,
+
+    /*
+    |--------------------------------------------------------------------------
     | WebAuthn (Passkeys & Security Keys)
     |--------------------------------------------------------------------------
     |
