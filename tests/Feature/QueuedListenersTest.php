@@ -492,6 +492,7 @@ it('queues a verified password, which has no stored authenticator, as it is', fu
         ->and($event->authenticator->factor)->toBe('password')
         ->and($event->authenticator->name)->toBe('Password')
         ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse()
+        ->and($event->authenticator->user()->is($user))->toBeTrue()
         ->and($event->verification->factor)->toBe('password')
         ->and($event->attempt->user()->is($user))->toBeTrue();
 });
@@ -513,30 +514,32 @@ it('queues a challenged password as it is', function () {
         ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse();
 });
 
-it('queues an authenticator that isn\'t stored without its secret or its user', function () {
-    Event::listen(FactorChallenged::class, QueuedKeyringListener::class);
+it('queues an authenticator that isn\'t stored without its secret or its user', function (string $class) {
+    Event::listen($class, QueuedKeyringListener::class);
 
     $user = $this->user->fresh();
     $authenticator = Authenticator::factory()->totp()->for($user, 'authenticatable')->make();
     $secret = $authenticator->secret;
     $stored = $authenticator->getAttributes()['secret'];
 
-    FactorChallenged::dispatch(Attempt::start(Purpose::Login, $user), $authenticator);
+    $class === FactorVerified::class
+        ? FactorVerified::dispatch(Attempt::start(Purpose::Login, $user), $authenticator, Verification::of($authenticator))
+        : FactorChallenged::dispatch(Attempt::start(Purpose::Login, $user), $authenticator);
 
-    $command = queuedCommand(FactorChallenged::class);
+    $command = queuedCommand($class);
 
     expect($command)->not->toContain($stored)
         ->and($command)->not->toContain($secret)
         ->and($command)->not->toContain($user->getAuthPassword());
 
-    $event = queuedEvent(FactorChallenged::class);
+    $event = queuedEvent($class);
 
     expect($event->authenticator->exists)->toBeFalse()
         ->and($event->authenticator->factor)->toBe('totp')
         ->and($event->authenticator->name)->toBe($authenticator->name)
         ->and($event->authenticator->secret)->toBeNull()
         ->and($event->authenticator->relationLoaded('authenticatable'))->toBeFalse();
-});
+})->with([FactorChallenged::class, FactorVerified::class]);
 
 it('still queues a stored authenticator by its ID', function () {
     Event::listen(FactorChallenged::class, QueuedKeyringListener::class);
