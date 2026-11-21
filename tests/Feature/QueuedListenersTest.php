@@ -100,6 +100,24 @@ function queuedCommand(string $event): string
 }
 
 /**
+ * Check a job holds none of the registry IDs there are: every record's own,
+ * and the ones it moved to and started on.
+ */
+function expectNoRegistryIds(string $command): void
+{
+    $ids = DB::table('keyring_sessions')->get(['id', 'replaced_by', 'origin'])
+        ->flatMap(fn (object $row) => [$row->id, $row->replaced_by, $row->origin])
+        ->filter()
+        ->unique();
+
+    expect($ids)->not->toBeEmpty();
+
+    foreach ($ids as $id) {
+        expect($command)->not->toContain($id);
+    }
+}
+
+/**
  * The event a queue worker hands the listener, once it has run the job.
  *
  * @template T of object
@@ -140,8 +158,11 @@ it('queues a resumed session with its handle in place of its registry ID', funct
     $command = queuedCommand(SessionResumed::class);
 
     expect($live)->toBe(session(Sessions::KEY))
+        ->and($record->origin)->toBe($signedIn['remembered_session'])
         ->and($command)->not->toContain($live)
         ->and($command)->not->toContain($signedIn['remembered_session']);
+
+    expectNoRegistryIds($command);
 
     // The listener gets the user back, the rest of the record, and a handle
     // that finds the session.
@@ -149,7 +170,8 @@ it('queues a resumed session with its handle in place of its registry ID', funct
 
     expect($event->user)->toBeInstanceOf(User::class)
         ->and($event->user->is($this->user))->toBeTrue()
-        ->and($event->session)->toEqual($record->with(['id' => '', 'replacedBy' => null]))
+        ->and($event->session)->toEqual($record->withoutIds())
+        ->and($event->session->origin)->toBeNull()
         ->and($event->handle)->toBe($sessions->handle($record))
         ->and($sessions->find($event->user, $event->handle))->toEqual($record);
 });
@@ -184,29 +206,60 @@ it('queues a reused "remember me" cookie\'s ended session with its handle in pla
         ->and($command)->not->toContain($copy['remembered_session'])
         ->and($command)->not->toContain($cookies['remembered_session']);
 
+    expectNoRegistryIds($command);
+
     // The session has ended, so Sessions::find() no longer leads to it, but
     // the handle is still the one its pages showed.
     $event = queuedEvent(RememberMeReused::class);
 
     expect($event->user->is($this->user))->toBeTrue()
-        ->and($event->session)->toEqual($seen[0]->session->with(['id' => '', 'replacedBy' => null]))
+        ->and($event->session)->toEqual($seen[0]->session->withoutIds())
         ->and($event->handle)->toBe($seen[0]->handle)
         ->and($event->handle)->toBe(app(Sessions::class)->handle($record));
 });
 
-it('fills in the handle of a session event dispatched without one', function () {
+dataset('session events', [
+    'SessionResumed' => [SessionResumed::class],
+    'RememberMeReused' => [RememberMeReused::class],
+]);
+
+it('works out the handle of a session event made without one, from the full record', function (string $class) {
     $record = new RegisteredSession(
         id: str_repeat('a', 40), userId: (string) $this->user->id, userType: RegisteredSession::typeOf($this->user), guard: 'web',
         deviceId: null, assurance: Assurance::None, ip: null, userAgent: null,
-        authenticatedAt: 0, lastActivityAt: 0, expiresAt: 0, replacedBy: str_repeat('b', 40),
+        authenticatedAt: 0, lastActivityAt: 0, expiresAt: 0, replacedBy: str_repeat('b', 40), origin: str_repeat('c', 40),
+    );
+    $handle = app(Sessions::class)->handle($record);
+
+    $event = new $class($this->user, $record);
+    $serialised = serialize($event);
+    $copy = unserialize($serialised);
+
+    // In the request, the event has the record as it is and its handle.
+    expect($event->session)->toBe($record)
+        ->and($event->handle)->toBe($handle);
+
+    // Queued, none of the record's IDs go with it, but the handle does.
+    expect($serialised)->not->toContain(str_repeat('a', 40))->not->toContain(str_repeat('b', 40))->not->toContain(str_repeat('c', 40))
+        ->and($copy->session)->toEqual($record->withoutIds())
+        ->and($copy->session->id)->toBe('')
+        ->and($copy->session->replacedBy)->toBeNull()
+        ->and($copy->session->origin)->toBeNull()
+        ->and($copy->handle)->toBe($handle);
+
+    // A handle the dispatcher passes is the one the event keeps.
+    expect(unserialize(serialize(new $class($this->user, $record, 'given')))->handle)->toBe('given');
+})->with('session events');
+
+it('gives no handle for a record without its IDs', function () {
+    $record = new RegisteredSession(
+        id: str_repeat('a', 40), userId: (string) $this->user->id, userType: RegisteredSession::typeOf($this->user), guard: 'web',
+        deviceId: null, assurance: Assurance::None, ip: null, userAgent: null,
+        authenticatedAt: 0, lastActivityAt: 0, expiresAt: 0, origin: str_repeat('c', 40),
     );
 
-    $event = unserialize(serialize(new SessionResumed($this->user, $record)));
-
-    expect(serialize(new SessionResumed($this->user, $record)))->not->toContain(str_repeat('a', 40))->not->toContain(str_repeat('b', 40))
-        ->and($event->session->id)->toBe('')
-        ->and($event->session->replacedBy)->toBeNull()
-        ->and($event->handle)->toBe(app(Sessions::class)->handle($record));
+    expect(fn () => app(Sessions::class)->handle($record->withoutIds()))->toThrow(LogicException::class)
+        ->and(fn () => app(Sessions::class)->handles($record->withoutIds()))->toThrow(LogicException::class);
 });
 
 it('queues a sign in without the user\'s password hash or remember token', function () {

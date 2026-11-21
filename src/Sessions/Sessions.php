@@ -29,6 +29,7 @@ use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
+use LogicException;
 
 /**
  * Starts, finds and ends registered sessions for the current request.
@@ -333,10 +334,20 @@ class Sessions
      * then under each of the previous keys (APP_PREVIOUS_KEYS), so a handle
      * kept from before the key was rotated still names its session.
      *
+     * A record with no IDs, such as the one a queued SessionResumed or
+     * RememberMeReused carries, has no handle: every such record would get
+     * the same one. Use the event's own handle instead.
+     *
      * @return non-empty-list<string>
+     *
+     * @throws LogicException when the record's IDs have been blanked
      */
     public function handles(RegisteredSession $session): array
     {
+        if ($session->origin() === '') {
+            throw new LogicException('This session record has no registry IDs, so it has no handle. A queued event carries its handle as $event->handle.');
+        }
+
         return KeyedHash::candidates(KeyedHash::SESSION_HANDLES, $session->origin());
     }
 

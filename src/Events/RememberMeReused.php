@@ -18,20 +18,29 @@ use Keyring\Sessions\Sessions;
  * those of whoever used the cookie first.
  *
  * Registry IDs stay in this request, as they do everywhere else. Queued,
- * the event keeps the rest of the record with a blank ID and no replacedBy,
- * and the handle stands in for it: the same handle Sessions::handle() gives.
+ * the event keeps the rest of the record without its registry IDs
+ * (RegisteredSession::withoutIds()), and the handle stands in for them: the
+ * same handle Sessions::handle() gives.
  */
 class RememberMeReused
 {
     use Dispatchable, SerializesModels {
-        SerializesModels::__serialize as serializeModels;
+        SerializesModels::__serialize as protected serializeModels;
     }
+
+    /**
+     * The session's handle, worked out from the full record when the event
+     * is made, so a queued listener gets the same one.
+     */
+    public readonly string $handle;
 
     public function __construct(
         public readonly Authenticatable $user,
         #[\SensitiveParameter] public readonly RegisteredSession $session,
-        public readonly ?string $handle = null,
-    ) {}
+        ?string $handle = null,
+    ) {
+        $this->handle = $handle ?? app(Sessions::class)->handle($session);
+    }
 
     /**
      * @return array<string, mixed>
@@ -40,8 +49,7 @@ class RememberMeReused
     {
         return [
             ...$this->serializeModels(),
-            'session' => $this->session->with(['id' => '', 'replacedBy' => null]),
-            'handle' => $this->handle ?? app(Sessions::class)->handle($this->session),
+            'session' => $this->session->withoutIds(),
         ];
     }
 }

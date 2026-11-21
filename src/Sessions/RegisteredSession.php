@@ -93,6 +93,18 @@ final readonly class RegisteredSession
     }
 
     /**
+     * The record with every registry ID blanked: its own, the one it moved
+     * to and the one it started on. Each is, or was, the value of a "remember
+     * me" cookie, so this is what goes anywhere off the server, such as a
+     * queued event. A handle can't be worked out from what's left.
+     */
+    #[\NoDiscard]
+    public function withoutIds(): self
+    {
+        return $this->with(['id' => '', 'replacedBy' => null, 'origin' => null]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array
