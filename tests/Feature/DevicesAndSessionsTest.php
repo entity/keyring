@@ -6,7 +6,9 @@ use Illuminate\Auth\GenericUser;
 use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -15,6 +17,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password as Broker;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Testing\TestResponse;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Changes\EmailChanges;
@@ -35,6 +38,7 @@ use Keyring\Features;
 use Keyring\Http\Middleware\AddSecurityHeaders;
 use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
+use Keyring\Login\VerificationLink;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
@@ -1636,6 +1640,223 @@ describe('the sessions a user can see and end', function () {
         config(['app.key' => 'base64:'.base64_encode(random_bytes(32))]);
 
         expect($sessions->handle($phone))->not->toBe($handle);
+    });
+
+    it('gives two sessions handles of their own however often each moves, and ends each by its own', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $sessions = app(Sessions::class);
+        login();
+
+        $phone = $sessions->handle(($this->session)('phone'));
+        $tablet = $sessions->handle(($this->session)('tablet'));
+        $registry->replace('phone', ($this->session)('phone-2', ['origin' => 'phone']));
+        $registry->replace('tablet', ($this->session)('tablet-2', ['origin' => 'tablet']));
+        $registry->replace('phone-2', ($this->session)('phone-3', ['origin' => 'phone']));
+
+        expect($phone)->not->toBe($tablet)
+            ->and(($this->handle)('phone-3'))->toBe($phone)
+            ->and(($this->handle)('tablet-2'))->toBe($tablet)
+            ->and($sessions->list(request(), $this->user)->pluck('id')->unique())->toHaveCount(3);
+
+        $this->deleteJson(route('keyring.sessions.destroy', $phone))->assertOk();
+
+        expect($registry->find('phone-3')->revokedAt)->not->toBeNull()
+            ->and($registry->find('tablet-2')->revokedAt)->toBeNull()
+            ->and($sessions->find($this->user, $tablet)->id)->toBe('tablet-2');
+    })->with('registries');
+
+    it('never finds another user\'s session by its handle, wherever it has moved', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $other = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        $handle = app(Sessions::class)->handle(($this->session)('theirs', user: $other));
+        app(SessionRegistry::class)->replace('theirs', ($this->session)('theirs-2', ['origin' => 'theirs'], $other));
+
+        expect(app(Sessions::class)->find($other, $handle)->id)->toBe('theirs-2')
+            ->and(app(Sessions::class)->find($this->user, $handle))->toBeNull();
+    })->with('registries');
+});
+
+describe('whether a user is still signed in on a session', function () {
+    beforeEach(function () {
+        config(['keyring.sessions.driver' => 'database']);
+
+        $now = now()->getTimestamp();
+        $this->record = new RegisteredSession('phone', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, '203.0.113.7', CHROME, $now - 600, $now - 300, $now + 3600);
+        $this->handle = app(Sessions::class)->handle($this->record);
+    });
+
+    it('is so for a session that can still be carried on, and asking changes nothing', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $registry->save($this->record);
+
+        // It isn't counted as activity, so it never keeps a session from idling out.
+        expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue()
+            ->and($registry->find('phone'))->toEqual($this->record);
+    })->with('registries');
+
+    it('is still so after the session moves to another record', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $registry->save($this->record);
+        $registry->replace('phone', $this->record->with(['id' => 'phone-2', 'origin' => 'phone']));
+
+        expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue();
+    })->with('registries');
+
+    it('is not so for a session that :dataset', function (Closure $end) {
+        $handle = $end($this->record) ?? $this->handle;
+
+        expect(app(Sessions::class)->stillSignedIn($this->user, $handle))->toBeFalse();
+    })->with([
+        'was revoked' => [function (RegisteredSession $record) {
+            app(SessionRegistry::class)->save($record);
+            app(SessionRegistry::class)->revoke($record->id);
+        }],
+        'expired' => [fn (RegisteredSession $record) => app(SessionRegistry::class)->save($record->with(['expiresAt' => now()->getTimestamp()]))],
+        'idled out' => [fn (RegisteredSession $record) => app(SessionRegistry::class)->save($record->with(['lastActivityAt' => now()->subHours(3)->getTimestamp()]))],
+        'is another user\'s' => [fn (RegisteredSession $record) => app(SessionRegistry::class)->save($record->with(['userId' => (string) User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password'])->id]))],
+        'is another guard\'s' => [fn (RegisteredSession $record) => app(SessionRegistry::class)->save($record->with(['guard' => 'admin']))],
+        'was never issued' => [fn (RegisteredSession $record) => null],
+        'is named by its registry ID' => [function (RegisteredSession $record) {
+            app(SessionRegistry::class)->save($record);
+
+            return $record->id;
+        }],
+        'is named by nothing' => [function (RegisteredSession $record) {
+            app(SessionRegistry::class)->save($record);
+
+            return '';
+        }],
+        'is named by something that is not a handle' => [function (RegisteredSession $record) {
+            app(SessionRegistry::class)->save($record);
+
+            return str_repeat('z', 64)."\0";
+        }],
+    ]);
+
+    it('is not so for a user the app no longer lets sign in', function () {
+        app(SessionRegistry::class)->save($this->record);
+        Keyring::allowSignInWhen(fn (User $user) => $user->name !== 'Banned');
+
+        expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue();
+
+        $this->user->forceFill(['name' => 'Banned'])->save();
+
+        expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeFalse()
+            // Asking ends nothing: the session middleware does that.
+            ->and(app(SessionRegistry::class)->find('phone')->revokedAt)->toBeNull();
+    });
+
+    it('is still so by a handle given under a previous app key, until that key is dropped', function () {
+        $sessions = app(Sessions::class);
+        app(SessionRegistry::class)->save($this->record);
+        $old = config('app.key');
+
+        config(['app.key' => 'base64:'.base64_encode(random_bytes(32)), 'app.previous_keys' => [$old]]);
+
+        expect($sessions->handle($this->record))->not->toBe($this->handle)
+            ->and($sessions->handles($this->record))->toBe([$sessions->handle($this->record), $this->handle])
+            ->and($sessions->find($this->user, $this->handle)?->id)->toBe('phone')
+            ->and($sessions->stillSignedIn($this->user, $this->handle))->toBeTrue()
+            ->and($sessions->stillSignedIn($this->user, $sessions->handle($this->record)))->toBeTrue();
+
+        config(['app.previous_keys' => []]);
+
+        expect($sessions->find($this->user, $this->handle))->toBeNull()
+            ->and($sessions->stillSignedIn($this->user, $this->handle))->toBeFalse();
+    });
+
+    it('answers for a request that has no session of its own, as a server-to-server call does', function () {
+        app(SessionRegistry::class)->save($this->record);
+
+        expect(request()->hasSession())->toBeFalse()
+            ->and(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue();
+    });
+
+    // Where registration hides who has an account, an unverified user is
+    // only let in from the browser that followed their verification link.
+    it('is not so for an unverified user, but on the browser that followed their verification link', function () {
+        app(SessionRegistry::class)->save($this->record);
+        $this->user->forceFill(['email_verified_at' => null])->save();
+
+        expect(Keyring::hidesRegisteredAddresses())->toBeTrue()
+            ->and(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeFalse();
+
+        // Asked from that browser's own request.
+        request()->setLaravelSession(session()->driver());
+        session()->put(VerificationLink::KEY, ['id' => $this->user->id, 'hash' => sha1($this->user->email), 'expires' => now()->addHour()->getTimestamp()]);
+
+        expect(app(Sessions::class)->stillSignedIn($this->user, $this->handle))->toBeTrue();
+    });
+
+    it('is not so for a user that isn\'t a model', function () {
+        $user = new GenericUser(['id' => $this->user->id]);
+        app(SessionRegistry::class)->save($this->record->with(['userType' => RegisteredSession::typeOf($user)]));
+
+        expect(app(Sessions::class)->stillSignedIn($user, $this->handle))->toBeFalse();
+    });
+});
+
+describe('the record a session started on', function () {
+    beforeEach(function () {
+        $now = now()->getTimestamp();
+        $this->record = new RegisteredSession('phone-2', (string) $this->user->id, RegisteredSession::typeOf($this->user), 'web', null, Assurance::AAL1, null, CHROME, $now, $now, $now + 3600, origin: 'phone');
+    });
+
+    it('is kept by the registry through every change to the record', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $registry = app(SessionRegistry::class);
+        $registry->save($this->record);
+
+        expect($registry->find('phone-2')->origin)->toBe('phone')
+            ->and($registry->forUser($this->user)->sole()->origin)->toBe('phone');
+
+        $registry->update('phone-2', ['lastActivityAt' => now()->getTimestamp() + 60]);
+        expect($registry->find('phone-2')->origin)->toBe('phone');
+
+        $registry->replace('phone-2', $this->record->with(['id' => 'phone-3']));
+        $registry->revoke('phone-3');
+
+        // A stale copy saved over either record changes nothing.
+        $registry->save($this->record);
+        $registry->save($this->record->with(['id' => 'phone-3']));
+
+        expect($registry->find('phone-2'))->origin->toBe('phone')->replacedBy->toBe('phone-3')
+            ->and($registry->find('phone-3'))->origin->toBe('phone')->revokedAt->not->toBeNull();
+    })->with('registries');
+
+    it('is a record\'s own ID when it has none', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        app(SessionRegistry::class)->save($this->record->with(['origin' => null]));
+
+        expect(app(SessionRegistry::class)->find('phone-2'))->origin->toBeNull()
+            ->and(app(SessionRegistry::class)->find('phone-2')->origin())->toBe('phone-2');
+    })->with('registries');
+
+    it('is not needed in a cache record, as none from before it has one', function () {
+        config(['keyring.sessions.driver' => 'cache']);
+        app(SessionRegistry::class)->save($this->record);
+        Cache::put('keyring:sessions:phone-2', Arr::except(Cache::get('keyring:sessions:phone-2'), 'origin'), 3600);
+
+        expect(app(SessionRegistry::class)->find('phone-2'))->origin->toBeNull()
+            ->and(RegisteredSession::fromArray(Arr::except($this->record->toArray(), 'origin'))->origin())->toBe('phone-2');
+    });
+
+    // An app that updated Keyring and hasn't run the migration that adds the
+    // column yet: sessions start, but none can move to another record.
+    it('is only written by the database driver when there is one, so signing in works before the migration', function () {
+        Schema::table('keyring_sessions', fn (Blueprint $table) => $table->dropColumn('origin'));
+
+        login()->assertRedirect('/dashboard');
+        $session = app(SessionRegistry::class)->find(session(Sessions::KEY));
+
+        // A QueryException in an app. On MySQL the test's own transaction
+        // ended when the column was dropped, so rolling back the failed move
+        // throws the PDOException it extends.
+        expect($session->origin)->toBeNull()
+            ->and(fn () => app(SessionRegistry::class)->replace($session->id, $session->with(['id' => 'moved', 'origin' => $session->id])))->toThrow(PDOException::class);
     });
 });
 

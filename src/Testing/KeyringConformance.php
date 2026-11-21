@@ -23,6 +23,7 @@ use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Throwable;
 
 /**
  * Checks that your Keyring setup (policy, factors, responses, pipeline
@@ -309,6 +310,35 @@ trait KeyringConformance
 
         $this->assertNotNull($id, 'Signed-in sessions should be registered.');
         $this->assertNotNull(app(SessionRegistry::class)->find($id)?->revokedAt, 'Signing out should revoke the registered session.');
+    }
+
+    public function test_keyring_keeps_a_sessions_handle_when_it_moves(): void
+    {
+        $user = $this->keyringUser();
+        $registry = app(SessionRegistry::class);
+
+        $this->actingAs($user)->withAssurance(Assurance::AAL1)->get(route('login'))->assertRedirect();
+        $first = $registry->find((string) session(Sessions::KEY));
+
+        $this->assertNotNull($first, 'Signed-in sessions should be registered.');
+
+        $sessions = app(Sessions::class);
+        $handle = $sessions->handle($first);
+
+        // What "remember me" and a step-up do: move the session to a new record.
+        $moved = $first->with(['id' => Str::random(40), 'origin' => $first->origin()]);
+        $hint = 'The session registry should keep the record a session started on (origin), so the session keeps its handle when it moves. On the database driver, publish and run Keyring\'s migrations. A driver of your own should store origin and return it.';
+
+        try {
+            $registry->replace($first->id, $moved);
+        } catch (Throwable $e) {
+            $this->fail($hint.' Moving a session failed: '.$e->getMessage());
+        }
+
+        $this->assertSame($first->id, $registry->find($moved->id)?->origin, $hint);
+        // The sessions list, and anything that looks a handle up, read
+        // through forUser().
+        $this->assertSame($moved->id, $sessions->find($user, $handle)?->id, $hint.' forUser() should return it too.');
     }
 
     /**
