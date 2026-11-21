@@ -138,7 +138,7 @@ class StepUp
         // Without the sign-in methods to meet it, confirming can't help, and
         // would only send the user round in a loop.
         if (! $this->keyring->for($this->keyring->user())->canMeet($requirement)) {
-            return $this->enrollFirst($request);
+            return $this->enrollFirst($request, requirement: $requirement);
         }
 
         $this->begin($request, $requirement, $proved);
@@ -149,15 +149,19 @@ class StepUp
     /**
      * Send a user who hasn't set up what's needed to keyring.enrollment_url,
      * or answer 403 when there isn't one. Where they were going is saved,
-     * for the enrollment to hand back as "continue".
+     * for the enrollment to hand back as "continue" once the account can
+     * meet $requirement.
      *
      * @param  string|null  $continue  where to carry on to instead of this
      *                                 page, for one of Keyring's own pages
      *                                 that was there on another's behalf
+     * @param  Requirement|null  $requirement  what the account couldn't meet;
+     *                                         without one, the first sign-in
+     *                                         method added hands it back
      */
-    public function enrollFirst(Request $request, ?string $continue = null): Response
+    public function enrollFirst(Request $request, ?string $continue = null, ?Requirement $requirement = null): Response
     {
-        $this->detours->remember($request, Detours::ENROLLMENT, $continue);
+        $this->detours->remember($request, Detours::ENROLLMENT, $continue, $requirement);
 
         return $this->keyring->response(EnrollmentRequiredResponse::class)->toResponse($request);
     }

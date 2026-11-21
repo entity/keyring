@@ -46,7 +46,7 @@ class RequireEnrollment
             return $next($request);
         }
 
-        return $this->stepUp->enrollFirst($request);
+        return $this->stepUp->enrollFirst($request, requirement: $requirement);
     }
 
     /**

@@ -18,6 +18,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\WebAuthn;
+use Keyring\Login\Detours;
 use Keyring\Models\Authenticator;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Testing\VirtualAuthenticator;
@@ -561,6 +562,20 @@ describe('aal3', function () {
 
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL3);
         $this->get('/vault')->assertOk();
+    });
+
+    it('hands back the page that sent them to enroll only once they add a key that reaches aal3', function () {
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->get('/vault', ['Sec-Fetch-Mode' => 'navigate', 'Sec-Fetch-Dest' => 'document'])->assertRedirect('/settings/security');
+
+        // A passkey nothing vouches for can't reach it, so the page stays saved.
+        attest(new VirtualAuthenticator, 'passkey')->assertOk()->assertJsonMissingPath('continue');
+
+        expect(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/vault');
+
+        attest($this->maker->key(YUBIKEY))->assertOk()->assertJsonPath('continue', 'http://localhost/vault');
+
+        expect(session()->has(Detours::ENROLLMENT))->toBeFalse();
     });
 
     it('doesn\'t take a synced passkey\'s user verification for the attested key\'s', function () {
