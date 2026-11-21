@@ -32,7 +32,6 @@ use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\KeyedHash;
 use Keyring\Tests\Fixtures\User;
-use Keyring\Tests\TestCase;
 
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
@@ -43,36 +42,6 @@ beforeEach(function () {
 
     $this->user = taylor();
 });
-
-/**
- * A request from a browser that holds these cookies and no others. The test
- * client would otherwise send every cookie an earlier request was given, and
- * every response would carry the ones queued for the responses before it.
- *
- * @param  array<string, string>  $cookies
- */
-function browser(array $cookies = [], string $agent = FIREFOX): TestCase
-{
-    Cookie::flushQueuedCookies();
-    Auth::forgetGuards();
-
-    return test()->withHeader('User-Agent', $agent)
-        ->withCredentials()
-        ->withCookies([config('session.cookie') => '', Auth::guard()->getRecallerName() => '', 'remembered_session' => '', 'known_device' => '', ...$cookies]);
-}
-
-/**
- * The long-lived cookies a response left the browser with.
- *
- * @return array<string, string>
- */
-function keptCookies(TestResponse $response): array
-{
-    return collect([Auth::guard()->getRecallerName(), 'remembered_session', 'known_device'])
-        ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)?->getValue()])
-        ->filter()
-        ->all();
-}
 
 /**
  * Sign in with "remember me" ticked, in a browser that wasn't signed in.
