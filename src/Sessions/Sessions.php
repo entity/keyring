@@ -6,7 +6,9 @@ namespace Keyring\Sessions;
 
 use Closure;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Events\CurrentDeviceLogout;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
@@ -30,6 +32,9 @@ use Keyring\Support\Duration;
 use Keyring\Support\KeyedHash;
 use Keyring\Support\RowLock;
 use Keyring\Support\Throttle;
+use LogicException;
+use PDOException;
+use Throwable;
 
 /**
  * Starts, finds and ends registered sessions for the current request.
@@ -92,6 +97,13 @@ class Sessions
      * in instead would let whoever holds an account's sessions keep its
      * owner out. Two sign ins at once take turns (holding), so neither
      * counts the sessions without the other's.
+     *
+     * A revocation that fails takes the whole sign in with it. On the
+     * database driver sharing the user's connection, the row lock's
+     * transaction is rolled back, the new record included. On a driver
+     * that announces straight away, the new record is revoked again,
+     * unannounced, before the lock is let go, so it doesn't count toward
+     * the limit, and the sessions ended before the failure stay ended.
      */
     protected function register(Authenticatable $user, RegisteredSession $session): void
     {
@@ -101,29 +113,41 @@ class Sessions
             return;
         }
 
-        $this->holding($user, function () use ($user, $session, $max) {
+        $this->holdingThenThrow($user, function () use ($user, $session, $max) {
             $this->registry->save($session);
 
-            $now = now()->getTimestamp();
+            try {
+                $now = now()->getTimestamp();
 
-            $this->registry->forUser($user)
-                ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
-                ->sortBy([
-                    // One that has idled out is over already, so it goes first.
-                    fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
-                    fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
-                ])
-                ->skip(max(0, (int) $max - 1))
-                // By ID, byte by byte. That's the order the sweep and
-                // revokeAll() lock rows in where the database sorts IDs the
-                // same way (SQLite, or a binary or "C" collation). Where it
-                // sorts them otherwise (MySQL's utf8mb4_*_ci, PostgreSQL's
-                // locale collations), this and a sweep ending the same
-                // sessions can deadlock now and then: the database ends one,
-                // the sweep tries again, and the sign in fails as it would
-                // on any database error.
-                ->sortBy(fn (RegisteredSession $other) => $other->id, SORT_STRING)
-                ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
+                $this->registry->forUser($user)
+                    ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
+                    ->sortBy([
+                        // One that has idled out is over already, so it goes first.
+                        fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
+                        fn (RegisteredSession $a, RegisteredSession $b) => $b->lastActivityAt <=> $a->lastActivityAt,
+                    ])
+                    ->skip(max(0, (int) $max - 1))
+                    // By ID, byte by byte. That's the order the sweep and
+                    // revokeAll() lock rows in where the database sorts IDs the
+                    // same way (SQLite, or a binary or "C" collation). Where it
+                    // sorts them otherwise (MySQL's utf8mb4_*_ci, PostgreSQL's
+                    // locale collations), this and a sweep ending the same
+                    // sessions can deadlock now and then: the database ends one,
+                    // the sweep tries again, and the sign in fails as it would
+                    // on any database error.
+                    ->sortBy(fn (RegisteredSession $other) => $other->id, SORT_STRING)
+                    ->each(fn (RegisteredSession $other) => $this->because(SessionEndReason::SessionLimit, fn () => $this->registry->revoke($other->id)));
+            } catch (Throwable $e) {
+                // No rollback takes the new record back on a driver that
+                // announces straight away. It's revoked while the lock is
+                // still held, so no other sign in counts it, and on the
+                // driver underneath, unannounced, as nobody used the session.
+                if ($this->registry instanceof AnnouncingSessionRegistry && $this->registry->announcesStraightAway()) {
+                    rescue(fn () => $this->registry->inner()->revoke($session->id));
+                }
+
+                throw $e;
+            }
         });
     }
 
@@ -141,6 +165,87 @@ class Sessions
     protected function holding(Authenticatable $user, Closure $change): mixed
     {
         return $user instanceof Model ? RowLock::hold($user, fn () => $change()) : $change();
+    }
+
+    /**
+     * holding(), then a callback that runs whether or not the change
+     * failed, outside the user's row lock, and the change's failure thrown
+     * after it.
+     *
+     * The row lock is a transaction on the user's connection. On a driver
+     * that announces straight away (AnnouncingSessionRegistry), a
+     * synchronous listener runs inside it: thrown from inside, a failure
+     * part way through would roll back what the listeners wrote for the
+     * sessions that did end, a job on a database queue included. So there
+     * the failure is held until the lock's transaction has committed, which
+     * keeps only what happened. Inside a transaction of the app's own, the
+     * failure, once thrown, still rolls that back unless the app catches it.
+     *
+     * On the database driver sharing the user's connection, the failure is
+     * thrown from inside, as the change is all or nothing: the revocations
+     * it made and the announcements waiting on them are rolled back
+     * together. So is any database failure, on any driver (canThrowLater):
+     * it may have left the transaction unusable, and committing it would
+     * run its after-commit callbacks for work that was rolled back.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $change
+     * @param  (Closure(): void)|null  $then  Run whether or not the change failed.
+     * @return TResult
+     */
+    protected function holdingThenThrow(Authenticatable $user, Closure $change, ?Closure $then = null): mixed
+    {
+        try {
+            $outcome = $this->holding($user, function () use ($change): Closure {
+                try {
+                    $result = $change();
+
+                    return fn () => $result;
+                } catch (Throwable $e) {
+                    if (! $this->canThrowLater($e)) {
+                        throw $e;
+                    }
+
+                    return fn () => throw $e;
+                }
+            });
+        } catch (Throwable $e) {
+            $outcome = fn () => throw $e;
+        }
+
+        try {
+            $then?->__invoke();
+        } finally {
+            $result = $outcome();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Whether a change's failure can wait until the user's row is let go:
+     * only when the registry announces straight away, and the failure came
+     * from nowhere near a database (no PDOException, which Laravel's
+     * QueryException and DeadlockException are too, anywhere in its
+     * chain). Any failed query may have left the
+     * connection's transaction unusable: on PostgreSQL a COMMIT after one
+     * silently rolls back, and Laravel would still run its after-commit
+     * callbacks.
+     */
+    protected function canThrowLater(Throwable $e): bool
+    {
+        if (! $this->registry instanceof AnnouncingSessionRegistry || ! $this->registry->announcesStraightAway()) {
+            return false;
+        }
+
+        for ($cause = $e; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof PDOException) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -343,10 +448,20 @@ class Sessions
      * then under each of the previous keys (APP_PREVIOUS_KEYS), so a handle
      * kept from before the key was rotated still names its session.
      *
+     * A record with no IDs, such as the one a queued SessionResumed or
+     * RememberMeReused carries, has no handle: every such record would get
+     * the same one. Use the event's own handle instead.
+     *
      * @return non-empty-list<string>
+     *
+     * @throws LogicException when the record's IDs have been blanked
      */
     public function handles(RegisteredSession $session): array
     {
+        if ($session->origin() === '') {
+            throw new LogicException('This session record has no registry IDs, so it has no handle. A queued event carries its handle as $event->handle.');
+        }
+
         return KeyedHash::candidates(KeyedHash::SESSION_HANDLES, $session->origin());
     }
 
@@ -437,14 +552,22 @@ class Sessions
         }
     }
 
+    /**
+     * The session's ID is only forgotten once its record is revoked. A
+     * registry that throws leaves it in place, so the next request finds
+     * the record still open and signs out again, rather than finding a
+     * signed-in session with no record and registering it afresh.
+     */
     public function end(Request $request): void
     {
-        $id = $request->session()->pull(self::KEY);
+        $id = $request->session()->get(self::KEY);
 
         try {
             if (is_string($id)) {
                 $this->registry->revoke($id);
             }
+
+            $request->session()->forget(self::KEY);
         } finally {
             $request->session()->forget(self::REMEMBERED);
             $this->forgetRememberCookie($request);
@@ -541,6 +664,46 @@ class Sessions
         if ($event->guard === config('keyring.guard') && $event->remember && $guard instanceof SessionGuard && $guard->viaRemember() && ! $this->recallerQueued()) {
             $guard->getSession()->put(self::REMEMBERED, true);
         }
+    }
+
+    /**
+     * End the session with a sign-out the app does itself: Auth::logout(),
+     * logoutCurrentDevice(), or a package that calls them. The guard only
+     * forgets who is signed in. Left at that, the session's record would
+     * stay good until it timed out, so a copy of a cookie session, or of
+     * the "remember me" cookies, would carry on signed in, and a session
+     * the app didn't also invalidate would hand what it proved to whoever
+     * signed in on it next.
+     *
+     * Keyring's own sign-out (SignIn::out) has ended the record by the time
+     * the guard announces it, and this finds nothing left to do.
+     *
+     * The record is announced as logged_out, unless the app gave a reason
+     * of its own around the sign-out with because(). That includes Laravel's
+     * auth.session middleware, which signs a browser out with
+     * logoutCurrentDevice() when the user's password hash no longer matches
+     * the one the session started with.
+     */
+    public function signedOut(Logout|CurrentDeviceLogout $event): void
+    {
+        $request = request();
+
+        if ($event->guard !== config('keyring.guard') || ! $request->hasSession()) {
+            return;
+        }
+
+        // The guard is signed out whatever becomes of the record: a
+        // registry that can't be reached is reported, not thrown from the
+        // middle of the app's sign-out. The record that would refuse the
+        // "remember me" cookies is still open then, and logoutCurrentDevice()
+        // leaves the token as it was, so it's cycled here instead.
+        rescue(fn () => $this->unlessGiven(SessionEndReason::LoggedOut, fn () => $this->end($request)), function () use ($event) {
+            if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
+                rescue(fn () => $this->cycleRememberToken($event->user));
+            }
+        });
+
+        $request->session()->forget(['keyring', 'auth.password_confirmed_at']);
     }
 
     /**
@@ -641,20 +804,23 @@ class Sessions
      * per user, so cycling it stops every "remember me" cookie, no other
      * device stays trusted, and an email change waiting for confirmation is
      * cancelled, though its "this wasn't me" link keeps working.
+     *
+     * When the registry fails part way, the rest is still done before the
+     * failure is thrown: the sessions it ended stay ended, and the ways back
+     * in close as they would have.
      */
     public function signOutEverywhere(Authenticatable $user, #[\SensitiveParameter] ?string $except = null): int
     {
         $keptDevice = $except === null ? null : $this->registry->find($except)?->deviceId;
-        $count = $this->holding($user, fn () => $this->registry->revokeAll($user, $except))->count();
 
-        $this->cycleRememberToken($user);
-        $this->distrustDevices($user, except: $keptDevice);
+        return $this->holdingThenThrow($user, fn () => $this->registry->revokeAll($user, $except), function () use ($user, $keptDevice) {
+            $this->cycleRememberToken($user);
+            $this->distrustDevices($user, except: $keptDevice);
 
-        if ($user instanceof Model) {
-            $this->emailChanges->cancel($user);
-        }
-
-        return $count;
+            if ($user instanceof Model) {
+                $this->emailChanges->cancel($user);
+            }
+        })->count();
     }
 
     /**
@@ -664,7 +830,17 @@ class Sessions
      */
     public function signOutOthers(Request $request, Authenticatable $user): int
     {
-        $count = $this->because(SessionEndReason::SignedOutEverywhere, fn () => $this->signOutEverywhere($user, except: $this->current($request)?->id));
+        // A copy of this session's cookie is shut out even when the
+        // registry fails part way, as the sessions it ended stay ended. The
+        // registry's failure is the one thrown, so a deadlock still reaches
+        // a transaction of the app's that would retry it.
+        try {
+            $count = $this->because(SessionEndReason::SignedOutEverywhere, fn () => $this->signOutEverywhere($user, except: $this->current($request)?->id));
+        } catch (Throwable $e) {
+            rescue(fn () => $this->rotate($request));
+
+            throw $e;
+        }
 
         $this->rotate($request);
 
@@ -678,7 +854,7 @@ class Sessions
      */
     public function revokeDevice(Authenticatable $user, string $deviceId): int
     {
-        return $this->holding($user, fn () => $this->registry->revokeDevice($user, $deviceId))->count();
+        return $this->holdingThenThrow($user, fn () => $this->registry->revokeDevice($user, $deviceId))->count();
     }
 
     public function cycleRememberToken(Authenticatable $user): void
@@ -741,6 +917,21 @@ class Sessions
     public function because(SessionEndReason $reason, Closure $callback): mixed
     {
         return AnnouncingSessionRegistry::because($reason, $callback);
+    }
+
+    /**
+     * Run the callback with every session it ends announced for this
+     * reason, unless the code around it gave one already (because()), which
+     * wins.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    public function unlessGiven(SessionEndReason $reason, Closure $callback): mixed
+    {
+        return AnnouncingSessionRegistry::unlessGiven($reason, $callback);
     }
 
     public function registry(): SessionRegistry

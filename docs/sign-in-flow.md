@@ -358,6 +358,8 @@ use Keyring\Login\SignIn;
 app(SignIn::class)->out($request);
 ```
 
+Your own `Auth::logout()` or `Auth::logoutCurrentDevice()`, on Keyring's guard in a request with a session, ends the registered session too, with its "remember me" cookie and what the session proved, so a sign-out route you already have keeps working. Invalidate the session after it as Laravel's docs do; `SignIn::out()` does that part for you. It dispatches no `LoggedOut`, so nothing reaches the security log. Dispatch `Keyring\Events\LoggedOut` yourself if you want it there.
+
 ## The Verification Pipeline
 
 Every verification, at login or step-up, goes through one pipeline of steps:
@@ -468,7 +470,7 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
 | `RegisterResponse` | A new user registered and was signed in, with [`registration.reveal_taken`](#saying-when-an-address-is-taken). | The same as `AuthenticatedResponse`. |
 | `StatusResponse` | Every other action: a code sent, a password changed, a device signed out... | See [Status Responses](#status-responses). |
-| `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, which brings them back afterwards. JSON: `401`. Both send `Clear-Site-Data`. |
+| `SignedOutResponse` | A session was ended for the user: revoked, timed out, or signed out by a risk response. Built with the `reason`. | Redirect to the login page with the `signed-out` status, which brings them back afterwards. JSON: `401`. Both send `Clear-Site-Data`. Not used for page visits to [routes that also serve guests](devices-and-sessions.md#pages-that-also-serve-guests). |
 | `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, which brings them back afterwards. JSON: `423` with `redirect`. |
 | `EnrollmentRequiredResponse` | A route needs a sign-in method the user hasn't set up. | Redirect to `enrollment_url` with the `enroll-first` status, or `403` without one. JSON: `403`. |
 | `PasswordChangeRequiredResponse` | The user has to [choose a new password](protected-changes.md#requiring-a-password-change) before going on. | Redirect to `password_change_url` with the `change-password` status, or `403` without one. JSON: `403`. |
@@ -536,6 +538,21 @@ JSON clients get the slug, its translated message, the redirect (when there is o
 ```
 
 Other requests are redirected, either back or to `redirect`. The slug is flashed as `status`, along with any data for the next request. That data is encrypted with `APP_KEY`, since it can hold a secret being set up or new recovery codes. Read it with `Keyring::result`, or read one key of it using dot notation, for example `Keyring::result('recoveryCodes')`. It's `null` when nothing was flashed. `session('keyring.result')` holds only the ciphertext.
+
+Two statuses can say where the user was going when Keyring sent them away. That happens when they were sent to [add a sign-in method](policies.md#carrying-on-afterwards) or [held to choose a new password](protected-changes.md#carrying-on-afterwards):
+
+- `authenticator-added` carries it as `continue` in its data. It's data rather than a redirect, so a page showing new recovery codes stays up until the user has saved them. The key is left out when there's nowhere to carry on to.
+- `password-updated` uses it as `redirect`, but only when the user was held for a new password. A password change the user chose goes back, as before.
+
+```json
+{
+  "status": "authenticator-added",
+  "message": "Sign-in method added.",
+  "authenticator": { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
+  "recoveryCodes": ["..."],
+  "continue": "https://example.com/invoices/42"
+}
+```
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password`, and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 

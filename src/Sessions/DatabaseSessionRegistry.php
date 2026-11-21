@@ -48,12 +48,12 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             unset($row['origin']);
         }
 
-        $this->withoutIds(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
+        $this->withoutBindings(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
     }
 
     public function find(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
-        $row = $this->withoutIds(fn () => $this->query()->find($id));
+        $row = $this->withoutBindings(fn () => $this->query()->find($id));
 
         return $row === null ? null : RegisteredSession::fromArray((array) $row);
     }
@@ -69,18 +69,19 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
 
     public function update(#[\SensitiveParameter] string $id, array $changes): void
     {
-        $this->withoutIds(fn () => $this->query()->where('id', $id)->update(RegisteredSession::columns($changes)));
+        $this->withoutBindings(fn () => $this->query()->where('id', $id)->update(RegisteredSession::columns($changes)));
     }
 
     /**
      * The row is read with a lock and revoked in the same transaction, so
      * nothing changes it in between: of two calls the second waits, then
-     * finds it revoked and returns null. A locking read is always made on
-     * the write connection, and sees the latest committed row even inside a
-     * caller's MySQL transaction that took its snapshot earlier. It can't
-     * deadlock with replace() or revokeEveryone(): this takes one lock (the
-     * row, or on MySQL the gap where a missing one would be) and nothing
-     * after it, so it never holds one while waiting for another.
+     * finds it revoked and returns null. The update only matches a record
+     * that isn't revoked yet, as a second guard. A locking read is always
+     * made on the write connection, and sees the latest committed row even
+     * inside a caller's MySQL transaction that took its snapshot earlier. It
+     * can't deadlock with replace() or revokeEveryone(): this takes one lock
+     * (the row, or on MySQL the gap where a missing one would be) and
+     * nothing after it, so it never holds one while waiting for another.
      */
     public function revoke(#[\SensitiveParameter] string $id): ?RegisteredSession
     {
@@ -89,7 +90,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
         // one that fails leaves that transaction usable (notes).
         $reason = $this->reason();
 
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id, $reason) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id, $reason) {
             $row = $this->query()->lockForUpdate()->find($id);
             $session = $row === null ? null : RegisteredSession::fromArray((array) $row);
 
@@ -98,9 +99,9 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             }
 
             $now = now()->getTimestamp();
-            $this->query()->where('id', $id)->update(['revoked_at' => $now, ...$reason]);
+            $revoked = $this->query()->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$reason]) === 1;
 
-            return $session->with(['revokedAt' => $now]);
+            return $revoked ? $session->with(['revokedAt' => $now]) : null;
         }));
     }
 
@@ -111,7 +112,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     public function replace(#[\SensitiveParameter] string $id, #[\SensitiveParameter] RegisteredSession $successor, bool $revoke = false): bool
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($id, $successor, $revoke) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($id, $successor, $revoke) {
             $now = now()->getTimestamp();
 
             $replaced = $this->query()->where('id', $id)->whereNull('revoked_at')->whereNull('replaced_by')->update([
@@ -160,7 +161,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
     {
         $reason = $this->reason();
 
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($query, $reason) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($query, $reason) {
             $now = now()->getTimestamp();
 
             $found = $query->orderBy('id')->lockForUpdate()->get()->map(fn (object $row) => RegisteredSession::fromArray((array) $row));
@@ -204,7 +205,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
                 ->limit(1000)
                 ->pluck('id');
 
-            $this->withoutIds(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$announced]));
+            $this->withoutBindings(fn () => $this->query()->whereIn('id', $ids)->whereNull('revoked_at')->update(['revoked_at' => $now, ...$announced]));
         } while ($ids->isNotEmpty());
     }
 
@@ -369,7 +370,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      */
     public function sweep(int $now, ?int $idle, ?int $rememberedIdle, int $limit): array
     {
-        return $this->withoutIds(fn () => $this->connection->transaction(function () use ($now, $idle, $rememberedIdle, $limit) {
+        return $this->withoutBindings(fn () => $this->connection->transaction(function () use ($now, $idle, $rememberedIdle, $limit) {
             $open = fn () => $this->query()->useWritePdo()->whereNull('revoked_at')->whereNull('replaced_by');
 
             /** @var array<string, int> $due when each timed out, by ID */
@@ -464,7 +465,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             return;
         }
 
-        $this->withoutIds(fn () => $this->connection->transaction(function () use ($announced, $failed, $at) {
+        $this->withoutBindings(fn () => $this->connection->transaction(function () use ($announced, $failed, $at) {
             foreach (array_chunk($announced, self::CHUNK) as $chunk) {
                 $this->query()->whereIn('id', $chunk)->update(['announced_at' => $at]);
             }
@@ -531,7 +532,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             ->where('revoked_at', '<=', $until)
             ->unless($announced, fn (Builder $query) => $query->where('revoked_at', '>=', $from));
 
-        $this->withoutIds(function () use ($records, $announced, $at) {
+        $this->withoutBindings(function () use ($records, $announced, $at) {
             for ($after = ''; ($ids = $records()->where('id', '>', $after)->orderBy('id')->limit(1000)->pluck('id')->map(strval(...)))->isNotEmpty(); $after = $ids->last()) {
                 $announced
                     ? $this->query()->whereIn('id', $ids->all())->update(['announced_at' => $at])
@@ -571,7 +572,7 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
      * @param  Closure(): TResult  $statements
      * @return TResult
      */
-    protected function withoutIds(Closure $statements): mixed
+    protected function withoutBindings(Closure $statements): mixed
     {
         return WithoutBindings::run($statements);
     }

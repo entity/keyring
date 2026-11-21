@@ -119,6 +119,7 @@ try {
             return app(Sessions::class)->endLatest(User::findOrFail($session->userId), $session)?->id;
         })(),
         'sign-out-everyone' => app(SessionRegistry::class)->revokeEveryone(),
+        'revoke' => app(SessionRegistry::class)->revoke($id)?->id,
         'revoke-all' => app(SessionRegistry::class)->revokeAll(User::findOrFail($id))->map(fn (RegisteredSession $session) => $session->id)->sort()->values()->all(),
         'start-session-announcing' => (function () use ($id, $value) {
             config(['keyring.sessions.max' => (int) $value]);

@@ -250,6 +250,12 @@ return [
     | requests, sent with the one that used it, are still let in on the same
     | session. Used after that, the session ends for everyone holding it.
     |
+    | A browser whose session has ended is sent to log in. On the routes in
+    | "continue_as_guest" (names as routeIs() takes them, "docs.*" say) a
+    | page visit is asked for again as a guest instead, for pages that also
+    | serve guests, with the "signed-out" status flashed. JSON requests still
+    | get a 401.
+    |
     | "sweep_every" ("5m", "1h"...) runs keyring:sweep that often, on the
     | database driver: it ends sessions that timed out with no request to
     | end them, and announces again any ended session whose announcement
@@ -275,6 +281,7 @@ return [
         'middleware' => true,
         'remember_cookie' => null,
         'remember_grace' => '10s',
+        'continue_as_guest' => [],
         'sweep_every' => null,
         'sweep_limit' => 1000,
     ],

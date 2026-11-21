@@ -52,7 +52,9 @@ final readonly class RegisteredSession
 
     /**
      * The ID of the record this session started on, which every record it
-     * moves to keeps.
+     * moves to keeps. It's a registry ID: on a remembered session that
+     * hasn't moved, it's the value of the "remember me" cookie. Keep it on
+     * the server, and use Sessions::handle() anywhere else.
      */
     public function origin(): string
     {
@@ -88,6 +90,18 @@ final readonly class RegisteredSession
     public function with(array $changes): self
     {
         return clone ($this, $changes);
+    }
+
+    /**
+     * The record with every registry ID blanked: its own, the one it moved
+     * to and the one it started on. Each is, or was, the value of a "remember
+     * me" cookie, so this is what goes anywhere off the server, such as a
+     * queued event. A handle can't be worked out from what's left.
+     */
+    #[\NoDiscard]
+    public function withoutIds(): self
+    {
+        return $this->with(['id' => '', 'replacedBy' => null, 'origin' => null]);
     }
 
     /**

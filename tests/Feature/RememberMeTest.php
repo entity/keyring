@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -24,12 +25,13 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Risk\Action;
 use Keyring\Risk\RiskLocks;
 use Keyring\Risk\Signals\SessionFingerprintChanged;
+use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\KeyedHash;
 use Keyring\Tests\Fixtures\User;
-use Keyring\Tests\TestCase;
 
 beforeEach(function () {
     Route::middleware(['web', 'auth'])->get('/home', fn () => 'home');
@@ -40,36 +42,6 @@ beforeEach(function () {
 
     $this->user = taylor();
 });
-
-/**
- * A request from a browser that holds these cookies and no others. The test
- * client would otherwise send every cookie an earlier request was given, and
- * every response would carry the ones queued for the responses before it.
- *
- * @param  array<string, string>  $cookies
- */
-function browser(array $cookies = [], string $agent = FIREFOX): TestCase
-{
-    Cookie::flushQueuedCookies();
-    Auth::forgetGuards();
-
-    return test()->withHeader('User-Agent', $agent)
-        ->withCredentials()
-        ->withCookies([config('session.cookie') => '', Auth::guard()->getRecallerName() => '', 'remembered_session' => '', 'known_device' => '', ...$cookies]);
-}
-
-/**
- * The long-lived cookies a response left the browser with.
- *
- * @return array<string, string>
- */
-function keptCookies(TestResponse $response): array
-{
-    return collect([Auth::guard()->getRecallerName(), 'remembered_session', 'known_device'])
-        ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)?->getValue()])
-        ->filter()
-        ->all();
-}
 
 /**
  * Sign in with "remember me" ticked, in a browser that wasn't signed in.
@@ -1329,3 +1301,57 @@ it('brings nothing back where a session ends with the level it signed in at', fu
     expectKeptCookiesRefused($cookies);
     expect(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
 });
+
+it('refuses the kept cookies after a sign-out the app did itself, :dataset', function (bool $unreachable) {
+    // The guard's own sign-out for one browser leaves the "remember me"
+    // token as it was, so Laravel's cookie alone would still sign in.
+    Route::middleware('web')->post('/app/logout', function () {
+        Auth::logoutCurrentDevice();
+        session()->invalidate();
+
+        return response()->noContent();
+    });
+
+    $cookies = rememberedSignIn();
+    $driver = config('keyring.sessions.driver');
+
+    // A registry that can't be reached leaves the record open, so the
+    // token is cycled instead.
+    if ($unreachable) {
+        Exceptions::fake();
+        app(SessionRegistryManager::class)->extend('unreachable', fn () => new class(app('db')->connection(), 'keyring_sessions') extends DatabaseSessionRegistry
+        {
+            public function revoke(string $id): never
+            {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+        config(['keyring.sessions.driver' => 'unreachable']);
+    }
+
+    browser($cookies)->post('/app/logout')->assertNoContent()->assertCookieExpired('remembered_session');
+
+    config(['keyring.sessions.driver' => $driver]);
+
+    if (! $unreachable) {
+        expectKeptCookiesRefused($cookies);
+
+        return;
+    }
+
+    // The record is still open, but Laravel's cookie no longer signs
+    // anyone in, so there's nothing for Keyring to carry on from.
+    $this->flushSession();
+    browser($cookies)->get('/home')->assertRedirect('/login');
+    $this->assertGuest();
+
+    $this->flushSession();
+    browser($cookies)->getJson('/home')->assertUnauthorized();
+    $this->assertGuest();
+
+    expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The database went away.');
+})->with([
+    'with the registry reachable' => false,
+    'when the registry can\'t be reached' => true,
+]);

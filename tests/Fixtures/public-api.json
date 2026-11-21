@@ -75,6 +75,7 @@
             "middleware": true,
             "remember_cookie": null,
             "remember_grace": "10s",
+            "continue_as_guest": [],
             "sweep_every": null,
             "sweep_limit": 1000
         },
@@ -618,6 +619,7 @@
             "userType"
         ],
         "Keyring\\Events\\RememberMeReused": [
+            "handle",
             "session",
             "user"
         ],
@@ -632,6 +634,7 @@
             "user"
         ],
         "Keyring\\Events\\SessionResumed": [
+            "handle",
             "session",
             "user"
         ],

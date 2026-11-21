@@ -19,6 +19,7 @@
     - [Writing a Driver](#writing-a-driver)
     - [How Many Sessions](#how-many-sessions)
     - [The Session Middleware](#the-session-middleware)
+    - [Pages That Also Serve Guests](#pages-that-also-serve-guests)
     - ["Remember Me"](#remember-me)
     - [A Cookie Used Twice](#a-cookie-used-twice)
 - [Keyring's Cookies](#keyrings-cookies)
@@ -316,13 +317,15 @@ Some things are only judged on the browser's own requests, so `stillSignedIn` do
 - [`sessions.end_on_lapse`](#ending-a-session-with-its-level), [risk locks](risk.md#actions), and the risk signals that run on each request. A session that one of these ends stays `true` until its browser's next request.
 - The session's [assurance level](policies.md#assurance-levels). `true` says the user is signed in, not how strongly.
 
+It can't see Laravel's own session either, because no request comes back to say it has ended. A session that isn't remembered is over once Laravel's session is (past `session.lifetime`, or on `expire_on_close`), but its record stays good until it [idles out](#timeouts), so `stillSignedIn` keeps answering `true` until then. With `sessions.idle` at `null`, that's when it hits `absolute`, 30 days by default. Keep `idle` no longer than `session.lifetime` if the answer shouldn't outlast Laravel's session. Even then, with `expire_on_close` or a browser that drops its cookies, it can answer `true` for up to `idle` after the browser has gone.
+
 It needs an Eloquent user, and returns `false` for any other. And where registration hides who has an account, a user who hasn't verified their email address can only be signed in from the browser that followed the verification link. Asked from any other request, such as a server-to-server call, `stillSignedIn` answers `false` for them.
 
 Keep the handle, not the registry ID. The ID is what the "remember me" cookie carries, so it must never leave the server.
 
 ### Hearing About Ended Sessions
 
-To be told when a session ends, rather than asking, listen for `Keyring\Events\RegisteredSessionEnded`. There's one for every registered session that ends, whoever ended it and wherever: signing out, signing out everywhere, ending one session or a device, the device and session limits, a deleted user, a risk response, a password change or reset, an email change or its undo, and the session middleware finding a session idle, expired, used twice, or kept out. See [Events](events.md#why-a-registered-session-ended) for its properties and every reason.
+To be told when a session ends, rather than asking, listen for `Keyring\Events\RegisteredSessionEnded`. There's one for every registered session that ends, whoever ended it and wherever: signing out, your app's own `Auth::logout()` or `Auth::logoutCurrentDevice()` on Keyring's guard, signing out everywhere, ending one session or a device, the device and session limits, a deleted user, a risk response, a password change or reset, an email change or its undo, and the session middleware finding a session idle, expired, used twice, or kept out. See [Events](events.md#why-a-registered-session-ended) for its properties and every reason.
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -349,7 +352,7 @@ What is announced:
 When it goes out depends on the [driver](#drivers):
 
 - **`database`**: the event is tied to the transaction on the registry's connection. Outside a transaction, it goes out as soon as the record is revoked. Inside one, such as the user's row that Keyring holds while it signs out everywhere, it goes out once that transaction commits. If the transaction is rolled back, so is the revocation, and nothing is announced. A transaction on any other connection doesn't change when it goes out. A connection with separate `read` and `write` hosts is still one connection, with its transactions on the write host, so the event follows the write host's transaction.
-- **`cache`**: the event goes out as soon as the record is revoked. The cache has no transactions, so a rollback elsewhere doesn't take the revocation back, and the event goes out anyway. This is best effort. A cache that's cleared, or that evicts records to make room, ends those sessions with no event at all. When the store fails part way through signing out everywhere, the sessions it had already revoked are still announced, and then the failure is thrown. A revocation whose copy into the record fails is kept and announced, and the failure is reported. Revoking a session and moving it with "remember me" take turns under a lock, so a sign-out that lands mid-move is announced. On a store without locks they can't, and such a sign-out can end the session with no event. A revocation that waits more than five seconds for the lock goes ahead without it, with the same risk.
+- **`cache`**: the event goes out as soon as the record is revoked. The cache has no transactions, so a rollback elsewhere doesn't take the revocation back, and the event goes out anyway. This is best effort. A cache that's cleared, or that evicts records to make room, ends those sessions with no event at all. When the store fails part way through signing out everywhere, the sessions it had already revoked are still announced, and then the failure is thrown. A synchronous listener runs inside Keyring's row-lock transaction on the user's connection, which commits before that failure is thrown. So what the listener wrote there is kept when Keyring's row lock is the outermost transaction. Inside a transaction of your own, the failure still rolls that transaction back, what the listener wrote included, unless you catch it. A database failure (a `PDOException` anywhere in its chain, which includes deadlocks and lost connections) is thrown from inside the row lock instead, so what the listener wrote is rolled back with it. A listener's own failed query is reported and not thrown, and on PostgreSQL it can still leave the row lock's transaction aborted, so its commit quietly rolls back what the other listeners wrote. With `sessions.max`, a sign in whose limit fails to end a session is refused, and its new record is revoked again without an event before the lock is let go. Signing out everywhere still cycles the remember token, stops trusting devices and cancels a pending email change before the failure is thrown, signing out a device still cycles the remember token, and signing out everywhere else still gives this session a new ID. These hold on the `database` driver too. There, with the registry on the user's connection, the same failures roll back everything the row lock held, so nothing is revoked or announced, and the sign in's new record isn't kept. With the registry on a `sessions.connection` of its own, the row lock's transaction isn't the registry's, so it behaves as the cache driver does here. A revocation whose copy into the record fails is kept and announced, and the failure is reported. Revoking a session and moving it with "remember me" take turns under a lock, so a sign-out that lands mid-move is announced. On a store without locks they can't, and such a sign-out can end the session with no event. A revocation that waits more than five seconds for the lock goes ahead without it, with the same risk.
 - **A driver of your own** is announced straight away, as the cache driver is, unless it extends `DatabaseSessionRegistry`. See [Writing a Driver](#writing-a-driver).
 
 Two kinds of ending need [the sweep](#sweeping-ended-sessions) to be announced:
@@ -503,7 +506,28 @@ A second middleware, `keyring.password`, is added to the `web` group after it. I
 
 A session whose record has gone missing is signed out rather than registered again. This means clearing records can't restart a session's window.
 
+A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so on Keyring's guard, in a request with a session, `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route. If the registry can't be reached, the user is still signed out and the error is reported. After `logoutCurrentDevice()`, the user's "remember me" token is then changed, as `Auth::logout()` already does, so a kept copy of the cookie stops working.
+
 A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
+
+### Pages That Also Serve Guests
+
+Some pages work for guests too, like a public page that shows more when you're signed in, or an OIDC authorize endpoint that has to answer `prompt=none` itself. Sending those to the login page when a session ends is wrong. List their route names in `sessions.continue_as_guest`, in any form `Request::routeIs()` takes, wildcards included:
+
+```php
+'sessions' => [
+    // ...
+    'continue_as_guest' => ['welcome', 'oauth.authorize', 'docs.*'],
+],
+```
+
+When a session ends on a `GET` page visit to one of those routes, the browser is signed out and `SessionEnded` is dispatched as usual. The browser is then redirected back to the URL it asked for, so it asks for the page again as a guest. The query string is kept, though its parameters may come back in a different order. The redirect sends `Clear-Site-Data` and clears the session and "remember me" cookies, as signing out does. The `signed-out` status is flashed, as on the way to the login page, so a page that shows statuses can say why. The page it's redirected to uses the flash up. No intended URL is saved, so the next sign in doesn't come back to this request. JSON requests still get the `401`. `HEAD`, `POST`, and other methods are signed out as before. This happens before your own [`SignedOutResponse`](sign-in-flow.md#responses) is used, so binding one doesn't change it.
+
+This is the same for every reason a session ends, a ["remember me" cookie used twice](#a-cookie-used-twice) (`reused`) and a [risk response](risk.md#responding-to-risk) (`risk`) included. For those two the login page wouldn't reliably reach the owner anyway: it goes to whichever browser asks next, and the owner's browser, whose session then ends as `revoked`, carries on as a guest. The owner is asked about a reused cookie by its ["was this you?" alert](security-log-and-emails.md#was-this-you-alerts) the next time they sign in, and `SessionEnded` and the security log record the reason either way.
+
+An Inertia visit gets a `409` with an `X-Inertia-Location` header instead of a redirect, which makes Inertia load the page in full. A redirect would be followed with the same headers, so a partial reload or a poll would get back only the props it asked for, and the page would still show the user as signed in. A prefetch gets the same answer. Inertia keeps that answer until the link is followed, and only then loads the page.
+
+Only list pages that render for a guest. The route has to let guests in, because one behind `auth` sends the guest to log in anyway. A broad pattern like `*` also matches Keyring's own pages. A route without a name can't be listed. If any entry in the list isn't a non-empty string, Keyring ignores the whole list, and the visit goes to log in as before.
 
 ### "Remember Me"
 
@@ -699,7 +723,9 @@ The events are in `Keyring\Events`:
 | `SessionEnded` | `user`, `reason` (`revoked`, `expired`, `idle`, `other_user`, `reused`, `risk`, or `not_allowed`) |
 | `RegisteredSessionEnded` | `handle`, `handles`, `userId`, `userType`, `guard`, `deviceId`, `endedAt`, `reason`. One for every registered session that ends. See [Hearing About Ended Sessions](#hearing-about-ended-sessions). |
 | `EveryoneSignedOut` | `at`. Every user's sessions ended at once. |
-| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended) |
-| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as) |
+| `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended), `handle` |
+| `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as), `handle` |
 | `AccessRefused` | `user`, `resource` (`device`), `id`. A request to sign out a device that isn't the user's, answered with a 404. |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`). A "this wasn't me" link that was refused. |
+
+`handle` is the session's [handle](#listing-and-ending-sessions). A listener in the request sees the record's registry ID as well, but it's the value of the "remember me" cookie, so a queued listener gets the record with a blank `id` and a null `replacedBy`, and has only the handle to go by.

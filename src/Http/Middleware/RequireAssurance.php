@@ -9,7 +9,6 @@ use Illuminate\Http\Request;
 use Keyring\Enums\Assurance;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
-use Keyring\Sessions\SessionAssurance;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -21,20 +20,14 @@ use Symfony\Component\HttpFoundation\Response;
 class RequireAssurance
 {
     public function __construct(
-        protected SessionAssurance $assurance,
         protected StepUp $stepUp,
     ) {}
 
     public function handle(Request $request, Closure $next, string $level = 'aal2', string ...$also): Response
     {
         $requirement = Requirement::named($level, ...$also);
-        $level = Assurance::fromName($level);
-        $proved = $this->assurance->countingToward($level);
 
-        if ($this->assurance->level()->atLeast($level) && $requirement->isMetBy($proved)) {
-            return $next($request);
-        }
-
-        return $this->stepUp->require($request, $requirement, $proved);
+        return $this->stepUp->unlessReached($request, Assurance::fromName($level), $requirement)
+            ?? $next($request);
     }
 }

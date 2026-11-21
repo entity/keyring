@@ -11,10 +11,16 @@ namespace Keyring\Enums;
  */
 enum SessionEndReason: string
 {
-    /** Revoked with no other reason given: one ended from the sessions list, or a call to the registry of your own. */
+    /** Revoked with no other reason given: one ended from the sessions list, or a call to the registry of your own. An app's own Auth::logout() is LoggedOut. */
     case Revoked = 'revoked';
 
-    /** The user signed out of it on purpose. */
+    /**
+     * The user signed out of it: with Keyring's sign-out, or the app's own
+     * Auth::logout() or logoutCurrentDevice() on Keyring's guard, unless the
+     * app gave a reason of its own around it with Sessions::because(). That
+     * includes Laravel's auth.session middleware signing a browser out once
+     * the user's password hash has changed.
+     */
     case LoggedOut = 'logged_out';
 
     /** "Sign out everywhere else", or an administrator's keyring:sign-out for the user. */

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Keyring;
 
+use Illuminate\Auth\Events\CurrentDeviceLogout;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Cache\RateLimiter;
@@ -196,6 +198,7 @@ class KeyringServiceProvider extends ServiceProvider
         Event::subscribe(SendSecurityNotifications::class);
         Event::subscribe(DispatchLaravelEvents::class);
         Event::listen(Login::class, [Sessions::class, 'markRecalled']);
+        Event::listen([Logout::class, CurrentDeviceLogout::class], [Sessions::class, 'signedOut']);
         Event::listen(Events\Authenticated::class, [VerificationLink::class, 'signedIn']);
         Event::listen(Events\PasswordReset::class, [VerificationLink::class, 'passwordReset']);
     }

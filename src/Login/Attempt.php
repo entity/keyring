@@ -22,6 +22,10 @@ use Keyring\UserKeyring;
  * step-up confirmation.
  *
  * Stored encrypted in the session as plain JSON (never serialize()).
+ * Serialised anyway, as a queued listener's event is, it's that same plain
+ * data: the user and keyring it looked up are left out and looked up again
+ * when they're next asked for, so their password hash and remember token
+ * never reach the queue.
  */
 final class Attempt
 {
@@ -227,6 +231,31 @@ final class Attempt
             'step_up' => $this->stepUp,
             'exhausted' => $this->exhausted,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function __serialize(): array
+    {
+        return $this->toArray();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    public function __unserialize(array $data): void
+    {
+        // Queued by 0.2 or earlier, it's the object's own properties, with
+        // the user it had looked up. Only the non-private ones are taken,
+        // so user() looks the user up again.
+        $attempt = array_key_exists('user_id', $data) ? self::fromArray($data) : (object) $data;
+
+        foreach (new \ReflectionClass(self::class)->getProperties() as $property) {
+            if (! $property->isStatic() && ! $property->isVirtual() && ! $property->isPrivate()) {
+                $this->{$property->name} = $attempt->{$property->name};
+            }
+        }
     }
 
     /**
