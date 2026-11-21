@@ -406,6 +406,7 @@ return [
 
         // Left out of Keyring::activity(): entries about a user that aren't
         // something they did. Still theirs, so they go when the user does.
+        // Keep it a list: packages push their own types to it.
         'unlisted' => [],
     ],
 
