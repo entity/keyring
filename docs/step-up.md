@@ -208,15 +208,13 @@ class AuthorizeController
             default => null,
         };
 
-        $asked = $level !== null || $since !== null;
-
-        // meets() starts no confirm, so the silent request isn't saved as
-        // the page to come back to.
-        if ($silent && $asked && ! $stepUp->meets($request, $level, $since)) {
-            return $this->loginRequired($validated);
-        }
-
-        $response = $asked ? $stepUp->unlessMet($request, $level, $since) : null;
+        // A silent request only asks meets(), which starts no confirm, so
+        // it's never saved as the page to come back to.
+        $response = match (true) {
+            $level === null && $since === null => null,
+            $silent => $stepUp->meets($request, $level, $since) ? null : $this->loginRequired($validated),
+            default => $stepUp->unlessMet($request, $level, $since),
+        };
 
         if ($response !== null) {
             return $response;

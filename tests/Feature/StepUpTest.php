@@ -1186,13 +1186,11 @@ describe('asking from a controller', function () {
                     default => null,
                 };
 
-                $asked = $level !== null || $since !== null;
-
-                if ($silent && $asked && ! $stepUp->meets($request, $level, $since)) {
-                    return 'login_required';
-                }
-
-                $response = $asked ? $stepUp->unlessMet($request, $level, $since) : null;
+                $response = match (true) {
+                    $level === null && $since === null => null,
+                    $silent => $stepUp->meets($request, $level, $since) ? null : response('login_required'),
+                    default => $stepUp->unlessMet($request, $level, $since),
+                };
 
                 if ($response !== null) {
                     return $response;
@@ -1394,6 +1392,14 @@ describe('asking from a controller', function () {
             expect(app(AttemptStore::class)->current(Purpose::Confirm))->toBeNull();
 
             $silently('max_age=600')->assertOk()->assertSee('authorized');
+        });
+
+        it('answers prompt=none from meets() alone, even where a subclass answers unlessMet() differently', function () {
+            app()->bind(StepUp::class, AnsweringStepUp::class);
+            signIn();
+
+            $this->get('/oidc/authorize?client_id=app&redirect_uri=https://app.test/callback&prompt=none&max_age=600')
+                ->assertOk()->assertSee('authorized');
         });
     });
 
