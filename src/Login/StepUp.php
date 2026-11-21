@@ -63,26 +63,29 @@ class StepUp
      */
     public function unlessMet(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): ?Response
     {
-        if ($level === Assurance::None) {
-            throw new InvalidArgumentException('Ask for a level of at least AAL1.');
-        }
+        $asked = $this->asked($level, $since);
 
-        if ($since === null) {
-            return $level === null
-                ? throw new InvalidArgumentException('Ask for a level, a verification since a moment, or both.')
-                : $this->unlessReached($request, $level, Requirement::for($level));
-        }
+        return $asked instanceof Assurance
+            ? $this->unlessReached($request, $asked, Requirement::for($asked))
+            : $this->unlessFresh($request, $asked, $level);
+    }
 
-        $now = now()->getTimestamp();
+    /**
+     * Whether unlessMet() would let the request carry on, asked without
+     * starting a confirm, saving the page to come back to, or sending the
+     * user to enroll. For a request that must not show anything, such as an
+     * OpenID Connect prompt=none, which answers login_required instead.
+     *
+     * @throws AuthenticationException for a guest
+     * @throws InvalidArgumentException as unlessMet() does
+     */
+    public function meets(Request $request, ?Assurance $level = null, ?DateTimeInterface $since = null): bool
+    {
+        $asked = $this->asked($level, $since);
 
-        // Nothing verified later could reach a moment that hasn't come yet,
-        // until it does, so the user would confirm and be asked again. A
-        // moment just ahead is another server's clock, and is taken as now.
-        if ($since->getTimestamp() > $now + static::CLOCK_LEEWAY) {
-            throw new InvalidArgumentException('A verification can\'t be asked for since a moment in the future.');
-        }
-
-        return $this->unlessFresh($request, min($since->getTimestamp(), $now), $level);
+        return $asked instanceof Assurance
+            ? $this->reached($asked, Requirement::for($asked))
+            : $this->verifiedSince($asked, $this->freshRequirement($request, $level), $level);
     }
 
     /**
@@ -94,13 +97,11 @@ class StepUp
      */
     public function unlessReached(Request $request, Assurance $level, Requirement $requirement): ?Response
     {
-        $proved = $this->assurance->countingToward($level);
-
-        if ($this->assurance->level()->atLeast($level) && $requirement->isMetBy($proved)) {
+        if ($this->reached($level, $requirement)) {
             return null;
         }
 
-        return $this->require($request, $requirement, $proved);
+        return $this->require($request, $requirement, $this->assurance->countingToward($level));
     }
 
     /**
@@ -114,19 +115,8 @@ class StepUp
     public function unlessFresh(Request $request, int $since, ?Assurance $level = null): ?Response
     {
         $requirement = $this->freshRequirement($request, $level);
-        $reached = true;
 
-        if ($level !== null) {
-            $reached = $this->assurance->level()->atLeast($level) && Requirement::for($level)->isMetBy($this->assurance->countingToward($level));
-        }
-
-        $proved = $this->assurance->since($since);
-
-        if (! $requirement->acceptsRecoveryCodes) {
-            $proved = array_values(array_filter($proved, fn (Verification $verification) => $verification->factor !== RecoveryCodes::KEY));
-        }
-
-        if ($reached && $requirement->isMetBy($proved)) {
+        if ($this->verifiedSince($since, $requirement, $level)) {
             return null;
         }
 
@@ -231,6 +221,73 @@ class StepUp
         // is never the whole of a verification: with one factor to prove,
         // that factor is what's asked for.
         return $requirement->factors < 2 ? $requirement->withoutRecoveryCodes() : $requirement;
+    }
+
+    /**
+     * What unlessMet() and meets() are asked: a level alone, or the moment
+     * to have verified since, as a timestamp no later than now. Both refuse
+     * the same arguments here.
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function asked(?Assurance $level, ?DateTimeInterface $since): Assurance|int
+    {
+        if ($level === Assurance::None) {
+            throw new InvalidArgumentException('Ask for a level of at least AAL1.');
+        }
+
+        if ($level === null && $since === null) {
+            throw new InvalidArgumentException('Ask for a level, a verification since a moment, or both.');
+        }
+
+        $now = now()->getTimestamp();
+
+        // Nothing verified later could reach a moment that hasn't come yet,
+        // until it does, so the user would confirm and be asked again. A
+        // moment just ahead is another server's clock, and is taken as now.
+        if ($since !== null && $since->getTimestamp() > $now + static::CLOCK_LEEWAY) {
+            throw new InvalidArgumentException('A verification can\'t be asked for since a moment in the future.');
+        }
+
+        return $since === null ? $level : min($since->getTimestamp(), $now);
+    }
+
+    /**
+     * Whether the session has reached the level, and what still counts
+     * toward it meets the requirement.
+     *
+     * @throws AuthenticationException for a guest
+     */
+    protected function reached(Assurance $level, Requirement $requirement): bool
+    {
+        // A guest's session can still hold what the last user proved, when
+        // the guard can no longer load that user, say because the account
+        // was deleted.
+        if ($this->keyring->guard()->guest()) {
+            throw new AuthenticationException(guards: [config('keyring.guard')]);
+        }
+
+        return $this->assurance->level()->atLeast($level) && $requirement->isMetBy($this->assurance->countingToward($level));
+    }
+
+    /**
+     * Whether the user proved what the requirement asks at or after the
+     * timestamp, with a recovery code counting only where it takes one.
+     * With a level, the session must have reached it too.
+     */
+    protected function verifiedSince(int $since, Requirement $requirement, ?Assurance $level): bool
+    {
+        if ($level !== null && ! $this->reached($level, Requirement::for($level))) {
+            return false;
+        }
+
+        $proved = $this->assurance->since($since);
+
+        if (! $requirement->acceptsRecoveryCodes) {
+            $proved = array_values(array_filter($proved, fn (Verification $verification) => $verification->factor !== RecoveryCodes::KEY));
+        }
+
+        return $requirement->isMetBy($proved);
     }
 
     /**
