@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Http\Responses;
 
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 trait ChoosesFormat
 {
@@ -35,5 +36,31 @@ trait ChoosesFormat
         return $previous === $root || str_starts_with($previous, $root.'/')
             ? $previous
             : url()->to(config('keyring.home'));
+    }
+
+    /**
+     * What Inertia answers with a full page visit to the URL, rather than
+     * swapping the next page into the app already running.
+     */
+    protected function loadInFull(string $url): Response
+    {
+        return new Response(status: Response::HTTP_CONFLICT, headers: ['X-Inertia-Location' => $url]);
+    }
+
+    /**
+     * Have the browser drop what it cached and stored for the site, as on
+     * sign out. Not "cookies": that would also clear the device cookie and
+     * make the next sign in look like a new device.
+     *
+     * @template T of Response
+     *
+     * @param  T  $response
+     * @return T
+     */
+    protected function clearSiteData(Response $response): Response
+    {
+        $response->headers->set('Clear-Site-Data', '"cache", "storage"');
+
+        return $response;
     }
 }

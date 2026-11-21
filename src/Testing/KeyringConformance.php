@@ -20,8 +20,10 @@ use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
 use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
+use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Throwable;
 
 /**
  * Checks that your Keyring setup (policy, factors, responses, pipeline
@@ -308,6 +310,90 @@ trait KeyringConformance
 
         $this->assertNotNull($id, 'Signed-in sessions should be registered.');
         $this->assertNotNull(app(SessionRegistry::class)->find($id)?->revokedAt, 'Signing out should revoke the registered session.');
+    }
+
+    public function test_keyring_keeps_a_sessions_handle_when_it_moves(): void
+    {
+        $user = $this->keyringUser();
+        $registry = app(SessionRegistry::class);
+
+        $this->actingAs($user)->withAssurance(Assurance::AAL1)->get(route('login'))->assertRedirect();
+        $first = $registry->find((string) session(Sessions::KEY));
+
+        $this->assertNotNull($first, 'Signed-in sessions should be registered.');
+
+        $sessions = app(Sessions::class);
+        $handle = $sessions->handle($first);
+
+        // What "remember me" and a step-up do: move the session to a new record.
+        $moved = $first->with(['id' => Str::random(40), 'origin' => $first->origin()]);
+        $hint = 'The session registry should keep the record a session started on (origin), so the session keeps its handle when it moves. On the database driver, publish and run Keyring\'s migrations. A driver of your own should store origin and return it.';
+
+        try {
+            $registry->replace($first->id, $moved);
+        } catch (Throwable $e) {
+            $this->fail($hint.' Moving a session failed: '.$e->getMessage());
+        }
+
+        $this->assertSame($first->id, $registry->find($moved->id)?->origin, $hint);
+        // The sessions list, and anything that looks a handle up, read
+        // through forUser().
+        $this->assertSame($moved->id, $sessions->find($user, $handle)?->id, $hint.' forUser() should return it too.');
+    }
+
+    /**
+     * What a registry revokes is what it reports, so anything built on it
+     * (events for each session that ends, say) misses none. A custom
+     * SessionRegistry driver, or anything wrapping one, has to say which
+     * records each call revoked.
+     */
+    public function test_keyring_registry_returns_the_sessions_it_revokes(): void
+    {
+        $user = $this->keyringUser();
+        $registry = app(SessionRegistry::class);
+        $now = now()->getTimestamp();
+
+        $device = 'conformance-'.Str::random(10);
+        $ids = fn (Collection $sessions) => $sessions->map(fn (RegisteredSession $session) => $session->id)->all();
+
+        // One to revoke alone, two on one device, the one kept, and one more.
+        [$alone, $phone, $tablet, $kept, $other] = array_map(function (?string $deviceId) use ($user, $registry, $now) {
+            $registry->save($session = new RegisteredSession(Str::random(40), (string) $user->getAuthIdentifier(), RegisteredSession::typeOf($user), (string) config('keyring.guard'), $deviceId, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+
+            return $session->id;
+        }, [null, $device, $device, null, null]);
+
+        $first = $registry->revoke($alone);
+
+        $this->assertSame($alone, $first?->id, 'Your SessionRegistry\'s revoke() should return the record it revoked, or null only when it revoked nothing.');
+        $this->assertNotNull($first->revokedAt, 'Your SessionRegistry\'s revoke() should return the record as it now stands, with revokedAt set.');
+        $this->assertNull(
+            $registry->revoke($alone),
+            'Your SessionRegistry\'s revoke() should return null for a record that was revoked already: it revoked nothing this time.',
+        );
+
+        $revoked = $registry->revokeDevice($user, $device);
+
+        $this->assertEqualsCanonicalizing([$phone, $tablet], $ids($revoked), 'Your SessionRegistry\'s revokeDevice() should return every record it revoked on the device, and only those.');
+        $this->assertTrue(
+            $revoked->every(fn (RegisteredSession $session) => $session->revokedAt !== null),
+            'Your SessionRegistry\'s revokeDevice() should return each record as it now stands, with revokedAt set.',
+        );
+        $this->assertTrue($registry->revokeDevice($user, $device)->isEmpty(), 'Your SessionRegistry\'s revokeDevice() should return nothing when it revoked nothing.');
+
+        $revoked = $registry->revokeAll($user, except: $kept);
+
+        $this->assertEqualsCanonicalizing(
+            [$other],
+            $ids($revoked),
+            'Your SessionRegistry\'s revokeAll() should return every record it revoked, and only those: not ones revoked already, nor the one it was told to leave.',
+        );
+        $this->assertTrue(
+            $revoked->every(fn (RegisteredSession $session) => $session->revokedAt !== null),
+            'Your SessionRegistry\'s revokeAll() should return each record as it now stands, with revokedAt set.',
+        );
+        $this->assertNull($registry->find($kept)?->revokedAt, 'Your SessionRegistry\'s revokeAll() should leave the record it was told to leave ($except).');
+        $this->assertTrue($registry->revokeAll($user, except: $kept)->isEmpty(), 'Your SessionRegistry\'s revokeAll() should return nothing when it revoked nothing.');
     }
 
     public function test_keyring_checks_the_session_on_every_signed_in_route(): void

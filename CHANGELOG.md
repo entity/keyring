@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Sessions and Devices
+
+- A session keeps its handle when it moves to a new record: when "remember me" carries it on, when a risk response asks it to verify again, and with `rotate` on the `cookie` session driver. Each record names the one the session started on (`origin`), and the handle comes from that. Sessions that started before the upgrade keep the handles they had. Needs a new migration, see the [upgrade guide](UPGRADE.md).
+- `Sessions::stillSignedIn($user, $handle)`, for code that knows a session by its handle to ask whether the user is still signed in on it. It applies `Keyring::allowSignInWhen()` and the session's timeouts, and it changes nothing.
+- A conformance check that the session registry keeps `origin` when a session moves, so a missing migration or a custom driver that drops it is caught in your tests.
+- The session registry says which records it revoked. `revoke()` returns the record it revoked, or `null` when it revoked nothing, and `revokeAll()` and `revokeDevice()` return the records they revoked instead of a count. Custom registry drivers need to return them too: see the [upgrade guide](UPGRADE.md#from-02-to-03). `Sessions::signOutEverywhere()`, `Sessions::revokeDevice()` and the `SessionsRevoked` event still give a count.
+- The conformance suite checks that the configured registry returns the records it revoked.
+- `sessions.continue_as_guest` lists routes that also serve guests. A page visit to one whose session has ended is signed out and asked for again as a guest, rather than sent to log in, whatever the reason it ended. The `signed-out` status is flashed and no intended URL is saved. JSON requests still get a `401`.
+
 ### Policies and Step-Up
 
 - `StepUp::unlessMet()` to ask for step-up from a controller, for an integration that reads what to ask for from the request, such as an OpenID Connect provider with `acr_values` and `max_age`. It takes an `Assurance` level, a moment the user must have verified since, or both, and gives the same answer as the `keyring` and `keyring.fresh` middleware. Asking for nothing, or for a moment more than a few seconds in the future, throws.

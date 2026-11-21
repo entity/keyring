@@ -74,7 +74,8 @@
             "end_on_lapse": false,
             "middleware": true,
             "remember_cookie": null,
-            "remember_grace": "10s"
+            "remember_grace": "10s",
+            "continue_as_guest": []
         },
         "protected": [],
         "email_changes": {
