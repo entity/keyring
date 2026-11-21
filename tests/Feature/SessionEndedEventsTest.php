@@ -1302,12 +1302,7 @@ function cacheFailingOn(string $failing): void
 describe('the cache driver failing part way inside the user\'s row lock', function () {
     beforeEach(function () {
         // A listener that keeps what it heard on the user's connection, as
-        // a job on a database queue would.
-        Schema::create('heard_endings', function (Blueprint $table) {
-            $table->id();
-            $table->string('handle');
-            $table->string('reason');
-        });
+        // a job on a database queue would (heard_endings, a test migration).
         Event::listen(fn (RegisteredSessionEnded $event) => DB::table('heard_endings')->insert(['handle' => $event->handle, 'reason' => $event->reason->value]));
 
         $this->failing = Str::random(40);
