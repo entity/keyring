@@ -49,16 +49,15 @@ trait RendersPages
         // noted as the page to go back to, as Laravel doesn't note an XHR.
         $request = request();
         $json = $request->expectsJson() && ! $request->hasHeader('X-Inertia');
-
-        if (! $json) {
-            $this->rememberPage();
-        }
-
         $component = $this->pages[$name] ?? 'auth/'.$name;
 
         // The app's own answer for the page, for JSON clients too: it may be
         // how the app keeps a prop from being shown.
         if ($component instanceof Closure) {
+            if (! $json) {
+                $this->rememberPage();
+            }
+
             return $component($props);
         }
 
@@ -66,7 +65,10 @@ trait RendersPages
             return new JsonResponse(['page' => $name, 'props' => (object) $props]);
         }
 
+        // Nothing renders, so there's no page to come back to either.
         abort_if(config('keyring.pages') === false, 404);
+
+        $this->rememberPage();
 
         if (class_exists(ResponseFactory::class)) {
             try {
