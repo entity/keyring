@@ -28,7 +28,7 @@ Keyring keeps a record of what happens to your users' accounts, and it sends ema
 
 ## The Security Log
 
-Keyring records sign ins, failures, lockouts, refusals, changes, and automatic actions in the `keyring_events` table, as `Keyring\Models\SecurityEvent` rows. Each entry has a `type`, a `severity`, the user (when it's known), the `factor`, the `device_id`, the IP address, the user agent, a `request_id`, `meta`, and `created_at`.
+Keyring records sign ins, failures, lockouts, refusals, changes, and automatic actions in the `keyring_events` table, as `Keyring\Models\SecurityEvent` rows. Each entry has a `type`, a `severity`, the user (when it's known), the `factor`, the `device_id`, the IP address, the user agent, a `request_id`, `meta`, `created_at`, and `seen_at`. Keyring sets `seen_at` when it returns an alert to the user, so the same alert isn't returned again.
 
 The log never holds passwords, codes, tokens, signatures, session IDs, or anything else from the request body.
 

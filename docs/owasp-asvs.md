@@ -384,7 +384,7 @@ The table below covers where Keyring doesn't meet a section whatever you configu
 | 3.1.1.2 A keyed hash or encryption under a separately stored key (recommended) | Deviates | Not built in. The hash column is shared with the rest of your app, where the key lives is your infrastructure's decision, and rotating it locks everyone out. [Peppering Passwords](security.md#peppering-passwords) shows how to add one. |
 | 3.2.2 No more than 100 failures in a row on one authenticator | Met by default | `limits.consecutive`. A higher number, or `null`, is accepted. A factor of your own that overrides `limits()` without the default list loses the cap. `Keyring::unlock()` switches a disabled authenticator back on without binding it again, which NIST doesn't provide for. See [At the Cap](security.md#at-the-cap). |
 | 4.1.2.1 A new authenticator is bound at the highest level the account can reach | Met by default | `changes_middleware`. Emptying it fails the conformance suite and nothing else. Keyring always asks for the highest level the account can reach, where NIST would also accept the level the new authenticator will be used at. |
-| 4.1.2.1 The subscriber is told when an authenticator is added | Met by default | `authenticator_added`, from the published provider. A notice that isn't registered isn't sent, and nothing warns you. |
+| 4.1.2.1 The subscriber is told when an authenticator is added | Met by default | `authenticator_added`, one of Keyring's own notices. It isn't sent if the app sets it to `null`. |
 | 4.2.1.1 A used recovery code is replaced with a new one | Deviates | Keyring uses the code up and doesn't issue another by itself. A new code is only worth something once its owner has seen and saved it. `shouldReplaceRecoveryCodes()` says when a set has had one used. Send the user to [make a new set](authenticators.md#recovery-codes). Until your app does, this rule isn't met. |
 | 4.2.1.1 A replacement recovery code is announced | Met by default | `recovery_codes_generated`. |
 | 4.2.1.2 A code sent by email lasts 24 hours at most | Yours | Reset links come from Laravel's broker: `auth.passwords.*.expire`, which is 60 minutes in a new app. Keyring doesn't cap it. |
@@ -425,11 +425,11 @@ Keyring follows these OWASP cheat sheets: Authentication, Session Management, Mu
 | Password Storage | Argon2id, or bcrypt for legacy systems | Yours | Your `hashing.driver`. Laravel's default is bcrypt. |
 | Password Storage | A pepper kept apart from the database | Deviates | Not built in. See [Peppering Passwords](security.md#peppering-passwords). |
 | Forgot Password | Rate limit reset requests per account | Yours | Laravel's broker `throttle`, which is on in a new Laravel app and which Keyring doesn't set. Keep it. The conformance suite fails without one. See [Resetting the Password](protected-changes.md#resetting-the-password). |
-| Forgot Password | After a reset: no automatic sign in, sessions ended, the user emailed | Met by default | The email is `password_changed`, from the published provider. |
+| Forgot Password | After a reset: no automatic sign in, sessions ended, the user emailed | Met by default | The email is `password_changed`, one of Keyring's own notices. |
 | Credential Stuffing Prevention | Per-IP limits that aren't the only defence | Met by default | The numbers are options. |
 | Credential Stuffing Prevention | Metrics from each defence | Partly | Keyring dispatches an event and writes a log entry for each. Counting them is a listener of yours. See [Events](events.md). |
 | Credential Stuffing Prevention | Find leaked passwords | Met by default | `passwords.uncompromised`. |
-| Credential Stuffing Prevention | Tell users of unusual events, show recent sign ins and sessions | Met by default | The notices and signals in the published provider, and `GET /user/sessions`. The pages are yours. |
+| Credential Stuffing Prevention | Tell users of unusual events, show recent sign ins and sessions | Met by default | The signals in the published provider, Keyring's own notices, and `GET /user/sessions`. The pages are yours. |
 | Cross-Site Request Forgery Prevention | The framework's protection on every request that changes state | Met by default | Laravel's, on the `web` group. |
 | Cross-Site Request Forgery Prevention | Client code doesn't build request targets from untrusted input | Met | The browser package encodes what it puts in a path. |
 | Logging | Log sign ins, failures, refusals and input validation failures | Deviates | Everything except validation failures, as ASVS 16.3.3 above. |

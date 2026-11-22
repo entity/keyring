@@ -316,7 +316,7 @@ Once the user has verified enough, Keyring does the following:
 4. dispatches `Keyring\Events\Confirmed`,
 5. redirects to the intended URL, or `home`.
 
-For a `GET` request, the intended URL is the page that needed step-up. For other methods, Laravel uses the previous URL instead. That way, the user returns to the page with the form, rather than to a URL they can't `GET`.
+For a `GET` request, the intended URL is the page that needed step-up. For other methods, Keyring uses the page the request came from (its `Referer`, or failing that the last page Laravel saw) when that's on the app's own origin, and `home` otherwise. That way, the user returns to the page with the form, rather than to a URL they can't `GET`.
 
 The confirm attempt expires after `pending_logins.keep_for`, in the same way as a sign in attempt. When it expires, the user returns to `/confirm`, and `keyring::keyring.expired` appears on the field of the factor it asks for next.
 
@@ -327,6 +327,7 @@ Requests that expect JSON (and aren't Inertia visits) get a `423 Locked` respons
 ```json
 {
   "message": "Please confirm it's you to continue.",
+  "page": "confirm",
   "redirect": "https://example.com/confirm"
 }
 ```

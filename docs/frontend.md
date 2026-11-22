@@ -317,7 +317,7 @@ await endOtherSessions()           // every session but this one
 | `endSession(id)` | `DELETE /user/sessions/{id}`. Ending the one marked `current` signs the user out and resolves to `{}`, so send them to the login page. |
 | `endOtherSessions()` | `DELETE /user/sessions`. |
 
-The `id` is a handle that only these routes accept. It changes when a session moves to a new record, so list the sessions again before ending one from a list that's been open for a while. An old handle gets a `404`. Both functions that end sessions need a fresh verification, as the authenticator helpers do. [Handling Step-Up in JavaScript](#handling-step-up-in-javascript) shows how to handle that.
+The `id` is a handle that only these routes accept. It stays the same when the session moves to a new record. It stops matching once the session has ended (or the app key is rotated without `APP_PREVIOUS_KEYS`), so list the sessions again before ending one from a list that's been open for a while. An old handle gets a `404`. Both functions that end sessions need a fresh verification, as the authenticator helpers do. [Handling Step-Up in JavaScript](#handling-step-up-in-javascript) shows how to handle that.
 
 ## Handling Step-Up in JavaScript
 

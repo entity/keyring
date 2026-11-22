@@ -76,7 +76,7 @@ A browser shared by several accounts has one cookie and a device for each accoun
 
 When `devices.trust_for` isn't `null`, the challenge page offers "don't ask again on this device" (`canTrustDevice`). Posting `trust: true` during the login marks the device as trusted for that long (30 days by default), counted from the moment trust is granted. It only counts when that login reached AAL2, for example with a password and an authenticator app's code. If `Features::emailVerification()` is on, the email address must also be verified.
 
-An [emailed code](factors.md#email-codes) doesn't count as a second factor. So a login that used one beside the password isn't offered trust (`canTrustDevice` is false), and it can't earn it. Sending `trust` with the password, or after a login that only used the password, is ignored. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
+An [emailed code](factors.md#email-codes) doesn't count as a second factor. So a login that used one beside the password isn't offered trust (`canTrustDevice` is false), and it can't earn it. Sending `trust` with the password is kept, and trust is granted once a second factor passes in that login. A login that only used the password doesn't earn it. Granting trust gives the browser a new cookie, so trust never rests on a cookie that was planted or copied before the login. Other accounts on the same browser move to the new cookie too.
 
 Trust on its own changes nothing. Your [policy](policies.md#deciding-per-user-and-attempt) is what makes use of it:
 
@@ -97,7 +97,7 @@ Risk detected at login leaves the owner's sessions and trusted devices alone, wh
 
 ### New Device Sign Ins
 
-A sign in from a new device dispatches `Keyring\Events\NewDeviceSignedIn`. The `new_device` [security email](security-log-and-emails.md#security-emails) tells the user about it, and `keyring:install` registers that email when devices are on. Alternatively, you may write your own listener to send a message:
+A sign in from a new device dispatches `Keyring\Events\NewDeviceSignedIn`. The `new_device` [security email](security-log-and-emails.md#security-emails) tells the user about it. Keyring sends it by default, unless the app sets `new_device` to `null` in `Keyring::notifications()`. `keyring:install` only turns on the `NewDevice` risk signal when devices are on. Alternatively, you may write your own listener to send a message:
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -390,7 +390,7 @@ To turn it on, set how often it runs. Keyring then adds it to Laravel's schedule
 ],
 ```
 
-`sweep_every` takes minutes or hours, such as `'1m'`, `'5m'`, or `'1h'`. Pick a step that divides an hour or a day. A step that doesn't, such as `'45m'`, runs at the steps that fit in each hour. A bare number counts seconds, and anything under a minute runs every minute. The longest it runs apart is 12 hours: a longer setting runs every 12 hours, with a warning in your log. Something that isn't a duration, such as `'5 min'`, leaves the sweep off, with a warning in your log, and `keyring:sweep` prints the problem when you run it. It never stops the rest of your schedule.
+`sweep_every` takes minutes or hours, such as `'1m'`, `'5m'`, or `'1h'`. Pick a step that divides an hour or a day. A step that doesn't, such as `'45m'`, runs at the steps that fit in each hour. Over an hour, the hours are rounded down, so `'90m'` runs hourly. A bare number counts seconds, and anything under a minute runs every minute, and zero turns the sweep off, with a warning in your log. The longest it runs apart is 12 hours: a longer setting runs every 12 hours, with a warning in your log. Something that isn't a duration, such as `'5 min'`, leaves the sweep off, with a warning in your log, and `keyring:sweep` prints the problem when you run it. It never stops the rest of your schedule.
 
 The scheduled sweep runs on one server at a time, and never overlaps itself. Both need a cache store shared by your servers that supports locks, such as Redis, Memcached, or the database store. With one that doesn't, each server may run its own sweep. That's safe but wasted work: two sweeps lock the sessions they end and wait for each other, though both may announce the same lost revocation again, which listeners already have to allow for. The lock that says a sweep is running lasts twice the interval, at least ten minutes and at most six hours. So a server that dies mid-sweep holds the sweep up for that long, not for a day. It needs the [scheduler running](installation.md#after-installing).
 
@@ -508,7 +508,7 @@ A session whose record has gone missing is signed out rather than registered aga
 
 A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so on Keyring's guard, in a request with a session, `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route. If the registry can't be reached, the user is still signed out and the error is reported. After `logoutCurrentDevice()`, the user's "remember me" token is then changed, as `Auth::logout()` already does, so a kept copy of the cookie stops working.
 
-A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "..."}`. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
+A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "...", "page": "login", "redirect": "..."}`, where `redirect` is the login page. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
 
 ### Pages That Also Serve Guests
 
@@ -725,7 +725,7 @@ The events are in `Keyring\Events`:
 | `EveryoneSignedOut` | `at`. Every user's sessions ended at once. |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended), `handle` |
 | `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as), `handle` |
-| `AccessRefused` | `user`, `resource` (`device`), `id`. A request to sign out a device that isn't the user's, answered with a 404. |
+| `AccessRefused` | `user`, `resource` (`device`, `session`, `authenticator`, or `email_verification`), `id`. A request for a device, session or authenticator that isn't the user's, answered with a 404, or a verification link made for another account. |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`). A "this wasn't me" link that was refused. |
 
 `handle` is the session's [handle](#listing-and-ending-sessions). A listener in the request sees the record's registry ID as well, but it's the value of the "remember me" cookie, so a queued listener gets the record with a blank `id` and a null `replacedBy`, and has only the handle to go by.

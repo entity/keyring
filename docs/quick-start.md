@@ -176,10 +176,10 @@ use Keyring\Features;
     Features::resetPasswords(),
     Features::emailVerification(),
     Features::updatePasswords(),
-    Features::securityLog(),
     // Features::manageAuthenticators(),
     // Features::devices(),
     // Features::emailChanges(),
+    Features::securityLog(),
 ],
 ```
 
@@ -241,7 +241,7 @@ The following protections are part of the foundation. You don't need to set any 
 | Rate limits on signing in | 5 a minute per account and 20 per IP address. After 100 failures in a row, an authenticator is refused until a password reset or `Keyring::unlock()` clears it, or until the second factor is removed and added again. | `limits` in [Configuration](configuration.md#pending-logins-timebox-and-rate-limits) |
 | Failed checks take the same amount of time, as does every registration and refused password reset | 500ms | `timebox` |
 | Registration gives the same response whether or not an address has an account | Enabled | [`registration.reveal_taken`](sign-in-flow.md#registration) |
-| Password rules | 15 characters without a second factor, and 8 with one. Common passwords and ones containing the user's or site's name are refused, as are breached passwords in production. | [Password Rules](protected-changes.md#password-rules) |
+| Password rules | 15 characters without a second factor, and 8 with one. Common passwords are refused, and so are ones made up only of the user's name or email, or the app's name or its `passwords.context` words, with digits and punctuation ignored. Breached passwords are refused in production, as well. | [Password Rules](protected-changes.md#password-rules) |
 | A record of each session, with its IP address and browser, so Keyring can sign it out | Sessions end after two hours unused, and 30 days after signing in. "Remember me" brings a browser back for up to 14 days away, with nothing proved, and only to a session that hasn't ended. | `sessions` in [Configuration](configuration.md#sessions) |
 | Assurance levels lapse, as NIST recommends | AAL2 after an hour idle or 24 hours, and AAL3 after 15 minutes idle or 12 hours. The session stays signed in at whatever level remains, unless `sessions.end_on_lapse` ends it. | `sessions.levels` |
 | Browsers are told to clear their cache and storage on sign out | Enabled | A custom [`LogoutResponse`](sign-in-flow.md#responses) |

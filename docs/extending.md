@@ -8,7 +8,7 @@
 
 ## Introduction
 
-Once you've run `keyring:install` and a migration, Keyring works. From there, nearly everything it does is yours to change. The code that an application is expected to own is published into your application. That includes the config, the migrations, a service provider, the [actions](protected-changes.md), and the [notifications](security-log-and-emails.md#security-emails). The rest stays in the package, where it keeps receiving fixes. You change it through options and hooks.
+Once you've run `keyring:install` and a migration, Keyring works. From there, nearly everything it does is yours to change. The code that an application is expected to own is published into your application. That includes the config, the migrations, a service provider, and the [actions](protected-changes.md). The rest stays in the package, notifications included, where it keeps receiving fixes. You change it through options and hooks, and the [notifications](security-log-and-emails.md#security-emails) through `Keyring::notifications()`.
 
 This page lists all of them, along with where each one is explained. The [Recipes](recipes.md) page has worked examples of the most common ones.
 
@@ -47,7 +47,7 @@ This page lists all of them, along with where each one is explained. The [Recipe
 | The models | `Keyring::useAuthenticatorModel()` and the other four | [The Keyring Facade](configuration.md#the-keyring-facade) |
 | Which attributes are protected | `protected`, `Keyring::withoutProtection()` | [Protected Changes](protected-changes.md) |
 
-Devices, email changes, and every sign-in method except the password are off until you turn them on. The [risk signals](risk.md) and [security notices](security-log-and-emails.md#security-emails) come from whatever your `KeyringServiceProvider` lists. The provider that `keyring:install` publishes starts with a set of each. An application without that provider has none.
+Devices, email changes, and every sign-in method except the password are off until you turn them on. The [risk signals](risk.md) come from whatever your `KeyringServiceProvider` lists. The provider that `keyring:install` publishes starts with a set. An application without that provider has none. The [security notices](security-log-and-emails.md#security-emails) are Keyring's own, and are sent by default with or without that provider.
 
 ## Replacing a Controller or Service
 

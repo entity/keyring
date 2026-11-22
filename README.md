@@ -89,7 +89,7 @@ The [Adding Features](docs/quick-start.md#adding-features) documentation covers 
 - **Getting Started:** [Quick Start](docs/quick-start.md) · [Installation](docs/installation.md) · [Configuration](docs/configuration.md) · [Upgrading From Fortify](docs/upgrading-from-fortify.md)
 - **Signing In:** [Factors](docs/factors.md) · [Policies](docs/policies.md) · [The Sign In Flow](docs/sign-in-flow.md) · [Step-Up](docs/step-up.md) · [Passkeys & Security Keys](docs/passkeys.md)
 - **Account Security:** [Managing Authenticators](docs/authenticators.md) · [Devices & Sessions](docs/devices-and-sessions.md) · [Protected Changes](docs/protected-changes.md) · [Risk](docs/risk.md) · [Security Log & Emails](docs/security-log-and-emails.md) · [Events](docs/events.md)
-- **Building Your Application:** [Frontend](docs/frontend.md) · [Extending Keyring](docs/extending.md) · [Recipes](docs/recipes.md) · [Testing](docs/testing.md) · [Example Application](https://github.com/entity/keyring-example)
+- **Building Your Application:** [Frontend](docs/frontend.md) · [Headless Frontends](docs/headless.md) · [Extending Keyring](docs/extending.md) · [Recipes](docs/recipes.md) · [Testing](docs/testing.md) · [Example Application](https://github.com/entity/keyring-example)
 - **Security:** [Security](docs/security.md) · [OWASP ASVS and NIST SP 800-63B](docs/owasp-asvs.md)
 
 The [changelog](CHANGELOG.md) lists what changed in each release, and the [upgrade guide](UPGRADE.md) covers anything you need to do when updating.

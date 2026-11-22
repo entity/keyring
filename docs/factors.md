@@ -137,7 +137,7 @@ EmailCode::asExtraStep(length: 6, expireAfter: '5m', maxGuesses: 3)
 
 Six digits is the shortest a code can be, and ten minutes is the longest it can last. These are the bounds OWASP ASVS 5.0.0 sets for codes sent out of band (requirements 6.5.4 and 6.5.5). Asking for less or for longer throws a `LogicException` on that line.
 
-The code goes out in your `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs). The `keyring:install` command publishes and registers that notification.
+The code goes out in Keyring's `verification_code` [notification](security-log-and-emails.md#emails-a-flow-needs). It's one of Keyring's own, sent by default, so `keyring:install` doesn't publish it. To change it, pass your own class to `Keyring::notifications()`.
 
 Whatever limits you choose, each code:
 
