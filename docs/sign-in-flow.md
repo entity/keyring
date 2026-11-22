@@ -358,7 +358,7 @@ use Keyring\Login\SignIn;
 app(SignIn::class)->out($request);
 ```
 
-Your own `Auth::logout()` or `Auth::logoutCurrentDevice()`, on Keyring's guard in a request with a session, ends the registered session too, with its "remember me" cookie and what the session proved, so a sign-out route you already have keeps working. Invalidate the session after it as Laravel's docs do; `SignIn::out()` does that part for you. It dispatches no `LoggedOut`, so nothing reaches the security log. Dispatch `Keyring\Events\LoggedOut` yourself if you want it there.
+Your own `Auth::logout()` or `Auth::logoutCurrentDevice()`, on Keyring's guard in a request with a session, ends the registered session too, with its "remember me" cookie and what the session proved, so a sign-out route you already have keeps working. Invalidate the session after it as Laravel's docs do, or before it on any route Keyring's [session middleware](devices-and-sessions.md#the-session-middleware) runs on; `SignIn::out()` does that part for you. It dispatches no `LoggedOut`, so nothing reaches the security log. Dispatch `Keyring\Events\LoggedOut` yourself if you want it there.
 
 ## The Verification Pipeline
 

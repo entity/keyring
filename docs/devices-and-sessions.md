@@ -508,6 +508,8 @@ A session whose record has gone missing is signed out rather than registered aga
 
 A sign-out your app does itself ends the record as well. Keyring listens for the guard's `Logout` and `CurrentDeviceLogout` events, so on Keyring's guard, in a request with a session, `Auth::logout()` and `Auth::logoutCurrentDevice()` revoke the session's record, forget its "remember me" cookie and clear what the session proved, on any route. If the registry can't be reached, the user is still signed out and the error is reported. After `logoutCurrentDevice()`, the user's "remember me" token is then changed, as `Auth::logout()` already does, so a kept copy of the cookie stops working.
 
+The record also ends when your app empties the session first, as in `$request->session()->invalidate()` followed by `Auth::logout()`, on any route the middleware runs on. The middleware notes the session's record on the request before your code runs, so the sign-out can still find it.
+
 A signed-out request is sent to the login page with the `signed-out` status, and it comes back to where it was going after signing in again. JSON clients get a `401` with `{"status": "signed-out", "message": "...", "page": "login", "redirect": "..."}`, where `redirect` is the login page. Either way, the response sends `Clear-Site-Data`, as signing out does. `Keyring\Events\SessionEnded` is dispatched with the reason, and it's logged as `session_ended`.
 
 ### Pages That Also Serve Guests
