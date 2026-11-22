@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Enums\Assurance;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\Password as PasswordFactor;
 use Keyring\Models\Authenticator;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\NewDevice;
@@ -102,6 +104,37 @@ describe('signing in', function () {
 
         $this->getJson(route('keyring.login.challenge'))->assertUnprocessable()->assertJsonPath('page', 'login');
     });
+
+    it('answers a sign in out of code guesses as an error with the page to start again on', function (string $method, string $route) {
+        Notification::fake();
+        Keyring::factors([PasswordFactor::class, EmailCode::asExtraStep()]);
+        config(['keyring.limits.per_account' => 100]);
+        $this->totp->delete();
+        Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]);
+
+        $this->postJson('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertStatus(202);
+        $this->getJson(route('keyring.login.challenge'))->assertJsonPath('props.factor', 'email-code');
+        $this->postJson(route('keyring.login.send', 'email-code'))->assertJsonPath('status', 'code-sent');
+
+        foreach (range(1, 5) as $guess) {
+            $this->postJson(route('keyring.login.verify', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
+        }
+
+        $this->json($method, route($route, 'email-code'))
+            ->assertUnprocessable()
+            ->assertExactJson([
+                'message' => __('keyring::keyring.too_many_codes'),
+                'errors' => ['email' => [__('keyring::keyring.too_many_codes')]],
+                'page' => 'login',
+                'redirect' => route('login'),
+            ]);
+
+        // The attempt is gone, so the page now says it ran out.
+        $this->getJson(route('keyring.login.challenge'))->assertUnprocessable()->assertJsonPath('errors.email.0', __('keyring::keyring.expired'));
+    })->with([
+        'sending a code' => ['POST', 'keyring.login.send'],
+        'showing the page' => ['GET', 'keyring.login.challenge'],
+    ]);
 
     it('still redirects a page visit with the error', function () {
         $this->post(route('keyring.login.verify', 'totp'), ['code' => '123456'])
@@ -318,6 +351,18 @@ describe('with pages turned off', function () {
         $this->get('/reset-password/a-token?email=taylor@example.com')->assertNotFound()->assertHeader('Referrer-Policy', 'no-referrer');
 
         $this->getJson('/login')->assertOk()->assertJsonPath('page', 'login');
+    });
+
+    // Laravel notes a full page load itself, whatever it answered. An
+    // Inertia visit, sent as an XHR, is only noted by Keyring.
+    it('notes no inertia visit it answers with a 404 as the page to go back to', function () {
+        Keyring::page('register', fn () => 'my register');
+        $this->inertia()->withHeader('X-Requested-With', 'XMLHttpRequest');
+
+        $this->get('/register')->assertOk();
+        $this->get('/login')->assertNotFound();
+
+        expect(session()->previousUrl())->toBe(url('/register'));
     });
 
     it('still renders a page the app answers itself', function () {
