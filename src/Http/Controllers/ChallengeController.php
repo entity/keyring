@@ -69,9 +69,10 @@ class ChallengeController
             // With nothing to confirm with, coming back here would only loop.
             // Once enrolled, they carry on to the page the confirm was for,
             // if they were sent here for one: on a visit of their own,
-            // url.intended is whatever someone last left in it.
+            // url.intended is whatever someone last left in it. It's handed
+            // back once the account can meet what the confirm asks.
             return $purpose === Purpose::Confirm
-                ? $this->stepUp->enrollFirst($request, $current === null ? null : $this->confirmingFor($request))
+                ? $this->stepUp->enrollFirst($request, $current === null ? null : $this->confirmingFor($request), $attempt->requirement)
                 : $this->expired($request, $purpose, __('keyring::keyring.unavailable'));
         }
 

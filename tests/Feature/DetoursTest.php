@@ -6,9 +6,11 @@ declare(strict_types=1);
 
 namespace Keyring\Tests\Feature\Detours;
 
+use Illuminate\Auth\GenericUser;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Uri;
 use Illuminate\Testing\TestResponse;
@@ -16,12 +18,21 @@ use Keyring\Contracts\Responses\ConfirmationRequiredResponse;
 use Keyring\Contracts\Responses\EnrollmentRequiredResponse;
 use Keyring\Contracts\Responses\PasswordChangeRequiredResponse;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\EmailCode;
+use Keyring\Factors\Password;
+use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\Totp;
+use Keyring\Factors\WebAuthn;
+use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Login\Detours;
 use Keyring\Login\Requirement;
 use Keyring\Login\StepUp;
 use Keyring\Models\Authenticator;
+use Keyring\Notifications\VerificationCode;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
 
 // Where a user was going when Keyring sent them to enroll or to choose a new
@@ -38,6 +49,7 @@ beforeEach(function () {
     });
 
     Route::middleware(['web', 'auth', 'keyring:aal2'])->get('/billing', fn () => 'billing');
+    Route::middleware(['web', 'auth', 'keyring:aal3'])->get('/vault', fn () => 'vault');
 
     Route::middleware(['web', 'auth'])->group(function () {
         Route::get('/home', fn () => 'home');
@@ -73,6 +85,38 @@ function addAuthenticatorApp(): array
 }
 
 /**
+ * Add a passkey, one that stays on its device unless it's $synced.
+ */
+function addPasskey(bool $synced = false): array
+{
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+
+    return test()->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => new VirtualAuthenticator(synced: $synced)->register($options)])->assertOk()->json();
+}
+
+/**
+ * Add an emailed code, which is a step at sign in but not a second factor.
+ */
+function addEmailCode(): array
+{
+    test()->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $code = Notification::sent(test()->user, VerificationCode::class)->last()->code;
+
+    return test()->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk()->json();
+}
+
+/**
+ * What keyring.enrolled saves a page with: the account must meet AAL2
+ * without its recovery codes.
+ *
+ * @return array<string, mixed>
+ */
+function needingAal2(): array
+{
+    return Requirement::named('aal2')->toArray();
+}
+
+/**
  * @return array{url: string, user: array{type: string, id: string}, at: int}
  */
 function savedFor(Model $user, string $url = 'http://localhost/invoices/42', ?int $at = null): array
@@ -86,7 +130,7 @@ describe('enrolling', function () {
 
         $this->get('/invoices/42', NAVIGATE)->assertRedirect('/settings/security');
 
-        expect(session(Detours::ENROLLMENT))->toBe(savedFor($this->user))
+        expect(session(Detours::ENROLLMENT))->toBe([...savedFor($this->user), 'requirement' => needingAal2()])
             ->and(addAuthenticatorApp())->toMatchArray(['status' => 'authenticator-added', 'continue' => 'http://localhost/invoices/42'])
             ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
     });
@@ -126,7 +170,100 @@ describe('enrolling', function () {
         $this->get('/keys-only', NAVIGATE)->assertRedirect(route('keyring.confirm.challenge'));
         $this->get(route('keyring.confirm.challenge'), NAVIGATE)->assertRedirect('/settings/security');
 
-        expect(addAuthenticatorApp()['continue'])->toBe('http://localhost/keys-only');
+        expect(session(Detours::ENROLLMENT)['requirement'])->toBe(Requirement::aal2()->deviceBound()->toArray())
+            ->and(addPasskey()['continue'])->toBe('http://localhost/keys-only');
+    });
+
+    it('keeps the page a confirm was for until the account has what the confirm asks', function () {
+        signIn();
+
+        $this->get('/keys-only', NAVIGATE)->assertRedirect(route('keyring.confirm.challenge'));
+        $this->get(route('keyring.confirm.challenge'), NAVIGATE)->assertRedirect('/settings/security');
+
+        // Neither an authenticator app nor a passkey that syncs is bound to
+        // a device.
+        expect(addAuthenticatorApp())->not->toHaveKey('continue')
+            ->and(addPasskey(synced: true))->not->toHaveKey('continue')
+            ->and(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/keys-only')
+            ->and(addPasskey()['continue'])->toBe('http://localhost/keys-only')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('hands back the page keyring.enrolled stopped them on for a passkey', function () {
+        signIn();
+
+        $this->get('/invoices/42', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(addPasskey()['continue'])->toBe('http://localhost/invoices/42');
+    });
+
+    it('keeps the page for a second factor when they add an emailed code, which isn\'t one', function () {
+        Notification::fake();
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, EmailCode::asExtraStep()]);
+        signIn();
+
+        $this->get('/invoices/42', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(addEmailCode())->toMatchArray(['status' => 'authenticator-added'])->not->toHaveKey('continue')
+            ->and(session(Detours::ENROLLMENT))->toMatchArray(['url' => 'http://localhost/invoices/42', 'requirement' => needingAal2()]);
+
+        // Still a page keyring.enrolled sends them back from.
+        $this->get('/invoices/42', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(addAuthenticatorApp()['continue'])->toBe('http://localhost/invoices/42')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('keeps the page step-up stopped them on until the account can reach the level', function () {
+        signIn();
+
+        $this->get('/vault', NAVIGATE)->assertRedirect('/settings/security');
+
+        // A code from an app is never AAL3.
+        expect(addAuthenticatorApp())->not->toHaveKey('continue')
+            ->and(session(Detours::ENROLLMENT))->toMatchArray(['url' => 'http://localhost/vault', 'requirement' => Requirement::aal3()->toArray()]);
+    });
+
+    it('keeps the page until the account can reach a level the route asks for after keyring.enrolled', function (string $assurance) {
+        // As the installer sets it up: keyring.enrolled in the web group,
+        // so it stops the request before the route's own level is asked.
+        app('router')->aliasMiddleware('assurance', RequireAssurance::class);
+        Route::middleware(['web', 'keyring.enrolled', 'auth', $assurance])->get('/vault/stacked', fn () => 'vault');
+        signIn();
+
+        $this->get('/vault/stacked', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(session(Detours::ENROLLMENT)['requirement'])->toBe(Requirement::named('aal2')->atLeast(Requirement::aal3())->toArray())
+            ->and(addAuthenticatorApp())->not->toHaveKey('continue')
+            ->and(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/vault/stacked');
+
+        // keyring.enrolled lets them through now, and the level sends them
+        // back to enroll for it, with the page still saved.
+        $this->get('/vault/stacked', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(session(Detours::ENROLLMENT)['requirement'])->toBe(Requirement::aal3()->toArray());
+    })->with(['keyring:aal3', 'assurance:aal3', RequireAssurance::class.':aal3']);
+
+    it('saves the level keyring.enrolled asks for alone when the route asks for nothing more', function () {
+        Route::middleware(['web', 'keyring.enrolled', 'auth', 'keyring'])->get('/billing/stacked', fn () => 'billing');
+        signIn();
+
+        $this->get('/billing/stacked', NAVIGATE)->assertRedirect('/settings/security');
+
+        expect(session(Detours::ENROLLMENT)['requirement'])->toBe(needingAal2())
+            ->and(addAuthenticatorApp()['continue'])->toBe('http://localhost/billing/stacked');
+    });
+
+    it('hands back a page saved without a requirement on the next sign-in method, as before', function () {
+        // As one saved before Keyring kept the requirement, or by an app
+        // calling remember() without one.
+        Notification::fake();
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, EmailCode::asExtraStep()]);
+        signIn();
+        $this->withSession([Detours::ENROLLMENT => savedFor($this->user)]);
+
+        expect(addEmailCode()['continue'])->toBe('http://localhost/invoices/42')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
     });
 
     it('saves nothing from a visit to the confirm page of their own, whatever url.intended holds', function () {
@@ -353,6 +490,7 @@ describe('enrolling', function () {
         $this->get('/invoices/42', NAVIGATE);
 
         $this->travel(Detours::LIFETIME)->seconds();
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
         expect($this->get('/detour/enrollment')->getContent())->toBe('http://localhost/invoices/42');
     });
@@ -389,6 +527,19 @@ describe('a saved page that has been tampered with', function () {
         'a url that isn\'t text' => [['url' => ['http://localhost/'], 'user' => ['type' => 'testing:users', 'id' => '1'], 'at' => time()]],
     ]);
 
+    it('is refused when its requirement isn\'t one', function (mixed $requirement) {
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->withSession([Detours::ENROLLMENT => [...savedFor($this->user), 'requirement' => $requirement]]);
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    })->with([
+        'null' => [null],
+        'a name' => ['aal2'],
+        'empty' => [[]],
+        'an unknown category' => [[...Requirement::aal2()->toArray(), 'categories' => ['telepathy']]],
+    ]);
+
     it('is refused when saved in the future', function () {
         $this->withSession([Detours::ENROLLMENT => savedFor($this->user, at: now()->addMinute()->getTimestamp())]);
 
@@ -407,6 +558,70 @@ describe('a saved page that has been tampered with', function () {
 
         expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
             ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+});
+
+describe('a saved page with a requirement', function () {
+    beforeEach(fn () => $this->actingAs($this->user));
+
+    it('is kept, not handed back, while the account can\'t meet it', function () {
+        $this->withSession([Detours::ENROLLMENT => [...savedFor($this->user), 'requirement' => needingAal2()]]);
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/invoices/42');
+
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('http://localhost/invoices/42')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('keeps the hour it was saved with while it waits', function () {
+        $this->withSession([Detours::ENROLLMENT => [...savedFor($this->user), 'requirement' => needingAal2()]]);
+
+        $this->travel(30)->minutes();
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeTrue();
+
+        $this->travel(31)->minutes();
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('is forgotten, not kept, when it was saved for someone else', function () {
+        $abigail = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        $this->withSession([Detours::ENROLLMENT => [...savedFor($abigail), 'requirement' => needingAal2()]]);
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('is refused for a user that isn\'t a model, with no authenticators to meet it', function () {
+        // Asked directly: Keyring's session middleware signs such a user out.
+        $user = new GenericUser(['id' => 1]);
+        Keyring::guard()->setUser($user);
+        $request = Request::create('http://localhost/settings/security');
+        $request->setLaravelSession($session = app('session.store'));
+        $session->put(Detours::ENROLLMENT, [
+            'url' => 'http://localhost/invoices/42',
+            'user' => ['type' => RegisteredSession::typeOf($user), 'id' => '1'],
+            'at' => now()->getTimestamp(),
+            'requirement' => needingAal2(),
+        ]);
+
+        expect(app(Detours::class)->pull($request, Detours::ENROLLMENT))->toBeNull()
+            ->and($session->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('isn\'t met with recovery codes', function () {
+        Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+        $this->withSession([Detours::ENROLLMENT => [...savedFor($this->user), 'requirement' => Requirement::aal1()->including(Category::Possession)->toArray()]]);
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeTrue();
     });
 });
 

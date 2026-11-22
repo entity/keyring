@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased
+
+### Policies and Step-Up
+
+- `continue` on the `authenticator-added` status only comes back once the account can meet what sent the user to enroll. Adding an email code on the way past `keyring.enrolled`, or an authenticator app on the way to an AAL3 page, used to hand back the page, and following it sent the user straight back to enroll. Now the page stays saved and comes back with the sign-in method that does meet it. When `keyring.enrolled` stops a route that also asks for `keyring:{level}`, the page waits for the stricter of the two. Recovery codes don't count toward it. A page saved before the upgrade, with no requirement kept beside it, comes back with the next sign-in method added, as before.
+
 ## v0.3.0 - 2026-11-21
 
 ### Sessions and Devices

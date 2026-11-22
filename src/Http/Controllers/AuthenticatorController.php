@@ -107,8 +107,10 @@ class AuthenticatorController
 
         // Where they were going when sent here, as data rather than a
         // redirect: a page with new recovery codes on it has to stay up
-        // until they're saved. New recovery codes meet no requirement, so
-        // they'd only be sent back here.
+        // until they're saved. It only comes back once the account can meet
+        // what sent them here, so an emailed code, which isn't a second
+        // factor, leaves it saved for one that is. New recovery codes meet
+        // no requirement, so they'd only be sent back here.
         return $this->status('authenticator-added', array_filter([
             'authenticator' => $authenticator->factor()->present($authenticator),
             'recoveryCodes' => $recoveryCodes,

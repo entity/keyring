@@ -84,7 +84,7 @@ class Detours extends KeyringDetours
 }
 ```
 
-Bind it with `$this->app->bind(KeyringDetours::class, Detours::class)`. A page you skip leaves what was saved before alone.
+Bind it with `$this->app->bind(KeyringDetours::class, Detours::class)`. A page you skip leaves what was saved before alone. The requirement that sent the user to enroll is in `$this->requiring` while `put()` runs, and the parent saves it with the page, so call the parent rather than writing to the session yourself.
 
 Think of this as a last resort. A class you've replaced stops receiving Keyring's fixes for whatever you override. So prefer an option or hook from the table above when one does the job, and in a method you do override, call the parent's method for everything you aren't changing.
 

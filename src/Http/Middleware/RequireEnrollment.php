@@ -7,6 +7,8 @@ namespace Keyring\Http\Middleware;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Uri;
 use Keyring\KeyringManager;
 use Keyring\Login\Requirement;
@@ -46,7 +48,28 @@ class RequireEnrollment
             return $next($request);
         }
 
-        return $this->stepUp->enrollFirst($request);
+        return $this->stepUp->enrollFirst($request, requirement: $this->toCarryOn($request, $requirement));
+    }
+
+    /**
+     * What the page is saved with: this level, and any keyring:{level} the
+     * route asks for too, whichever alias it's under. Otherwise a user who
+     * adds enough for this one would be handed the page, only to be sent
+     * back to enroll by the route's own level.
+     */
+    protected function toCarryOn(Request $request, Requirement $requirement): Requirement
+    {
+        $route = $request->route();
+
+        foreach ($route instanceof Route ? app(Router::class)->gatherRouteMiddleware($route) : [] as $middleware) {
+            [$class, $parameters] = is_string($middleware) ? array_pad(explode(':', $middleware, 2), 2, '') : [null, ''];
+
+            if (is_string($class) && is_a($class, RequireAssurance::class, true)) {
+                $requirement = $requirement->atLeast(Requirement::named(...explode(',', $parameters ?: 'aal2')));
+            }
+        }
+
+        return $requirement;
     }
 
     /**

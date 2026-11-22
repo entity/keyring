@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Keyring\Login;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Uri;
 use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Sessions\RegisteredSession;
+use Throwable;
 
 /**
  * Where a user was going when Keyring sent them off to enroll or to choose
@@ -21,6 +23,9 @@ use Keyring\Sessions\RegisteredSession;
  * It's saved only for a page the browser navigated to, so an image, a
  * fetch() or a prefetch can't take its place, and it's only handed back on
  * this app's own origin, to the user it was saved for, within the hour.
+ *
+ * A page saved with the requirement that sent the user away keeps it as
+ * "requirement", and is only handed back once the account can meet it.
  */
 class Detours
 {
@@ -45,6 +50,12 @@ class Detours
      */
     protected array $own = ['keyring.*', 'login', 'register', 'password.*', 'verification.*', 'logout', 'user-password.update'];
 
+    /**
+     * What the page being saved needs the account to meet, while remember()
+     * hands it to put(), which saves it with the page.
+     */
+    protected ?Requirement $requiring = null;
+
     public function __construct(
         protected KeyringManager $keyring,
     ) {}
@@ -54,8 +65,12 @@ class Detours
      * Keyring's own pages only the $url it says it was there for. Anything
      * but a navigation, and anything off this origin or on the detour's own
      * page, leaves what's saved alone.
+     *
+     * With a $requirement, the page is only handed back once the account
+     * can meet it: what sent the user away, so meeting less would only send
+     * them back.
      */
-    public function remember(Request $request, string $key, ?string $url = null): void
+    public function remember(Request $request, string $key, ?string $url = null, ?Requirement $requirement = null): void
     {
         if (! $this->isNavigation($request)) {
             return;
@@ -63,14 +78,25 @@ class Detours
 
         $url ??= $request->routeIs(...$this->own) ? null : $request->fullUrl();
 
-        if ($url !== null && $this->isOwnOrigin($request, $url) && ! $this->isDestination($key, $url)) {
+        if ($url === null || ! $this->isOwnOrigin($request, $url) || $this->isDestination($key, $url)) {
+            return;
+        }
+
+        $this->requiring = $requirement;
+
+        try {
             $this->put($request, $key, $url);
+        } finally {
+            $this->requiring = null;
         }
     }
 
     /**
      * The saved page, if it's still one to go to for the signed-in user.
-     * It's forgotten either way.
+     * One whose requirement the account can't meet yet stays saved, for
+     * the sign-in method that does. Anything else is forgotten either way.
+     * A page saved without a requirement, as before there was one, is
+     * handed back as it always was.
      */
     public function pull(Request $request, string $key): ?string
     {
@@ -80,6 +106,8 @@ class Detours
 
         $saved = $request->session()->pull($key);
         $user = $this->keyring->guard()->user();
+        // Only an Eloquent user has authenticators to meet a requirement with.
+        $model = $user instanceof Model ? $user : null;
 
         if (! is_array($saved) || ! $user instanceof Authenticatable) {
             return null;
@@ -89,12 +117,30 @@ class Detours
         $at = $saved['at'] ?? null;
         $age = is_int($at) ? now()->getTimestamp() - $at : -1;
 
-        return is_string($url)
-            && ($saved['user'] ?? null) === $this->owner($user)
-            && $age >= 0 && $age <= static::LIFETIME
-            && $this->isOwnOrigin($request, $url)
-                ? $url
-                : null;
+        if (! is_string($url)
+            || ($saved['user'] ?? null) !== $this->owner($user)
+            || $age < 0 || $age > static::LIFETIME
+            || ! $this->isOwnOrigin($request, $url)) {
+            return null;
+        }
+
+        if (! array_key_exists('requirement', $saved)) {
+            return $url;
+        }
+
+        $requirement = $this->requirementIn($saved['requirement']);
+
+        if ($requirement === null || $model === null) {
+            return null;
+        }
+
+        if ($this->keyring->for($model)->withoutFallbacks()->canMeet($requirement)) {
+            return $url;
+        }
+
+        $request->session()->put($key, $saved);
+
+        return null;
     }
 
     /**
@@ -112,14 +158,35 @@ class Detours
      * its checks, so an app that binds its own subclass can skip pages it
      * never wants carried on to, and call the parent for the rest. $url is
      * the page being saved. On the confirm page $request is the confirm
-     * page itself, so check $url, not $request.
+     * page itself, so check $url, not $request. What the page needs the
+     * account to meet, if remember() was given it, is $this->requiring, and
+     * is saved with it.
      */
     protected function put(Request $request, string $key, string $url): void
     {
         $user = $this->keyring->guard()->user();
 
         if ($user instanceof Authenticatable) {
-            $request->session()->put($key, ['url' => $url, 'user' => $this->owner($user), 'at' => now()->getTimestamp()]);
+            $request->session()->put($key, [
+                'url' => $url,
+                'user' => $this->owner($user),
+                'at' => now()->getTimestamp(),
+                ...$this->requiring === null ? [] : ['requirement' => $this->requiring->toArray()],
+            ]);
+        }
+    }
+
+    /**
+     * The requirement a page was saved with, or null when what's there
+     * isn't one, and the page is refused.
+     */
+    protected function requirementIn(mixed $saved): ?Requirement
+    {
+        try {
+            // @phpstan-ignore argument.type (fromArray() throws for anything it can't read)
+            return is_array($saved) ? Requirement::fromArray($saved) : null;
+        } catch (Throwable) {
+            return null;
         }
     }
 
