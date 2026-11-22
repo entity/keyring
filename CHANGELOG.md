@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Headless Frontends
+
+- A JSON request for one of Keyring's pages, one that isn't an Inertia visit, gets the page's name and props as `{"page": "...", "props": {...}}`, for a frontend Laravel doesn't serve, such as a Nuxt app. Laravel counts an XHR that accepts anything as a JSON request too, so a Blade page that loads one with jQuery now gets JSON (see the [upgrade guide](UPGRADE.md)). It's sent with the same headers as the page, `Referrer-Policy: no-referrer` and `Cache-Control: no-store` on the pages emailed links open included, never throws `MissingPage`, and isn't noted as the page to go back to. A page you render with a closure through `Keyring::page` still decides what it answers.
+- A `pages` config option. Set it to `false` when every page is in such a frontend, and a page request that isn't JSON gets a `404`.
+- JSON answers that send the browser to one of Keyring's pages name it as `page`: `challenge` and `confirm` on the challenge response, `confirm` on the `423` for step-up, `login` on the `401` for a session Keyring ended, which also gains a `redirect` to the login page, and the page a status response's `redirect` goes to, such as `login` after a password reset.
+- A JSON request to a sign in or step-up that ran out or used up its code guesses gets a `422` with the reason on the field, as a page visit's redirect flashes it, and the page to start again on as `page`. It used to be redirected, and a `fetch()` that followed the redirect lost the error.
+- Verifying an email address answers JSON requests with an `email-verified` status, `justNow` and the `redirect`, where it always redirected.
+- A guide to [headless frontends](docs/headless.md): Sanctum, CORS, cookies, CSRF, passkeys, emailed links that open the frontend, mapping pages and answers to its routes, and rendering on the server with Nuxt.
+
 ### Policies and Step-Up
 
 - `continue` on the `authenticator-added` status only comes back once the account can meet what sent the user to enroll. Adding an email code on the way past `keyring.enrolled`, or an authenticator app on the way to an AAL3 page, used to hand back the page, and following it sent the user straight back to enroll. Now the page stays saved and comes back with the sign-in method that does meet it. When `keyring.enrolled` stops a route that also asks for `keyring:{level}`, the page waits for the stricter of the two. Recovery codes don't count toward it. A page saved before the upgrade, with no requirement kept beside it, comes back with the next sign-in method added, as before.

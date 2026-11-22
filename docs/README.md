@@ -36,6 +36,7 @@ The pages below are grouped by topic.
 ## Building Your Application
 
 - [Frontend](frontend.md): the Inertia pages, and the `@keyringjs/keyring` browser package.
+- [Headless Frontends](headless.md): a frontend Laravel doesn't serve, such as a Nuxt app on another subdomain, signing in with Sanctum's session cookies.
 - [Example Application](https://github.com/entity/keyring-example): every page, written in React.
 - [Extending Keyring](extending.md): every option and hook in one place, and what stays fixed.
 - [Recipes](recipes.md): worked examples with real packages, such as IP locations, Maizzle emails, SMS codes, and social login.

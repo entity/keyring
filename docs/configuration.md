@@ -7,6 +7,7 @@
 - [Registration](#registration)
 - [Redirects](#redirects)
 - [Routes](#routes)
+- [Pages](#pages)
 - [WebAuthn](#webauthn)
 - [Account Changes and Enrollment](#account-changes-and-enrollment)
 - [Devices](#devices)
@@ -87,7 +88,7 @@ If you set `reveal_taken` to `true`, the form answers "has already been taken" a
 'home' => '/dashboard',
 ```
 
-`home` is where users go after they sign in or confirm, when there's no intended URL. Keyring also uses it after email verification, with `?verified=1` added, and after confirming an email change while signed in.
+`home` is where users go after they sign in or confirm, when there's no intended URL. Keyring also uses it after email verification, with `?verified=1` added, and after confirming an email change while signed in. It may be a full URL, such as a page on a [frontend of your own](headless.md#where-each-answer-goes).
 
 Users who are signed out are sent to the route named `login`.
 
@@ -114,6 +115,14 @@ Route::prefix('account')->middleware('throttle:60,1')->group(fn () => Keyring::r
 The `Keyring::routes` method adds the `middleware` option, but it doesn't add `prefix` or `domain`. Your group decides those. To change the routes themselves, copy `vendor/keyring/keyring/routes/keyring.php` into your application instead, and keep the route names. Keyring's controllers, emails, and middleware link to routes by name, such as `login`, `keyring.confirm.challenge`, and `keyring.devices.report`.
 
 The browser package uses Keyring's default paths. If you change the prefix, tell the package with [`configureRoutes({ prefix })`](frontend.md#changing-routes).
+
+## Pages
+
+```php
+'pages' => true,
+```
+
+Keyring renders its [pages](sign-in-flow.md#pages) as Inertia components or Blade views, and answers a JSON request for one with the page's name and props. Set `pages` to `false` when every page lives in a frontend that Laravel doesn't serve, such as a Nuxt app. Keyring then answers anything but a JSON request for a page with a `404`, and never throws a `MissingPage` exception. A page you render with a closure through `Keyring::page` still renders. See [Headless Frontends](headless.md).
 
 ## WebAuthn
 

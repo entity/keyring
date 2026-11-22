@@ -13,7 +13,7 @@ class ConfirmationRequiredResponse implements ConfirmationRequiredResponseContra
 
     /**
      * To the confirm page, coming back here afterwards. JSON callers get a
-     * 423 with where to send the browser.
+     * 423 with where to send the browser, and the page by name.
      */
     public function toResponse($request)
     {
@@ -22,7 +22,7 @@ class ConfirmationRequiredResponse implements ConfirmationRequiredResponseContra
         $url = route('keyring.confirm.challenge');
 
         return $this->wantsJson($request)
-            ? new JsonResponse(['message' => __('keyring::keyring.confirm'), 'redirect' => $url], 423)
+            ? new JsonResponse(['message' => __('keyring::keyring.confirm'), 'page' => 'confirm', 'redirect' => $url], 423)
             : redirect($url);
     }
 }

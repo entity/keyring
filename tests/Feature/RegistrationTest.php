@@ -249,6 +249,7 @@ describe('hiding who has an account', function () {
             ->assertExactJson([
                 'status' => 'registration-received',
                 'message' => __('keyring::status.registration-received'),
+                'page' => 'login',
                 'redirect' => route('login'),
             ]);
     });

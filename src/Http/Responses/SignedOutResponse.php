@@ -28,7 +28,7 @@ class SignedOutResponse implements SignedOutResponseContract
         redirect()->setIntendedUrl($this->intendedUrl($request));
 
         $response = $this->wantsJson($request)
-            ? new JsonResponse(['status' => 'signed-out', 'message' => Keyring::statusMessage('signed-out')], 401)
+            ? new JsonResponse(['status' => 'signed-out', 'message' => Keyring::statusMessage('signed-out'), 'page' => 'login', 'redirect' => route('login')], 401)
             : to_route('login')->with('status', 'signed-out');
 
         // As on sign out: nothing the session cached stays in the browser.

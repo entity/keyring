@@ -6,6 +6,7 @@ namespace Keyring\Http\Responses;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Route;
 use Keyring\Contracts\Responses\StatusResponse as StatusResponseContract;
 use Keyring\Facades\Keyring;
 use Keyring\Support\EncryptedSession;
@@ -18,6 +19,18 @@ class StatusResponse implements StatusResponseContract
      * Where a non-JSON response flashes its data, encrypted.
      */
     public const string RESULT = 'keyring.result';
+
+    /**
+     * The pages a status can send the user on to, by route name.
+     */
+    protected const array PAGES = [
+        'login' => 'login',
+        'register' => 'register',
+        'password.request' => 'forgot-password',
+        'verification.notice' => 'verify-email',
+        'keyring.login.challenge' => 'challenge',
+        'keyring.confirm.challenge' => 'confirm',
+    ];
 
     /**
      * @param  string  $status  a slug such as "device-revoked", with its message in keyring::status
@@ -36,6 +49,7 @@ class StatusResponse implements StatusResponseContract
             return new JsonResponse(Arr::whereNotNull([
                 'status' => $this->status,
                 'message' => Keyring::statusMessage($this->status),
+                'page' => $this->page(),
                 'redirect' => $this->redirect,
                 ...$this->data,
             ]));
@@ -51,5 +65,21 @@ class StatusResponse implements StatusResponseContract
         }
 
         return ($this->redirect === null ? back() : redirect($this->redirect))->with('status', $this->status);
+    }
+
+    /**
+     * The name of Keyring's page the redirect goes to, such as "login", for
+     * a frontend whose pages aren't at Keyring's URLs. Null when it goes
+     * anywhere else, such as home.
+     */
+    protected function page(): ?string
+    {
+        foreach (self::PAGES as $route => $page) {
+            if ($this->redirect !== null && Route::has($route) && route($route) === $this->redirect) {
+                return $page;
+            }
+        }
+
+        return null;
     }
 }

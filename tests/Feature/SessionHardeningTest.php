@@ -677,7 +677,7 @@ it('answers a signed-out json request with a 401, and remembers where a page vis
     signInWith();
     app(SessionRegistry::class)->revoke(session(Sessions::KEY));
 
-    $this->getJson('/home')->assertUnauthorized()->assertJsonPath('status', 'signed-out');
+    $this->getJson('/home')->assertUnauthorized()->assertJsonPath('status', 'signed-out')->assertJsonPath('page', 'login')->assertJsonPath('redirect', route('login'));
 
     signInWith();
     app(SessionRegistry::class)->revoke(session(Sessions::KEY));

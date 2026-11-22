@@ -32,7 +32,7 @@ Every way a user can prove who they are is a **factor**. Users may hold as many 
 - **Risk signals.** New devices, new countries, impossible travel, session cookies reused in another browser, and breached passwords. [Risk](docs/risk.md)
 - **A security log and security emails.** Sent from day one, and each one may be replaced, restyled, or turned off. [Security Log & Emails](docs/security-log-and-emails.md)
 - **Built on OWASP ASVS 5.0.0 and NIST SP 800-63B-4.** Every requirement is mapped on [one page](docs/owasp-asvs.md).
-- **Headless.** You build the pages with Inertia or Blade, and a small browser package handles WebAuthn for Vue and React. [Frontend](docs/frontend.md)
+- **Headless.** You build the pages with Inertia or Blade, or in a separate frontend like Nuxt that gets each page as JSON, and a small browser package handles WebAuthn for Vue and React. [Frontend](docs/frontend.md), [Headless Frontends](docs/headless.md)
 
 ## Installation
 

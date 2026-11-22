@@ -6,6 +6,7 @@ namespace Keyring\Http\Responses;
 
 use Illuminate\Http\JsonResponse;
 use Keyring\Contracts\Responses\ChallengeResponse as ChallengeResponseContract;
+use Keyring\Enums\Purpose;
 use Keyring\Pipeline\Context;
 
 class ChallengeResponse implements ChallengeResponseContract
@@ -18,10 +19,13 @@ class ChallengeResponse implements ChallengeResponseContract
 
     public function toResponse($request)
     {
-        $url = route('keyring.'.$this->context->purpose->value.'.challenge');
+        $purpose = $this->context->purpose;
+        $url = route('keyring.'.$purpose->value.'.challenge');
 
+        // The page by name too, for a frontend whose pages aren't at
+        // Keyring's URLs: "challenge" at sign in, "confirm" for step-up.
         return $this->wantsJson($request)
-            ? new JsonResponse(['status' => 'challenge', 'redirect' => $url], 202)
+            ? new JsonResponse(['status' => 'challenge', 'page' => $purpose === Purpose::Login ? 'challenge' : 'confirm', 'redirect' => $url], 202)
             : redirect($url);
     }
 }
