@@ -19,7 +19,7 @@ A request for one of Keyring's pages that expects JSON, and isn't an Inertia vis
 These only matter to code that reads Keyring's JSON, such as tests that compare whole bodies with `assertExactJson`.
 
 - The challenge response, the `423` for step-up, and a status response whose `redirect` is one of Keyring's pages have a new `page` key. The `401` for a session Keyring ended has new `page` and `redirect` keys. See [Responses](docs/sign-in-flow.md#responses).
-- A JSON request to a sign in or step-up that ran out, or used up its code guesses, gets a `422` with the error and `page`, where it used to be redirected to the login or confirm page.
+- A JSON request to a sign in or step-up that ran out, or used up its code guesses, gets a `422` with the error, `page` and `redirect`, where it used to be redirected to the login or confirm page.
 - The default `VerifiedResponse` answers JSON requests with `{"status": "email-verified", "message": "...", "justNow": ..., "redirect": "..."}`, where it always redirected. A response of your own bound with `Keyring::respondWith` is unchanged.
 
 The new `email-verified` status has its message in `lang/en/status.php`. If you published Keyring's translations, Keyring's English line is used until you add `'email-verified'` to yours.
@@ -98,7 +98,7 @@ If a subclass of `Keyring\Http\Middleware\AuthenticateSession` overrides `signOu
 The contract's methods mark the parameters that hold a registry ID with `#[\SensitiveParameter]`. A driver without the attribute still works, but its stack traces show those IDs. Adding it is recommended.
 ### Published Config
 
-If you published `config/keyring.php`, you may add `'continue_as_guest' => []` to `sessions` and `'unlisted' => []` to `security_log`. Leaving either out is the same as an empty list.
+If you published `config/keyring.php`, you may add `'continue_as_guest' => []` and `'sweep_limit' => 1000` to `sessions`, and `'unlisted' => []` to `security_log`. Leaving any of them out is the same as those values.
 
 ### Guests on Step-Up Routes
 

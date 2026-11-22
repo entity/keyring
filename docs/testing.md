@@ -80,8 +80,8 @@ The `withAssurance` method only pretends, so its verifications aren't tied to an
 ```php
 use Keyring\Models\Authenticator;
 
-// Added yesterday, so it's older than the session.
-$totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subDay()]);
+// Added a month ago, so it's established and older than the session.
+$totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
 
 $this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
 ```
@@ -150,7 +150,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | State | Creates |
 |---|---|
 | `totp($secret = null)` | An authenticator app with a random secret, or the one you give. This is also the default state. |
-| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the codes you give. Each must be in the form Keyring makes them, 26 base32 characters (`a`-`z` and `2`-`7`), with or without dashes. Anything else throws an `InvalidArgumentException`. |
+| `recoveryCodes($codes = ['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb', 'cccc-cccc-cccc-cccc-cccc-cccc-cc'])` | A set of recovery codes that accepts the codes you give. Each must be in the form Keyring makes them, 26 base32 characters (`a`-`z` and `2`-`7`), with or without dashes, or in Fortify's form, 20 letters and digits. Anything else throws an `InvalidArgumentException`. |
 | `emailCode()` | Email codes. |
 | `passkey($synced = true)` | A user-verified passkey, which is synced unless you pass `false`. One that isn't synced is device bound, and it reaches AAL3 when it's `attested()` and its factor requires attestation. |
 | `securityKey($userVerified = false)` | A security key. |
@@ -282,6 +282,7 @@ The suite checks that:
 - changing sign-in methods needs a fresh verification,
 - every enrollable factor can begin enrolling,
 - signing out revokes the registered session,
+- the registry's `revoke()`, `revokeDevice()` and `revokeAll()` return exactly the records they revoked, each as it now stands, and nothing they didn't revoke. It fails when a [driver of your own](devices-and-sessions.md#writing-a-driver) gets that wrong,
 - signing out announces the session that ended, once, with a [`RegisteredSessionEnded`](devices-and-sessions.md#hearing-about-ended-sessions). It fails when a `SessionRegistry` is bound in the container in place of the one Keyring's manager gives, which nothing announces,
 - the `database` driver's table has the columns that note which ended sessions were announced (`announced_at`, `end_reason`, `announce_attempts`, `announce_after`), so [`keyring:sweep`](devices-and-sessions.md#sweeping-ended-sessions) can run. It's skipped on other drivers,
 - the session registry keeps the record a session started on (`origin`) when the session moves, so the session keeps its [handle](devices-and-sessions.md#listing-and-ending-sessions). It fails when the `database` driver's table is missing the column, or when a [driver of your own](devices-and-sessions.md#writing-a-driver) doesn't store it,

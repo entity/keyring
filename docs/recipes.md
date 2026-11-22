@@ -115,7 +115,7 @@ For another proxy or CDN, bind the locator with your own header names. See [Loca
 
 ## Emails With Maizzle
 
-Every email Keyring sends is a [notification class in your application](security-log-and-emails.md#security-emails), so you can render it with any template you like. [Maizzle](https://maizzle.com) builds email-safe HTML from Vue and Tailwind, and it can write Blade views.
+Every email Keyring sends is a [notification class](security-log-and-emails.md#security-emails), Keyring's own unless your app gives one with `Keyring::notifications()`, so you can render it with any template you like. [Maizzle](https://maizzle.com) builds email-safe HTML from Vue and Tailwind, and it can write Blade views.
 
 To install it, run:
 
@@ -513,7 +513,7 @@ Route::middleware(['auth', 'keyring.fresh:15m'])->group(function () {
 
 Socialite sends GitHub the callback from `config/services.php` unless you pass another with `redirectUrl`, so both routes pass this one. Make sure your GitHub OAuth app accepts that URL as a callback too.
 
-Keyring doesn't know about this link, so none of Keyring's own features removes it. A password reset and an [undone email change](protected-changes.md#changing-the-email-address) remove the sign-in methods Keyring holds, but they leave `github_id` where it is. Clear the link when the account is recovered by listening for the `PasswordReset` and `EmailChangeReverted` events:
+Keyring doesn't know about this link, so none of Keyring's own features removes it. An [undone email change](protected-changes.md#changing-the-email-address) removes the sign-in methods added around the time of the change, and a password reset removes none, but neither clears `github_id`. Clear the link when someone takes the account back, by listening for the `PasswordReset` and `EmailChangeReverted` events:
 
 ```php
 use Keyring\Events\EmailChangeReverted;
@@ -609,7 +609,7 @@ You can also configure how long Keyring keeps records:
 
 The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, and log entries at the same time.
 
-You can also keep less by leaving features off. To keep no devices at all, leave `Features::devices()` off. Without `Features::securityLog()`, there's no log table, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
+You can also keep less by leaving features off. To keep no devices at all, leave `Features::devices()` off. The `keyring_events` table is always created, but without `Features::securityLog()` nothing is written to it, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
 
 ## Accounts an Admin Approves
 

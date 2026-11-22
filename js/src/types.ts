@@ -45,8 +45,9 @@ export interface Enrollment {
 
 /**
  * One of the user's sessions, as listSessions() returns it. `id` is a handle
- * for endSession(), not the session's own ID, and changes when the session
- * moves to a new record, so list again before ending one from an old list.
+ * for endSession(), not the session's own ID. It stays the same when the
+ * session moves to a new record, and stops matching once the session ends,
+ * so list again before ending one from an old list.
  */
 export interface Session {
   id: string

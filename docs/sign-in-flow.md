@@ -60,7 +60,7 @@ The routes that spend session state (`POST /login`, `POST /login/{factor}`, the 
 > [!NOTE]
 > Your cache store must support locks.
 
-A factor key that isn't registered gives a `404` on every route that takes one.
+A factor key that isn't registered gives a `404` on `/login/{factor}`, its `options` route, the enrollment routes, and the verify and send routes once a sign in or step-up is under way. The challenge page's `GET` routes send an unknown key back to the page without it instead.
 
 ## Signing In With a Password
 
@@ -191,10 +191,10 @@ The page (`challenge` for sign ins, `confirm` for step-up) receives:
   "purpose": "login",
   "factor": "security-key",
   "authenticator": { "factor": "security-key", "id": "01JC3...", "name": "Work key" },
-  "challenge": { "options": { "challenge": "...", "rpId": "example.com", "allowCredentials": [] } },
+  "challenge": { "options": { "challenge": "...", "rpId": "example.com", "allowCredentials": [{ "type": "public-key", "id": "AbC...", "transports": ["usb"] }] } },
   "alternatives": [
     { "factor": "totp", "id": "01JC4...", "name": "Authenticator app" },
-    { "factor": "recovery", "id": "01JC5...", "name": "Recovery codes", "remaining": 7 }
+    { "factor": "recovery", "id": "01JC5...", "name": "Recovery codes", "remaining": 7, "replace": false }
   ],
   "canTrustDevice": true,
   "expiresAt": "2026-11-08T14:05:00+00:00"
@@ -465,7 +465,7 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 |---|---|---|
 | `AuthenticatedResponse` | The login or confirmation is complete. | Redirect to the intended URL or `home`. JSON: `{"status": "authenticated", "redirect": "..."}`. |
 | `ChallengeResponse` | Another factor is needed. | Redirect to the challenge page. JSON: `202` with `{"status": "challenge", "page": "challenge", "redirect": "..."}`, where `page` is `confirm` for step-up. |
-| `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login, otherwise `keyring::keyring.invalid` on the factor's field. |
+| `FailedResponse` | The proof was wrong or the user wasn't found. | A validation error: `auth.failed` on the username field when starting a login with a password (a passkey has no username field, so it goes on `credential`), otherwise `keyring::keyring.invalid` on the factor's field. |
 | `LockoutResponse` | Too many attempts. When an account's own limit refuses a typed username, the answer is `FailedResponse` instead (see [Rate Limiting](security.md#rate-limiting)). | A `429` validation error with Laravel's `auth.throttle` message, or `keyring::keyring.locked` when a password reset is the way back in, or `keyring::keyring.factor_locked` for a second factor that has to be set up again. |
 | `LogoutResponse` | The user signed out. | Redirect to `/`. JSON: `204`. Both send `Clear-Site-Data`. |
 | `RegisterResponse` | A new user registered and was signed in, with [`registration.reveal_taken`](#saying-when-an-address-is-taken). | The same as `AuthenticatedResponse`. |
@@ -474,7 +474,7 @@ Each outcome is answered by a response class, bound to a contract in `Keyring\Co
 | `ConfirmationRequiredResponse` | A route needs [step-up](step-up.md) first. | Redirect to the confirm page, which brings them back afterwards. JSON: `423` with `"page": "confirm"` and `redirect`. |
 | `EnrollmentRequiredResponse` | A route needs a sign-in method the user hasn't set up. | Redirect to `enrollment_url` with the `enroll-first` status, or `403` without one. JSON: `403`. |
 | `PasswordChangeRequiredResponse` | The user has to [choose a new password](protected-changes.md#requiring-a-password-change) before going on. | Redirect to `password_change_url` with the `change-password` status, or `403` without one. JSON: `403`. |
-| `VerifiedResponse` | The user's email address is verified. Built with `justNow`, which is true when the link they followed did the verifying. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. JSON: `{"status": "email-verified", "justNow": true, "redirect": "..."}`. |
+| `VerifiedResponse` | The user's email address is verified. Built with `justNow`, which is true when the link they followed did the verifying. | Redirect to the intended URL or `home`, with `?verified=1` when `justNow`. JSON: `{"status": "email-verified", "message": "...", "justNow": true, "redirect": "..."}`. |
 
 In this table, "JSON" means the request expects JSON and isn't an Inertia request. Inertia visits get redirects, like normal page visits. Whenever a JSON answer sends the browser to one of Keyring's [pages](#pages), it names the page as `page` beside the `redirect`, so a [frontend of your own](headless.md) can go to its page of that name without reading the URL.
 
@@ -498,7 +498,7 @@ use Keyring\Contracts\Responses\AuthenticatedResponse;
 Keyring::respondWith(AuthenticatedResponse::class, WelcomeBack::class);
 ```
 
-Your class must implement the contract. Keyring builds it through the container and passes what it knows by constructor parameter name. Each contract lists those names in its `BUILT_WITH` constant: `status`, `data`, and `redirect` for a `StatusResponse`, `reason` for a `SignedOutResponse`, and `justNow` for a `VerifiedResponse`. Take only the ones you need, and type-hint anything else for the container to inject. A required parameter that Keyring can't fill is refused when you call `respondWith`, so the problem shows up at boot, not at someone's first sign in.
+Your class must implement the contract. Keyring builds it through the container and passes what it knows by constructor parameter name. A contract that takes any lists those names in a `BUILT_WITH` constant: `status`, `data`, and `redirect` for a `StatusResponse`, `reason` for a `SignedOutResponse`, and `justNow` for a `VerifiedResponse`. A contract without the constant, such as `LogoutResponse`, passes nothing. Take only the ones you need, and type-hint anything else for the container to inject. A required parameter that Keyring can't fill is refused when you call `respondWith`, so the problem shows up at boot, not at someone's first sign in.
 
 After a verification, Keyring builds responses with the pipeline's `context`, so you may accept it in the constructor:
 

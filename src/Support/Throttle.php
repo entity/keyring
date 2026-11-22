@@ -318,10 +318,11 @@ class Throttle
     /**
      * Start the user's limits over on the factors that can start a sign in:
      * the per-minute counts, the locks and how long the next lock would be,
-     * for known browsers and under every name they were typed with, and the
-     * failures in a row with whatever they had got refused. The limits in
-     * the cache are counted under a mark that's replaced here, so the old
-     * ones are left behind to run out.
+     * for the account and its known browsers, and the failures in a row with
+     * whatever they had got refused. The counts kept under the names typed
+     * for it are left to run out, since the right password still gets past
+     * a refused name. The limits in the cache are counted under a mark
+     * that's replaced here, so the old ones are left behind to run out.
      *
      * The per-IP limits stay, or a reset would be a way around them. A
      * second factor's counts and locks stay too: a reset only proves control

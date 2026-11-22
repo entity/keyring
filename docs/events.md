@@ -150,7 +150,7 @@ An assessment that ends in `Action::allow` dispatches nothing. See [Risk](risk.m
 | Event | When | Properties |
 |---|---|---|
 | `AccessRefused` | A signed-in user asked for an authenticator, device, or session that isn't theirs, or that doesn't exist. Both cases get the same 404, so the event doesn't tell them apart. The event also fires when someone opens an email verification link made for another account. | `user`, `resource` (`authenticator`, `device`, `session`, or `email_verification`), `id` (what was asked for, as it was sent. For a session, this is its handle.) |
-| `RateLimited` | The form limiter refused a request to one of Keyring's routes, outside the sign-in limits. This covers registration, a reset, a change, an emailed link or the page it opens, and passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring`, `keyring-pages`, or `keyring-login-options`), `route` (its name), `retryAfter` (in seconds) |
+| `RateLimited` | The form limiter refused a request to one of Keyring's routes, outside the sign-in limits. This covers registration, a reset, a change, an emailed link or the page it opens, and passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring`, `keyring-pages`, or `keyring-login-options`), `route` (its name, or `null` for a route without one), `retryAfter` (in seconds) |
 | `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down, such as with a wrong code or a key it won't take) or `not_allowed` (the account may not add one yet) |
 | `AuthenticatorRemovalRefused` | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `user`, `authenticator` |
 | `LinkRefused` | An emailed link was refused. This happens for a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
@@ -168,7 +168,7 @@ use Keyring\Events\RateLimited;
 
 Event::listen(fn (FactorFailed $event) => Metrics::increment('auth.failed', ['factor' => $event->factor]));
 Event::listen(fn (Lockout $event) => Metrics::increment('auth.locked_out', ['factor' => $event->factor]));
-Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited', ['route' => $event->route]));
+Event::listen(fn (RateLimited $event) => Metrics::increment('auth.rate_limited', ['route' => $event->route ?? 'unnamed']));
 ```
 
 `Metrics` stands for whatever your application reports to.

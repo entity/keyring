@@ -143,4 +143,4 @@ If you want to change the prefix, domain, or middleware, or turn the routes off,
 - To hear about every session that ends, including ones that time out with no request, set `sessions.sweep_every`. Keyring then schedules `keyring:sweep`. See [Sweeping Ended Sessions](devices-and-sessions.md#sweeping-ended-sessions).
 - The `keyring:sign-out` Artisan command signs one user out everywhere. Pass `--all` to sign everyone out instead. It's useful for a stolen laptop, or for an account that someone else got into. See [For Administrators](devices-and-sessions.md#for-administrators).
 
-`keyring:install` ends by listing the last four.
+`keyring:install` ends by listing a few things to check before going live: the idle timeout, a bcrypt note when bcrypt is the default hasher, the scheduler, the `keyring.session` middleware, and `keyring:sign-out`.

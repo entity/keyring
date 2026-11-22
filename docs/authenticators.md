@@ -32,14 +32,14 @@ Without this feature, users have no way to set up a sign-in method besides the p
 
 | Method | URI | Name | Does |
 |---|---|---|---|
-| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begins an enrollment: returns a QR code, WebAuthn options, recovery codes, and so on. |
+| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begins an enrollment: returns a QR code, WebAuthn options, recovery codes, and so on. Uses the session lock. |
 | `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finishes it by proving the new authenticator works. Uses the `keyring` rate limiter and the session lock. |
 | `PATCH` | `/user/authenticators/{authenticator}` | `keyring.authenticators.update` | Renames the authenticator, or makes it the default. |
 | `DELETE` | `/user/authenticators/{authenticator}` | `keyring.authenticators.destroy` | Removes the authenticator. Uses the `keyring` rate limiter, because it may check the password. |
 
 These routes require `auth:{guard}` middleware, along with the middleware set in the `changes_middleware` configuration option. By default, that is `['keyring.fresh:15m']`. Users must have verified, within the last 15 minutes, the strongest combination their account can offer. For example, someone with a key that can't leave its device uses that key before adding another, and someone with only a password uses the password. See [Fresh Verification](step-up.md#fresh-verification).
 
-The `{factor}` segment must be a registered factor that implements `Enrollable`. If it isn't, the route returns a 404. Users can only see and change their own authenticators, and requesting anyone else's ID also returns a 404.
+The `{factor}` segment must be a registered factor that implements `Enrollable`. If it isn't, the route returns a 404. The check for whether the user may enroll comes first, so an unverified user gets the `403` even for a key that isn't registered. Users can only see and change their own authenticators, and requesting anyone else's ID also returns a 404.
 
 ## Email Verification
 
@@ -92,7 +92,7 @@ Adding an authenticator always takes two steps. Nothing is saved until the secon
 }
 ```
 
-Authenticator apps and email codes accept an optional `name` when beginning or confirming. If you send one in both places, the name sent when confirming wins. Passkeys and security keys accept a `name` when confirming. If no name is sent, it defaults to "Authenticator app", "Email", "Passkey", or "Security key", depending on the factor. Names are cut to 64 characters. A name that isn't valid UTF-8, or that holds a NUL character, is refused with an error on `name`.
+Authenticator apps and email codes accept an optional `name` when beginning or confirming. If you send one in both places, the name sent when confirming wins. Passkeys and security keys accept a `name` when confirming. If no name is sent, it defaults to "Authenticator app", "Email", "Passkey", or "Security key", depending on the factor. A name given when beginning is cut to 64 characters. When confirming, a name over 64 characters is refused with a `422` on `name`, which is what passkeys and security keys get, since they only take one then. A name that isn't valid UTF-8, or that holds a NUL character, is refused with an error on `name`.
 
 ### Confirming
 
@@ -196,7 +196,7 @@ Every route answers with a [status response](sign-in-flow.md#status-responses). 
 | Action | `status` | Also |
 |---|---|---|
 | Begin | `enrollment-started` | `factor`, `enrollment` |
-| Confirm | `authenticator-added` | `authenticator`, `recoveryCodes` |
+| Confirm | `authenticator-added` | `authenticator`, `recoveryCodes`, `continue` when set |
 | Update | `authenticator-updated` | `authenticator` |
 | Remove | `authenticator-removed` | |
 

@@ -22,7 +22,7 @@ use Keyring\Login\Requirement;
 Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade());
 ```
 
-The `keyring:install` command adds this line when you pick a second sign-in method. If you never call `Keyring::require`, the policy is `Requirement::aal2()->ifEnrolled()`. That means a user signs in with the password alone until they set up a second factor. From then on, they need that factor too.
+The `keyring:install` command always writes this line, whichever sign-in methods you pick. If you never call `Keyring::require`, the policy is `Requirement::aal2()->ifEnrolled()`. That means a user signs in with the password alone until they set up a second factor. From then on, they need that factor too.
 
 ## Requirements
 

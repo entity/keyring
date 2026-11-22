@@ -233,6 +233,7 @@ What changes from the rest of this guide:
 
 - `APP_URL` is `https://example.com`, the frontend's origin. Emailed links start there, at Keyring's paths such as `/auth/reset-password/{token}`, which are the frontend's pages, so no `linkRootUsing()` is needed.
 - The URLs in Keyring's answers, such as `redirect`, are built from the forwarded headers, so they point at `https://example.com/backend/auth/...`. The frontend goes by `page` anyway.
+- After confirming, `redirect` is the page whose request got the `423`, and that can be the frontend's page now that it shares Laravel's origin. The same goes for a sign in that follows Keyring's `signed-out` `401`. Any other sign in still answers `home`.
 - There's no CORS to set up, and `SESSION_DOMAIN` stays empty. Every request is same-origin, so cookies are the origin's own, and Laravel's CSRF check passes on `Sec-Fetch-Site: same-origin`.
 - The relying party ID and the allowed origin default to `APP_URL`'s host and origin, which are the frontend's, so passkeys need no settings.
 - Sanctum's `sanctum.stateful` already lists `APP_URL`'s host.
@@ -296,7 +297,7 @@ Mirroring Keyring's paths is only required for the pages emailed links open. The
 
 Laravel's plain `401` names no page. Send the user to your login page.
 
-Laravel only remembers the page a browser was going to from navigations it sees itself, and from a `Referer` on its own host. So after a JSON sign in or step-up, `redirect` is `home`, never the frontend's page. Keep the page the user was going to in the frontend, such as in a `?redirect=` query on your login route, and go there when the answer is `authenticated`. Only go to a path on your own site from that query, one that starts with a single `/`: anyone can send a link with `?redirect=https://elsewhere.example`. In the same way, `continue` is never set on `authenticator-added` for a JSON client (see [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts)).
+Laravel only remembers the page a browser was going to from navigations it sees itself, and from a `Referer` on its own host. So after a JSON sign in or step-up, `redirect` is `home`, never the frontend's page, when the frontend is on another origin. On one origin ([One Origin](#one-origin)), the `Referer` is kept, so `redirect` can be the page the request came from. Keep the page the user was going to in the frontend, such as in a `?redirect=` query on your login route, and go there when the answer is `authenticated`. Only go to a path on your own site from that query, one that starts with a single `/`: anyone can send a link with `?redirect=https://elsewhere.example`. In the same way, `continue` is never set on `authenticator-added` for a JSON client (see [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts)).
 
 ## Building the Frontend With Nuxt
 
@@ -519,7 +520,7 @@ Even with all of that, a request from the Nuxt server comes from the server's IP
 
 - **Different sites.** The frontend and Laravel must be on [one site](#choosing-a-layout).
 - **Bearer tokens and mobile apps.** Pending logins and step-up live in the session, so Keyring only signs in session guards. See [Known Limitations](security.md#known-limitations).
-- **Coming back after signing in, confirming or enrolling.** Laravel doesn't learn the frontend's pages, so JSON answers give `home` as the `redirect` after signing in or confirming, and `authenticator-added` carries no `continue`. Keep the page the user was going to [in the frontend](#where-each-answer-goes).
+- **Coming back after signing in, confirming or enrolling.** On another origin, Laravel doesn't learn the frontend's pages, so JSON answers give `home` as the `redirect` after signing in or confirming. On one origin, the `Referer` can make it the page the request came from. `authenticator-added` carries no `continue` either way. Keep the page the user was going to [in the frontend](#where-each-answer-goes).
 - **Laravel's `guest` middleware.** Keyring's sign-in and registration routes are only for guests. Laravel redirects a signed-in request to them, a JSON one too, rather than answering it. Check whether the user is signed in, with `GET /api/user` say, before showing those pages. `$middleware->redirectUsersTo()` in `bootstrap/app.php` changes where the redirect goes, but don't point it at the frontend. `fetch()` follows the redirect to the frontend's origin, which sends no CORS headers, so the request fails with a network error.
 - **Clearing the browser's data on sign out.** Keyring's `Clear-Site-Data` header only clears what the browser keeps for Laravel's origin. Clear what the frontend kept itself when signing out answers `204`.
 - **The Inertia helpers.** `useChallenge` and the browser package's other Inertia helpers need Inertia. Its WebAuthn, enrollment, session and passkey sign in helpers work in any frontend, once [`configureRequests()`](#calling-laravel) tells them where Laravel is. See [Frontends on Another Origin](frontend.md#frontends-on-another-origin).

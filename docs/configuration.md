@@ -201,7 +201,7 @@ This is how long a user has to finish adding a sign-in method, once they've star
 ],
 ```
 
-The `cookie` option sets the name of the device cookie. When it's `null`, the name is `known_device`, with the `__Host-` prefix once your application is served over HTTPS (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)). A name you set is used exactly as it is. The `cookie_lifetime` option sets how long the browser keeps the cookie. 400 days is the most browsers allow.
+The `cookie` option sets the name of the device cookie. When it's `null`, the name is `known_device`, with a prefix once your application is served over HTTPS: `__Host-`, or `__Secure-` when `session.domain` is set or `session.path` isn't `/` (see [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies)). A name you set is used exactly as it is. The `cookie_lifetime` option sets how long the browser keeps the cookie. 400 days is the most browsers allow.
 
 The `limit` option sets how many devices one account keeps. If a sign in from a new browser goes past that limit, the device seen longest ago is forgotten and signed out. Set it to `null` for no limit.
 
@@ -249,7 +249,7 @@ The `locator` option is the class that works out a request's location. See [Devi
 | `levels` | How long each assurance level keeps counting, as `idle` and `absolute` limits. The keys are `aal1`, `aal2`, or `aal3`. By default, these follow NIST's limits: AAL2 is 1h and 24h, and AAL3 is 15m and 12h. |
 | `end_on_lapse` | Whether a session ends when the level it signed in at runs out. Otherwise, the session carries on at a lower level. See [Ending a Session With Its Level](devices-and-sessions.md#ending-a-session-with-its-level). |
 | `middleware` | Whether Keyring adds its session middleware to the `web` group for you. |
-| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `remembered_session`, prefixed over HTTPS like the device cookie. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
+| `remember_cookie` | The name of the cookie that ties ["remember me"](devices-and-sessions.md#remember-me) to the session it was ticked for. `null` is `remembered_session`, prefixed over HTTPS like the device cookie, with `__Secure-` when `session.domain` is set or `session.path` isn't `/`. See [Keyring's Cookies](devices-and-sessions.md#keyrings-cookies). |
 | `remember_grace` | How long after that cookie is used the browser's other requests, sent with it, still get in on the same session. Each cookie works once. After this grace period, [sending a used one again](devices-and-sessions.md#a-cookie-used-twice) ends the session. A `0` leaves no room at all, so requests that a browser sends together end the session too. |
 | `continue_as_guest` | Route names, as `Request::routeIs()` takes them, where a page visit whose session has ended is asked for again as a guest instead of being sent to log in. The `signed-out` status is flashed for the page to show. JSON requests still get a `401`. A list with an entry that isn't a non-empty string is ignored. See [Pages That Also Serve Guests](devices-and-sessions.md#pages-that-also-serve-guests). |
 | `sweep_every` | How often Keyring schedules [`keyring:sweep`](devices-and-sessions.md#sweeping-ended-sessions), such as `'5m'` or `'1h'`, on the `database` driver. It ends sessions that timed out with no request to end them, and announces again any ended session whose event was lost. A bare number counts seconds. It runs at least every 12 hours. `null` (the default) leaves the sweep off, and anything that isn't a duration does too, with a warning in your log. |
@@ -445,6 +445,7 @@ The `Keyring\Facades\Keyring` facade is the entry point for everything you set i
 | `Keyring::useDeviceModel($model)` | Uses your own subclass of `Keyring\Models\Device`. See [Your Own Device Model](devices-and-sessions.md#your-own-device-model). |
 | `Keyring::usePendingChangeModel($model)` | Uses your own subclass of `Keyring\Models\PendingChange`. |
 | `Keyring::useSecurityEventModel($model)` | Uses your own subclass of `Keyring\Models\SecurityEvent`. |
+| `Keyring::useFailureCountModel($model)` | Uses your own subclass of `Keyring\Models\FailureCount`. |
 | `Keyring::attempt($request, $factor)` | Starts a sign in with a factor from a route of your own, through the same pipeline as the login form. See [Starting a Sign In Yourself](sign-in-flow.md#starting-a-sign-in-yourself). |
 | `Keyring::requirePasswordChange($user, $reason = null)` | Holds a user until they choose a new password. `requiresPasswordChange($user)` asks whether they're held, and `cancelPasswordChange($user)` lets them go. See [Requiring a Password Change](protected-changes.md#requiring-a-password-change). |
 | `Keyring::unlock($user)` | Lets a locked-out user try again without a password reset. It lifts their risk lock, and clears the limits, locks, and failures in a row on the factors that can start a sign in. `Keyring::unlock($user, 'totp')` clears one factor's instead, such as a second factor that was refused at the cap. See [At the Cap](security.md#at-the-cap). |
@@ -478,6 +479,7 @@ The facade also answers questions about your setup. These are useful in your own
 | `Keyring::requirementFor($user, $attempt)` | What this user must prove to finish the attempt. See [Checking Requirements in Code](policies.md#checking-requirements-in-code). |
 | `Keyring::statusMessage($status)` | The translated message for a status slug, or `null`. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
 | `Keyring::render($name, $props)` | Renders one of Keyring's [pages](sign-in-flow.md#pages), as Inertia or Blade, for a route of your own. |
+| `Keyring::result($key = null, $default = null)` | What the last status response flashed for the page, such as new recovery codes, or one key of it in dot notation. `$default` when nothing was flashed. See [Flash Messages and Alerts](frontend.md#flash-messages-and-alerts). |
 | `Keyring::hasNotification($type)` | Whether a notification is sent for a [type](security-log-and-emails.md#email-types). |
 | `Keyring::protectedAttributes($user = null)` | The attributes that only change through Keyring's flows. Pass a user whose model keeps its password under another name to get that name. See [Protected Attributes](protected-changes.md#protected-attributes). |
 | `Keyring::response($contract, ...$with)` | Builds one of Keyring's [responses](sign-in-flow.md#responses), or yours when you swapped it, for a route of your own. |

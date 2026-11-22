@@ -137,7 +137,7 @@ The link has to carry its token in the URL, but the request that acts doesn't. T
 </form>
 ```
 
-With Inertia, post `{ token }` to `url`. A token that's missing, wrong, already used, or expired gets the `email-change-invalid` status as its answer.
+With Inertia, post `{ token }` to `url`. A token that's missing, wrong, already used, or expired gets the `email-change-invalid` status as its answer. A link for a change that doesn't exist is a `404`, and `LinkRefused` records it with the reason `unknown`.
 
 Keyring builds these links from `APP_URL`, never from the request's `Host` header. They also work when the user is signed out, since they may open in another browser.
 
@@ -193,7 +193,7 @@ With the `HasKeyring` trait, saving a user with a reserved address in any other 
 
 A password reset or a password change cancels any pending change. Whoever knew the old password shouldn't keep a change they started with it. Signing out everywhere else cancels it too, as does anything else that goes through `Sessions::signOutEverywhere`.
 
-However a change is cancelled, the old address's "this wasn't me" link keeps working until the change would have expired. Whoever asked for the change can cancel it too. That shouldn't take away the owner's way to remove what was added and sign everything out.
+However a change is cancelled, the old address's "this wasn't me" link keeps working until the change would have expired. Whoever asked for the change can cancel it too. That shouldn't take away the owner's way to remove what was added and sign everything out. The exception is a change that can't be applied any more, because the address has moved or the new one is taken. It's cancelled when its confirmation tries to apply it, and its link stops working straight away.
 
 ## Changing the Password
 
