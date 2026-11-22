@@ -703,6 +703,22 @@ describe('a sign-out the app does itself', function () {
             return response()->noContent();
         });
 
+        // The same in the other order, which empties the session before
+        // the guard announces the sign-out.
+        Route::middleware('web')->post('/app/invalidate-then-logout', function (Request $request) {
+            $request->session()->invalidate();
+            auth()->logout();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/invalidate-then-logout-this-device', function (Request $request) {
+            $request->session()->invalidate();
+            auth()->logoutCurrentDevice();
+
+            return response()->noContent();
+        });
+
         // One that leaves the session as it was, and signs the user back in on it.
         Route::middleware('web')->post('/app/logout-only', fn () => tap(response()->noContent(), fn () => auth()->logout()));
         Route::middleware('web')->post('/app/login', fn () => tap(response()->noContent(), fn () => auth()->login(test()->user)));
@@ -724,7 +740,7 @@ describe('a sign-out the app does itself', function () {
         session()->flush();
         app('auth')->forgetGuards();
         $this->withCredentials()->withCookies($copied)->getJson(route('keyring.devices.index'))->assertUnauthorized();
-    })->with('drivers')->with(['/app/logout', '/app/logout-this-device']);
+    })->with('drivers')->with(['/app/logout', '/app/logout-this-device', '/app/invalidate-then-logout', '/app/invalidate-then-logout-this-device']);
 
     it('leaves nothing the session proved for the next sign in on it', function () {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);

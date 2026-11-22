@@ -1324,10 +1324,16 @@ it('brings nothing back where a session ends with the level it signed in at', fu
     expect(app(SessionRegistry::class)->find($session->id)->revokedAt)->not->toBeNull();
 });
 
-it('refuses the kept cookies after a sign-out the app did itself, :dataset', function (bool $unreachable) {
+it('refuses the kept cookies after a sign-out the app did itself, :dataset', function (bool $unreachable, bool $invalidatesFirst) {
     // The guard's own sign-out for one browser leaves the "remember me"
     // token as it was, so Laravel's cookie alone would still sign in.
-    Route::middleware('web')->post('/app/logout', function () {
+    // Invalidating first leaves the session with no record by the time the
+    // guard announces it.
+    Route::middleware('web')->post('/app/logout', function () use ($invalidatesFirst) {
+        if ($invalidatesFirst) {
+            session()->invalidate();
+        }
+
         Auth::logoutCurrentDevice();
         session()->invalidate();
 
@@ -1376,4 +1382,28 @@ it('refuses the kept cookies after a sign-out the app did itself, :dataset', fun
 })->with([
     'with the registry reachable' => false,
     'when the registry can\'t be reached' => true,
+])->with([
+    'signing out first' => false,
+    'invalidating first' => true,
 ]);
+
+it('ends the record "remember me" just moved the session to, when the app empties the session before signing out', function () {
+    Route::middleware('web')->post('/app/invalidate-then-logout', function () {
+        session()->invalidate();
+        Auth::logout();
+
+        return response()->noContent();
+    });
+
+    $announced = new Collection;
+    Event::listen(fn (RegisteredSessionEnded $event) => $announced->push($event->reason->value));
+    $cookies = rememberedSignIn();
+
+    // Laravel's session has gone, so the cookies bring the browser back on
+    // a new record, and the app signs out on that same request.
+    $this->flushSession();
+    browser($cookies)->post('/app/invalidate-then-logout')->assertNoContent();
+
+    expect(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+        ->and($announced->all())->toBe(['logged_out']);
+});
