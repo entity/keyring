@@ -43,6 +43,7 @@ use Keyring\Events\SessionEnded;
 use Keyring\Exceptions\PartialRevocation;
 use Keyring\Facades\Keyring;
 use Keyring\Http\Middleware\AuthenticateSession;
+use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
@@ -566,6 +567,23 @@ describe('a sign-out the app does itself', function () {
         '/app/flush-then-logout',
         '/app/invalidate-then-logout-this-device',
     ]);
+
+    it('announces it once when the app empties the session before SignIn::out()', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $handle = handleOf(signInHere());
+        Route::middleware('web')->post('/app/invalidate-then-sign-out', function (Request $request) {
+            $request->session()->invalidate();
+            app(SignIn::class)->out($request);
+
+            return response()->noContent();
+        });
+
+        $this->post('/app/invalidate-then-sign-out')->assertNoContent();
+
+        // Revoked, as SignIn::out() announces it when the app gives no reason.
+        expectEnded($handle, SessionEndReason::Revoked);
+        expect($this->announced)->toHaveCount(1);
+    })->with('session drivers');
 
     it('ends nothing an earlier request in the same process was on, as under Octane', function () {
         // Another browser's request, earlier in the same process, as under
