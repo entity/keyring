@@ -428,18 +428,20 @@ configureRequests({
 })
 ```
 
-Laravel needs setting up for this too: Sanctum's stateful API, CORS that allows credentials, a `SESSION_DOMAIN` both hosts share, and the frontend's origin for passkeys. [Headless Frontends](headless.md) covers the Laravel side.
+Laravel needs setting up for this too: CORS that allows credentials, a `SESSION_DOMAIN` both hosts share, and the frontend's origin for passkeys, plus Sanctum's stateful API if you want your own `api` routes and the `/sanctum/csrf-cookie` route. [Headless Frontends](headless.md) covers the Laravel side.
 
 | Option | |
 |---|---|
-| `baseUrl` | Where Laravel is. Every path `json()` sends goes there, Keyring's routes and your own calls such as `json('GET', '/user/devices')` alike. It may include a path, such as `https://example.com/backend`. A full URL given to `json()` still goes where it says. It must be an absolute `http` or `https` URL without credentials, a query or a fragment, or `configureRequests()` throws a `TypeError`. `null` goes back to the page's origin. |
-| `credentials` | The `credentials` option of each `fetch`. By default it's `include` when `baseUrl` is on another origin than the page, or when there's no page, as when rendering on the server. Otherwise it's `same-origin`, as before. |
-| `csrfCookie` | A URL that sets the `XSRF-TOKEN` cookie, resolved against `baseUrl` like any path. When it's set and the cookie isn't there, `json()` fetches it before any request but a `GET`, once for requests made together. Off by default. If fetching it fails, the request throws a `KeyringRequestError` with that response's status. |
+| `baseUrl` | Where Laravel is. Every path `json()` sends goes there, Keyring's routes and your own calls such as `json('GET', '/api/user')` alike. It may include a path, such as `https://example.com/backend`. A full URL given to `json()` still goes where it says. It must be an absolute `http` or `https` URL without credentials, a query or a fragment, or `configureRequests()` throws a `TypeError`. `null` goes back to the page's origin. |
+| `credentials` | The `credentials` option of each `fetch`. By default it's `include` for a request to `baseUrl` when that's on another origin than the page, or when there's no page, as when rendering on the server. Anything else, including a full URL on some other origin, is `same-origin`, as before. |
+| `csrfCookie` | A URL that sets the `XSRF-TOKEN` cookie, resolved against `baseUrl` like any path. When it's set and the cookie isn't there, `json()` fetches it before any request but a `GET`, once for requests made together. Off by default. If fetching it fails, the request throws a `KeyringRequestError` with that response's status. If it succeeds and the cookie still can't be read, the request throws a `KeyringRequestError` with a `419` status that says so, rather than posting without a token. |
 | `fetch` | A function to call instead of the global `fetch`, taking a URL and the init and resolving to a `Response`. See [Rendering on the Server](#rendering-on-the-server). |
 
-Only the options you pass change. Passing one as `undefined` puts it back to its default.
+Only the options you pass change. Passing one as `undefined` puts it back to its default. An option the package doesn't have, such as `baseURL` spelt the way axios and ofetch spell it, throws a `TypeError`.
 
-`routes` still holds paths, so `routes.login` is still `/login`, and `json()` adds `baseUrl` when it sends one. `configureRoutes()` works as before: set the `prefix` with it if you changed Keyring's, and the base URL is added in front of the prefix.
+`routes` still holds paths, so `routes.login` is still `/login`, and `json()` adds `baseUrl` when it sends one. `configureRoutes()` works as before: set the `prefix` with it if you changed Keyring's, and the base URL is added in front of the prefix. Only the `routes.*` paths carry the prefix. A path you write yourself, such as `/api/user`, goes to `baseUrl` exactly as written.
+
+If the frontend reaches Laravel through a proxy on its own origin, such as `app.example.com/backend`, the requests are same-origin and need no `baseUrl`. Put the proxy's path in the prefix instead, with `configureRoutes({ prefix: 'backend/auth' })` when Keyring's prefix is `auth`.
 
 ### Cookies and CSRF
 
@@ -448,7 +450,7 @@ Keyring signs users in with Laravel's session cookie, so the browser has to send
 Laravel checks a CSRF token on every request but a `GET`. Sanctum's SPA flow gets that token from `GET /sanctum/csrf-cookie`, which sets an `XSRF-TOKEN` cookie. `json()` reads that cookie from `document.cookie` and sends it back as `X-XSRF-TOKEN`. Two things follow from that:
 
 - The frontend can only read the cookie when Laravel sets it for a domain both hosts share, with `SESSION_DOMAIN=.example.com`. If the two are on unrelated domains, such as `app.com` and `api.net`, browsers treat Laravel's cookies as third-party cookies, and session sign in doesn't work. Put them on one domain, or use tokens instead.
-- Before the first `POST`, the cookie has to exist. The `csrfCookie` option fetches it for you. Without that option, fetch it yourself first:
+- Before the first `POST`, the cookie has to exist. The `csrfCookie` option fetches it for you, and throws when the cookie arrives but the page can't read it, which is what a missing `SESSION_DOMAIN` looks like. Without that option, fetch it yourself first:
 
 ```ts
 await fetch('https://api.example.com/sanctum/csrf-cookie', { credentials: 'include' })
@@ -472,9 +474,9 @@ try {
 }
 ```
 
-The challenge page works the same way. Run `getCredential(challenge.options)` for a passkey or security key, then post the `code` or `password` the factor needs, `trust`, the `authenticator` ID, and any `credential` to `routes.verify(purpose, factor)` with `json()`. [Headless Frontends](headless.md) describes what each of Keyring's pages answers with JSON.
+The challenge page works the same way. Run `getCredential(challenge.options)` for a passkey or security key, then post the `code` or `password` the factor needs, `trust`, the `authenticator` ID, and any `credential` to `routes.verify(purpose, factor)` with `json()`. [Headless Frontends](headless.md#pages-as-json) describes what each of Keyring's pages answers with JSON.
 
-Some JSON answers carry a URL on Laravel's side, such as the `redirect` in a step-up `423` or `continue` after enrolling. Point those at the matching page of your frontend, rather than sending the browser to `api.example.com`. Keyring only remembers pages on its own origin to send the user back to, so your frontend keeps track of where the user was.
+To decide which of your pages comes next, go by an answer's `page` when there is one, then its `redirect`. A `redirect`, such as the one in a step-up `423`, is a URL on Laravel's side, so point it at the matching page of your frontend rather than sending the browser to `api.example.com`. See [Where Each Answer Goes](headless.md#where-each-answer-goes). Keyring only remembers pages the browser navigates to on its own origin, so a frontend on another origin never gets `continue` and keeps track of where the user was itself.
 
 ### Rendering on the Server
 
@@ -490,7 +492,7 @@ configureRequests({
 ```
 
 > [!WARNING]
-> `configureRequests()` sets one configuration for the whole JavaScript process. On a server that renders pages for many users at once, never pass a `fetch` that adds one user's cookies, since another user's render may use it. Forward cookies for a single request with your framework's own request-scoped fetch, such as Nuxt's `useRequestFetch()`, and call Keyring's routes with it directly.
+> `configureRequests()` sets one configuration for the whole JavaScript process. On a server that renders pages for many users at once, never pass a `fetch` that adds one user's cookies, since another user's render may use it. Forward cookies for a single request with your framework's own request-scoped fetch, and call Keyring's routes with it directly. Nuxt's `useRequestFetch()` forwards the browser's cookies, but drops the `Set-Cookie` Laravel answers with, which can end a remembered session. [Rendering on the Server](headless.md#rendering-on-the-server) in Headless Frontends covers what to do about that.
 
 Don't pass Nuxt's `$fetch` or ofetch as `fetch`. They resolve to the parsed body rather than a `Response`.
 

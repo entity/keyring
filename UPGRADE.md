@@ -32,6 +32,10 @@ Only apps that extend these classes need to change anything:
 - `Detours::put()` keeps its arguments. It saves the requirement from `$this->requiring` beside the page, so an override that calls the parent needs no change. One that writes to the session itself saves pages without a requirement, which come back with the next sign-in method added, as before. So does a subclass that overrides `remember()` and calls `put()` itself rather than the parent's `remember()`, since only the parent's `remember()` sets `$this->requiring`.
 - `Detours::pull()` leaves a page saved, and returns `null`, while the signed-in account can't meet the requirement saved with it.
 
+### The XSRF Token Stays on Your Origins
+
+The browser package's `json()` no longer sends `X-XSRF-TOKEN` to a full URL on another origin. It sends it to the page's own origin, and to the `baseUrl` set with [`configureRequests()`](docs/frontend.md#frontends-on-another-origin). If you called Laravel on another origin by passing `json()` full URLs, set `baseUrl` to that origin instead and pass paths.
+
 ## From 0.2 to 0.3
 
 ### Run the New Sessions Migration

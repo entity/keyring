@@ -13,13 +13,17 @@
 
 ### Browser Package
 
-- `configureRequests()`, for a frontend Laravel doesn't serve, such as a Nuxt application on `app.example.com` calling Laravel on `api.example.com`. `baseUrl` sends every path `json()` is given there, Keyring's routes included, after the route prefix. The requests then send cookies (`credentials: 'include'`) unless told otherwise with `credentials`, and stay `same-origin` without a `baseUrl`, so Inertia applications see no change. `csrfCookie` names a URL such as Sanctum's `/sanctum/csrf-cookie` to fetch before a request that needs the `XSRF-TOKEN` cookie when it isn't there, once for requests made together. `fetch` replaces the global `fetch`. See [Frontends on Another Origin](docs/frontend.md#frontends-on-another-origin).
-- `json()` only sends the `X-XSRF-TOKEN` header to the page's own origin or the `baseUrl`, not to a full URL on another origin, and sends none when rendering on the server, where it used to throw on the missing `document`.
+- `@keyringjs/keyring` 0.2.0. `configureRequests()`, for a frontend Laravel doesn't serve, such as a Nuxt application on `app.example.com` calling Laravel on `api.example.com`. `baseUrl` sends every path `json()` is given there, Keyring's routes included, after the route prefix. Requests to it then send cookies (`credentials: 'include'`) unless told otherwise with `credentials`, and everything stays `same-origin` without a `baseUrl`, so Inertia applications see no change. `csrfCookie` names a URL such as Sanctum's `/sanctum/csrf-cookie` to fetch before a request that needs the `XSRF-TOKEN` cookie when it isn't there, once for requests made together, and throws when the cookie arrives but the page can't read it. `fetch` replaces the global `fetch`. An option it doesn't have, such as `baseURL`, throws. See [Frontends on Another Origin](docs/frontend.md#frontends-on-another-origin).
+- `json()` no longer throws when rendering on the server, where there's no `document`. It sends no XSRF token there.
 - `passkeyCredential()` and `isAbort()` are in the main entry point too, so a frontend without Inertia can sign in with a passkey without installing `@inertiajs/core`. The `inertia`, `vue`, and `react` entry points still export them.
 
 ### Policies and Step-Up
 
 - `continue` on the `authenticator-added` status only comes back once the account can meet what sent the user to enroll. Adding an email code on the way past `keyring.enrolled`, or an authenticator app on the way to an AAL3 page, used to hand back the page, and following it sent the user straight back to enroll. Now the page stays saved and comes back with the sign-in method that does meet it. When `keyring.enrolled` stops a route that also asks for `keyring:{level}`, the page waits for the stricter of the two. Recovery codes don't count toward it. A page saved before the upgrade, with no requirement kept beside it, comes back with the next sign-in method added, as before.
+
+### Security
+
+- `json()` only sends the `X-XSRF-TOKEN` header to the page's own origin or the `baseUrl`, never to a full URL on another origin. It decides that from the URL as the browser parses it, so a URL that only looks like a path, such as `/\evil.test`, gets no token either. See the [upgrade guide](UPGRADE.md#the-xsrf-token-stays-on-your-origins).
 
 ## v0.3.0 - 2026-11-21
 
