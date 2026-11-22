@@ -73,6 +73,43 @@ describe('by default', () => {
 
     expect(requests.map(request => request.headers['X-XSRF-TOKEN'])).toEqual([undefined, undefined])
   })
+
+  test('sends no token where the document\'s base url points a path at another origin', async () => {
+    ;(document as any).baseURI = 'https://cdn.example/assets/'
+    await json('POST', '/user/password')
+
+    ;(document as any).baseURI = 'https://app.example.com/settings/'
+    await json('POST', 'user/password')
+
+    expect(requests.map(request => request.headers['X-XSRF-TOKEN'])).toEqual([undefined, 'abc='])
+  })
+})
+
+// What a browser reads as a full URL to another origin, however much it
+// looks like a path: backslashes count as slashes, and tabs, newlines and
+// leading spaces are dropped.
+describe('a url that only looks like a path', () => {
+  const lookalikes = ['/\\evil.test/x', '\\\\evil.test/x', ' //evil.test/x', '/\t/evil.test/x', '\n//evil.test/x', '\thttps://evil.test/x', 'javascript:alert(1)']
+
+  for (const baseUrl of [null, 'https://api.example.com']) {
+    test(`gets no token, no csrf cookie and no cookies ${baseUrl ? 'with' : 'without'} a base url`, async () => {
+      configureRequests({ baseUrl, csrfCookie: '/sanctum/csrf-cookie' })
+
+      for (const url of lookalikes) {
+        await json('POST', url)
+      }
+
+      document.cookie = ''
+
+      for (const url of lookalikes) {
+        await json('POST', url)
+      }
+
+      expect(requests.map(request => request.url)).toEqual([...lookalikes, ...lookalikes])
+      expect(requests.map(request => request.headers['X-XSRF-TOKEN'])).toEqual(lookalikes.flatMap(() => [undefined, undefined]))
+      expect(requests.map(request => request.credentials)).toEqual(lookalikes.flatMap(() => ['same-origin', 'same-origin']))
+    })
+  }
 })
 
 describe('with a base url', () => {
@@ -117,6 +154,16 @@ describe('with a base url', () => {
     expect(requests.map(request => request.headers['X-XSRF-TOKEN'])).toEqual(['abc=', 'abc=', undefined, undefined])
   })
 
+  test('sends cookies only to the base url, not to a full url elsewhere', async () => {
+    configureRequests({ baseUrl: 'https://api.example.com' })
+
+    await json('GET', 'https://elsewhere.example/feed')
+    await json('GET', 'https://api.example.com/user/sessions')
+    await json('GET', 'https://app.example.com/me')
+
+    expect(requests.map(request => request.credentials)).toEqual(['same-origin', 'include', 'same-origin'])
+  })
+
   test('stays same-origin when the base url is the page\'s own origin', async () => {
     configureRequests({ baseUrl: 'https://app.example.com' })
 
@@ -155,6 +202,10 @@ describe('with a base url', () => {
     for (const baseUrl of ['api.example.com', '/api', 'ftp://api.example.com', 'javascript:alert(1)', 'https://user:pass@api.example.com', 'https://api.example.com/?x=1', 'https://api.example.com/#x']) {
       expect(() => configureRequests({ baseUrl })).toThrow(TypeError)
     }
+  })
+
+  test('refuses an option it doesn\'t have, such as axios\'s spelling', () => {
+    expect(() => configureRequests({ baseURL: 'https://api.example.com' } as any)).toThrow('no request option [baseURL]')
   })
 })
 
@@ -209,6 +260,17 @@ describe('the csrf cookie', () => {
     expect(requests.map(request => request.url)).toEqual(['https://api.example.com/user/sessions', 'https://api.example.com/login'])
   })
 
+  test('says so when it was set for a domain this page can\'t read, rather than posting for a 419', async () => {
+    answer = () => new Response(null, { status: 204 })
+
+    const error = await json('POST', '/login').catch(error => error)
+
+    expect(error).toBeInstanceOf(KeyringRequestError)
+    expect(error.status).toBe(419)
+    expect(error.message).toContain('SESSION_DOMAIN')
+    expect(requests.map(request => request.url)).toEqual(['https://api.example.com/sanctum/csrf-cookie'])
+  })
+
   test('isn\'t fetched for a request to another origin', async () => {
     await json('POST', 'https://elsewhere.example/hook')
 
@@ -250,6 +312,7 @@ describe('a fetch of its own', () => {
       csrfCookie: '/sanctum/csrf-cookie',
       fetch: function (this: unknown, url, init) {
         seen.push({ self: this, url })
+        document.cookie = 'XSRF-TOKEN=fresh'
 
         return record(url, init)
       },

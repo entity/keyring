@@ -12,9 +12,10 @@ export interface RequestOptions {
    */
   baseUrl?: string | null
   /**
-   * fetch()'s credentials. By default "include" when baseUrl is on another
-   * origin, so the session cookie goes with each request, and "same-origin"
-   * otherwise.
+   * fetch()'s credentials. By default "include" for a request to the
+   * baseUrl when it's on another origin than the page, or when there's no
+   * page (rendering on the server), so the session cookie goes with it.
+   * "same-origin" otherwise.
    */
   credentials?: RequestCredentials
   /**
@@ -32,27 +33,36 @@ const settings: { baseUrl: string, credentials?: RequestCredentials, csrfCookie:
   csrfCookie: null,
 }
 
+const options = ['baseUrl', 'credentials', 'csrfCookie', 'fetch']
+
 let fetchingCsrfCookie: Promise<void> | null = null
 
 /**
  * Say once, at startup, how json() sends requests. Only the options given
  * change, and passing one as undefined puts it back to its default.
  */
-export function configureRequests(options: RequestOptions): void {
-  if ('baseUrl' in options) {
-    settings.baseUrl = base(options.baseUrl)
+export function configureRequests(given: RequestOptions): void {
+  // A misspelt option, such as axios's "baseURL", would otherwise do nothing.
+  for (const key of Object.keys(given)) {
+    if (!options.includes(key)) {
+      throw new TypeError(`Keyring has no request option [${key}]. The options are ${options.join(', ')}.`)
+    }
   }
 
-  if ('credentials' in options) {
-    settings.credentials = options.credentials
+  if ('baseUrl' in given) {
+    settings.baseUrl = base(given.baseUrl)
   }
 
-  if ('csrfCookie' in options) {
-    settings.csrfCookie = options.csrfCookie || null
+  if ('credentials' in given) {
+    settings.credentials = given.credentials
   }
 
-  if ('fetch' in options) {
-    settings.fetch = options.fetch
+  if ('csrfCookie' in given) {
+    settings.csrfCookie = given.csrfCookie || null
+  }
+
+  if ('fetch' in given) {
+    settings.fetch = given.fetch
   }
 }
 
@@ -61,12 +71,23 @@ export function configureRequests(options: RequestOptions): void {
  * WebAuthn options, enrolling). Sends Laravel's XSRF cookie like Inertia does.
  */
 export async function json<T = any>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, body?: unknown): Promise<T> {
-  const target = resolve(url)
-  let token = isTrusted(target) ? xsrf() : null
+  const target = locate(url)
+  let token = target.trusted ? xsrf() : null
 
-  if (token === null && method !== 'GET' && settings.csrfCookie !== null && isTrusted(target) && typeof document !== 'undefined') {
+  if (token === null && method !== 'GET' && settings.csrfCookie !== null && target.trusted && typeof document !== 'undefined') {
     await csrfCookie()
     token = xsrf()
+
+    // Laravel set it, but for a domain this page isn't on, so posting now
+    // would only get a 419.
+    if (token === null) {
+      throw new KeyringRequestError(
+        419,
+        'The XSRF-TOKEN cookie was set, but this page can\'t read it. Set SESSION_DOMAIN to a domain the frontend and Laravel share.',
+        {},
+        {},
+      )
+    }
   }
 
   const response = await send(target, {
@@ -103,7 +124,7 @@ export class KeyringRequestError extends Error {
  * Fetch the CSRF cookie, once for however many requests are waiting on it.
  */
 function csrfCookie(): Promise<void> {
-  fetchingCsrfCookie ??= send(resolve(settings.csrfCookie!), { method: 'GET' })
+  fetchingCsrfCookie ??= send(locate(settings.csrfCookie!), { method: 'GET' })
     .then((response) => {
       if (!response.ok) {
         throw new KeyringRequestError(response.status, 'Could not fetch the CSRF cookie', {}, {})
@@ -116,14 +137,14 @@ function csrfCookie(): Promise<void> {
   return fetchingCsrfCookie
 }
 
-function send(url: string, { headers, ...init }: Omit<RequestInit, 'headers'> & { headers?: Record<string, string> }): Promise<Response> {
+function send(target: Target, { headers, ...init }: Omit<RequestInit, 'headers'> & { headers?: Record<string, string> }): Promise<Response> {
   // Called on its own, not as settings.fetch(), since a browser's fetch
   // refuses to run with anything but the window as `this`.
   const request = settings.fetch ?? fetch
 
-  return request(url, {
+  return request(target.url, {
     ...init,
-    credentials: settings.credentials ?? (settings.baseUrl !== '' && origin(settings.baseUrl) !== pageOrigin() ? 'include' : 'same-origin'),
+    credentials: settings.credentials ?? (target.toBase && origin(settings.baseUrl) !== pageOrigin() ? 'include' : 'same-origin'),
     headers: {
       'Accept': 'application/json',
       'X-Requested-With': 'XMLHttpRequest',
@@ -155,41 +176,52 @@ function base(value: string | null | undefined): string {
   return url.origin + url.pathname.replace(/\/+$/, '')
 }
 
-function isAbsolute(url: string): boolean {
-  return /^[a-z][a-z\d+.-]*:/i.test(url) || url.startsWith('//')
-}
+/**
+ * Where a request goes: the URL to fetch, whether it's to the baseUrl, and
+ * whether it may carry the XSRF token.
+ */
+type Target = { url: string, toBase: boolean, trusted: boolean }
 
 /**
- * A path goes to the baseUrl, when there is one. A full URL goes where it says.
+ * Decided the way the browser will read the URL, not by how it looks:
+ * "/\evil.test", " //evil.test" and "\thttps://evil.test" are all full URLs
+ * to a browser. A path is one that lands on whatever origin it's resolved
+ * against. It goes to the baseUrl when there is one, and to the page
+ * otherwise. Only the page's own origin and the baseUrl's get the token.
  */
-function resolve(url: string): string {
-  if (settings.baseUrl === '' || isAbsolute(url)) {
-    return url
+function locate(url: string): Target {
+  const one = parse(url, 'https://one.keyring.invalid')
+  const two = parse(url, 'https://two.keyring.invalid')
+  const isPath = one !== null && two !== null && one.origin !== two.origin
+
+  if (isPath && settings.baseUrl !== '') {
+    return { url: settings.baseUrl + one.pathname + one.search + one.hash, toBase: true, trusted: true }
   }
 
-  return settings.baseUrl + (url.startsWith('/') ? url : `/${url}`)
-}
+  if (isPath) {
+    // With no page, as when rendering on the server, a path has nowhere else
+    // to go. With one, it goes where the document's base URL says.
+    const page = typeof document !== 'undefined' && typeof document.baseURI === 'string' ? document.baseURI : pageOrigin()
 
-/**
- * Whether a request may carry the XSRF token: it goes to the page's own
- * origin or to the baseUrl's, not to whatever full URL json() was handed.
- */
-function isTrusted(url: string): boolean {
-  if (!isAbsolute(url)) {
-    return true
+    return { url, toBase: false, trusted: page === null || parse(url, page)?.origin === pageOrigin() }
   }
 
-  const target = origin(url)
+  const target = one?.origin ?? null
+  const toBase = target !== null && settings.baseUrl !== '' && target === origin(settings.baseUrl)
 
-  return target !== null && (target === pageOrigin() || (settings.baseUrl !== '' && target === origin(settings.baseUrl)))
+  return { url, toBase, trusted: target !== null && target !== 'null' && (target === pageOrigin() || toBase) }
 }
 
-function origin(url: string): string | null {
+function parse(url: string, base: string): URL | null {
   try {
-    return new URL(url, pageOrigin() ?? undefined).origin
+    return new URL(url, base)
   } catch {
     return null
   }
+}
+
+function origin(url: string): string | null {
+  return parse(url, 'https://keyring.invalid')?.origin ?? null
 }
 
 function pageOrigin(): string | null {
