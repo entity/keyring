@@ -572,7 +572,10 @@ class Sessions
      *
      * A session the app emptied before signing out, with invalidate() or
      * flush() ahead of Auth::logout(), is ended by the ID the request
-     * noted (bind, current).
+     * noted (bind, current). Given a copy, like a form request passed to
+     * SignIn::out(), only the copy forgets the ID, so the Logout listener
+     * revokes again from request(): the record has ended, so nothing is
+     * announced twice.
      */
     public function end(Request $request): void
     {
