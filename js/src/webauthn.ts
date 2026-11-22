@@ -55,6 +55,17 @@ export async function getCredential(options: Json, { autofill = false, signal }:
   return toJson(await navigator.credentials.get({ publicKey, mediation: autofill ? 'conditional' : undefined, signal }))
 }
 
+/**
+ * The user closed the prompt, or a newer request replaced this one. Browsers
+ * report a closed prompt and a timeout as NotAllowedError, which is also what
+ * they throw when WebAuthn isn't allowed at all (a cross-origin iframe without
+ * the publickey-credentials permission, or no user gesture in Safari), so
+ * check those first if a prompt never appears.
+ */
+export function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === 'AbortError' || error.name === 'NotAllowedError')
+}
+
 function ensureSupported(): void {
   if (!supportsWebAuthn()) {
     throw new Error('This browser does not support passkeys or security keys.')

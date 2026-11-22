@@ -1,6 +1,6 @@
 {
   "name": "@keyringjs/keyring",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Browser helpers for Keyring: WebAuthn ceremonies and Inertia bindings for Vue and React.",
   "license": "MIT",
   "keywords": [

@@ -17,6 +17,15 @@ describe('base64url', () => {
   })
 })
 
+test('the main entry point has the passkey sign in helpers, for a frontend without inertia', async () => {
+  const main = await import('../src/index')
+  const inertia = await import('../src/inertia')
+
+  expect(main.passkeyCredential).toBe(inertia.passkeyCredential)
+  expect(main.isAbort).toBe(inertia.isAbort)
+  expect(main.configureRequests).toBeFunction()
+})
+
 describe('enrollment', () => {
   test('runs the browser ceremony for any factor that sends creation options', () => {
     expect(isWebAuthn({ options: { challenge: 'abc', rp: { id: 'example.com' } } })).toBe(true)

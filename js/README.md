@@ -20,12 +20,12 @@ The package has four entry points:
 
 | Import | Contains |
 |---|---|
-| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `json()`, routes, and types. No framework code. |
+| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `passkeyCredential()`, `json()` and `configureRequests()`, routes, and types. No framework code. |
 | `@keyringjs/keyring/inertia` | The challenge helpers, for Inertia with any framework. |
 | `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
 
-The package needs the Keyring Composer package on the server. For the full details, see the [frontend documentation](https://github.com/entity/keyring/blob/main/docs/frontend.md).
+A frontend that Laravel doesn't serve, such as a Nuxt application on another subdomain, points the package at Laravel with `configureRequests({ baseUrl })`. The package needs the Keyring Composer package on the server. For the full details, see the [frontend documentation](https://github.com/entity/keyring/blob/main/docs/frontend.md).
 
 ## License
 
