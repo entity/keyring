@@ -1,9 +1,6 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "enabledManagers": ["github-actions"],
-    "github-actions": {
-        "managerFilePatterns": ["/(^|/)\\.depot/workflows/.+\\.ya?ml$/"]
-    },
     "minimumReleaseAge": "5 days",
     "schedule": ["before 6am on monday"],
     "packageRules": [
