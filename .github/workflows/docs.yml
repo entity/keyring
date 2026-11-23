@@ -1,0 +1,23 @@
+name: docs
+
+# keyringphp.com builds its docs from docs/ on main. When they change, ask the
+# site's repository to rebuild and deploy (its deploy workflow listens for the
+# "docs" dispatch).
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**']
+  workflow_dispatch:
+
+# Nothing here reads or writes this repository.
+permissions: {}
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      # SITE_DISPATCH_TOKEN: a fine-grained token with Contents: write on
+      # keyringphp/keyringphp.com, which repository dispatches need.
+      - run: gh api repos/keyringphp/keyringphp.com/dispatches -f event_type=docs
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
