@@ -43,6 +43,7 @@ use Keyring\Events\SessionEnded;
 use Keyring\Exceptions\PartialRevocation;
 use Keyring\Facades\Keyring;
 use Keyring\Http\Middleware\AuthenticateSession;
+use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
 use Keyring\Models\Device;
 use Keyring\Models\PendingChange;
@@ -526,6 +527,29 @@ describe('a sign-out the app does itself', function () {
         });
 
         Route::middleware('web')->post('/app/logout-for-risk', fn () => tap(response()->noContent(), fn () => app(Sessions::class)->because(SessionEndReason::Risk, fn () => Auth::logout())));
+
+        // Sign-outs that empty the session first, so it no longer says which
+        // record it was on by the time the guard announces them.
+        Route::middleware('web')->post('/app/invalidate-then-logout', function (Request $request) {
+            $request->session()->invalidate();
+            Auth::logout();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/flush-then-logout', function (Request $request) {
+            $request->session()->flush();
+            Auth::logout();
+
+            return response()->noContent();
+        });
+
+        Route::middleware('web')->post('/app/invalidate-then-logout-this-device', function (Request $request) {
+            $request->session()->invalidate();
+            Auth::logoutCurrentDevice();
+
+            return response()->noContent();
+        });
     });
 
     it('announces it once as signing out', function (string $driver, string $uri) {
@@ -536,7 +560,53 @@ describe('a sign-out the app does itself', function () {
 
         expectEnded($handle, SessionEndReason::LoggedOut);
         expect($this->announced)->toHaveCount(1);
-    })->with('session drivers')->with(['/app/logout', '/app/logout-this-device']);
+    })->with('session drivers')->with([
+        '/app/logout',
+        '/app/logout-this-device',
+        '/app/invalidate-then-logout',
+        '/app/flush-then-logout',
+        '/app/invalidate-then-logout-this-device',
+    ]);
+
+    it('announces it once when the app empties the session before SignIn::out()', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $handle = handleOf(signInHere());
+        Route::middleware('web')->post('/app/invalidate-then-sign-out', function (Request $request) {
+            $request->session()->invalidate();
+            app(SignIn::class)->out($request);
+
+            return response()->noContent();
+        });
+
+        $this->post('/app/invalidate-then-sign-out')->assertNoContent();
+
+        // Revoked, as SignIn::out() announces it when the app gives no reason.
+        expectEnded($handle, SessionEndReason::Revoked);
+        expect($this->announced)->toHaveCount(1);
+    })->with('session drivers');
+
+    it('ends nothing an earlier request in the same process was on, as under Octane', function () {
+        // Another browser's request, earlier in the same process, as under
+        // Octane. Then this browser signs in and out on a route without
+        // Keyring's session middleware, which registers nothing for it.
+        $elsewhere = signInHere();
+        $this->get('/home')->assertOk();
+
+        $this->flushSession();
+        Auth::forgetGuards();
+        Route::post('/app/login-then-logout', function (Request $request) {
+            Auth::login(test()->user);
+            $request->session()->invalidate();
+            Auth::logout();
+
+            return response()->noContent();
+        })->middleware('web')->withoutMiddleware(AuthenticateSession::class);
+
+        $this->post('/app/login-then-logout')->assertNoContent();
+
+        expect($this->announced)->toBeEmpty()
+            ->and(app(SessionRegistry::class)->find($elsewhere)->revokedAt)->toBeNull();
+    });
 
     it('announces it for the reason the app gave around it', function () {
         $handle = handleOf(signInHere());

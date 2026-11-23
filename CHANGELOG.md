@@ -17,6 +17,10 @@
 - `json()` no longer throws when rendering on the server, where there's no `document`. It sends no XSRF token there.
 - `passkeyCredential()` and `isAbort()` are in the main entry point too, so a frontend without Inertia can sign in with a passkey without installing `@inertiajs/core`. The `inertia`, `vue`, and `react` entry points still export them.
 
+### Sessions and Devices
+
+- A sign-out your app does itself also ends the registered session when the app empties the session first, as in `$request->session()->invalidate()` or `flush()` followed by `Auth::logout()` or `Auth::logoutCurrentDevice()`. Before, the record stayed good until it timed out and no `RegisteredSessionEnded` went out. On the `cookie` session driver a copy of the session stayed signed in, and after `logoutCurrentDevice()` so did a kept copy of the "remember me" cookies. It works on any route Keyring's session middleware runs on.
+
 ### Policies and Step-Up
 
 - `continue` on the `authenticator-added` status only comes back once the account can meet what sent the user to enroll. Adding an email code on the way past `keyring.enrolled`, or an authenticator app on the way to an AAL3 page, used to hand back the page, and following it sent the user straight back to enroll. Now the page stays saved and comes back with the sign-in method that does meet it. When `keyring.enrolled` stops a route that also asks for `keyring:{level}`, the page waits for the stricter of the two. Recovery codes don't count toward it. A page saved before the upgrade, with no requirement kept beside it, comes back with the next sign-in method added, as before.

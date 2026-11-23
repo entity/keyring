@@ -378,6 +378,7 @@ class Sessions
     protected function bind(Request $request, RegisteredSession $session, bool $remembered): void
     {
         $request->session()->put(self::KEY, $session->id);
+        $request->attributes->set(self::KEY, $session->id);
 
         if (! $remembered) {
             $request->session()->forget(self::REMEMBERED);
@@ -532,11 +533,22 @@ class Sessions
         });
     }
 
+    /**
+     * The record the request's session is on. Its ID is noted on the
+     * request too, so end() can still find it if the app empties the
+     * session before signing out.
+     */
     public function current(Request $request): ?RegisteredSession
     {
         $id = $request->session()->get(self::KEY);
 
-        return is_string($id) ? $this->registry->find($id) : null;
+        if (! is_string($id)) {
+            return null;
+        }
+
+        $request->attributes->set(self::KEY, $id);
+
+        return $this->registry->find($id);
     }
 
     /**
@@ -557,14 +569,22 @@ class Sessions
      * registry that throws leaves it in place, so the next request finds
      * the record still open and signs out again, rather than finding a
      * signed-in session with no record and registering it afresh.
+     *
+     * A session the app emptied before signing out, with invalidate() or
+     * flush() ahead of Auth::logout(), is ended by the ID the request
+     * noted (bind, current). Given a copy, like a form request passed to
+     * SignIn::out(), only the copy forgets the ID, so the Logout listener
+     * revokes again from request(): the record has ended, so nothing is
+     * announced twice.
      */
     public function end(Request $request): void
     {
-        $id = $request->session()->get(self::KEY);
+        $id = $request->session()->get(self::KEY) ?? $request->attributes->get(self::KEY);
 
         try {
             if (is_string($id)) {
                 $this->registry->revoke($id);
+                $request->attributes->remove(self::KEY);
             }
 
             $request->session()->forget(self::KEY);
