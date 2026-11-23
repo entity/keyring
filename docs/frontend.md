@@ -46,7 +46,7 @@ Keyring renders components named `auth/login`, `auth/challenge`, and so on. The 
 - **The challenge page** (and `confirm`, for step-up) shows whichever factor comes next. [`useChallenge`](#the-challenge-page) does the work.
 - **The login page** can offer passkeys, with [`usePasskeyLogin`](#signing-in-with-a-passkey).
 
-Settings pages for authenticators, sessions, devices, and the email address are yours to build too, using the [helpers below](#managing-authenticators) and the JSON routes. If you'd like a reference, the [example application](https://github.com/entity/keyring-example) has every page, written in React with the components from the Laravel starter kit.
+Settings pages for authenticators, sessions, devices, and the email address are yours to build too, using the [helpers below](#managing-authenticators) and the JSON routes. If you'd like a reference, the [example application](https://github.com/keyringphp/example) has every page, written in React with the components from the Laravel starter kit.
 
 ## The Pages Emailed Links Open
 

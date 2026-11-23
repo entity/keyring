@@ -213,7 +213,7 @@ There are two things that often catch people out:
 - **Keep `=>` and `>` out of the Blade inside `<Raw>`.** Maizzle writes them as HTML entities, which breaks the directive. Pass a list of `['label' => ..., 'value' => ...]` rather than looping over keys and values, and write `@if ($details !== [])` rather than counting the items.
 - **Blade's `{{ }}` is what keeps the HTML safe.** A key's name is whatever the user typed, and escaping stops it from adding a link to a genuine security email. Don't swap it for `{!! !!}` in the HTML views.
 
-The [example application](https://github.com/entity/keyring-example#emails) has the whole setup: five templates, a shared frame, the four emails a flow needs, and a local page that previews each one.
+The [example application](https://github.com/keyringphp/example#emails) has the whole setup: five templates, a shared frame, the four emails a flow needs, and a local page that previews each one.
 
 ## SMS Codes
 

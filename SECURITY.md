@@ -8,7 +8,7 @@ Security fixes go into the latest release.
 
 Please don't report a security problem in a public issue, pull request, or discussion.
 
-Report it privately through GitHub instead. Open the repository's **Security** tab and choose **Report a vulnerability**, or go straight to [the form](https://github.com/entity/keyring/security/advisories/new). Only the maintainers can see the report.
+Report it privately through GitHub instead. Open the repository's **Security** tab and choose **Report a vulnerability**, or go straight to [the form](https://github.com/keyringphp/keyring/security/advisories/new). Only the maintainers can see the report.
 
 It helps to include:
 

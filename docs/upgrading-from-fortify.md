@@ -63,7 +63,7 @@ The second is a password containing characters that weren't typed in Unicode's N
 
 Laravel's starter kits come with Fortify already wired in. A new app built from a kit is still an upgrade, though it's one with no users to import. Follow the [steps](#steps) and skip the import. The tables below show what that looks like in a kit.
 
-The file names come from the React starter kit, which the [example application](https://github.com/entity/keyring-example) was started from. Other kits and versions differ in places, so treat these tables as a checklist.
+The file names come from the React starter kit, which the [example application](https://github.com/keyringphp/example) was started from. Other kits and versions differ in places, so treat these tables as a checklist.
 
 **Remove**
 

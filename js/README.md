@@ -1,6 +1,6 @@
 # @keyringjs/keyring
 
-This package holds the browser side of [Keyring](https://github.com/entity/keyring), the factor-driven authentication package for Laravel. It runs the WebAuthn ceremonies for passkeys and security keys, wraps the enrollment routes, and provides Inertia bindings for the challenge page in Vue and React.
+This package holds the browser side of [Keyring](https://github.com/keyringphp/keyring), the factor-driven authentication package for Laravel. It runs the WebAuthn ceremonies for passkeys and security keys, wraps the enrollment routes, and provides Inertia bindings for the challenge page in Vue and React.
 
 To install it, run:
 
@@ -25,7 +25,7 @@ The package has four entry points:
 | `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
 
-A frontend that Laravel doesn't serve, such as a Nuxt application on another subdomain, points the package at Laravel with `configureRequests({ baseUrl })`. The package needs the Keyring Composer package on the server. For the full details, see the [frontend documentation](https://github.com/entity/keyring/blob/main/docs/frontend.md).
+A frontend that Laravel doesn't serve, such as a Nuxt application on another subdomain, points the package at Laravel with `configureRequests({ baseUrl })`. The package needs the Keyring Composer package on the server. For the full details, see the [frontend documentation](https://github.com/keyringphp/keyring/blob/main/docs/frontend.md).
 
 ## License
 
