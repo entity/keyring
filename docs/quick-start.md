@@ -81,7 +81,7 @@ A login page posts `email`, `password`, and an optional `remember` field to `/lo
 
 Once signed in, users are sent to the `home` path in your `config/keyring.php` configuration file, which is `/dashboard` by default. A new Laravel application doesn't have a `/dashboard` route, so you should either add one or point `home` somewhere that exists.
 
-Every page and the data it receives is listed in the [Pages](sign-in-flow.md#pages) documentation, and the [example application](https://github.com/entity/keyring-example) includes all of them in React.
+Every page and the data it receives is listed in the [Pages](sign-in-flow.md#pages) documentation, and the [example application](https://github.com/keyringphp/example) includes all of them in React.
 
 ## Your Settings Page
 

@@ -390,7 +390,7 @@ SecurityNotice::toMailUsing(fn (SecurityNotice $notice, object $notifiable) => (
     ]));
 ```
 
-Blade's `{{ }}` escapes those values for HTML. The callback may return a `Mailable` instead. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through this approach. The [example application](https://github.com/entity/keyring-example#emails) builds every email this way, using Maizzle templates compiled to Blade views. One shared view serves every notice, and a local page lets you preview them.
+Blade's `{{ }}` escapes those values for HTML. The callback may return a `Mailable` instead. [Emails With Maizzle](recipes.md#emails-with-maizzle) walks through this approach. The [example application](https://github.com/keyringphp/example#emails) builds every email this way, using Maizzle templates compiled to Blade views. One shared view serves every notice, and a local page lets you preview them.
 
 For a single notice, or for one of the [emails a flow needs](#emails-a-flow-needs), extend Keyring's class and register your own:
 

@@ -10,13 +10,13 @@
     "passkeys",
     "inertia"
   ],
-  "homepage": "https://github.com/entity/keyring/blob/main/docs/frontend.md",
+  "homepage": "https://keyringphp.com/docs/0.x/frontend",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/entity/keyring.git",
+    "url": "git+https://github.com/keyringphp/keyring.git",
     "directory": "js"
   },
-  "bugs": "https://github.com/entity/keyring/issues",
+  "bugs": "https://github.com/keyringphp/keyring/issues",
   "type": "module",
   "sideEffects": false,
   "files": [
