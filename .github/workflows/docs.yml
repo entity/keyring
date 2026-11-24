@@ -1,12 +1,15 @@
 name: docs
 
-# keyringphp.com builds its docs from docs/ on main. When they change, ask the
-# site's repository to rebuild and deploy (its deploy workflow listens for the
-# "docs" dispatch).
+# keyringphp.com builds its docs from docs/ on main and shows the latest
+# release's version on its homepage. When either changes, ask the site's
+# repository to rebuild and deploy (its deploy workflow listens for the "docs"
+# and "release" dispatches).
 on:
   push:
     branches: [main]
     paths: ['docs/**']
+  release:
+    types: [published]
   workflow_dispatch:
 
 # Nothing here reads or writes this repository.
@@ -18,6 +21,7 @@ jobs:
     steps:
       # SITE_DISPATCH_TOKEN: a fine-grained token with Contents: write on
       # keyringphp/keyringphp.com, which repository dispatches need.
-      - run: gh api repos/keyringphp/keyringphp.com/dispatches -f event_type=docs
+      - run: gh api repos/keyringphp/keyringphp.com/dispatches -f event_type="$EVENT_TYPE"
         env:
           GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          EVENT_TYPE: ${{ github.event_name == 'release' && 'release' || 'docs' }}
