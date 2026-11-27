@@ -40,7 +40,8 @@
             "keyring.fresh:15m"
         ],
         "authenticator_changes": {
-            "established_after": "7d"
+            "established_after": "7d",
+            "skip_with_totp": false
         },
         "enrollment_url": null,
         "enrollment_except": [],
@@ -150,6 +151,7 @@
     "routes": {
         "keyring.authenticators.confirm": "POST /user/authenticators/{factor}/confirm",
         "keyring.authenticators.destroy": "DELETE /user/authenticators/{authenticator}",
+        "keyring.authenticators.proof-options": "POST /user/authenticators/{factor}/proof-options",
         "keyring.authenticators.store": "POST /user/authenticators/{factor}",
         "keyring.authenticators.update": "PATCH /user/authenticators/{authenticator}",
         "keyring.confirm.challenge": "GET /confirm/{factor?}",

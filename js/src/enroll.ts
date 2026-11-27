@@ -1,7 +1,7 @@
-import { json } from './http.js'
+import { json, KeyringRequestError } from './http.js'
 import { routes } from './routes.js'
-import type { Authenticator, Enrollment } from './types.js'
-import { createCredential } from './webauthn.js'
+import type { Authenticator, Enrollment, FreezeProof, FrozenChanges, ProvableChange } from './types.js'
+import { createCredential, getCredential } from './webauthn.js'
 
 /**
  * Whether an enrollment needs the browser's WebAuthn ceremony. Decided by
@@ -14,6 +14,8 @@ export function isWebAuthn(enrollment: Record<string, any>): boolean {
 
 /**
  * Start enrolling: returns what to show (a QR code, recovery codes...).
+ * New recovery codes replace the old ones, so while the account is frozen
+ * they need `proof` in `data` (see `proveWithKey()`).
  */
 export function beginEnrollment(factor: string, data: Record<string, unknown> = {}) {
   return json<Enrollment>('POST', routes.enroll(factor), data)
@@ -32,12 +34,14 @@ export async function confirmEnrollment(factor: string, enrollment: Record<strin
 
 /**
  * Begin and finish in one go, for factors that need no input in between
- * (passkeys, security keys, recovery codes).
+ * (passkeys, security keys, recovery codes). A `proof` goes with the
+ * beginning only, which the server remembers it for.
  */
 export async function enroll(factor: string, data: Record<string, unknown> = {}) {
   const { enrollment } = await beginEnrollment(factor, data)
+  const { proof: _, ...rest } = data
 
-  return { enrollment, ...(await confirmEnrollment(factor, enrollment, data)) }
+  return { enrollment, ...(await confirmEnrollment(factor, enrollment, rest)) }
 }
 
 export function renameAuthenticator(id: string, name: string) {
@@ -54,13 +58,40 @@ export function makeDefault(id: string) {
  * it the request fails with an error on `password`. `signOutOthers` ends the
  * user's other sessions along with it. While the account's sign-in methods
  * are frozen, removing an established one fails with a `422` whose `data`
- * holds `frozen` (see `FrozenChanges`).
+ * holds `frozen` (see `FrozenChanges`), unless it comes with `proof` from
+ * `proveWithKey()`.
  */
-export function removeAuthenticator(id: string, password?: string, { signOutOthers }: { signOutOthers?: boolean } = {}) {
+export function removeAuthenticator(id: string, password?: string, { signOutOthers, proof }: { signOutOthers?: boolean, proof?: FreezeProof } = {}) {
   const body = {
     ...(password !== undefined && { password }),
     ...(signOutOthers !== undefined && { sign_out_others: signOutOthers }),
+    ...(proof !== undefined && { proof }),
   }
 
   return json('DELETE', routes.authenticator(id), Object.keys(body).length === 0 ? undefined : body)
+}
+
+/**
+ * The freeze a request was refused for, or null when it was refused for
+ * anything else. When `skip` names a passkey or security key factor, offer
+ * "use your passkey to do this now", and send the request again with
+ * `proveWithKey()`'s proof.
+ */
+export function frozenChanges(error: unknown): FrozenChanges | null {
+  return error instanceof KeyringRequestError && error.status === 422 && error.data?.frozen ? error.data.frozen as FrozenChanges : null
+}
+
+/**
+ * Prove one change with an established passkey or security key, while the
+ * account's sign-in methods are frozen. Asks for a challenge issued for
+ * that change alone, runs the browser's ceremony, and returns the proof
+ * for the change's own request. It works once, and only for that change.
+ *
+ *     const proof = await proveWithKey('passkey', { action: 'remove', target: id })
+ *     await removeAuthenticator(id, undefined, { proof })
+ */
+export async function proveWithKey(factor: string, change: ProvableChange): Promise<FreezeProof> {
+  const { options } = await json<{ options: Record<string, any> }>('POST', routes.proofOptions(factor), change)
+
+  return { factor, credential: await getCredential(options) }
 }

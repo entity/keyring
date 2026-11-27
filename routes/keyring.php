@@ -68,6 +68,7 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
             Route::prefix('/user/authenticators')->name('keyring.authenticators.')->group(function () {
                 Route::post('/{factor}', [AuthenticatorController::class, 'store'])->block()->name('store');
                 Route::post('/{factor}/confirm', [AuthenticatorController::class, 'confirm'])->middleware('throttle:keyring')->block()->name('confirm');
+                Route::post('/{factor}/proof-options', [AuthenticatorController::class, 'proofOptions'])->middleware('throttle:keyring')->name('proof-options');
                 Route::patch('/{authenticator}', [AuthenticatorController::class, 'update'])->name('update');
                 Route::delete('/{authenticator}', [AuthenticatorController::class, 'destroy'])->middleware('throttle:keyring')->name('destroy');
             });

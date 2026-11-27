@@ -22,6 +22,7 @@ export const routes = {
   enroll: (factor: string) => `${prefix}/user/authenticators/${segment(factor)}`,
   confirmEnrollment: (factor: string) => `${prefix}/user/authenticators/${segment(factor)}/confirm`,
   authenticator: (id: string) => `${prefix}/user/authenticators/${segment(id)}`,
+  proofOptions: (factor: string) => `${prefix}/user/authenticators/${segment(factor)}/proof-options`,
   sessions: () => `${prefix}/user/sessions`,
   session: (id: string) => `${prefix}/user/sessions/${segment(id)}`,
 }

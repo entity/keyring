@@ -26,11 +26,34 @@ export interface Authenticator extends AuthenticatorSummary {
  * Why an established sign-in method, or a set of recovery codes, can't be
  * removed or replaced just now, and until when (ISO 8601). It comes with a
  * `422`, as `data.frozen` on the `KeyringRequestError`, beside the usual
- * `message` and `errors.authenticator`.
+ * `message` and `errors.authenticator`. `skip` names the factors that could
+ * make the change now (see `proveWithKey()`), and is empty when none can.
  */
 export interface FrozenChanges {
   reason: 'new-authenticator' | 'recent-change'
   until: string
+  skip: string[]
+}
+
+/**
+ * A change an established sign-in method can make while the account's
+ * sign-in methods are frozen: removing an authenticator, by its ID, or
+ * replacing a factor's, by its key (`recovery` for new recovery codes).
+ */
+export interface ProvableChange {
+  action: 'remove' | 'replace'
+  target: string
+}
+
+/**
+ * What the change's own request sends as `proof`: a key's answer to a
+ * challenge for that change, or a code from an authenticator app where
+ * the server allows it.
+ */
+export interface FreezeProof {
+  factor: string
+  credential?: Record<string, any>
+  code?: string
 }
 
 /**

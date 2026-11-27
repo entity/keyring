@@ -234,14 +234,30 @@ class WebAuthn extends Factor implements DiscoverableFactor, Enrollable, Primary
 
     public function challenge(Attempt $attempt, Authenticator $authenticator): array
     {
+        ['browser' => $browser, 'kept' => $kept] = $this->requestOptionsFor($attempt->keyring()->of($this->key()));
+
+        $attempt->put($this->key(), 'options', $kept);
+
+        return ['options' => $browser];
+    }
+
+    /**
+     * A new challenge for one of these keys to sign: the options for the
+     * browser, and as they're kept to check the answer against. Whoever
+     * asks keeps them, scoped to what they're for, and verify() takes them
+     * from an attempt's state.
+     *
+     * @param  iterable<Authenticator>  $authenticators
+     * @return array{browser: array<string, mixed>, kept: string}
+     */
+    public function requestOptionsFor(iterable $authenticators): array
+    {
         $options = $this->ceremonies()->requestOptions(
-            array_values($attempt->keyring()->of($this->key())->map($this->descriptor(...))->all()),
+            array_values(collect($authenticators)->map($this->descriptor(...))->all()),
             $this->profile->userVerification,
         );
 
-        $attempt->put($this->key(), 'options', $this->ceremonies()->toJson($options));
-
-        return ['options' => $this->ceremonies()->toBrowser($options)];
+        return ['browser' => $this->ceremonies()->toBrowser($options), 'kept' => $this->ceremonies()->toJson($options)];
     }
 
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification

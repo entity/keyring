@@ -168,12 +168,19 @@ return [
     | recovery codes. So whoever got into a session can't add a factor and
     | then take away the owner's.
     |
+    | The owner can still make one of those changes by proving, in the same
+    | request, a passkey or security key the account has had that long and
+    | since before the session signed in. "skip_with_totp" lets an
+    | authenticator app do it too. Its codes can be phished as they're
+    | typed, so it's off.
+    |
     */
 
     'changes_middleware' => ['keyring.fresh:15m'],
 
     'authenticator_changes' => [
         'established_after' => '7d',
+        'skip_with_totp' => false,
     ],
 
     /*

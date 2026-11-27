@@ -166,7 +166,7 @@ describe('while a new sign-in method is not established', function () {
             ->assertExactJson([
                 'message' => $message = __('keyring::keyring.frozen_new_authenticator', ['time' => '1 week']),
                 'errors' => ['authenticator' => [$message]],
-                'frozen' => ['reason' => 'new-authenticator', 'until' => $until],
+                'frozen' => ['reason' => 'new-authenticator', 'until' => $until, 'skip' => []],
             ]);
 
         expect($this->totp->fresh())->not->toBeNull();

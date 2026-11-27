@@ -53,8 +53,9 @@ class AuthenticatorChanges
      *
      * Replacing recovery codes that have some left, or a factor the account
      * has had for a while, is refused while the account is frozen(), unless
-     * $ignoreFreeze says otherwise (for an app's own support tools, never a
-     * user's request), and freezes it in turn.
+     * $ignoreFreeze says otherwise, and freezes it in turn. That's for an
+     * app's own support tools, and for a request that proved an established
+     * method for this change (see FreezeSkips), never a user's say-so.
      *
      * With the request it came in, the session that asked has to still be
      * signed in when it's saved: one ended while the request ran (an email
@@ -241,8 +242,9 @@ class AuthenticatorChanges
      *
      * Removing a factor the account has had for a while, or its recovery
      * codes, is refused while the account is frozen(), unless $ignoreFreeze
-     * says otherwise (for an app's own support tools, never a user's
-     * request), and freezes it in turn. A factor that isn't established
+     * says otherwise, and freezes it in turn. That's for an app's own
+     * support tools, and for a request that proved an established method
+     * for this removal (see FreezeSkips), never a user's say-so. A factor that isn't established
      * yet can always go, so the owner can remove one someone else added.
      *
      * @throws ValidationException

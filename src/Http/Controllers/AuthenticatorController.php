@@ -4,17 +4,21 @@ declare(strict_types=1);
 
 namespace Keyring\Http\Controllers;
 
+use Closure;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
+use Keyring\Changes\FreezeSkips;
 use Keyring\Contracts\Enrollable;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Events\EnrollmentRefused;
+use Keyring\Exceptions\SignInChangesFrozen;
 use Keyring\Factors\Factor;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
@@ -34,6 +38,9 @@ class AuthenticatorController
 {
     use RespondsWithStatus;
 
+    /** On an enrollment begun with a proof that let it past the freeze. */
+    protected const string PROVED = 'keyring.freeze_skipped';
+
     // A route keeps its controller once it has made one, and in a worker
     // that serves many requests that can be longer than a request lasts.
     // These hold the session they were made for, or reach something that
@@ -49,6 +56,7 @@ class AuthenticatorController
         protected AuthenticatorChanges $changes,
         protected Throttle $throttle,
         protected Sessions $sessions,
+        protected FreezeSkips $skips,
     ) {}
 
     /**
@@ -62,8 +70,14 @@ class AuthenticatorController
         // Anything that isn't text is left out of it, as before.
         Input::validate($request, ['name' => [Factor::validText()]]);
 
-        // New recovery codes that couldn't be saved yet aren't shown at all.
-        $this->changes->ensureMayAdd($this->keyring->user(), $factor);
+        // New recovery codes that couldn't be saved yet aren't shown at all,
+        // unless the request proves an established method for replacing
+        // them. Then the enrollment remembers it, for the confirm.
+        $proved = $this->skips->proves($this->keyring->user(), $request, 'replace', $factor->key());
+
+        if (! $proved) {
+            $this->skippable($request, fn () => $this->changes->ensureMayAdd($this->keyring->user(), $factor));
+        }
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
@@ -72,7 +86,7 @@ class AuthenticatorController
 
         $enrollment = $factor->beginEnrollment($this->keyring->user(), $request);
 
-        $this->enrollments->put($enrollment);
+        $this->enrollments->put($proved ? $enrollment->with(static::PROVED, true) : $enrollment);
 
         return $this->status('enrollment-started', ['factor' => $factor->key(), 'enrollment' => $enrollment->props]);
     }
@@ -91,13 +105,17 @@ class AuthenticatorController
 
         $authenticator = $this->confirmed($factor, $enrollment, $request);
 
+        // Proved when it began, or in this request.
+        $proved = $enrollment->state(static::PROVED) === true
+            || $this->skips->proves($this->keyring->user(), $request, 'replace', $factor->key());
+
         // Each enrollment adds its authenticator once, whichever copy of the
         // session it comes back in.
         if (! $this->enrollments->claim($enrollment)) {
             throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
         }
 
-        $recoveryCodes = $this->changes->add($this->keyring->user(), $factor, $authenticator, $request);
+        $recoveryCodes = $this->skippable($request, fn () => $this->changes->add($this->keyring->user(), $factor, $authenticator, $request, ignoreFreeze: $proved));
 
         $this->enrollments->forget($factor->key());
         $this->signOutOthers($request);
@@ -144,10 +162,50 @@ class AuthenticatorController
         // Only asked for when this is the last second factor.
         Input::validate($request, ['password' => ['nullable', 'string'], 'sign_out_others' => ['sometimes', 'boolean']]);
 
-        $this->changes->remove($this->keyring->user(), $authenticator, Input::get($request, 'password'));
+        // A proof of an established method, for removing this one, lets it
+        // past the freeze.
+        $proved = $this->skips->proves($this->keyring->user(), $request, 'remove', $authenticator);
+
+        $this->skippable($request, fn () => $this->changes->remove($this->keyring->user(), $authenticator, Input::get($request, 'password'), ignoreFreeze: $proved));
         $this->signOutOthers($request);
 
         return $this->status('authenticator-removed');
+    }
+
+    /**
+     * A challenge for one of the user's established keys of this factor to
+     * sign, to make one change while the account is frozen: "remove" an
+     * authenticator (its ID as "target"), or "replace" a factor's (its key).
+     * The change's own request then sends the answer as "proof".
+     */
+    public function proofOptions(Request $request, string $factor): JsonResponse
+    {
+        $change = Input::validate($request, [
+            'action' => ['required', 'string', Rule::in(FreezeSkips::ACTIONS)],
+            'target' => ['required', 'string', 'max:255'],
+        ]);
+
+        return new JsonResponse([
+            'options' => $this->skips->options($this->keyring->user(), $request, $factor, $change['action'], $change['target']),
+        ]);
+    }
+
+    /**
+     * Run a change, and when it's refused for the freeze, say which factors
+     * could prove it now.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $change
+     * @return T
+     */
+    protected function skippable(Request $request, Closure $change): mixed
+    {
+        try {
+            return $change();
+        } catch (SignInChangesFrozen $e) {
+            throw $e->skippableWith($this->skips->factors($this->keyring->user(), $request));
+        }
     }
 
     /**

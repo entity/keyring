@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '../src/enroll'
+import { enroll, frozenChanges, makeDefault, proveWithKey, removeAuthenticator, renameAuthenticator } from '../src/enroll'
 import { KeyringRequestError } from '../src/http'
 import { endOtherSessions, endSession, listSessions } from '../src/sessions'
 import { createCredential, fromBase64Url, getCredential, toBase64Url } from '../src/webauthn'
@@ -195,6 +195,48 @@ describe('enrolling', () => {
       { password: 'secret', sign_out_others: false },
       { password: 'secret' },
     ])
+  })
+
+  test('proves a frozen removal with a key and sends it again with the proof', async () => {
+    answers.push(
+      { status: 422, body: { message: 'Frozen', errors: { authenticator: ['Frozen'] }, frozen: { reason: 'new-authenticator', until: '2026-12-04T00:00:00+00:00', skip: ['passkey'] } } },
+      { status: 200, body: { options: { challenge: 'AQID', rpId: 'localhost', allowCredentials: [{ id: 'BAU', type: 'public-key' }] } } },
+      { status: 200, body: { status: 'authenticator-removed' } },
+    )
+
+    const error = await removeAuthenticator('a1').catch(error => error)
+    const frozen = frozenChanges(error)
+
+    expect(frozen?.skip).toEqual(['passkey'])
+
+    const proof = await proveWithKey(frozen!.skip[0], { action: 'remove', target: 'a1' })
+    await removeAuthenticator('a1', undefined, { proof })
+
+    expect(requests.map(request => `${request.method} ${request.url}`)).toEqual([
+      'DELETE /user/authenticators/a1',
+      'POST /user/authenticators/passkey/proof-options',
+      'DELETE /user/authenticators/a1',
+    ])
+    expect(requests[1].body).toEqual({ action: 'remove', target: 'a1' })
+    expect(calls[0].options.publicKey.allowCredentials[0].id).toEqual(bytes(4, 5))
+    expect(requests[2].body.proof.factor).toBe('passkey')
+    expect(requests[2].body.proof.credential.id).toBe('key-1')
+  })
+
+  test('only finds a freeze in a refusal for one', async () => {
+    answers.push({ status: 422, body: { message: 'Enter your password', errors: { password: ['Enter your password'] } } })
+
+    expect(frozenChanges(await removeAuthenticator('a1').catch(error => error))).toBeNull()
+    expect(frozenChanges(new Error('offline'))).toBeNull()
+  })
+
+  test('sends the proof for new recovery codes with the beginning only', async () => {
+    answers.push({ status: 200, body: { factor: 'recovery', enrollment: { codes: ['a'] } } }, { status: 200, body: { authenticator: { id: 'r1' } } })
+
+    await enroll('recovery', { proof: { factor: 'passkey', credential: { id: 'key-1' } } })
+
+    expect(requests[0].body.proof.factor).toBe('passkey')
+    expect(requests[1].body).toEqual({})
   })
 
   test('renames an authenticator and makes one the default', async () => {
