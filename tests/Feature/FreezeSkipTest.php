@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Keyring\Changes\AuthenticatorChanges;
@@ -19,6 +20,9 @@ use Keyring\Login\Attempt;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SignInChange;
+use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
+use Keyring\Notifications\PasswordChanged as PasswordChangedNotice;
+use Keyring\Notifications\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Keyring\Sessions\Sessions;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
@@ -453,6 +457,69 @@ describe('with an authenticator app', function () {
 
         expect(fn () => removeWithProof($this->other, ['factor' => 'totp', 'code' => '000000']))->toThrow(RuntimeException::class, 'Down')
             ->and(fn () => removeWithProof($this->other, ['factor' => 'totp', 'code' => '000000']))->toThrow(RuntimeException::class, 'Down');
+    });
+});
+
+describe('the emails about a new sign-in method or new codes', function () {
+    beforeEach(function () {
+        Notification::fake();
+        sendNotifications(['authenticator_added', 'recovery_codes_generated']);
+        $this->actingAs($this->user)->verifiedWith($this->totp);
+        $this->passkey->delete();
+        $this->codes->delete();
+    });
+
+    it('link to the app\'s page for sign-in methods, from APP_URL, and say what to do', function () {
+        config(['keyring.authenticators_url' => '/settings/security', 'app.url' => 'https://app.example']);
+
+        $this->withHeader('Host', 'evil.example')->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+        $key = new VirtualAuthenticator;
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
+
+        $added = Notification::sent($this->user, AuthenticatorAddedNotice::class)->sole();
+        $codes = Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole();
+
+        expect($added->url)->toBe('https://app.example/settings/security')
+            ->and($codes->url)->toBe('https://app.example/settings/security');
+
+        $mail = renderedMail($added->toMail($this->user));
+        expect($mail['html'])->toContain('href="https://app.example/settings/security"')
+            ->and($mail['text'])->toContain('Review your sign-in methods')
+            ->toContain('If you didn\'t add it, someone else may be signed in to your account. Remove it, sign out of your account everywhere, and change your password straight away.')
+            ->not->toContain('check your sign-in methods straight away');
+
+        $mail = renderedMail($codes->toMail($this->user));
+        expect($mail['html'])->toContain('href="https://app.example/settings/security"')
+            ->and($mail['text'])->toContain('If you didn\'t make them, someone else may be signed in to your account. Sign out of your account everywhere, change your password, and remove any sign-in method you don\'t recognise straight away.');
+    });
+
+    it('keep a full URL as it is', function () {
+        config(['keyring.authenticators_url' => 'https://account.example/security']);
+
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        expect(Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole()->url)->toBe('https://account.example/security');
+    });
+
+    it('have no link without the page, and still say what to do', function () {
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
+
+        $codes = Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole();
+        $mail = renderedMail($codes->toMail($this->user));
+
+        expect($codes->url)->toBeNull()
+            ->and($mail['text'])->not->toContain('Review your sign-in methods')
+            ->toContain('If you didn\'t make them');
+    });
+
+    it('leave the other notices\' last line as it was', function () {
+        $mail = renderedMail(new PasswordChangedNotice(when: 'now')->toMail($this->user));
+
+        expect($mail['text'])->toContain('If this wasn\'t you, change your password and check your sign-in methods straight away.');
     });
 });
 

@@ -45,6 +45,7 @@
         },
         "enrollment_url": null,
         "enrollment_except": [],
+        "authenticators_url": null,
         "password_change_url": null,
         "support_contact": null,
         "devices": {

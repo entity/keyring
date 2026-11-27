@@ -202,6 +202,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Sign-In Methods Page
+    |--------------------------------------------------------------------------
+    |
+    | Your page where users see and remove their sign-in methods. The emails
+    | about a new sign-in method and new recovery codes link to it, so the
+    | owner can remove one they didn't add. A path is put after APP_URL (or
+    | Keyring::linkRootUsing()). Null leaves the link out.
+    |
+    */
+
+    'authenticators_url' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Password Change Page
     |--------------------------------------------------------------------------
     |

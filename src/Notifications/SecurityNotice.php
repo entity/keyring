@@ -76,6 +76,15 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
     }
 
     /**
+     * What to do if it wasn't the user, the email's last word before who to
+     * contact.
+     */
+    public function ifNotYou(): string
+    {
+        return __('If this wasn\'t you, change your password and check your sign-in methods straight away.');
+    }
+
+    /**
      * The notifiable is a bare address, not your user, for the copies of an
      * email change sent to the address the account no longer has.
      *
@@ -108,7 +117,7 @@ abstract class SecurityNotice extends Notification implements ShouldQueueAfterCo
             $message->action($this->action(), $this->url);
         }
 
-        $message->line(__('If this wasn\'t you, change your password and check your sign-in methods straight away.'));
+        $message->line($this->ifNotYou());
 
         return $this->contact === null
             ? $message
