@@ -288,7 +288,7 @@ In Blade:
 
 An impersonation ends by itself `impersonation.lifetime` after it started, an hour by default. It's a [duration](configuration.md#durations), and never longer than `sessions.absolute`. On the next request after that, the [session middleware](devices-and-sessions.md#the-session-middleware) ends it and goes back to the impersonator's session, as stopping does.
 
-Left unused for `sessions.idle`, it ends sooner. The impersonator's own session has then gone unused as long, so unless it ticked "remember me", which gives it `sessions.remember_idle`, it has idled out too, and the browser is signed out. A page visit is sent to `impersonation.return_to` with the `impersonation-ended` status. An Inertia visit is told to load that page in full, and a JSON request gets a `409` with `{"status": "impersonation-ended", "message": "...", "redirect": "..."}`, since what it asked for was the user's.
+Left unused for `sessions.idle`, it ends sooner. The impersonator's own session has then gone unused as long, so unless it ticked "remember me", which gives it `sessions.remember_idle`, it has idled out too, and the browser is signed out like any other [ended session](devices-and-sessions.md#the-session-middleware). When it does go back, a page visit is sent to `impersonation.return_to` with the `impersonation-ended` status. An Inertia visit is told to load that page in full, and a JSON request gets a `409` with `{"status": "impersonation-ended", "message": "...", "redirect": "..."}`, since what it asked for was the user's.
 
 ## The Sessions List
 
