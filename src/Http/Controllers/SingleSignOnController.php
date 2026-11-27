@@ -19,6 +19,7 @@ use Keyring\Enums\SsoFailure;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\ProviderIdentityAccepted;
+use Keyring\Exceptions\PasswordRequired;
 use Keyring\Exceptions\SsoFailed;
 use Keyring\Factors\SingleSignOn;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
@@ -380,8 +381,17 @@ class SingleSignOnController
             return $this->failed($request, $return, ['provider' => __('keyring::keyring.enrollment_expired')]); // @codeCoverageIgnore
         }
 
+        // The password, where linking takes it, was checked when the link
+        // began, as for any other sign-in method (see
+        // AuthenticatorChanges::needsPassword()).
         try {
-            $this->changes->add($user, $factor, $authenticator, $request);
+            $this->changes->add($user, $factor, $authenticator, $request, passwordConfirmed: $enrollment->state(AuthenticatorController::PASSWORD_CONFIRMED) === true);
+        } catch (PasswordRequired $e) {
+            // The account lost its established second factor since the link
+            // began without one. Begin again, with the password.
+            $this->enrollments->forget($factor->key());
+
+            return $this->failed($request, $return, $e->errors(), $e);
             // @codeCoverageIgnoreStart
         } catch (UniqueConstraintViolationException) {
             // Only when two links of the same account race each other: the

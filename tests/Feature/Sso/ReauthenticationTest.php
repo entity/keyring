@@ -296,7 +296,7 @@ describe('linking', function () {
         $idp = $provider === 'google' ? $this->google : $this->github;
         $idp->signIn(['sub' => '42', 'id' => 42])->signedInAt(now()->subDay());
 
-        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => $provider])->assertOk()->json('enrollment.url');
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => $provider, 'password' => 'password'])->assertOk()->json('enrollment.url');
         $this->get($idp->approve($url))->assertSessionHas('status', 'authenticator-added');
 
         $this->travel(5)->minutes();
@@ -642,8 +642,9 @@ describe('a link at a provider that can\'t be asked for a new sign in', function
     });
 
     it('meets a fresh verification with a second factor, each proved on the confirm page', function () {
-        githubLink($this->user);
-        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        // Established, so it's asked for: a newer link wouldn't be.
+        githubLink($this->user)->forceFill(['created_at' => now()->subDays(8)])->save();
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         signedInLongAgo($this->user);
 
         $this->get('/settings/danger')->assertRedirect(route('keyring.confirm.challenge'));
@@ -756,7 +757,7 @@ describe('a link whose sign ins are never fresh', function () {
     it('gets a lapsed AAL2 back with a round trip to the provider and the second factor, as signing in again would', function () {
         $this->freezeSecond();
         $link = githubLink($this->user);
-        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
 
         signInThrough($this->github, 'github');
         $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
@@ -860,7 +861,7 @@ describe('a link whose sign ins are never fresh', function () {
     it('asks for the level and the fresh verification in turn when a confirm can\'t give both at once', function () {
         $this->freezeSecond();
         githubLink($this->user);
-        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
 
         signInThrough($this->github, 'github');
         $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');
@@ -911,7 +912,7 @@ describe('a link whose sign ins are never fresh', function () {
         $this->user->forceFill(['password' => 'password'])->saveQuietly();
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subMinutes(14));
 
-        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'github'])->assertOk()->json('enrollment.url');
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'github', 'password' => 'password'])->assertOk()->json('enrollment.url');
         $this->get($this->github->approve($url))->assertSessionHas('status', 'authenticator-added');
 
         $this->travel(5)->minutes();
@@ -954,9 +955,9 @@ describe('a link whose sign ins are never fresh', function () {
         // The password signs them in fresh, so they can add a method and
         // link Google again.
         $this->post(route('login.store'), ['email' => 'taylor@example.com', 'password' => 'a long new passphrase'])->assertRedirect('/dashboard');
-        $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'a long new passphrase'])->assertOk();
 
-        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google'])->assertOk()->json('enrollment.url');
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google', 'password' => 'a long new passphrase'])->assertOk()->json('enrollment.url');
         $this->get($this->google->approve($url))->assertSessionHas('status', 'authenticator-added');
         expect($this->user->keyring->refresh()->of('sso'))->toHaveCount(1);
     });
@@ -1023,7 +1024,7 @@ describe('providers configured after the routes', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now());
 
         expect(Route::has('keyring.sso.callback'))->toBeFalse();
-        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google'])->assertJsonValidationErrors('provider');
+        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google', 'password' => 'password'])->assertJsonValidationErrors('provider');
     });
 
     it('offers no link on the confirm page', function () {

@@ -645,6 +645,9 @@ it('leaves no link from a session a reset or "this wasn\'t me" signs out while t
 it('removes a link saved between a reset\'s or "this wasn\'t me"\'s first look and its sign-out', function (string $undo) {
     useRaceFactors(SingleSignOn::class);
     $user = taylor();
+    // So the session links without the password, which the reset has
+    // already replaced by then.
+    Authenticator::factory()->totp()->established()->for($user, 'authenticatable')->create();
     registeredSessionFor($user, 'intruder');
     $older = Authenticator::factory()->sso(subject: 'linked a moment earlier')->for($user, 'authenticatable')->create();
 

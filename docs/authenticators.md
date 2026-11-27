@@ -114,9 +114,11 @@ Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a
 
 So adding a second factor (an authenticator app, a passkey, a security key, or a factor of your own) takes the current password, typed for that enrollment, while the account has no [established](#established-authenticators) second factor. That's an account with only a password, or one whose second factors are all from the last 7 days, since a copy of the session could have added the first of those too. Recovery codes and an emailed code aren't second factors, so they never need it.
 
+Linking an account at an [identity provider](sso.md#linking-and-unlinking) takes it on the same terms. A link is never a second factor, but it signs in without the password, so a copy of the session could otherwise link an account of its own and keep signing in after the session ends. Beside an established second factor, a sign in with the link is still asked for that factor, so a copy of the session gains nothing it didn't have and the password isn't needed. A link never counts as the established second factor itself.
+
 Send it as `password` when beginning. A recent sign in or step-up doesn't count in its place, because whoever copied the session has those too. A missing password is a `422` on `password` (`keyring::keyring.password_to_add_factor`). A wrong one is a `422` on `password` too (`validation.current_password`). It counts against the password's rate limits, as a step-up's would, so too many get a `429`, with `keyring::keyring.locked` once it reaches the cap on failures in a row, which locks password sign in as it would at the login form and dispatches `AccountLocked`. It dispatches `FactorFailed` for the password, and `EnrollmentRefused` with the reason `password`.
 
-The password goes with the beginning only, and counts for that one enrollment. The confirm checks again, under the same lock as the freeze. If the account lost its established second factor in between, the confirm is refused on `password` and the enrollment is spent, so the user begins again with the password.
+The password goes with the beginning only, and counts for that one enrollment. The confirm checks again, under the same lock as the freeze. If the account lost its established second factor in between, the confirm is refused on `password` and the enrollment is spent, so the user begins again with the password. For a link, that check is at the provider's callback, which goes back to the page the link began on with the error on `password`.
 
 A user [`keyring.enrolled`](policies.md#requiring-a-second-factor) sends to add their first factor straight after registering types their password again for it.
 
@@ -210,16 +212,16 @@ Removing the user's last second factor (the last one beyond recovery codes, emai
 
 ## Frozen Sign-In Methods
 
-Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a stolen copy of a session that has just signed in can add a sign-in method of its own. Without anything more, it could then remove the owner's authenticator app, or replace their recovery codes, and the owner couldn't get back in. A password reset leaves sign-in methods alone.
+Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a stolen copy of a session that has just signed in can add a sign-in method of its own. Without anything more, it could then remove the owner's authenticator app, or replace their recovery codes, and the owner couldn't get back in. A password reset leaves second factors alone.
 
 So Keyring freezes an account's sign-in methods for a while, as some large providers do. The account is frozen while either of these is true:
 
-- It has an authenticator that isn't [established](#established-authenticators) yet. That means one added in the last 7 days.
+- It has an authenticator that isn't [established](#established-authenticators) yet. That means one added in the last 7 days, a newly linked [identity provider](sso.md#linking-and-unlinking) included.
 - In the last 7 days, it removed an established authenticator, replaced one, or replaced recovery codes that had codes left.
 
 While it's frozen, these are refused:
 
-- Removing an established authenticator.
+- Removing an established authenticator, which includes unlinking an established identity provider.
 - Renaming an established authenticator.
 - Confirming a factor that allows only one per user, when that replaces an established one. For `recovery`, that's replacing an established set that has codes left. That's the same for a factor of your own whose `multiple()` is `false`. Beginning is refused too, so the user isn't shown codes that can't be saved.
 
@@ -227,7 +229,7 @@ The rest still works. The user can add sign-in methods (with [the password](#the
 
 A change that goes through and takes something established freezes the account for 7 days from then. That's removing an established authenticator, replacing one, or replacing an established set of recovery codes that had codes left.
 
-[Undoing an email change](protected-changes.md#reverting) isn't subject to the freeze. It's started from a link sent to the old address, never from the session, and it signs every session out. What it removes are sign-in methods a session could have added, so it doesn't start the freeze over either.
+[Undoing an email change](protected-changes.md#reverting) isn't subject to the freeze. It's started from a link sent to the old address, never from the session, and it signs every session out. What it removes are sign-in methods a session could have added, so it doesn't start the freeze over either. Nor is the unlinking a [password reset](sso.md#password-resets-and-email-changes) does, which is proved with the address and signs every session out too.
 
 A refusal is a validation error on `authenticator`. Its message says how long is left, such as `keyring::keyring.frozen_new_authenticator` with "another 3 days". JSON gets a `422` with the usual `message` and `errors`, plus `frozen`. It holds the `reason`, `new-authenticator` or `recent-change`, `until`, an ISO 8601 time, and `skip`. `skip` lists the factors that could make this change now, by key, as the next section explains. It's empty when none can:
 

@@ -284,16 +284,16 @@ When the provider sends the user back, the sign in goes on as a password sign in
 
 ## Linking and Unlinking
 
-A user links an account at a provider from your settings page. It's an enrollment, like adding a passkey, so it needs [`Features::manageAuthenticators()`](authenticators.md), a [fresh verification](step-up.md#fresh-verification) (`changes_middleware`), and [a verified address](authenticators.md#who-may-enroll). The browser package's `linkProvider()` begins the enrollment and sends the browser to the provider:
+A user links an account at a provider from your settings page. It's an enrollment, like adding a passkey, so it needs [`Features::manageAuthenticators()`](authenticators.md), a [fresh verification](step-up.md#fresh-verification) (`changes_middleware`), and [a verified address](authenticators.md#who-may-enroll). It also takes the current password, sent as `password`, while the account has a password and no [established](authenticators.md#established-authenticators) second factor, as [any other sign-in method](authenticators.md#the-password-for-a-first-second-factor) does: a link signs in without the password, so a copy of the session that links an account of its own could otherwise keep signing in after the session ends. Beside an established second factor, a sign in with the link is still asked for it, so the password isn't needed then. The browser package's `linkProvider()` begins the enrollment and sends the browser to the provider:
 
 ```vue
 <script setup lang="ts">
 import { KeyringRequestError, linkProvider, removeAuthenticator } from '@keyringjs/keyring'
 import { router } from '@inertiajs/vue3'
 
-async function link(provider: string) {
+async function link(provider: string, password?: string) {
   try {
-    await linkProvider(provider)
+    await linkProvider(provider, { password })
   } catch (error) {
     if (error instanceof KeyringRequestError && error.status === 423) {
       return router.visit(error.data.redirect)
@@ -305,7 +305,7 @@ async function link(provider: string) {
 </script>
 ```
 
-Without the package, post the provider's name to `POST /user/authenticators/sso` as JSON. The answer's `enrollment` holds the `provider` and the `url` to send the browser to, which has to be a real navigation (`location.assign(url)`), not a `fetch`:
+Without the package, post the provider's name, and the `password` where it's needed, to `POST /user/authenticators/sso` as JSON. The answer's `enrollment` holds the `provider` and the `url` to send the browser to, which has to be a real navigation (`location.assign(url)`), not a `fetch`:
 
 ```json
 {
@@ -315,12 +315,13 @@ Without the package, post the provider's name to `POST /user/authenticators/sso`
 }
 ```
 
-A provider that isn't configured is a `422` on `provider`. So is one that can't be reached, with `keyring::keyring.sso_failed`.
+A provider that isn't configured is a `422` on `provider`. So is one that can't be reached, with `keyring::keyring.sso_failed`. A missing or wrong password is a `422` on `password`, as for any other sign-in method.
 
 Once the user has signed in at the provider, it sends them back to the [callback](#the-callback-url), and Keyring finishes the link there. There's no confirm step: the confirm route can't finish this enrollment. The callback checks again that the user who started the link is still the one signed in, that the address is still verified, and that the verification is still fresh. If it isn't fresh any more, the user confirms first and comes back to the callback, which still works while the request is within [`request_for`](#configuration). Then the user goes back to the page they started from, as with any form:
 
 - `authenticator-added`, flashed with the new authenticator in `Keyring::result('authenticator')`. It's named after the provider and the address, such as "Google (taylor@example.com)", and the security email for a new sign-in method goes out.
 - `authenticator-updated` when that account was already linked to this user. Only the address Keyring keeps for it changes, and the provider's name too when the one the link was made with is no longer configured. While its own is, the link keeps it, as it does when it [signs in](#step-up) through another.
+- An error on `password` when the link began without the password beside an established second factor that has gone since. The link is spent, so begin it again with the password.
 - An error on `provider` when the account is linked to someone else (`keyring::keyring.sso_link_failed`, which doesn't say whose), when the callback failed a check, or when a newer link replaced this one (`keyring::keyring.enrollment_expired`).
 - A callback that comes back after `request_for` fails straight away, without asking for a fresh verification first, and goes back to the page the link was started from with `keyring::keyring.enrollment_expired` on `provider`. One whose request this browser doesn't have at all, because it was used already or was never this browser's, fails with `keyring::keyring.sso_failed` on `provider` and goes to `home`, or with a confirm in progress, back to the confirm page with `keyring::keyring.expired` on the username field, as a [confirm](#step-up) is the most likely thing it was. Nothing is logged for either.
 - The `sso-cancelled` status, without an error, when the user said no at the provider.
@@ -335,6 +336,8 @@ To show which providers a user may link, pass `Keyring::factor('sso')->providers
 
 To unlink an account, remove the authenticator with `DELETE /user/authenticators/{authenticator}` (`removeAuthenticator(id)` in the browser package), as you would any other. Removing the user's last way to sign in is refused with `keyring::keyring.last_factor`, so a user whose only way in is one provider has to add another first.
 
+A link counts for the [freeze](authenticators.md#frozen-sign-in-methods) like any other sign-in method. A new one freezes the account for 7 days, so whoever linked it from a copy of the session can't then remove the owner's established methods, and the owner can unlink it whenever they like. Unlinking one the account has had for 7 days is refused while the account is frozen, unless the request [proves an established key](authenticators.md#making-a-change-with-an-established-key). A link can never prove a change itself. Nor does a new link make a policy ask for more: it's one proof of the knowledge category, which an account with a password already has, and on an account without one, only established methods decide what an [`ifEnrolled()`](policies.md#only-when-enrolled) policy asks for.
+
 ## How It Fits With the Rest
 
 ### Second Factors and Policies
@@ -344,6 +347,7 @@ A sign in with a provider is one proof of the knowledge category, the same kind 
 A link is never asked for as a second step, so it doesn't count as a second factor:
 
 - Linking an account doesn't come with recovery codes, and doesn't keep them. A user who removes their last authenticator app loses their recovery codes, whatever they've linked.
+- It never stands in for the established second factor that lets a sign-in method be added [without the password](authenticators.md#the-password-for-a-first-second-factor), and removing the last real second factor beside a link still asks for the password.
 - A link is never made the default, and never offered on the challenge page. `PATCH /user/authenticators/{authenticator}` with `default` is refused for one, with an error on `default`, as it is for recovery codes.
 
 The `Identity` behind each sign in has the provider's `amr`, `acr`, and `authTime`, when it sends them. Keyring reads `authTime` for [step-up](#step-up). It never counts `amr` or `acr` toward anything: an `amr` of `mfa` or `hwk` doesn't make the sign in a second factor, phishing resistant, or any more than the one knowledge proof it is. It does keep them, as the provider's claim, on the session's [`Verification`](step-up.md#reading-what-was-proved) for a sign in, a confirm, or a new link, as `providerAmr` and `providerAcr`, so an app that reports how the user signed in, such as an identity provider of its own built on Keyring, can pass them on. Only so much is kept, so a provider can't fill the session: the first 10 distinct `amr` values of 1 to 64 letters, digits, and `.`, `_`, `:`, `/`, or `-`, and an `acr` of 1 to 255 printable ASCII characters with no spaces. Anything else is left out, and an `acr` that doesn't fit is `null`. The whole `Identity`, with the claims the provider sent (a queued listener's without the ID token's `nonce`, `at_hash`, and `c_hash`), comes with the [`ProviderIdentityAccepted`](#hearing-about-accepted-identities) event.
@@ -610,7 +614,7 @@ it('links a Google account', function () {
     $user = User::factory()->create();
 
     $url = $this->actingAs($user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google'])
+        ->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google', 'password' => 'password'])
         ->json('enrollment.url');
 
     $this->get($google->approve($url))->assertSessionHas('status', 'authenticator-added');

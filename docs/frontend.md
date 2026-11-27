@@ -256,11 +256,11 @@ export default function Login({ providers, status }: LoginProps) {
 
 The browser leaves your site for the provider, so use a plain link. When the sign in doesn't work, the user comes back to the login page with the error on the username field, in the page's `errors`.
 
-To link an account at a provider from a settings page, `linkProvider(name)` begins the `sso` enrollment and sends the browser to the provider. It throws a `KeyringRequestError` before going anywhere when the request fails, such as with the `423` of [step-up](#handling-step-up-in-javascript). When the provider sends the user back, Keyring finishes the link and returns them to the page they started from, with the `authenticator-added` status. A linked account is presented as an `SsoAuthenticator`, with its `provider` and `email` added.
+To link an account at a provider from a settings page, `linkProvider(name, { password })` begins the `sso` enrollment and sends the browser to the provider. The `password` is needed while the account has a password and no [established](authenticators.md#established-authenticators) second factor, as it is for any other sign-in method. It throws a `KeyringRequestError` before going anywhere when the request fails, such as with the `423` of [step-up](#handling-step-up-in-javascript), or a `422` on `password`. When the provider sends the user back, Keyring finishes the link and returns them to the page they started from, with the `authenticator-added` status. A linked account is presented as an `SsoAuthenticator`, with its `provider` and `email` added.
 
 | Function | Does |
 |---|---|
-| `linkProvider(provider)` | `POST /user/authenticators/sso` with `provider`, then `location.assign()` to the provider's URL in the answer. |
+| `linkProvider(provider, { password? })` | `POST /user/authenticators/sso` with `provider`, and `password` when it's given, then `location.assign()` to the provider's URL in the answer. |
 | `signInWithProvider(provider, { remember? })` | Asks `GET /auth/{provider}/redirect` for the provider's URL as JSON, then `location.assign()` to it. A link does the same on a page Laravel serves, so this is for a [frontend on another origin](#frontends-on-another-origin). |
 | `confirmWithProvider(authenticator)` | Asks `GET /confirm/sso/redirect` for the provider's URL for that link as JSON, then `location.assign()` to it, to [confirm a step-up](sso.md#step-up) by signing in there. |
 
@@ -311,8 +311,9 @@ import { beginEnrollment, confirmEnrollment, enroll, linkProvider, makeDefault, 
 const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop', password })
 const { enrollment } = await enroll('recovery')   // enrollment.codes holds the new codes
 
-// An identity provider: the browser goes there, and comes back linked.
-await linkProvider('google')
+// An identity provider: the browser goes there, and comes back linked. It
+// takes the password when adding a second factor would.
+await linkProvider('google', { password })
 
 // Two steps for authenticator apps and email codes.
 const started = await beginEnrollment('totp', { name: 'Work phone', password })
@@ -332,7 +333,7 @@ await removeAuthenticator(added.authenticator.id)
 | `renameAuthenticator(id, name, { proof }?)` | `PATCH` with `name`. Resolves to `{ authenticator }`. Renaming an established authenticator while frozen needs `proof` from `proveWithKey()`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. Recovery codes and identity provider links can't be the default, and throw a `KeyringRequestError` with a `422` on `default`. |
 | `removeAuthenticator(id, password?, { signOutOthers, proof }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. `proof` comes from `proveWithKey()`. |
-| `linkProvider(provider)` | Begins linking an account at an [identity provider](#signing-in-with-an-identity-provider), and sends the browser there. |
+| `linkProvider(provider, { password? })` | Begins linking an account at an [identity provider](#signing-in-with-an-identity-provider), and sends the browser there. |
 | `proveWithKey(factor, { action, target, name? })` | `POST /user/authenticators/{factor}/proof-options`, then the browser's ceremony. Resolves to a `FreezeProof`, `{ factor, credential }`, for the one change it was asked for. See below. |
 | `frozenChanges(error)` | The `FrozenChanges` a request was refused for, or `null` when it wasn't refused as frozen. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |

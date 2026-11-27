@@ -42,8 +42,12 @@ class AuthenticatorController
     /** On an enrollment begun with a proof that let it past the freeze. */
     protected const string PROVED = 'keyring.freeze_skipped';
 
-    /** On an enrollment begun with the password, where adding it takes one. */
-    protected const string PASSWORD_CONFIRMED = 'keyring.password_confirmed';
+    /**
+     * On an enrollment begun with the password, where adding it takes one.
+     * A link to an identity provider, which its callback finishes, reads it
+     * there.
+     */
+    public const string PASSWORD_CONFIRMED = 'keyring.password_confirmed';
 
     // A route keeps its controller once it has made one, and in a worker
     // that serves many requests that can be longer than a request lasts.

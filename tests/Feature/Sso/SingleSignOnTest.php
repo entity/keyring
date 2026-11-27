@@ -13,11 +13,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Facades\Route;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enrollment\EnrollmentStore;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
+use Keyring\Enums\FreezeReason;
 use Keyring\Enums\Purpose;
 use Keyring\Enums\SsoFailure;
 use Keyring\Events\AuthenticatorAdded;
@@ -76,13 +78,14 @@ function signInAtProvider(FakeIdentityProvider $idp, string $provider = 'fake', 
 
 /**
  * Begin linking an account at the provider, as the signed-in user: the
- * provider's authorization URL.
+ * provider's authorization URL. Linking takes the password while the
+ * account has no established second factor, so it's sent along.
  *
  * @param  array<string, string>  $headers
  */
 function beginLink(string $provider = 'fake', array $headers = []): string
 {
-    return test()->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => $provider], $headers)
+    return test()->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => $provider, 'password' => 'password'], $headers)
         ->assertOk()
         ->assertJsonPath('factor', 'sso')
         ->assertJsonPath('enrollment.provider', $provider)
@@ -847,14 +850,14 @@ describe('linking', function () {
     });
 
     it('needs a provider that is configured', function () {
-        $this->postJson(route('keyring.authenticators.store', 'sso'))->assertJsonValidationErrors('provider');
-        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'nope'])->assertJsonValidationErrors('provider');
+        $this->postJson(route('keyring.authenticators.store', 'sso'), ['password' => 'password'])->assertJsonValidationErrors('provider');
+        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'nope', 'password' => 'password'])->assertJsonValidationErrors('provider');
     });
 
     it('says when the provider cannot be reached to start', function () {
         $this->idp->down();
 
-        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])
+        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake', 'password' => 'password'])
             ->assertJsonValidationErrors(['provider' => __('keyring::keyring.sso_failed', ['provider' => 'Fake'])]);
     });
 
@@ -868,6 +871,107 @@ describe('linking', function () {
         $this->get($this->idp->signIn(['sub' => 'work'])->approve(beginLink()))->assertSessionHas('status', 'authenticator-added');
 
         expect($this->user->keyring->refresh()->of('sso'))->toHaveCount(2);
+    });
+});
+
+// Whoever holds a copy of the session can link an account of their own,
+// which signs in without the password. So linking takes the password, as
+// any other sign-in method does, while the account has no established
+// second factor that a sign in with the link would still be asked for.
+describe('linking from a session', function () {
+    beforeEach(function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+    });
+
+    it('takes the password, typed when it begins, while the account has no established second factor', function () {
+        Event::fake([EnrollmentRefused::class]);
+
+        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])
+            ->assertJsonValidationErrors(['password' => __('keyring::keyring.password_to_add_factor')]);
+        $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake', 'password' => 'wrong'])
+            ->assertJsonValidationErrors(['password' => __('validation.current_password')]);
+
+        Event::assertDispatchedTimes(EnrollmentRefused::class, 2);
+        Event::assertDispatched(EnrollmentRefused::class, fn (EnrollmentRefused $event) => $event->factor === 'sso' && $event->reason === 'password');
+
+        $this->get($this->idp->approve(beginLink()))->assertSessionHas('status', 'authenticator-added');
+        expect($this->user->keyring->refresh()->of('sso'))->toHaveCount(1);
+    });
+
+    it('doesn\'t take it beside an established second factor, or without a password to type', function (string $account) {
+        match ($account) {
+            'established app' => $this->verifiedWith(Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create()),
+            'no password' => $this->user->forceFill(['password' => null])->saveQuietly(),
+        };
+
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])->assertOk()->json('enrollment.url');
+
+        $this->get($this->idp->approve($url))->assertSessionHas('status', 'authenticator-added');
+    })->with(['established app', 'no password']);
+
+    it('refuses the link when the account lost its established second factor since it began, and spends it', function () {
+        Event::fake([EnrollmentRefused::class, AuthenticatorAdded::class]);
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
+        $this->verifiedWith($totp);
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])->assertOk()->json('enrollment.url');
+        $totp->delete();
+
+        $this->get($this->idp->approve($url))->assertRedirect('http://localhost')->assertSessionHasErrors(['password' => __('keyring::keyring.password_to_add_factor')]);
+
+        expect($this->user->keyring->refresh()->of('sso'))->toBeEmpty()
+            ->and(session()->has('keyring.enrollment.sso'))->toBeFalse();
+        Event::assertDispatched(EnrollmentRefused::class, fn (EnrollmentRefused $event) => $event->reason === 'password');
+        Event::assertNotDispatched(AuthenticatorAdded::class);
+    });
+
+    it('freezes the account, so the owner\'s established methods stay until the link goes', function () {
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
+        $this->verifiedWith($totp);
+
+        $this->get($this->idp->approve(beginLink()))->assertSessionHas('status', 'authenticator-added');
+
+        expect(app(AuthenticatorChanges::class)->frozen($this->user))->reason->toBe(FreezeReason::NewAuthenticator);
+        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id))->assertUnprocessable()->assertJsonPath('frozen.reason', 'new-authenticator');
+
+        // The owner can always unlink it, and with it gone, nothing's frozen.
+        $link = $this->user->keyring->refresh()->of('sso')->sole();
+        $this->deleteJson(route('keyring.authenticators.destroy', $link->id))->assertOk();
+
+        expect($totp->fresh())->not->toBeNull()
+            ->and(app(AuthenticatorChanges::class)->frozen($this->user))->toBeNull();
+    });
+
+    it('never makes a sign in ask for more', function () {
+        $this->get($this->idp->approve(beginLink()))->assertSessionHas('status', 'authenticator-added');
+        Auth::logout();
+        session()->flush();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
+        expect($this->user->keyring->refresh()->reachable(Keyring::policy($this->user, Attempt::start(Purpose::Login, $this->user))))->factors->toBe(1);
+    });
+});
+
+// It's never asked for as a second step, so the password checks that go by
+// whether the account has a second factor never count it as one.
+describe('a link beside the password', function () {
+    beforeEach(function () {
+        $this->link = Authenticator::factory()->sso()->established()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+    });
+
+    it('still takes the password to add the first second factor', function () {
+        $this->postJson(route('keyring.authenticators.store', 'totp'))
+            ->assertJsonValidationErrors(['password' => __('keyring::keyring.password_to_add_factor')]);
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
+    });
+
+    it('still takes the password to remove the last second factor, and unlinks without it', function () {
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
+        $this->verifiedWith($totp);
+
+        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id))
+            ->assertJsonValidationErrors(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
+        $this->deleteJson(route('keyring.authenticators.destroy', $this->link->id))->assertOk();
     });
 });
 
@@ -922,7 +1026,7 @@ describe('unlinking', function () {
     it('makes the next second factor the default, not the link', function () {
         linkFor($this->user);
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         expect($this->user->keyring->refresh()->default()->factor)->toBe('totp')

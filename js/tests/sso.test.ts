@@ -77,6 +77,14 @@ describe('linking a provider', () => {
     expect(visited).toEqual(['https://accounts.google.com/o/oauth2/v2/auth?state=abc'])
   })
 
+  test('sends the password where it\'s given', async () => {
+    answer = () => Response.json({ status: 'enrollment-started', factor: 'sso', enrollment: { provider: 'google', url: 'https://accounts.google.com/o/oauth2/v2/auth?state=abc' } })
+
+    await linkProvider('google', { password: 'hunter2' })
+
+    expect(requests).toEqual([{ url: '/user/authenticators/sso', method: 'POST', body: { provider: 'google', password: 'hunter2' } }])
+  })
+
   test('goes nowhere until the user has confirmed it\'s them', async () => {
     answer = () => Response.json({ status: 'confirm', page: 'confirm', redirect: '/confirm' }, { status: 423 })
 
