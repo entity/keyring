@@ -6,10 +6,12 @@ namespace Keyring\Impersonation;
 
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Session\CookieSessionHandler;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Route;
 use Keyring\Enums\ImpersonationEndReason;
 use Keyring\Enums\SessionEndReason;
@@ -37,13 +39,16 @@ use Symfony\Component\HttpFoundation\Response;
  * - The impersonator's session is parked, not ended: its record stays good
  *   (kept from idling out while they're active), and their "remember me"
  *   cookies are left as they are. What it proved is kept aside in the
- *   session, where nothing reads it until they come back.
+ *   session, where nothing reads it until they come back. Its levels lapse
+ *   on their own clocks as they would in that session: a request after a
+ *   level's idle limit lapses it.
  * - Coming back takes that record still being good, the impersonator still
- *   being someone who may sign in and impersonate the user, and the
- *   browser's session still being the impersonation it started. Otherwise
- *   the browser is signed out, and the parked record ends with it. They
- *   come back at the level they had, but nothing counts as fresh: a page
- *   of the user's could have sent them back.
+ *   being someone who may sign in, and the browser's session still being
+ *   the impersonation it started. Otherwise the browser is signed out, and
+ *   the parked record ends with it. An impersonator who may no longer
+ *   impersonate the user ends it too, and goes back. They come back at the
+ *   level they had, but nothing counts as fresh: a page of the user's could
+ *   have sent them back.
  *
  * The user's own sign-in events don't fire, so nothing that listens for a
  * sign in (new device emails, risk, "last signed in") takes it for one.
@@ -109,7 +114,7 @@ class Impersonation
             'remembered' => $session->get(Sessions::REMEMBERED) === true,
             'started_at' => $now,
             'expires_at' => $until,
-            'parked' => array_filter(array_combine($this->parkedKeys(), array_map($session->get(...), $this->parkedKeys())), fn (mixed $value) => $value !== null),
+            'parked' => $this->pick($session),
         ];
 
         $record = $this->sessions->startImpersonation($request, $user, $impersonator, $own, $until);
@@ -144,11 +149,13 @@ class Impersonation
      * counting as fresh. Otherwise, or for a reason that doesn't, the
      * browser is signed out and the impersonator's session ends too.
      *
-     * Only the impersonation this browser started goes back: the session
-     * still on the impersonated record that parked the impersonator's, or
-     * on no record at all, and the guard still signed in as its user.
-     * Anything else (the user gone, someone else signed in on the session)
-     * signs out, as Lost: what's parked isn't this session's to go back to.
+     * Only the impersonation this browser started goes back: the guard
+     * still signed in as the user it parked the impersonator's session for,
+     * and the session still on the impersonated record that parked it, or
+     * on no record at all. Anything else (the user gone, someone else
+     * signed in on the session) signs out, as Lost: what's parked isn't
+     * this session's to go back to. With nothing parked, the impersonated
+     * record still names the impersonator and their session, which ends.
      *
      * The reason it ended for is the one given, unless it couldn't go back:
      * then ImpersonatorSessionEnded or Lost. It went back when the reason
@@ -160,9 +167,15 @@ class Impersonation
         $current = $this->sessions->current($request);
         $user = $this->keyring->guard()->user();
         $target = $this->userFrom($parked, $current);
-        $impersonator = $parked === null ? null : $this->impersonatorFrom($parked);
+        $impersonated = $current?->isImpersonated() === true ? $current : null;
+        $impersonator = match (true) {
+            $parked !== null => $this->impersonatorFrom($parked),
+            default => $impersonated === null ? null : $this->load((string) $impersonated->impersonatorId, $impersonated->impersonatorType),
+        };
+        $own = $parked['session'] ?? $impersonated?->impersonatorSession;
 
         $ours = $parked !== null && $user !== null
+            && (string) $user->getAuthIdentifier() === $parked['user'] && RegisteredSession::typeOf($user) === $parked['user_type']
             && ($current === null || ($current->impersonatorSession === $parked['session'] && $current->belongsTo($user)));
         $back = $ours && $reason->returns() ? $this->returnable($parked, $impersonator) : null;
 
@@ -170,14 +183,14 @@ class Impersonation
             $reason = $ours ? ImpersonationEndReason::ImpersonatorSessionEnded : ImpersonationEndReason::Lost;
         }
 
-        $this->sessions->because(SessionEndReason::ImpersonationEnded, function () use ($current, $parked, $back) {
+        $this->sessions->because(SessionEndReason::ImpersonationEnded, function () use ($current, $own, $back) {
             if ($current !== null) {
                 $this->sessions->registry()->revoke($current->id);
             }
 
             // Nobody is going back to it, so it ends with the browser.
-            if ($back === null && $parked !== null) {
-                $this->sessions->registry()->revoke($parked['session']);
+            if ($back === null && $own !== null) {
+                $this->sessions->registry()->revoke($own);
             }
         });
 
@@ -187,16 +200,16 @@ class Impersonation
             app(SignIn::class)->out($request, onlyThisBrowser: true);
         } else {
             $this->switchTo($request, $back[0]);
-            $this->restore($request, $parked['parked']);
+            $this->restore($request, $this->catchUp($parked['parked'])[0]);
             $this->sessions->rebind($request, $back[1], $parked['remembered']);
 
-            // A cookie session lives in the browser, where regenerating
-            // can't destroy a copy made while impersonating, which would
-            // lead back here again with what was parked. The record moves,
-            // as on a step-up, so the copy's parked record has ended.
-            if ($request->session()->getHandler() instanceof CookieSessionHandler) {
-                $this->sessions->reregister($request);
-            }
+            // A copy of the session from while impersonating would lead
+            // back here again with what was parked: a cookie session's, in
+            // the browser where regenerating can't destroy it, or a request
+            // that overlapped this one and saves the old session after it.
+            // The record moves, as on a step-up, so the copy's parked record
+            // has ended. The browser's "remember me" moves with it.
+            $this->sessions->reregister($request);
         }
 
         if ($impersonator !== null || $target !== null) {
@@ -268,19 +281,19 @@ class Impersonation
      * Note activity on the impersonated session and on the impersonator's,
      * so the one they'll come back to doesn't idle out while they're busy,
      * nor what it proved: the impersonator is using the browser all along.
-     * At most once a minute, as for any session.
+     * The records at most once a minute, as for any session. What it proved
+     * on every request, as their own session would note it, lapsing a level
+     * whose idle limit passed since the last one.
      */
     public function touch(Request $request, RegisteredSession $session, int $now): void
     {
-        if ($now - $session->lastActivityAt < 60) {
-            return;
+        if ($now - $session->lastActivityAt >= 60) {
+            $this->sessions->registry()->update($session->id, ['lastActivityAt' => $now]);
+            $this->sessions->registry()->update((string) $session->impersonatorSession, ['lastActivityAt' => $now]);
         }
 
-        $this->sessions->registry()->update($session->id, ['lastActivityAt' => $now]);
-        $this->sessions->registry()->update((string) $session->impersonatorSession, ['lastActivityAt' => $now]);
-
         if (($parked = $this->parked($request)) !== null) {
-            $parked['parked'][SessionAssurance::ACTIVE] = $now;
+            $parked['parked'] = $this->catchUp($parked['parked'])[0];
 
             $request->session()->put(self::KEY, $parked);
             $request->attributes->set(self::KEY, $parked);
@@ -391,8 +404,9 @@ class Impersonation
 
     /**
      * The impersonator and their session, when the browser can go back to
-     * it: the record is still good and theirs, and they may still sign in,
-     * with no password change they're held for.
+     * it: the record is still good and theirs, they may still sign in, with
+     * no password change they're held for, and, under
+     * sessions.end_on_lapse, the level it signed in at hasn't lapsed.
      *
      * @param  Parked  $parked
      * @return array{0: Authenticatable&Model, 1: RegisteredSession}|null
@@ -403,11 +417,36 @@ class Impersonation
         $now = now()->getTimestamp();
 
         if ($impersonator === null || $own === null || ! $own->isActive($now) || $this->sessions->idledOut($own, $now)
-            || ! $own->belongsTo($impersonator) || ! $this->keyring->allowsSignIn($impersonator) || $this->keyring->requiresPasswordChange($impersonator)) {
+            || ! $own->belongsTo($impersonator) || ! $this->keyring->allowsSignIn($impersonator) || $this->keyring->requiresPasswordChange($impersonator)
+            || $this->catchUp($parked['parked'])[1] !== null) {
             return null;
         }
 
         return [$impersonator, $own];
+    }
+
+    /**
+     * What the impersonator's session parked, noted for a request now, by
+     * the rules their own session goes by (SessionAssurance): a level whose
+     * idle limit passed since the last request has lapsed. With why the
+     * level it signed in at no longer holds, under sessions.end_on_lapse,
+     * which ends it as it would end their own session.
+     *
+     * @param  array<string, mixed>  $parked
+     * @return array{0: array<string, mixed>, 1: 'idle'|'expired'|null}
+     */
+    protected function catchUp(array $parked): array
+    {
+        $session = new Store('keyring-parked', new ArraySessionHandler(0));
+
+        foreach ($parked as $key => $value) {
+            $session->put($key, $value);
+        }
+
+        $assurance = app()->make(SessionAssurance::class, ['session' => $session]);
+        $assurance->touch();
+
+        return [$this->pick($session), $assurance->lapse()];
     }
 
     /**
@@ -497,12 +536,25 @@ class Impersonation
     }
 
     /**
-     * Forget the impersonation, from the session and the request.
+     * Forget the impersonation, from the session and the request. From
+     * request() too, when given a copy of it, like a form request: the
+     * Logout listener reads the note from there, and would end it again.
      */
     protected function forget(Request $request): void
     {
         $request->session()->forget(self::KEY);
         $request->attributes->remove(self::KEY);
+        request()->attributes->remove(self::KEY);
+    }
+
+    /**
+     * What a session holds of what the impersonator's keeps aside.
+     *
+     * @return array<string, mixed>
+     */
+    protected function pick(Session $session): array
+    {
+        return array_filter(array_combine($this->parkedKeys(), array_map($session->get(...), $this->parkedKeys())), fn (mixed $value) => $value !== null);
     }
 
     /**
