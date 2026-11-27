@@ -443,7 +443,7 @@ class Impersonation
             $session->put($key, $value);
         }
 
-        $assurance = app()->make(SessionAssurance::class, ['session' => $session]);
+        $assurance = new SessionAssurance($session, $this->sessions, $this->keyring);
         $assurance->touch();
 
         return [$this->pick($session), $assurance->lapse()];
