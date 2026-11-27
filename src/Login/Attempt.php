@@ -45,6 +45,13 @@ final class Attempt
     /** Whether the user asked not to be asked again on this device. */
     public bool $trustDevice = false;
 
+    /**
+     * How many of the verifications it started with: what the session had
+     * proved before, for a step-up that builds on it. The rest were proved
+     * during the attempt (added()).
+     */
+    public private(set) int $carried = 0;
+
     /** The known device this attempt comes from, null for a new device. */
     public private(set) ?string $deviceId = null;
 
@@ -99,8 +106,20 @@ final class Attempt
         );
 
         $attempt->resolvedUser = $user;
+        $attempt->carried = count($verifications);
 
         return $attempt;
+    }
+
+    /**
+     * The verifications proved during the attempt, without what it started
+     * with.
+     *
+     * @return list<Verification>
+     */
+    public function added(): array
+    {
+        return array_slice($this->verifications, $this->carried);
     }
 
     public function user(): Authenticatable&Model
@@ -168,7 +187,7 @@ final class Attempt
     {
         return $this->requirement === null
             ? new Collection
-            : $this->keyring()->usefulFor($this->requirement, $this->verifications);
+            : $this->keyring()->usefulFor($this->requirement, $this->verifications, $this->purpose);
     }
 
     /**
@@ -230,6 +249,7 @@ final class Attempt
             'risk' => $this->risk?->toArray(),
             'step_up' => $this->stepUp,
             'exhausted' => $this->exhausted,
+            'carried' => $this->carried,
         ];
     }
 
@@ -248,11 +268,12 @@ final class Attempt
     {
         // Queued by 0.2 or earlier, it's the object's own properties, with
         // the user it had looked up. Only the non-private ones are taken,
-        // so user() looks the user up again.
+        // so user() looks the user up again, and one added since keeps its
+        // default.
         $attempt = array_key_exists('user_id', $data) ? self::fromArray($data) : (object) $data;
 
         foreach (new \ReflectionClass(self::class)->getProperties() as $property) {
-            if (! $property->isStatic() && ! $property->isVirtual() && ! $property->isPrivate()) {
+            if (! $property->isStatic() && ! $property->isVirtual() && ! $property->isPrivate() && property_exists($attempt, $property->name)) {
                 $this->{$property->name} = $attempt->{$property->name};
             }
         }
@@ -282,6 +303,7 @@ final class Attempt
         $attempt->risk = isset($data['risk']) ? Risk::fromArray($data['risk']) : null;
         $attempt->stepUp = $data['step_up'] ?? false;
         $attempt->exhausted = $data['exhausted'] ?? false;
+        $attempt->carried = $data['carried'] ?? 0;
 
         return $attempt;
     }

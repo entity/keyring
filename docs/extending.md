@@ -21,7 +21,9 @@ This page lists all of them, along with where each one is explained. The [Recipe
 | How users sign in | `Keyring::factors()`, `Keyring::extend()`, your own `Factor` | [Factors](factors.md) |
 | What they must prove | `Keyring::require()` | [Policies](policies.md) |
 | The steps a verification runs | `Keyring::pipeline()` | [The Pipeline](sign-in-flow.md#the-verification-pipeline) |
-| Signing in from a route of your own, like a social login's callback | `Keyring::attempt()` and a factor that can start a login | [Social Login With Socialite](recipes.md#social-login-with-socialite) |
+| Signing in with Google, Microsoft, GitHub or an OpenID Connect provider | The `SingleSignOn` factor and `sso.providers` | [Single Sign-On](sso.md) |
+| An identity provider Keyring has no driver for, or a change to one it has | `Keyring::sso()->extend()`, your own `IdentityProvider` | [Custom Drivers](sso.md#custom-drivers) |
+| Signing in from a route of your own, like a provider's callback | `Keyring::attempt()` and a factor that can start a login | [Starting a Sign In Yourself](sign-in-flow.md#starting-a-sign-in-yourself) |
 | How a user is found, and how usernames are normalised | `Keyring::findUsersUsing()`, `Keyring::normalizeUsernamesUsing()` | [Finding the User](sign-in-flow.md#finding-the-user) |
 | The attribute users sign in with, and the one holding their address | `username` and `email` | [Guard and Users](configuration.md#guard-and-users) |
 | Creating users, resetting and changing passwords, validating a new address | The published actions in `app/Actions/Keyring` | [Protected Changes](protected-changes.md) |

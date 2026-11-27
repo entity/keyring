@@ -9,6 +9,7 @@
 - [Routes](#routes)
 - [Pages](#pages)
 - [WebAuthn](#webauthn)
+- [Single Sign-On](#single-sign-on)
 - [Account Changes and Enrollment](#account-changes-and-enrollment)
 - [Devices](#devices)
 - [Sessions](#sessions)
@@ -145,6 +146,19 @@ For more, see [Passkeys & Security Keys](passkeys.md#relying-party-and-origins).
 The `attestation_roots` option lists the root certificates that a new key's attestation has to chain to. You may give them as PEM text or as paths to PEM files. Keyring only reads this list for a factor set up with [`requireAttestation()`](passkeys.md#requiring-attestation). That setup refuses every key while the list is empty.
 
 The `algorithms` option lists the signature algorithms that keys may use, in order of preference: `ES256`, `EdDSA`, and `RS256`. `RS256` is off by default. When you turn it on, `minimum_rsa_bits` sets the shortest RSA key that Keyring accepts, which is never under 2048. See [Signature Algorithms](passkeys.md#signature-algorithms) for what turning it on gains you and what it costs.
+
+## Single Sign-On
+
+```php
+'sso' => [
+    'providers' => [],
+    'request_for' => '10m',
+    'cache_for' => '1h',
+    'store' => null,
+],
+```
+
+`providers` lists the identity providers users can sign in with, by name, once the `SingleSignOn` factor is registered. Keyring only registers its `/auth/{provider}` routes when this lists a provider as the app boots. Each one has a `driver` (`oidc`, `google`, `microsoft`, `github`, or one of your own), a `client_id`, and usually a `client_secret`. Its `freshness` (`reauthenticate`, `round_trip`, or `never`) says how much its sign ins and confirms count toward a [fresh verification](step-up.md#fresh-verification). It's `reauthenticate` for `oidc` and `microsoft` and `never` for `google` and `github`, see [Freshness](sso.md#freshness). `request_for` is how long a user sent to a provider has to come back. Providers' discovery documents and signing keys are cached in `store` (`null` for your default store) for `cache_for`. Both are [durations](#durations). See [Single Sign-On](sso.md#configuration) for every provider option.
 
 ## Account Changes and Enrollment
 
@@ -451,7 +465,8 @@ The `Keyring\Facades\Keyring` facade is the entry point for everything you set i
 | `Keyring::unlock($user)` | Lets a locked-out user try again without a password reset. It lifts their risk lock, and clears the limits, locks, and failures in a row on the factors that can start a sign in. `Keyring::unlock($user, 'totp')` clears one factor's instead, such as a second factor that was refused at the cap. See [At the Cap](security.md#at-the-cap). |
 | `Keyring::allowSignInWhen($callback)` | Decides who may be signed in at all, such as accounts that aren't banned. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |
-| `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. See [Emailed Links](security.md#emailed-links). |
+| `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. Identity providers' [callback URL](sso.md#the-callback-url) starts there too. See [Emailed Links](security.md#emailed-links). |
+| `Keyring::sso()` | The identity providers in `sso.providers`. `extend($driver, $resolver)` registers a [driver of your own](sso.md#custom-drivers), and `start()` and `complete()` sign in with a provider [from your own routes](sso.md#signing-up-with-a-provider). |
 | `Keyring::recordIpsUsing($callback)` | What Keyring stores as a request's IP address. See [What's Stored](security-log-and-emails.md#whats-stored). |
 | `Keyring::describeDevicesUsing($callback)` | Names devices your own way, in place of "Firefox on Windows". See [Device Names](devices-and-sessions.md#device-names). |
 | `Keyring::findUsersUsing($callback)` | Finds the user a typed username belongs to, in your own way, for a password sign in. See [Finding the User](sign-in-flow.md#finding-the-user). |

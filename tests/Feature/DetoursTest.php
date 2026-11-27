@@ -33,6 +33,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Notifications\VerificationCode;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\SingleSignOn as SingleSignOnFixture;
 use Keyring\Tests\Fixtures\User;
 
 // Where a user was going when Keyring sent them to enroll or to choose a new
@@ -614,6 +615,21 @@ describe('a saved page with a requirement', function () {
 
         expect(app(Detours::class)->pull($request, Detours::ENROLLMENT))->toBeNull()
             ->and($session->has(Detours::ENROLLMENT))->toBeFalse();
+    });
+
+    it('isn\'t met with a sign-in method the confirm page can\'t ask for, as step-up wouldn\'t take it', function () {
+        Keyring::factors([Password::class, Totp::class, SingleSignOnFixture::class]);
+        $this->user->forceFill(['password' => null])->saveQuietly();
+        $this->withSession([Detours::ENROLLMENT => [...savedFor($this->user), 'requirement' => Requirement::aal1()->toArray()]]);
+
+        // Signing in with it would meet the requirement, but a confirm can't ask for it.
+        expect($this->user->keyring->canMeet(Requirement::aal1()))->toBeTrue()
+            ->and($this->get('/detour/enrollment')->getContent())->toBe('nothing')
+            ->and(session()->has(Detours::ENROLLMENT))->toBeTrue();
+
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        expect($this->get('/detour/enrollment')->getContent())->toBe('http://localhost/invoices/42');
     });
 
     it('isn\'t met with recovery codes', function () {

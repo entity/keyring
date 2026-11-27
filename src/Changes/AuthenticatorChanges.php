@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
@@ -42,7 +43,8 @@ class AuthenticatorChanges
      * the first extra factor comes with recovery codes (as does one added
      * once they've run out), whose plain codes are returned to show once.
      * An emailed code isn't a factor, so it comes with none: there would be
-     * nothing for them to recover.
+     * nothing for them to recover. Nor does a factor that only starts a sign
+     * in, like an identity provider, which is never the default either.
      *
      * With the request it came in, the session that asked has to still be
      * signed in when it's saved: one ended while the request ran (an email
@@ -56,10 +58,14 @@ class AuthenticatorChanges
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
-        $recoverable = array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
+        // One that can only start a sign in, like an identity provider, is
+        // never asked for as a second step: no code would stand in for it,
+        // and it's never the one a challenge offers first.
+        $challengeable = ! $factor instanceof PrimaryFactor || $factor->answersChallenges();
+        $recoverable = $challengeable && array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
         $recovery = ! $isRecovery && $recoverable && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
-        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
+        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $challengeable, $recovery) {
             if (! $factor->multiple()) {
                 $replaced = $keyring->of($factor->key())->each->delete();
 
@@ -69,7 +75,7 @@ class AuthenticatorChanges
                 }
             }
 
-            $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
+            $this->save($user, $authenticator, default: ! $isRecovery && $challengeable && $keyring->default() === null);
 
             if ($recovery !== null) {
                 $keyring->of(RecoveryCodes::KEY)->each->delete();

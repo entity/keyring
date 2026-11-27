@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Keyring\Features;
 use Keyring\KeyringManager;
+use Keyring\Testing\FakeIdentityProvider;
 use Keyring\UserKeyring;
 
 // What apps build on, as the README's "What's Stable" lists it: the config
@@ -20,6 +21,8 @@ use Keyring\UserKeyring;
 // tests/Feature/PublicApiTest.php, commit tests/Fixtures/public-api.json
 // with it, and say so in UPGRADE.md.
 it('keeps the names and defaults apps build on, or says which changed', function () {
+    // Single sign-on's routes are only there with a provider configured.
+    new FakeIdentityProvider()->register();
     withFeatures(Features::all());
 
     // Each method as it would be declared, so a new type, parameter or

@@ -346,7 +346,8 @@ it('serialises an attempt as the same plain data it keeps in the session', funct
  */
 function serialisedByOldVersion(Attempt $attempt): string
 {
-    $properties = (array) $attempt;
+    // 0.2 didn't know how many verifications an attempt started with.
+    $properties = array_diff_key((array) $attempt, ['carried' => true]);
     $private = fn (string $name) => "\0".Attempt::class."\0".$name;
 
     expect(array_keys($properties))->toEqualCanonicalizing([
@@ -409,7 +410,8 @@ it('restores a job queued by 0.2 for an event with an attempt, and looks the use
 
     $event = queuedEvent(Authenticated::class);
 
-    expect($event->attempt->toArray())->toBe($attempt->toArray())
+    // It didn't keep how many verifications the attempt started with.
+    expect($event->attempt->toArray())->toBe([...$attempt->toArray(), 'carried' => 0])
         ->and($event->user->is($user))->toBeTrue()
         ->and($event->attempt->user()->is($user))->toBeTrue()
         ->and($event->attempt->user()->name)->toBe('Taylor Otwell');
@@ -426,7 +428,7 @@ it('restores an attempt serialised by 0.2 with its keyring looked up, and looks 
     $user->update(['name' => 'Taylor Otwell']);
     $copy = unserialize($old);
 
-    expect($copy->toArray())->toBe($attempt->toArray())
+    expect($copy->toArray())->toBe([...$attempt->toArray(), 'carried' => 0])
         ->and($copy->complete)->toBeTrue()
         ->and($copy->user()->is($user))->toBeTrue()
         ->and($copy->user()->name)->toBe('Taylor Otwell')

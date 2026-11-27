@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Request;
 use Illuminate\Mail\Markdown;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Routing\RouteCollection;
@@ -11,9 +12,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Keyring\Enums\SsoFailure;
+use Keyring\Exceptions\SsoFailed;
 use Keyring\Factors\Totp;
 use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
+use Keyring\Sso\Identity;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\Staff;
 use Keyring\Tests\Fixtures\User;
@@ -129,6 +133,15 @@ function withFeatures(array $features): void
 {
     config(['keyring.features' => $features]);
 
+    reloadRoutes();
+}
+
+/**
+ * Register Keyring's routes again, for config that's read once at boot:
+ * the features, and whether any identity provider is configured.
+ */
+function reloadRoutes(): void
+{
     app('router')->setRoutes(new RouteCollection);
     Keyring\Facades\Keyring::routes();
     app('router')->getRoutes()->refreshNameLookups();
@@ -242,4 +255,52 @@ function keptCookies(TestResponse $response): array
         ->mapWithKeys(fn (string $name) => [$name => $response->getCookie($name)?->getValue()])
         ->filter()
         ->all();
+}
+
+const SSO_CALLBACK = 'https://app.test/sso/callback';
+
+/**
+ * Send the user to an identity provider: the authorization URL.
+ *
+ * @param  array<string, mixed>  $data
+ */
+function ssoStart(string $provider = 'fake', string $purpose = 'login', array $data = []): string
+{
+    return Keyring\Facades\Keyring::sso()->start($provider, $purpose, SSO_CALLBACK, $data);
+}
+
+/**
+ * Take the user back from an identity provider's callback URL.
+ */
+function ssoComplete(string $callback, string $provider = 'fake'): Identity
+{
+    return Keyring\Facades\Keyring::sso()->complete(Request::create($callback), $provider);
+}
+
+/**
+ * Why signing in failed, and what it said, or null when it didn't.
+ *
+ * @return array{SsoFailure, string}|null
+ */
+function ssoFailure(Closure $callback): ?array
+{
+    try {
+        $callback();
+    } catch (SsoFailed $e) {
+        return [$e->reason, $e->getMessage()];
+    }
+
+    return null;
+}
+
+/**
+ * The authorization URL's query string.
+ *
+ * @return array<string, mixed>
+ */
+function authorizationQuery(string $url): array
+{
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+    return $query;
 }

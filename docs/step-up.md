@@ -79,7 +79,8 @@ NIST SP 800-63B-4 (Sec. 4.1.2.1) binds a new authenticator at the highest level 
 - A policy the user can't fully meet yet, such as one that asks for a passkey they haven't added, counts as far as they can go, so they can still add it.
 - A policy that asks for more than that is honoured. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about an attempt nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification, and it doesn't slide with activity. Using the app doesn't keep it fresh.
-- Signing in counts as a verification, so a fresh login is also fresh for step-up. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
+- A link at an [identity provider](sso.md#step-up) is offered on the confirm page as its [`freshness`](sso.md#freshness) says, and sends the user back to the provider. With `reauthenticate`, the default for any OpenID Connect provider and Microsoft, it has them sign in again there. With `never`, the default for Google and GitHub, it's only offered toward a level, as a plain round trip that counts as much as signing in with it again would and never as fresh: on a `keyring.fresh` page the user confirms another way, and it's left out of what that asks of them. A user with nothing else is sent to enroll, and their way out is a [password reset](sso.md#users-whose-only-way-in-is-never-fresh). Only a provider you opt into `round_trip` is a plain round trip that proves as much as signing out and in with it again would, which may be nothing more than a session the user still has there.
+- Signing in counts as a verification, so a fresh login is also fresh for step-up. A sign in with an identity provider whose `freshness` is `reauthenticate` counts from when the user last signed in at the provider, as its ID token says (`auth_time`), so one the provider let straight through on an old session isn't fresh, and one without `auth_time` never is. One with a `never` provider is never fresh. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
 
 Keyring uses `keyring.fresh:15m` on its own sensitive routes. It applies this through the `changes_middleware` config option, on top of `auth:{guard}`. Those routes cover managing authenticators, ending sessions, signing out devices, changing the password, and starting an email change.
 
@@ -95,7 +96,7 @@ It returns `null` when the user has already proved what's asked, and the request
 
 - `$level` works like `keyring:{level}`. The session must have reached that [assurance level](policies.md#assurance-levels), and the confirm asks only for what's missing. The `device-bound` and `phishing-resistant` names are only for the middleware.
 - `$since` works like `keyring.fresh`. The user must have verified, at or after that moment, the strongest combination their account can give. A proof made in the same second as the moment counts. See [Fresh Verification](#fresh-verification) for what that means. A moment on its own doesn't look at whether a level lapsed: a password and an authenticator app proved 90 minutes ago meet a moment a day ago, though AAL2 lapsed after an hour idle. Pass `$level` too when the level the session holds now matters.
-- With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier. A recovery code is taken beside another factor whenever the level alone would take one, and never in place of the key AAL3 asks for.
+- With both, the session must have reached the level, and the user must have verified since the moment. The confirm asks for both at once, and it doesn't build on what the session proved earlier. A recovery code is taken beside another factor whenever the level alone would take one, and never in place of the key AAL3 asks for. When the account can't freshly prove the level, so that one confirm couldn't give both, they're asked in turn instead: first the level, as `$level` alone asks it, building on what still counts, then the fresh verification, as `$since` alone asks it. A user with a [`never`](sso.md#freshness) GitHub link and an authenticator app, and no password, can reach AAL2 with a round trip to GitHub and the app, but GitHub can't be fresh, and the app alone isn't AAL2. They confirm the level, and the app they proved for it meets the moment, so they're asked once. Without the fallback they'd be sent to enroll. `meets()` answers the same way.
 
 When nobody is signed in to Keyring's guard, `unlessMet` throws an `AuthenticationException`, which Laravel answers by sending the browser to sign in. It throws an `InvalidArgumentException` when it's asked for nothing (no level and no moment), and for `Assurance::None`. It also throws for a moment more than `StepUp::CLOCK_LEEWAY` (5) seconds in the future. Nothing could meet that moment yet, so the user would confirm and be sent back to confirm again. A moment less than that ahead is taken as now, since another of your servers may have stored it with its clock a little ahead.
 
@@ -249,13 +250,16 @@ Each item is a `Keyring\Login\Verification`, with these public properties:
 | `authenticator` | `?string` | The ID of the user's authenticator (the stored sign-in method, not a session record), or `null` for a factor with no stored authenticator, such as the password. |
 | `categories` | `list<Category>` | What it proved, as `Keyring\Enums\Category` cases: `Knowledge`, `Possession`, `Inherence`, or `Address` for an emailed code, which isn't an authentication factor. |
 | `phishingResistant` | `bool` | Whether it was a passkey or security key. |
-| `at` | `int` | When it was verified, as a Unix timestamp. |
+| `at` | `int` | When it was verified, as a Unix timestamp. Assurance levels and their timeouts go by this. |
 | `deviceBound` | `bool` | Whether the key can't leave its device. |
 | `attested` | `bool` | Whether the key was added with a verified attestation. |
+| `authenticatedAt` | `?int` | When the user really proved it, if earlier than `at`, as a Unix timestamp. Only a sign in with an [identity provider](sso.md) that says, with `auth_time`, that the user signed in there earlier sets it. `Verification::UNKNOWN` (`0`) means the provider should have said when and didn't: treat it as unknown, and never as recent. `null` when it's the same as `at`. |
+
+`provedAt()` returns when the user last proved it: `authenticatedAt`, or `at` when that's `null` or earlier. It returns `Verification::UNKNOWN` when that's unknown. Freshness (`keyring.fresh`, and `StepUp` with a moment) goes by `provedAt()`.
 
 To ask whether a set of verifications meets a requirement, use `Requirement::isMetBy(array $verifications): bool`. `Requirement::factors(2)` counts distinct authentication categories, so two codes of the same kind aren't multi-factor. `Assurance::of(array $verifications)` returns the highest level a set of verifications reaches.
 
-Report `auth_time` as the oldest `at` among the verifications you build `amr` from, not the newest. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
+Report `auth_time` as the oldest `provedAt()` among the verifications you build `amr` from, not the newest, and leave it out when that's `Verification::UNKNOWN`: a provider didn't say when the user signed in there. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
 
 When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. `level()` and `countingToward()` take a Unix timestamp for that. They count only what was proved since then, with each level still on its own clock. Don't work the level out again with `Assurance::of()` from what counts toward a lower level. Say AAL2 lapsed after an hour idle, and the session is at AAL1. What counts toward AAL1 still holds the authenticator app proved before the lapse, so `Assurance::of()` would give AAL2. For the same reason, only report `mfa` at AAL2 or higher, and at AAL1 only report the one factor that holds it. Listing the authenticator app beside the password would read as two factors to a client that looks at `amr`. For example:
 
@@ -278,13 +282,17 @@ if ($level === Assurance::AAL1) {
     $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
 }
 
+$provedAt = $proved === [] ? Verification::UNKNOWN : min(array_map(fn (Verification $verification) => $verification->provedAt(), $proved));
+
 $claims = [
     'acr' => $level === Assurance::None ? null : strtolower($level->name),
     'amr' => [
         ...array_values(array_unique(array_column($proved, 'factor'))),
         ...($level->atLeast(Assurance::AAL2) ? ['mfa'] : []),
     ],
-    'auth_time' => $proved === [] ? null : min(array_column($proved, 'at')),
+    // Left out (null) when nothing was proved, or when it was proved at an
+    // unknown time.
+    'auth_time' => $provedAt === Verification::UNKNOWN ? null : $provedAt,
 ];
 ```
 
@@ -302,7 +310,9 @@ When a request needs step-up, Keyring starts a confirm attempt with the requirem
 | `POST` | `/confirm/{factor}` | `keyring.confirm.verify` |
 | `POST` | `/confirm/{factor}/send` | `keyring.confirm.send` |
 
-These routes need a user signed in to Keyring's guard (`auth:{guard}`). The page, and its verify and send routes, take the session lock, as the login challenge does. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress, including after one times out, starts one. Any single factor except a recovery code satisfies that attempt. Keyring doesn't know which route the user was heading for, so a recovery code spent on this page might not be enough to get them through. A user with nothing to confirm with (no password, and no other sign-in method) is sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) instead. Without one, they get a `403`.
+These routes need a user signed in to Keyring's guard (`auth:{guard}`). The page, and its verify and send routes, take the session lock, as the login challenge does. The page rendered is `confirm` (not `challenge`), with `purpose: "confirm"` and `canTrustDevice: false`. Visiting `/confirm` with no confirm attempt in progress, including after one times out, starts one. Any single factor except a recovery code satisfies that attempt, as long as it can be proved recently. Keyring doesn't know which route the user was heading for, so a recovery code spent on this page might not be enough to get them through. Laravel's `password.confirm` sends users to this page, and that's a freshness check, so a link at a [`never`](sso.md#freshness) identity provider isn't offered here. A user with nothing to confirm with (no password, and no other sign-in method a challenge can ask for and that can be proved recently) is sent to your [`enrollment_url`](configuration.md#account-changes-and-enrollment) instead. Without one, they get a `403`.
+
+A link at an identity provider is offered like any other method, except that one whose provider's [`freshness`](sso.md#freshness) is `never`, the default for Google and GitHub, is only offered toward a level, never for a fresh verification. Its `challenge` prop holds the `provider`, its `label`, and the `url` of `GET /confirm/sso/redirect` (`keyring.sso.confirm`), which sends the user to the provider to sign in there, asked to sign in again when its `freshness` is `reauthenticate`. The provider sends them back to its callback, which finishes the confirm through the same pipeline, and goes on to the intended URL. See [Single Sign-On](sso.md#step-up).
 
 If a page asks again while a confirm attempt for the same requirement is in progress, it continues that attempt. That way, what the user already proved isn't lost.
 
@@ -312,7 +322,7 @@ Once the user has verified enough, Keyring does the following:
 
 1. regenerates the session ID, which destroys the old one,
 2. records the new verifications, which resets the [level's clocks](devices-and-sessions.md#timeouts), and raises the registered session's assurance,
-3. sets Laravel's `auth.password_confirmed_at`,
+3. sets Laravel's `auth.password_confirmed_at` to when the user proved what this confirm added (see [below](#laravels-password-confirmation)),
 4. dispatches `Keyring\Events\Confirmed`,
 5. redirects to the intended URL, or `home`.
 
@@ -337,6 +347,8 @@ Send the user to `redirect`, and then let them try again. Keyring remembers the 
 ## Laravel's Password Confirmation
 
 Confirming through Keyring also satisfies Laravel's `password.confirm` middleware, so routes that already use it keep working. The reverse isn't true. Laravel's own password confirmation doesn't count for Keyring's middleware.
+
+Keyring sets `auth.password_confirmed_at` to the latest moment the user really proved one of the factors the confirm added (`Verification::provedAt()`), so a sign in at an identity provider that let them straight through counts from when they signed in there. What the confirm built on, such as the password from signing in, confirms nothing. A confirm that added only a round trip to a [`never`](sso.md#freshness) identity provider, say toward AAL2 after it lapsed, leaves it as it was, since nobody may have typed anything. The marker never moves back.
 
 ## Events
 

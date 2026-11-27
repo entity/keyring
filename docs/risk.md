@@ -61,7 +61,7 @@ The built-in signals live in `Keyring\Risk\Signals`:
 | `NewDevice` | The browser hasn't signed in before. | 15 | login |
 | `NewCountry` | The request comes from a country none of the user's devices have been seen in, and at least one device has a known country. It needs a locator. | 30 | login |
 | `ImpossibleTravel` | The last located sign in was 500 km or more away, and getting here since would mean travelling faster than 900 km/h. It needs a locator with coordinates. | 60 | login |
-| `RepeatedFactorFailures` | Five or more second factors failed after a correct password in the last 15 minutes (the `within` option). Ten or more doubles the score. | 25 | login |
+| `RepeatedFactorFailures` | Five or more second factors failed after a correct password, or a sign in with an identity provider, in the last 15 minutes (the `within` option). Ten or more doubles the score. | 25 | login |
 | `RecentlyChangedRecovery` | The email address changed (or was changed back) within `risk.recent_change` (7 days). | 25 | login |
 | `InactiveAccount` | The account last signed in 90 days ago or more (the `after` option), and none of its sessions has been used since. | 30 | login |
 | `SuccessAfterFailures` | The first factor was right after five or more failed attempts on the account (the `threshold` option) in the last hour (`within`), counted since it last signed in. | 30 | login |
@@ -71,7 +71,7 @@ The built-in signals live in `Keyring\Risk\Signals`:
 
 `SessionFingerprintChanged` compares the session with the browser it was last seen in, and it acts on each change once. A cookie that two browsers use at the same time flips back and forth. So with the default response, the owner is asked to verify again, and emailed, on every switch. To end such a session instead, have [your responder](#actions) answer `Action::reauthenticate()` at `Checkpoint::Request`.
 
-`RepeatedFactorFailures` only counts failures after a correct password. Anyone can type a wrong password for a known email address, and counting those would let a stranger raise the owner's risk. The signal reads the [security log](security-log-and-emails.md) table, so it does nothing when `Features::securityLog()` is off or the table can't be read.
+`RepeatedFactorFailures` only counts failures after a correct password, or after a sign in with an [identity provider](sso.md) the account linked. Anyone can type a wrong password for a known email address, and counting those would let a stranger raise the owner's risk. The signal reads the [security log](security-log-and-emails.md) table, so it does nothing when `Features::securityLog()` is off or the table can't be read.
 
 `InactiveAccount` goes by when the account's devices last signed in. It says nothing about an account that has no sign in on record, so turning it on doesn't flag every existing user's next sign in. Devices that go unseen for `devices.keep_unseen_for` (a year) are pruned. After that, a returning user's browser counts as a new device again, which `NewDevice` and the `new_device` email cover.
 

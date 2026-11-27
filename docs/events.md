@@ -45,7 +45,7 @@ Keyring's other events don't put a password hash, a secret, or a "remember me" v
 | `Confirmed` | A [step-up](step-up.md) completed. | `user`, `attempt` |
 | `LoggedOut` | The user signed out. | `user` |
 
-`purpose` is the `Keyring\Enums\Purpose` enum, either `Login` or `Confirm`. `FactorChallenged`, `FactorVerified`, and `FactorFailed` fire for both purposes, so check `$event->attempt?->purpose` when a listener should only react to sign ins. On `FactorFailed`, `attempt` is null when the user wasn't found. See [The Sign In Flow](sign-in-flow.md#events).
+`purpose` is the `Keyring\Enums\Purpose` enum, either `Login` or `Confirm`. `FactorChallenged`, `FactorVerified`, and `FactorFailed` fire for both purposes, so check `$event->attempt?->purpose` when a listener should only react to sign ins. On `FactorFailed`, `attempt` is null when the user wasn't found. Its `afterFirstFactor()` says whether a later step failed once the login's first step had passed, `afterPassword()` whether that first step was the password, as opposed to an [identity provider](sso.md), and `firstFactor()` gives that first step's `Verification`. See [The Sign In Flow](sign-in-flow.md#events).
 
 ## Sessions and Devices
 
@@ -151,7 +151,7 @@ An assessment that ends in `Action::allow` dispatches nothing. See [Risk](risk.m
 |---|---|---|
 | `AccessRefused` | A signed-in user asked for an authenticator, device, or session that isn't theirs, or that doesn't exist. Both cases get the same 404, so the event doesn't tell them apart. The event also fires when someone opens an email verification link made for another account. | `user`, `resource` (`authenticator`, `device`, `session`, or `email_verification`), `id` (what was asked for, as it was sent. For a session, this is its handle.) |
 | `RateLimited` | The form limiter refused a request to one of Keyring's routes, outside the sign-in limits. This covers registration, a reset, a change, an emailed link or the page it opens, and passkey options. | `user` (whoever is signed in, otherwise null), `limiter` (`keyring`, `keyring-pages`, or `keyring-login-options`), `route` (its name, or `null` for a route without one), `retryAfter` (in seconds) |
-| `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down, such as with a wrong code or a key it won't take) or `not_allowed` (the account may not add one yet) |
+| `EnrollmentRefused` | A sign-in method wasn't added. | `user`, `factor`, `reason`: `invalid` (the factor turned the confirmation down, such as with a wrong code, a key it won't take, or an identity provider's account that's linked to someone else) or `not_allowed` (the account may not add one yet) |
 | `AuthenticatorRemovalRefused` | A sign-in method was kept, because removing it would have left the user unable to sign in the way their policy requires. | `user`, `authenticator` |
 | `LinkRefused` | An emailed link was refused. This happens for a change that doesn't exist, a wrong or ended token, or a signature that didn't match or had expired. | `link`, `reason` (see [Refused Links](security-log-and-emails.md#refused-links)), `user` (whose email change it was, otherwise null) |
 | `VerificationRefused` | A sign in or step-up met its requirement but was still refused, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `attempt`, `factor`, `skipped` (the steps' class names) |
@@ -179,6 +179,6 @@ Keyring signs users in and out through the guard, so Laravel's `Login`, `Logout`
 
 | Laravel Event | Dispatched With |
 |---|---|
-| `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
+| `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. That's the user's own when one was found. Otherwise it's what was typed, for a factor that asks for a username, such as the password, and `null` for one that doesn't, such as an identity provider's callback. |
 | `Illuminate\Auth\Events\Lockout` | `Lockout`, so once for every refused request. |
 | `Illuminate\Auth\Events\PasswordReset` | Keyring's `PasswordReset`. |

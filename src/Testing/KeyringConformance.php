@@ -21,6 +21,7 @@ use Keyring\Enums\SessionEndReason;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Exceptions\ProtectedAttributeException;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Sessions\RegisteredSession;
@@ -296,9 +297,15 @@ trait KeyringConformance
         }
 
         foreach ($this->enrollableFactors() as $factor) {
-            $this->actingAs($user)->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', $factor->key()))
-                ->assertOk();
+            $response = $this->actingAs($user)->withAssurance(Assurance::AAL1)
+                ->postJson(route('keyring.authenticators.store', $factor->key()));
+
+            // Linking an identity provider begins by asking it where to send
+            // the user, which a test can't do without one standing in for
+            // it. Without a provider named, it asks which.
+            $factor instanceof SingleSignOn
+                ? $response->assertUnprocessable()->assertJsonValidationErrors('provider')
+                : $response->assertOk();
         }
     }
 

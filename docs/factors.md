@@ -8,6 +8,7 @@
     - [Email Codes](#email-codes)
     - [Recovery Codes](#recovery-codes)
     - [Passkeys and Security Keys](#passkeys-and-security-keys)
+    - [Single Sign-On](#single-sign-on)
 - [Categories](#categories)
 - [Writing a Code Factor](#writing-a-code-factor)
 - [Writing Any Other Factor](#writing-any-other-factor)
@@ -80,6 +81,7 @@ To fix this, register the factor again, or delete or migrate those rows. Until y
 | `recovery` | `RecoveryCodes` | possession | no | yes, one set | 0 |
 | `passkey` | `WebAuthn::passkeys()` | possession, plus inherence when the user was verified | yes | yes | 100 |
 | `security-key` | `WebAuthn::securityKeys()` | possession, plus inherence when the user was verified | no | yes | 90 |
+| `sso` | `SingleSignOn` | knowledge | yes, from the provider's callback | yes, one for each account linked | 30 |
 
 When Keyring needs another factor, it offers the user's default authenticator first, and then the rest in order of priority.
 
@@ -183,6 +185,10 @@ Once every code is used, the set no longer counts as a factor. Policies and step
 
 Both use one WebAuthn driver, with two profiles. Passkeys are discoverable and always verify the user, so they can sign in on their own. Security keys are a second factor. You may limit them to keys whose maker vouches for them by calling `requireAttestation()`. See [Passkeys & Security Keys](passkeys.md).
 
+### Single Sign-On
+
+`SingleSignOn` signs users in with the identity providers in `sso.providers`: Google, Microsoft, GitHub, or any OpenID Connect provider. Each account at a provider that a user links is one of their authenticators, matched on the provider's issuer and subject, never on the email address. It stands in for the password, so it counts as knowledge, and a user with a second factor is still asked for it. It's never offered on the challenge page, never the default, and never comes with recovery codes. A link also confirms a step-up by sending the user back to the provider, as its [`freshness`](sso.md#freshness) says: with `reauthenticate`, the default for OpenID Connect providers and Microsoft, they sign in again there, and with `round_trip` it proves as much as signing in with it again would. With `never`, the default for Google and GitHub, its sign ins and confirms never count as fresh, and it's only offered toward a level. See [Single Sign-On](sso.md#step-up).
+
 ## Categories
 
 Every verification proves one or more **categories**, from `Keyring\Enums\Category`:
@@ -277,7 +283,7 @@ The `deliver` method then reads the number from `$authenticator->secret`.
 Because codes go to the address on the authenticator, confirming the enrollment proves the user can receive them.
 
 
-For a complete example, see the [SMS recipe](recipes.md#sms-codes). A factor that starts a sign in, such as [a social login](recipes.md#social-login-with-socialite), is covered in [Writing Any Other Factor](#writing-any-other-factor).
+For a complete example, see the [SMS recipe](recipes.md#sms-codes). A factor that starts a sign in, such as a login with a service of your own, is covered in [Writing Any Other Factor](#writing-any-other-factor).
 
 ## Writing Any Other Factor
 
@@ -360,7 +366,7 @@ Implement these as well when they apply:
 A `PrimaryFactor` has five methods:
 
 - `startsLogin()` says whether the factor can start a sign in, as configured. WebAuthn returns `false` for security keys.
-- `answersChallenges()` says whether `verify()` checks a proof of its own. Return `false` when the proof is who `identify()` found, as with a social login. Keyring then keeps the factor off the challenge and confirm pages, which never call `identify()`.
+- `answersChallenges()` says whether `verify()` checks a proof of its own. Return `false` when the proof is who `identify()` found, as with [single sign-on](sso.md). Keyring then keeps the factor off the challenge and confirm pages, which never call `identify()`. A user who'd need it to finish a confirm gets the `enroll-first` answer before being asked for anything, rather than after proving what they could. Keyring's own `SingleSignOn` links are the one exception: the confirm page offers them, and the provider's callback finishes the confirm. An authenticator of such a factor is never made the default, never comes with recovery codes, and doesn't count as a second factor that recovery codes are kept for.
 - `identify($request)` returns the authenticator the request is for, or `null`. An authenticator whose user Keyring's guard wouldn't load back counts as `null`. The method must take the same time whether or not a user is found.
 - `stall()` spends the time `verify()` would take. Keyring calls it instead when it turns away whoever `identify()` found, without looking at their proof. That happens for an account that `allowSignInWhen()` keeps out, or one whose own rate limit refuses. The base factor's `stall()` does nothing, so only write one when checking a proof is slow, as a password hash is.
 - `identificationRules()` validates the identifying fields.

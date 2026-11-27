@@ -38,6 +38,7 @@ final readonly class Requirement
         public bool $acceptsRecoveryCodes = true,
         public int $steps = 0,
         public bool $requiresAttestedKey = false,
+        public bool $requiresFreshness = false,
     ) {}
 
     public static function aal1(): self
@@ -205,6 +206,21 @@ final readonly class Requirement
     }
 
     /**
+     * Count only verifications that can say the user proved them recently:
+     * not one whose factor couldn't tell when (Verification::UNKNOWN), like
+     * a sign in through an identity provider whose sign ins are never
+     * fresh. For a fresh verification (keyring.fresh), so the confirm page
+     * doesn't offer what could never meet it.
+     *
+     * @internal
+     */
+    #[\NoDiscard]
+    public function freshlyProved(): static
+    {
+        return clone ($this, ['requiresFreshness' => true]);
+    }
+
+    /**
      * Apply this requirement as far as the user's authenticators can meet it.
      * A user with nothing beyond one factor signs in with that.
      */
@@ -230,6 +246,7 @@ final readonly class Requirement
     #[\NoDiscard]
     public function limitedTo(array $provable): static
     {
+        $provable = $this->recent($provable);
         $limited = clone ($this, [
             'requiresPhishingResistance' => $this->requiresPhishingResistance && array_any($provable, fn (Verification $verification) => $verification->phishingResistant),
             'requiresDeviceBound' => $this->requiresDeviceBound && array_any($provable, fn (Verification $verification) => $verification->phishingResistant && $verification->deviceBound),
@@ -334,11 +351,12 @@ final readonly class Requirement
                 default => $other->phishingResistanceExceptions,
             },
             'acceptsRecoveryCodes' => $this->acceptsRecoveryCodes && $other->acceptsRecoveryCodes,
+            'requiresFreshness' => $this->requiresFreshness || $other->requiresFreshness,
         ]);
     }
 
     /**
-     * @return array{factors: int, steps: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, attested_key: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool}
+     * @return array{factors: int, steps: int, categories: list<string>, phishing_resistant: bool, device_bound: bool, attested_key: bool, if_enrolled: bool, no_downgrade: bool, downgrade_exceptions: list<string>, phishing_resistance_exceptions: list<string>, accepts_recovery_codes: bool, fresh: bool}
      */
     public function toArray(): array
     {
@@ -354,11 +372,12 @@ final readonly class Requirement
             'downgrade_exceptions' => $this->downgradeExceptions,
             'phishing_resistance_exceptions' => $this->phishingResistanceExceptions,
             'accepts_recovery_codes' => $this->acceptsRecoveryCodes,
+            'fresh' => $this->requiresFreshness,
         ];
     }
 
     /**
-     * @param  array{factors: int, steps?: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, attested_key?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool}  $data
+     * @param  array{factors: int, steps?: int, categories: list<string>, phishing_resistant: bool, device_bound?: bool, attested_key?: bool, if_enrolled: bool, no_downgrade?: bool, downgrade_exceptions?: list<string>, phishing_resistance_exceptions?: list<string>, accepts_recovery_codes?: bool, fresh?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -374,6 +393,7 @@ final readonly class Requirement
             acceptsRecoveryCodes: $data['accepts_recovery_codes'] ?? true,
             steps: $data['steps'] ?? 0,
             requiresAttestedKey: $data['attested_key'] ?? false,
+            requiresFreshness: $data['fresh'] ?? false,
         );
     }
 
@@ -398,13 +418,16 @@ final readonly class Requirement
      * The verifications this requirement takes into account. One that asks
      * for an attested key leaves out everything else the user holds: a
      * synced passkey that verified them says nothing of who touched the
-     * key, and at AAL3 nothing that can be copied counts.
+     * key, and at AAL3 nothing that can be copied counts. One that asks
+     * for freshness leaves out what can't be recent (recent()).
      *
      * @param  list<Verification>  $verifications
      * @return list<Verification>
      */
     private function counted(array $verifications): array
     {
+        $verifications = $this->recent($verifications);
+
         if (! $this->requiresAttestedKey) {
             return $verifications;
         }
@@ -412,6 +435,20 @@ final readonly class Requirement
         return array_values(array_filter($verifications, fn (Verification $verification) => $this->isAttestedKey($verification)
             || $this->standsIn($verification)
             || ! in_array(Category::Possession, $verification->categories, true)));
+    }
+
+    /**
+     * The verifications, without those that can never be recent when this
+     * asks for freshness (freshlyProved()).
+     *
+     * @param  list<Verification>  $verifications
+     * @return list<Verification>
+     */
+    private function recent(array $verifications): array
+    {
+        return $this->requiresFreshness
+            ? array_values(array_filter($verifications, fn (Verification $verification) => $verification->authenticatedAt !== Verification::UNKNOWN))
+            : $verifications;
     }
 
     /**

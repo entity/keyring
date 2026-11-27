@@ -30,6 +30,7 @@ return [
     'session-revoked' => 'That session has been signed out.',
     'sessions-revoked' => 'You\'ve been signed out everywhere else.',
     'sign-in-to-verify' => 'Sign in to finish verifying your email address.',
+    'sso-cancelled' => 'Signing in was cancelled.',
     'signed-out' => 'You\'ve been signed out. Please sign in again.',
     'verification-link-sent' => 'We\'ve emailed you a new verification link.',
 ];

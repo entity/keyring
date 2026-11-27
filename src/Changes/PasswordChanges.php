@@ -12,8 +12,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Keyring\Enums\SessionEndReason;
+use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\PasswordChanged;
 use Keyring\Events\PasswordReset;
+use Keyring\Factors\SingleSignOn;
+use Keyring\KeyringManager;
+use Keyring\Models\Authenticator;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
@@ -97,7 +101,10 @@ class PasswordChanges
      * The user proved they own the address with a reset link, and $save set
      * the new password. Every session is signed out, and risk locks and the
      * account's throttle locks are lifted so a lock can't keep the owner out
-     * for good.
+     * for good. Accounts at identity providers linked to it are unlinked:
+     * each stands in for the password, so one an intruder linked would
+     * still let them in after it. A second factor stays, since a reset only
+     * proves the address and must not be a way around one.
      *
      * $new is the password they sent. When it's the one the account already
      * had, the reset goes through like any other, so the form doesn't tell a
@@ -109,11 +116,39 @@ class PasswordChanges
     public function reset(Authenticatable&Model $user, Closure $save, #[\SensitiveParameter] ?string $new = null): void
     {
         $this->save($user, $save, new: $new, keepHold: true);
+
+        // The links go before the sessions, so a sign in with one of them
+        // that's under way either lands before the sign-out, which ends it,
+        // or finds the link gone.
+        $this->unlinkIdentityProviders($user);
         $this->sessions->because(SessionEndReason::PasswordReset, fn () => $this->sessions->signOutEverywhere($user));
+
+        // Once more, now no session is left to make another. A link that was
+        // being added while the first look ran, by a session that's now
+        // signed out, was saved after it, and is found here.
+        $this->unlinkIdentityProviders($user);
+
         $this->locks->unlock($user);
         $this->throttle->clearAccount($user);
 
         PasswordReset::dispatch($user);
+    }
+
+    /**
+     * One by one, so each is logged and announced like any other removal.
+     * Even while the factor isn't registered: a link left behind would come
+     * back with it.
+     */
+    protected function unlinkIdentityProviders(Authenticatable&Model $user): void
+    {
+        app(KeyringManager::class)->authenticatorModel()::query()
+            ->ownedBy($user)
+            ->where('factor', SingleSignOn::KEY)
+            ->get()
+            ->each(function (Authenticator $authenticator) use ($user) {
+                $authenticator->setRelation('authenticatable', $user)->delete();
+                AuthenticatorRemoved::dispatch($user, $authenticator);
+            });
     }
 
     /**

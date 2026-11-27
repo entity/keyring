@@ -105,14 +105,27 @@ class SessionAssurance
 
     /**
      * Record a step-up confirmation. It also satisfies Laravel's own
-     * password.confirm middleware, so apps can keep using it.
+     * password.confirm middleware, so apps can keep using it: its marker
+     * goes to when the user last really proved one of $added, what the
+     * confirm proved itself (Verification::provedAt()), all of it when
+     * that's not given. What the confirm built on was proved before it, at
+     * sign in say, and confirms nothing. A confirm that added only what
+     * can't say when, like a round trip to an identity provider whose sign
+     * ins are never fresh, leaves the marker as it was, and so does one
+     * that proved nothing later than it.
      *
      * @param  list<Verification>  $verifications
+     * @param  list<Verification>|null  $added
      */
-    public function confirm(array $verifications): void
+    public function confirm(array $verifications, ?array $added = null): void
     {
         $this->record($verifications);
-        $this->session->put('auth.password_confirmed_at', now()->getTimestamp());
+
+        $provedAt = max([Verification::UNKNOWN, ...array_map(fn (Verification $verification) => $verification->provedAt(), $added ?? $verifications)]);
+
+        if ($provedAt > (int) $this->session->get('auth.password_confirmed_at', 0)) {
+            $this->session->put('auth.password_confirmed_at', $provedAt);
+        }
     }
 
     /**
@@ -144,6 +157,19 @@ class SessionAssurance
     public function since(int $timestamp): array
     {
         return array_values(array_filter($this->all(), fn (Verification $verification) => $verification->at >= $timestamp));
+    }
+
+    /**
+     * Verifications the user proved since the given timestamp: by when they
+     * really proved each one (Verification::provedAt()), so a sign in an
+     * identity provider let through on a session it already had is as old
+     * as that session. This is what freshness asks.
+     *
+     * @return list<Verification>
+     */
+    public function provedSince(int $timestamp): array
+    {
+        return array_values(array_filter($this->all(), fn (Verification $verification) => $verification->provedAt() >= $timestamp));
     }
 
     /**

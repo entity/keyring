@@ -1,6 +1,6 @@
 # @keyringjs/keyring
 
-This package holds the browser side of [Keyring](https://github.com/keyringphp/keyring), the factor-driven authentication package for Laravel. It runs the WebAuthn ceremonies for passkeys and security keys, wraps the enrollment routes, and provides Inertia bindings for the challenge page in Vue and React.
+This package holds the browser side of [Keyring](https://github.com/keyringphp/keyring), the factor-driven authentication package for Laravel. It runs the WebAuthn ceremonies for passkeys and security keys, wraps the enrollment routes, starts sign ins and links with identity providers, and provides Inertia bindings for the challenge page in Vue and React.
 
 To install it, run:
 
@@ -16,11 +16,19 @@ import { enroll } from '@keyringjs/keyring'
 const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })
 ```
 
+Or link an account at an identity provider, such as Google, which sends the browser there and back:
+
+```ts
+import { linkProvider } from '@keyringjs/keyring'
+
+await linkProvider('google')
+```
+
 The package has four entry points:
 
 | Import | Contains |
 |---|---|
-| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `passkeyCredential()`, `json()` and `configureRequests()`, routes, and types. No framework code. |
+| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `passkeyCredential()`, `signInWithProvider()`, `linkProvider()` and `confirmWithProvider()` for single sign-on, `json()` and `configureRequests()`, routes, and types. No framework code. |
 | `@keyringjs/keyring/inertia` | The challenge helpers, for Inertia with any framework. |
 | `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |

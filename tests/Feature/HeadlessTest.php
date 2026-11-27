@@ -29,7 +29,7 @@ it('answers a json request for a page with its name and props', function () {
         ->assertOk()
         ->assertExactJson([
             'page' => 'login',
-            'props' => ['canResetPassword' => true, 'canRegister' => true, 'status' => null],
+            'props' => ['canResetPassword' => true, 'canRegister' => true, 'status' => null, 'providers' => []],
         ])
         // The same headers as every other Keyring response.
         ->assertHeader('Cache-Control', 'no-store, private')
@@ -55,7 +55,7 @@ it('still answers inertia with its component', function () {
 it('leaves a page the app answers itself to the app, for json too', function () {
     Keyring::page('login', fn (array $props) => response()->json(['mine' => array_keys($props)]));
 
-    $this->getJson('/login')->assertOk()->assertExactJson(['mine' => ['canResetPassword', 'canRegister', 'status']]);
+    $this->getJson('/login')->assertOk()->assertExactJson(['mine' => ['canResetPassword', 'canRegister', 'status', 'providers']]);
 });
 
 describe('signing in', function () {

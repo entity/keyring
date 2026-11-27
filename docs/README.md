@@ -1,6 +1,6 @@
 # Keyring Documentation
 
-Keyring handles the authentication side of a Laravel application, taking care of signing in, registration, password resets, email verification, second factors, passkeys, step-up, devices, sessions, and account changes. It doesn't ship any UI of its own. Your application owns the pages and the account actions, and Keyring provides everything around them.
+Keyring handles the authentication side of a Laravel application, taking care of signing in, registration, password resets, email verification, second factors, passkeys, single sign-on, step-up, devices, sessions, and account changes. It doesn't ship any UI of its own. Your application owns the pages and the account actions, and Keyring provides everything around them.
 
 The pages below are grouped by topic.
 
@@ -18,6 +18,8 @@ The pages below are grouped by topic.
 - [The Sign In Flow](sign-in-flow.md): login, the challenge page, the verification pipeline, responses, and pages.
 - [Step-Up](step-up.md): asking signed-in users to prove who they are again, from middleware or a controller, and reading what they proved.
 - [Passkeys & Security Keys](passkeys.md): WebAuthn settings, and what Keyring does and doesn't check.
+- [Single Sign-On](sso.md): signing in with Google, Microsoft, GitHub, or any OpenID Connect provider, and linking accounts at them.
+- [More Identity Providers](sso-providers.md): config for GitLab, Slack, Twitch, Okta, Auth0, Keycloak, Cognito, and Salesforce, drivers for Discord, Bitbucket, Facebook, and LinkedIn, and why Apple isn't supported.
 
 ## Account Security
 
@@ -39,5 +41,5 @@ The pages below are grouped by topic.
 - [Headless Frontends](headless.md): a frontend Laravel doesn't serve, such as a Nuxt app on another subdomain, signing in with Sanctum's session cookies.
 - [Example Application](https://github.com/keyringphp/example): every page, written in React.
 - [Extending Keyring](extending.md): every option and hook in one place, and what stays fixed.
-- [Recipes](recipes.md): worked examples with real packages, such as IP locations, Maizzle emails, SMS codes, and social login.
+- [Recipes](recipes.md): worked examples with real packages, such as IP locations, Maizzle emails, and SMS codes.
 - [Testing](testing.md): test helpers, fakes, factories, and the conformance suite.
