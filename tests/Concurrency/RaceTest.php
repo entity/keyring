@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -16,10 +17,12 @@ use Keyring\Enums\Assurance;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\SingleSignOn;
+use Keyring\Impersonation\Impersonation;
 use Keyring\Models\Authenticator;
 use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
 use Keyring\Testing\VirtualAuthenticator;
 use Keyring\Tests\Fixtures\User;
@@ -349,6 +352,42 @@ it('signs out a session that moved to a new record while everyone was being sign
     expect($registry->find('resumed')->revokedAt)->not->toBeNull()
         ->and($registry->find('remembered')->revokedAt)->not->toBeNull()
         ->and($registry->forUser($user))->toBeEmpty();
+});
+
+// On the cookie driver, stopping moves the admin's record as they come
+// back, holding their row, so a sign-out everywhere that overlaps it either
+// ends the record it moved to, or ends the one it moves from first, which
+// it then can't move.
+it('leaves nothing of the admin signed in when they stop impersonating as they\'re signed out everywhere', function () {
+    $admin = taylor();
+    $user = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);
+    $now = now()->getTimestamp();
+    $registry = app(SessionRegistry::class);
+    $registry->save($own = new RegisteredSession('admins-own', (string) $admin->id, RegisteredSession::typeOf($admin), 'web', null, Assurance::AAL2, null, null, $now, $now, $now + 3600));
+    $impersonated = app(Sessions::class)->startImpersonation(Request::create('/'), $user, $admin, $own, $now + 3600);
+
+    $browser = [
+        Sessions::KEY => $impersonated->id,
+        Impersonation::KEY => [
+            'impersonator' => (string) $admin->id,
+            'type' => RegisteredSession::typeOf($admin),
+            'name' => 'Taylor',
+            'session' => $own->id,
+            'user' => (string) $user->id,
+            'user_type' => RegisteredSession::typeOf($user),
+            'remembered' => false,
+            'started_at' => $now,
+            'expires_at' => $now + 3600,
+            'parked' => [SessionAssurance::ACTIVE => $now],
+        ],
+    ];
+
+    $results = contend($admin, [['stop-impersonating', $user->id, json_encode($browser)], ['sign-out', $admin->id]]);
+
+    expect($results[0])->toBe('back')
+        ->and($registry->find($own->id)->revokedAt)->not->toBeNull()
+        ->and($registry->find($impersonated->id)->revokedAt)->not->toBeNull()
+        ->and($registry->forUser($admin))->toBeEmpty();
 });
 
 // The record is read with a lock, so the second waits for the first, then
