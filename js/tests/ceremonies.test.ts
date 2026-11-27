@@ -305,7 +305,7 @@ describe('enrolling', () => {
 
 describe('sessions', () => {
   test('lists the sessions the server returns', async () => {
-    const session = { id: '9f2c', name: 'Firefox on Windows', ip: '203.0.113.7', device: null, remembered: false, signedInAt: 'a', lastActiveAt: 'b', expiresAt: 'c', current: true, impersonated: true, impersonator: 'Ada Admin' }
+    const session = { id: '9f2c', name: 'Firefox on Windows', ip: '203.0.113.7', device: null, remembered: false, signedInAt: 'a', lastActiveAt: 'b', expiresAt: 'c', current: true, impersonated: true, impersonator: { name: 'Ada Admin' } }
     answers.push({ status: 200, body: { sessions: [session] } })
 
     expect(await listSessions()).toEqual([session])

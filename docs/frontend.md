@@ -383,7 +383,7 @@ await endOtherSessions()           // every session but this one
 
 | Function | Does |
 |---|---|
-| `listSessions()` | `GET /user/sessions`. Resolves to the sessions, most recently active first, each a `Session`: `id`, `name`, `ip`, `device`, `remembered`, `signedInAt`, `lastActiveAt`, `expiresAt`, `current`, `impersonated`, and `impersonator`. |
+| `listSessions()` | `GET /user/sessions`. Resolves to the sessions, most recently active first, each a `Session`: `id`, `name`, `ip`, `device`, `remembered`, `signedInAt`, `lastActiveAt`, `expiresAt`, `current`, `impersonated`, and `impersonator` (`{ name }`, or `null`). |
 | `endSession(id)` | `DELETE /user/sessions/{id}`. Ending the one marked `current` signs the user out and resolves to `{}`, so send them to the login page. |
 | `endOtherSessions()` | `DELETE /user/sessions`. |
 

@@ -153,8 +153,11 @@ export interface Session {
   current: boolean
   /** Someone else is signed in to it as the user, e.g. support. */
   impersonated: boolean
-  /** Who that is, by name, or null when nobody else is in it. */
-  impersonator: string | null
+  /**
+   * Who that is, by name only, or null when nobody else is in it or the
+   * impersonator has been deleted.
+   */
+  impersonator: { name: string | null } | null
 }
 
 /**

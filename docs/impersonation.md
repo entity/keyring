@@ -316,11 +316,11 @@ With `impersonation.show_in_sessions` on, which is the default, the impersonated
   "expiresAt": "2026-11-27T10:00:00+00:00",
   "current": false,
   "impersonated": true,
-  "impersonator": "Ada Admin"
+  "impersonator": { "name": "Ada Admin" }
 }
 ```
 
-The user can end it from there, like any of their sessions. The impersonator's next request then goes back to their own session. `impersonator` is `null` once the impersonator has been deleted.
+The user can end it from there, like any of their sessions. The impersonator's next request then goes back to their own session. `impersonator` has only their name, not their ID as [`Keyring::impersonation()`](#showing-a-banner) does, since the user has no use for it. It's `null` once the impersonator has been deleted.
 
 With `show_in_sessions` off, it's left out of the user's list. It's still one of their sessions: "sign out everywhere else", a password change, or anything else that ends all their sessions ends it too. So it isn't perfectly invisible: the number of sessions "sign out everywhere else" says it ended counts it.
 

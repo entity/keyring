@@ -459,11 +459,11 @@ class Sessions
     /**
      * The user's sessions for a "where you're signed in" page, most recently
      * active first, each under its handle. One someone else is signed in to
-     * as the user is marked "impersonated", with who it is, as long as
-     * "impersonation.show_in_sessions" is on. With it off, it's left out,
-     * unless it's the session asking.
+     * as the user is marked "impersonated", with who it is by name, as long
+     * as "impersonation.show_in_sessions" is on. With it off, it's left
+     * out, unless it's the session asking.
      *
-     * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool, impersonated: bool, impersonator: ?string}>
+     * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool, impersonated: bool, impersonator: array{name: ?string}|null}>
      */
     public function list(Request $request, Authenticatable $user): Collection
     {

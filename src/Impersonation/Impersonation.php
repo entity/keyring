@@ -444,14 +444,17 @@ class Impersonation
     }
 
     /**
-     * Who is in an impersonated session, as the user's sessions list names
-     * them. Null for one nobody else is in, or whose impersonator is gone.
+     * Who is in an impersonated session, as the user's sessions list shows
+     * them: by name only, as the user has no use for the impersonator's ID.
+     * Null for one nobody else is in, or whose impersonator is gone.
+     *
+     * @return array{name: ?string}|null
      */
-    public function describe(RegisteredSession $session): ?string
+    public function describe(RegisteredSession $session): ?array
     {
         $impersonator = $session->isImpersonated() ? $this->keyring->provider()->retrieveById($session->impersonatorId) : null;
 
-        return $impersonator instanceof Model && RegisteredSession::typeOf($impersonator) === $session->impersonatorType ? $this->nameOf($impersonator) : null;
+        return $impersonator instanceof Model && RegisteredSession::typeOf($impersonator) === $session->impersonatorType ? ['name' => $this->nameOf($impersonator)] : null;
     }
 
     /**

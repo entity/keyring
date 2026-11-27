@@ -493,7 +493,7 @@ describe('while impersonating', function () {
         $sessions = $this->getJson(route('keyring.sessions.index'))->assertOk()->json('sessions');
 
         expect($sessions)->toHaveCount(1)
-            ->and($sessions[0])->toMatchArray(['current' => true, 'impersonated' => true, 'impersonator' => 'Ada Admin']);
+            ->and($sessions[0])->toMatchArray(['current' => true, 'impersonated' => true, 'impersonator' => ['name' => 'Ada Admin']]);
     });
 
     it('is not held to what the user has still to do: enroll, or change a held password', function () {
@@ -1071,7 +1071,7 @@ describe('ending by itself', function () {
         $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
         $listed = collect($this->getJson(route('keyring.sessions.index'))->json('sessions'))->firstWhere('impersonated', true);
 
-        expect($listed['impersonator'])->toBe('Ada Admin');
+        expect($listed['impersonator'])->toBe(['name' => 'Ada Admin']);
 
         $this->deleteJson(route('keyring.sessions.destroy', $listed['id']))->assertOk();
 
@@ -1459,7 +1459,7 @@ describe('the user\'s sessions list', function () {
 
         $listed = app(Sessions::class)->list(request(), $this->user)->sole();
 
-        expect($listed)->toMatchArray(['impersonated' => true, 'impersonator' => 'Ada Admin', 'remembered' => false, 'device' => null]);
+        expect($listed)->toMatchArray(['impersonated' => true, 'impersonator' => ['name' => 'Ada Admin'], 'remembered' => false, 'device' => null]);
     });
 
     it('names nobody once the impersonator is gone', function () {
