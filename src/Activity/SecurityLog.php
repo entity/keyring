@@ -50,6 +50,7 @@ class SecurityLog
         'risk_reauthenticate', 'risk_notified', 'risk_password_change', 'risk_denied', 'risk_locked',
         'risk_revoked_sessions', 'access_refused', 'enrollment_refused', 'authenticator_removal_refused',
         'link_refused', 'verification_refused', 'refusals_limited', 'impersonation_started', 'impersonation_ended',
+        'impersonation_refused',
     ];
 
     public function __construct(

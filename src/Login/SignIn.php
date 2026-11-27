@@ -195,25 +195,30 @@ class SignIn
      * record is revoked, and that is what stops this browser's cookies
      * bringing it back (Sessions::end). Nor does signing out of an
      * impersonation: the token is the user's, and they didn't sign out.
+     * When the registry fails then, it's the impersonator's token that's
+     * cycled, if any: the browser's "remember me" cookies are theirs, and
+     * their parked session, which would refuse them, may still be open
+     * (Impersonation::signedOut).
      */
     public function out(Request $request, bool $onlyThisBrowser = false): ?Authenticatable
     {
         $guard = $this->keyring->guard();
         $user = $guard->user();
+        $impersonating = app(Impersonation::class)->active($request);
 
         // Signing out of an impersonation is the impersonator's doing, so
-        // the user's own "remember me" token is left alone, and the
-        // impersonator's parked session ends with this one.
-        if (app(Impersonation::class)->active($request)) {
-            $onlyThisBrowser = true;
-
-            app(Impersonation::class)->signedOut($request);
-        }
+        // the user's own "remember me" token is left alone.
+        $onlyThisBrowser = $onlyThisBrowser || $impersonating;
 
         // Signed out whatever happens to the registry: a revocation that
         // fails is thrown on, but never leaves the browser signed in with no
-        // record, for the next request to register afresh.
+        // record, for the next request to register afresh. The
+        // impersonator's parked session ends with this one.
         try {
+            if ($impersonating) {
+                app(Impersonation::class)->signedOut($request);
+            }
+
             $this->sessions->end($request);
         } finally {
             $onlyThisBrowser && $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();

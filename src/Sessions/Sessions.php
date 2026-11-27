@@ -774,12 +774,17 @@ class Sessions
         // registry that can't be reached is reported, not thrown from the
         // middle of the app's sign-out. The record that would refuse the
         // "remember me" cookies is still open then, and logoutCurrentDevice()
-        // leaves the token as it was, so it's cycled here instead.
-        // Signing out while impersonating leaves nobody to come back to.
-        app(Impersonation::class)->signedOut($request);
+        // leaves the token as it was, so it's cycled here instead. Not for
+        // a user being impersonated: the cookies are the impersonator's,
+        // whose token Impersonation::signedOut() cycles if their parked
+        // session can't be ended. Signing out while impersonating leaves
+        // nobody to come back to.
+        $impersonation = app(Impersonation::class);
 
-        rescue(fn () => $this->unlessGiven(SessionEndReason::LoggedOut, fn () => $this->end($request)), function () use ($event) {
-            if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
+        rescue(fn () => $impersonation->signedOut($request));
+
+        rescue(fn () => $this->unlessGiven(SessionEndReason::LoggedOut, fn () => $this->end($request)), function () use ($event, $request, $impersonation) {
+            if ($event instanceof CurrentDeviceLogout && $event->user !== null && ! $impersonation->impersonates($request, $event->user)) {
                 rescue(fn () => $this->cycleRememberToken($event->user));
             }
         });

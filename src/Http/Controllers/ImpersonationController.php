@@ -8,7 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Enums\ImpersonationEndReason;
-use Keyring\Exceptions\ImpersonationRefused;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\Impersonation\Impersonation;
@@ -35,13 +34,14 @@ class ImpersonationController
     /**
      * Sign in as the user with this ID, as Keyring's guard loads them. One
      * that doesn't exist is refused like one that may not be impersonated,
-     * so the answer doesn't say which IDs have an account.
+     * so the answer doesn't say which IDs have an account. The log says
+     * which it was.
      */
     public function store(Request $request, string $user): Response
     {
         $found = $this->keyring->provider()->retrieveById($user);
 
-        $this->impersonation->start($request, $found instanceof Model ? $found : throw new ImpersonationRefused('not_allowed'));
+        $this->impersonation->start($request, $found instanceof Model ? $found : $this->impersonation->refuseUnknown($user));
 
         return $this->answer($request, 'impersonation-started', $this->impersonation->redirectTo());
     }

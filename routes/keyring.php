@@ -137,7 +137,7 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge, $sso) {
     if (Features::enabled(Features::emailVerification())) {
         Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
         Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware([ValidatePostedSignature::class, 'throttle:keyring'])->name('verification.verify.store');
-        Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware('throttle:keyring')->name('verification.send');
+        Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware(['keyring.not-impersonating', 'throttle:keyring'])->name('verification.send');
     }
 
     // Signing in as another user takes what impersonation.middleware asks,

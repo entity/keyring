@@ -28,7 +28,7 @@ Impersonation lets someone, usually support staff or an administrator, sign in a
 - The impersonator's own session is parked, not ended, and their "remember me" cookies are left as they are. Coming back takes that session still being good. Otherwise the browser is signed out. They come back at the level they had, but anything that needs a fresh verification asks again.
 - It ends by itself after an hour.
 - While it lasts, Keyring refuses every change to how the user signs in, and you can refuse your own routes the same way.
-- The start and the end are logged on both accounts, with why it ended.
+- The start and the end are logged on both accounts, with why it ended. A start that can't be logged doesn't happen, and a refused start is logged on the impersonator's account.
 
 ## Turning It On
 
@@ -68,6 +68,14 @@ Whatever the callback says, Keyring always refuses:
 - a user the application doesn't let sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)),
 - starting while already impersonating someone. It's one at a time.
 
+A [risk](risk.md) lock doesn't refuse an impersonation: it only refuses sign ins, so a locked user can still be impersonated, and a locked impersonator whose session is still signed in can still start one. If a lock should keep support out too, refuse locked accounts in your callback:
+
+```php
+use Keyring\Risk\RiskLocks;
+
+Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => $impersonator->isAdmin() && ! app(RiskLocks::class)->locked($user));
+```
+
 The callback is asked again on every request while the impersonation lasts, so taking someone's admin role away, or protecting a user, ends an impersonation that's already running. The browser goes back to the impersonator's own session, with the `ended` [reason](#security-log-and-events).
 
 On those requests the signed-in user is the one being impersonated, so decide from the two arguments alone. `auth()->user()`, `$request->user()`, and `Gate::allows()` all ask about the user, and would end the impersonation on its first request. To use a gate, ask it about the impersonator:
@@ -100,9 +108,9 @@ Both are only registered with `Features::impersonation()` on. They sit in Keyrin
 
 ### Starting
 
-`{user}` is the user's ID, as Keyring's guard loads them. An ID nobody has gets the same `403` as a user who may not be impersonated, so the answer doesn't say which IDs have an account.
+`{user}` is the user's ID, as Keyring's guard loads them. An ID nobody has gets the same `403` as a user who may not be impersonated, so the answer doesn't say which IDs have an account. Only the [security log](#security-log-and-events) tells them apart.
 
-The route takes `impersonation.middleware`, which is `['keyring:aal2', 'keyring.fresh:15m']` by default: the impersonator has to have proved two factors, the second a possession factor or a passkey, in the last 15 minutes. One who hasn't is sent to confirm, as on any [step-up](step-up.md) route, and one without a second factor is sent to enroll.
+The route takes `impersonation.middleware`, which is `['keyring:aal2', 'keyring.fresh:15m']` by default: the impersonator has to have proved two factors, the second a possession factor or a passkey, in the last 15 minutes. One who hasn't is sent to confirm, as on any [step-up](step-up.md) route, and one without a second factor is sent to enroll. An empty list asks for nothing more: any signed-in session your callback allows can start one, with no step-up.
 
 A refusal is a `403`, with Laravel's `{"message": "You can't sign in as that user."}` for JSON clients. Otherwise the answer is a [status response](sign-in-flow.md#status-responses) with `impersonation-started`, to `impersonation.redirect_to` (`home` when it's `null`). A JSON client gets `{"status": "impersonation-started", "message": "...", "redirect": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, so nothing the browser cached for the impersonator stays for the user's pages, and the other way round when stopping.
 
@@ -151,7 +159,7 @@ Route::delete('/admin/impersonation', function (Request $request) {
 })->middleware('auth')->block();
 ```
 
-`Keyring::impersonate()` checks who may, but not how the request got there: keep it to a `POST` with the middleware above, as Keyring's route does. Keep `->block()` too, as Keyring's routes have it. Without it, two starts sent at once from the same browser, a double click say, both find nobody being impersonated yet, and each starts one. Laravel's [session blocking](https://laravel.com/docs/session#session-blocking) makes them take turns, so the second is refused as `impersonating`. It needs a cache store that supports locks. `ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`. Its `reason` says why: `not_allowed` (the feature is off, the callback said no or was never registered, the user may not sign in, or the guard wouldn't load them), `self`, `impersonating`, or `unregistered` (the impersonator's session has no record in the registry to come back to). `Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated.
+`Keyring::impersonate()` checks who may, but not how the request got there: keep it to a `POST` with the middleware above, as Keyring's route does. Keep `->block()` too, as Keyring's routes have it. Without it, two starts sent at once from the same browser, a double click say, both find nobody being impersonated yet, and each starts one. Laravel's [session blocking](https://laravel.com/docs/session#session-blocking) makes them take turns, so the second is refused as `impersonating`. It needs a cache store that supports locks. `ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`. Its `reason` says why: `not_allowed` (the feature is off, the callback said no or was never registered, the user may not sign in, or the guard wouldn't load them), `self`, `impersonating`, or `unregistered` (the impersonator's session has no record in the registry to come back to). Each refusal is logged as `impersonation_refused` on the impersonator's account, and so is one that never gets this far because Keyring's route found no user with that ID. A start that can't be logged throws whatever the security log threw, and leaves the browser as it was. `Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated.
 
 These answer questions about the current request:
 
@@ -173,7 +181,11 @@ Starting gives the browser a new session ID, and a session record of its own for
 - lasts no longer than `impersonation.lifetime`,
 - isn't one of the user's own [`sessions.max`](devices-and-sessions.md#how-many-sessions): it doesn't end one of their sessions to make room when it starts, doesn't count toward the limit when the user signs in again, and isn't ended to make room for them.
 
-The session keeps nothing the impersonator's had for Keyring: what they proved, a sign in or confirm in progress, Laravel's `auth.password_confirmed_at`, and the password hash Laravel's `auth.session` middleware compares. The rest of your application's session data is left as it is. Keyring doesn't call `Auth::login()`, so Laravel's `Login` event and Keyring's `Authenticated` don't fire for the user. Nothing that listens for a sign in, such as new device emails, risk signals, or a "last signed in" column of your own, takes it for one. Risk signals aren't assessed on the impersonated session's requests either, and [`InactiveAccount`](risk.md#built-in-signals) doesn't count the impersonated session as the user using their account, so a dormant account still gets its finding when its owner, or someone with their password, next signs in.
+The session keeps nothing the impersonator's had for Keyring: what they proved, a sign in or confirm in progress, Laravel's `auth.password_confirmed_at`, the password hash Laravel's `auth.session` middleware compares, and Laravel's `url.intended`. Going back forgets `url.intended` too, so a page of the user's can't choose where the impersonator's next confirm or sign in sends them.
+
+The rest of your application's session data is left as it is, and carries over both ways: into the user's session when it starts, and back into the impersonator's when it ends. If your application keeps anything about who is signed in in the session, such as their roles, their team or tenant, or an "is admin" flag, the user's pages see the impersonator's, and the impersonator comes back with whatever the user's pages put there. Look those up from the signed-in user on each request instead, or key them by the user's ID, or forget them when `ImpersonationStarted` and `ImpersonationEnded` fire.
+
+Keyring doesn't call `Auth::login()`, so Laravel's `Login` event and Keyring's `Authenticated` don't fire for the user. Nothing that listens for a sign in, such as new device emails, risk signals, or a "last signed in" column of your own, takes it for one. Risk signals aren't assessed on the impersonated session's requests either, and [`InactiveAccount`](risk.md#built-in-signals) doesn't count the impersonated session as the user using their account, so a dormant account still gets its finding when its owner, or someone with their password, next signs in.
 
 The impersonator's own session isn't ended. Its record stays good, and while the impersonator is busy it's kept from idling out along with the impersonated one, and so are its levels: they're the one using the browser all along. A gap between requests longer than a level's idle limit still lapses that level, as it would in their own session. Their "remember me" cookies aren't touched. What it had proved, and the password hash Laravel's `auth.session` middleware compares, are kept aside in the session, where nothing reads them until they come back.
 
@@ -196,6 +208,8 @@ If any of that no longer holds, the browser is signed out, and the impersonator'
 
 Signing out with Keyring's `POST /logout` while impersonating signs the browser out of both: the impersonated session, and the impersonator's parked one, since nobody can come back to it now. The user's "remember me" token is left alone, so the user's own remembered browsers aren't signed out.
 
+When the session registry can't be reached, the browser is still signed out, as it is for any sign-out, and the error is thrown on. The browser's "remember me" cookies are the impersonator's, and their parked session is what refuses a copy of them, so when that session couldn't be ended the impersonator's "remember me" token is changed instead. The user's is never changed for it.
+
 Your application's own `Auth::logout()` ends both sessions the same way, also after `$request->session()->invalidate()`. But Laravel's guard changes the user's "remember me" token whenever it logs out, which signs out every other browser where the user ticked "remember me", so use Keyring's sign-out, or `Auth::logoutCurrentDevice()`, while impersonating.
 
 ## What's Refused While Impersonating
@@ -207,11 +221,12 @@ Keyring refuses all of these with a `403`, and `{"status": "impersonating", "mes
 - adding, confirming, renaming, and removing authenticators,
 - ending sessions and devices, "sign out everywhere else" included,
 - confirming who they are: the confirm page, its challenges, and the identity provider confirm,
+- sending the email verification link again,
 - starting another impersonation.
 
 Step-up can't be met either. A `keyring:{level}` or `keyring.fresh` route the session hasn't already met answers with the same `403`, rather than sending the impersonator to a confirm page that would refuse them. The impersonated session starts having proved nothing, so in practice that's every such route. A route with `keyring.enrolled`, or a user [held for a new password](protected-changes.md#requiring-a-password-change), lets the impersonator through, since only the user can do what those ask.
 
-Listing the user's sessions and devices still works, as does signing out.
+Listing the user's sessions and devices still works, as does `GET /user/email`, which shows a pending new email address, and signing out.
 
 ### Your Own Routes
 
@@ -317,7 +332,9 @@ With `show_in_sessions` off, it's left out of the user's list. It's still one of
 
 ## Security Log and Events
 
-Each start and end is logged on both accounts, as `impersonation_started` and `impersonation_ended`. Both entries carry `impersonator` and `user`, the two accounts' IDs, and `role`, which is `impersonator` or `impersonated` for the account the entry is on. An end also has `reason` and `returned`, which says whether the browser went back to the impersonator's session. Once the impersonator has been deleted, the end is only logged on the user's account, with a `null` `impersonator`, and once the user has, only on the impersonator's, with a `null` `user`. See [Entry Types](security-log-and-emails.md#entry-types).
+Each start and end is logged on both accounts, as `impersonation_started` and `impersonation_ended`. The start is written before the browser changes hands, and before `ImpersonationStarted` fires, so a listener of yours that throws can't leave it unlogged. If it can't be written, the start is refused and the browser stays as it was. An end is logged once its sessions have been ended, even if signing the browser out or moving the impersonator's session to a new record fails after that. Both entries carry `impersonator` and `user`, the two accounts' IDs, and `role`, which is `impersonator` or `impersonated` for the account the entry is on. An end also has `reason` and `returned`, which says whether the browser went back to the impersonator's session. Once the impersonator has been deleted, the end is only logged on the user's account, with a `null` `impersonator`, and once the user has, only on the impersonator's, with a `null` `user`. See [Entry Types](security-log-and-emails.md#entry-types).
+
+A refused start is logged as `impersonation_refused` on the impersonator's account, with `reason` and `user`, the ID asked for. The reason is one of `ImpersonationRefused`'s, or `not_found` for an ID nobody has, which gets the same `403` as `not_allowed`. Like Keyring's other refusals, it's written at most `security_log.refusals` times every `refusals_per` period. A browser that's already impersonating is turned away from Keyring's route by `keyring.not-impersonating` before it gets that far, and that isn't logged.
 
 The reasons are the `Keyring\Enums\ImpersonationEndReason` enum:
 

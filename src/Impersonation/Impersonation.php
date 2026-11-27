@@ -13,6 +13,8 @@ use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
+use Keyring\Activity\SecurityLog;
 use Keyring\Enums\ImpersonationEndReason;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\ImpersonationEnded;
@@ -28,6 +30,7 @@ use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 /**
  * Signing in as another user, and coming back. Everything goes through
@@ -62,19 +65,26 @@ class Impersonation
     /** Where the browser's session keeps what it needs to go back. */
     public const string KEY = 'keyring.impersonation';
 
+    /** Where a request notes the impersonation it ended, once the session has forgotten it. */
+    protected const string ENDED = 'keyring.impersonation_ended';
+
     /** What the impersonator's session proved, kept aside until they come back. */
     protected const array PROVED = [SessionAssurance::KEY, SessionAssurance::ACTIVE, SessionAssurance::LAPSED, SessionAssurance::SIGNED_IN];
 
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
+        protected SecurityLog $log,
     ) {}
 
     /**
      * Sign the browser in as $user, on behalf of whoever is signed in now.
      *
-     * The user's record is saved before the browser changes hands, so a
-     * registry that fails leaves the impersonator where they were.
+     * The user's record is saved, and the start logged on both accounts,
+     * before the browser changes hands, so a registry or a security log
+     * that fails leaves the impersonator where they were: it never starts
+     * unlogged. A refusal is logged on the impersonator's account, as
+     * impersonation_refused.
      *
      * @throws ImpersonationRefused
      */
@@ -90,15 +100,17 @@ class Impersonation
             default => null,
         };
 
+        // Logged on whoever is impersonating, when someone is, rather than
+        // the user they're signed in as.
         if ($refusal !== null) {
-            throw new ImpersonationRefused($refusal);
+            $this->refused($this->impersonator($request) ?? $impersonator, (string) $user->getAuthIdentifier(), $refusal);
         }
 
         // Coming back takes a record to come back to.
         $own = $this->sessions->current($request);
 
         if ($own === null || ! $own->isActive($now) || ! $own->belongsTo($impersonator)) {
-            throw new ImpersonationRefused('unregistered');
+            $this->refused($impersonator, (string) $user->getAuthIdentifier(), 'unregistered');
         }
 
         $until = $now + Duration::seconds(config('keyring.impersonation.lifetime') ?? '1h');
@@ -119,12 +131,34 @@ class Impersonation
 
         $record = $this->sessions->startImpersonation($request, $user, $impersonator, $own, $until);
 
+        // Logged here rather than by a listener, ahead of the app's: one of
+        // those that throws, sending an email say, can't leave it unlogged.
+        try {
+            $this->logStart($impersonator, $user);
+        } catch (Throwable $e) {
+            rescue(fn () => $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($record->id)));
+
+            throw $e;
+        }
+
         $this->switchTo($request, $user);
         $session->put(self::KEY, $parked);
         $request->attributes->set(self::KEY, $parked);
         $this->sessions->rebind($request, $record, remembered: false);
 
         ImpersonationStarted::dispatch($impersonator, $user);
+    }
+
+    /**
+     * Refuse starting as an ID nobody has: answered as one that may not be
+     * impersonated, so the answer doesn't say which IDs have an account,
+     * and logged as not_found.
+     *
+     * @throws ImpersonationRefused
+     */
+    public function refuseUnknown(string $id): never
+    {
+        $this->refused($this->keyring->user(), $id, 'not_found', as: 'not_allowed');
     }
 
     /**
@@ -196,24 +230,29 @@ class Impersonation
 
         $this->forget($request);
 
-        if ($back === null) {
-            app(SignIn::class)->out($request, onlyThisBrowser: true);
-        } else {
-            $this->switchTo($request, $back[0]);
-            $this->restore($request, $this->catchUp($parked['parked'])[0]);
-            $this->sessions->rebind($request, $back[1], $parked['remembered']);
+        // It has ended by now, whatever the registry does next, so it's
+        // announced, and logged, even when signing out or moving the record
+        // throws.
+        try {
+            if ($back === null) {
+                app(SignIn::class)->out($request, onlyThisBrowser: true);
+            } else {
+                $this->switchTo($request, $back[0]);
+                $this->restore($request, $this->catchUp($parked['parked'])[0]);
+                $this->sessions->rebind($request, $back[1], $parked['remembered']);
 
-            // A copy of the session from while impersonating would lead
-            // back here again with what was parked: a cookie session's, in
-            // the browser where regenerating can't destroy it, or a request
-            // that overlapped this one and saves the old session after it.
-            // The record moves, as on a step-up, so the copy's parked record
-            // has ended. The browser's "remember me" moves with it.
-            $this->sessions->reregister($request);
-        }
-
-        if ($impersonator !== null || $target !== null) {
-            ImpersonationEnded::dispatch($impersonator, $target, $reason, $back !== null);
+                // A copy of the session from while impersonating would lead
+                // back here again with what was parked: a cookie session's, in
+                // the browser where regenerating can't destroy it, or a request
+                // that overlapped this one and saves the old session after it.
+                // The record moves, as on a step-up, so the copy's parked record
+                // has ended. The browser's "remember me" moves with it.
+                $this->sessions->reregister($request);
+            }
+        } finally {
+            if ($impersonator !== null || $target !== null) {
+                ImpersonationEnded::dispatch($impersonator, $target, $reason, $back !== null);
+            }
         }
 
         return $reason;
@@ -230,6 +269,14 @@ class Impersonation
      * A session the app emptied before signing out, with invalidate() or
      * flush() ahead of Auth::logout(), is ended by what the request noted
      * (parked()), as Sessions::end() does for its own record.
+     *
+     * The parked session is ended before the impersonation is forgotten, so
+     * a registry that fails leaves it for another go: the guard's sign-out
+     * after SignIn::out(), or the next request. The browser's "remember me"
+     * cookies are the impersonator's, and that session is what refuses
+     * them, so their token is cycled when it can't be ended, as
+     * Sessions::signedOut() cycles a user's for their own session. Then it
+     * throws.
      */
     public function signedOut(Request $request): void
     {
@@ -237,16 +284,38 @@ class Impersonation
             return;
         }
 
+        $impersonator = $this->impersonatorFrom($parked);
+
+        try {
+            $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($parked['session']));
+        } catch (Throwable $e) {
+            if ($impersonator !== null) {
+                rescue(fn () => $this->sessions->cycleRememberToken($impersonator));
+            }
+
+            throw $e;
+        }
+
         $this->forget($request);
 
-        $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($parked['session']));
-
-        $impersonator = $this->impersonatorFrom($parked);
         $user = $this->userFrom($parked, null);
 
         if ($impersonator !== null || $user !== null) {
             ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false);
         }
+    }
+
+    /**
+     * Whether $user is the one this request's browser is impersonating, or
+     * was until this request ended it. Their "remember me" cookies aren't
+     * the browser's then, the impersonator's are, so a sign-out the registry
+     * fails mustn't cycle the user's token (Sessions::signedOut()).
+     */
+    public function impersonates(Request $request, Authenticatable $user): bool
+    {
+        $parked = $this->parked($request, orNoted: true) ?? $request->attributes->get(self::ENDED);
+
+        return is_array($parked) && (string) $user->getAuthIdentifier() === $parked['user'] && RegisteredSession::typeOf($user) === $parked['user_type'];
     }
 
     /**
@@ -381,11 +450,41 @@ class Impersonation
     }
 
     /**
+     * Log a refused start on the impersonator's account, and throw it as
+     * $as: what was refused is answered the same however it was logged.
+     *
+     * @throws ImpersonationRefused
+     */
+    protected function refused(Authenticatable $impersonator, string $id, string $reason, ?string $as = null): never
+    {
+        $this->log->recordRefusal('impersonation_refused', $impersonator, meta: ['reason' => $reason, 'user' => Str::limit($id, 64, '')]);
+
+        throw new ImpersonationRefused($as ?? $reason);
+    }
+
+    /**
+     * Log the start on both accounts, each entry naming both: "role" says
+     * which of them the entry's account was. In the table, both are
+     * written or neither. A failure is thrown.
+     */
+    protected function logStart(Authenticatable $impersonator, Authenticatable $user): void
+    {
+        $meta = ['impersonator' => (string) $impersonator->getAuthIdentifier(), 'user' => (string) $user->getAuthIdentifier()];
+
+        $this->keyring->securityEventModel()::query()->getConnection()->transaction(function () use ($impersonator, $user, $meta) {
+            $this->log->recordOrFail('impersonation_started', $impersonator, meta: [...$meta, 'role' => 'impersonator']);
+            $this->log->recordOrFail('impersonation_started', $user, meta: [...$meta, 'role' => 'impersonated']);
+        });
+    }
+
+    /**
      * Hand the browser to another user, on a new session ID, with nothing
      * of what the session held for the last one: what it proved, the
-     * pending sign ins and confirms, Laravel's password confirmation, and
-     * the password hash Laravel's auth.session middleware compares. Their
-     * own Login event doesn't fire: nobody signed in.
+     * pending sign ins and confirms, Laravel's password confirmation, the
+     * password hash Laravel's auth.session middleware compares, and where
+     * Laravel's intended redirect would send them: a page of the user's
+     * could otherwise choose where the impersonator's next confirm or sign
+     * in goes. Their own Login event doesn't fire: nobody signed in.
      */
     protected function switchTo(Request $request, Authenticatable&Model $user): void
     {
@@ -396,7 +495,7 @@ class Impersonation
         $session = $request->session();
 
         $session->regenerate(true);
-        $session->forget(['keyring', 'auth.password_confirmed_at', $this->passwordHashKey()]);
+        $session->forget(['keyring', 'auth.password_confirmed_at', 'url.intended', $this->passwordHashKey()]);
         $session->put($guard->getName(), $user->getAuthIdentifier());
 
         $guard->setUser($user);
@@ -563,12 +662,18 @@ class Impersonation
      * Forget the impersonation, from the session and the request. From
      * request() too, when given a copy of it, like a form request: the
      * Logout listener reads the note from there, and would end it again.
+     * Both note what ended instead, for impersonates().
      */
     protected function forget(Request $request): void
     {
+        $parked = $this->parked($request, orNoted: true);
+
         $request->session()->forget(self::KEY);
-        $request->attributes->remove(self::KEY);
-        request()->attributes->remove(self::KEY);
+
+        foreach ([$request, request()] as $noted) {
+            $noted->attributes->remove(self::KEY);
+            $noted->attributes->set(self::ENDED, $parked);
+        }
     }
 
     /**

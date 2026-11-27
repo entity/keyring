@@ -361,14 +361,19 @@ return [
     | With Features::impersonation(), whoever Keyring::allowImpersonationWhen()
     | lets can sign in as another user, and come back to their own account.
     | Starting takes the "middleware": by default, two factors proved in the
-    | last 15 minutes. It ends by itself after "lifetime". Nothing proved
-    | before carries over, and Keyring refuses every change to how the user
-    | signs in until it ends.
+    | last 15 minutes. An empty list asks for nothing more: any signed-in
+    | session the callback allows can start, with no step-up. It ends by
+    | itself after "lifetime". Nothing proved before carries over, and
+    | Keyring refuses every change to how the user signs in until it ends.
     |
     | With "show_in_sessions" the user sees it in their sessions list, with
     | who is in it, and can end it. With "show_in_activity" its start and end
-    | are in Keyring::activity(); they're logged either way. Starting goes to
-    | "redirect_to" and stopping to "return_to": null for "home".
+    | are in Keyring::activity(); they're logged either way. Neither keeps it
+    | secret: turned off, it still counts in the sessions "sign out
+    | everywhere else" says it ended, and what was done while impersonating,
+    | like signing out, is still in the user's activity.
+    | Starting goes to "redirect_to" and stopping to "return_to": null for
+    | "home".
     |
     */
 

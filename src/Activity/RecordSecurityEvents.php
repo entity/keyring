@@ -58,7 +58,6 @@ class RecordSecurityEvents
             Events\AuthenticatorRemovalRefused::class => 'authenticatorRemovalRefused',
             Events\LinkRefused::class => 'linkRefused',
             Events\VerificationRefused::class => 'verificationRefused',
-            Events\ImpersonationStarted::class => 'impersonationStarted',
             Events\ImpersonationEnded::class => 'impersonationEnded',
         ];
     }
@@ -279,20 +278,10 @@ class RecordSecurityEvents
     }
 
     /**
-     * Logged on both accounts, each entry naming both: "role" says which of
-     * them the entry's account was.
-     */
-    public function impersonationStarted(Events\ImpersonationStarted $event): void
-    {
-        $meta = $this->impersonation($event->impersonator, $event->user);
-
-        $this->log->record('impersonation_started', $event->impersonator, meta: [...$meta, 'role' => 'impersonator']);
-        $this->log->record('impersonation_started', $event->user, meta: [...$meta, 'role' => 'impersonated']);
-    }
-
-    /**
-     * On both accounts, as it started, but for one that can no longer be
-     * loaded, deleted say: then on the other's alone.
+     * On both accounts, as it started (Impersonation::start() logs that
+     * itself, before the browser changes hands), but for one that can no
+     * longer be loaded, deleted say: then on the other's alone. "role" says
+     * which of them the entry's account was.
      */
     public function impersonationEnded(Events\ImpersonationEnded $event): void
     {

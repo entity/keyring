@@ -36,7 +36,7 @@ enum Severity: string
             'factor_failed', 'second_factor_failed', 'locked_out', 'rate_limited', 'account_locked', 'device_reported',
             'remember_me_reused', 'email_change_reverted', 'protection_bypassed', 'access_refused',
             'enrollment_refused', 'authenticator_removal_refused', 'link_refused', 'refusals_limited',
-            'risk_denied', 'risk_locked', 'risk_revoked_sessions' => self::Warning,
+            'risk_denied', 'risk_locked', 'risk_revoked_sessions', 'impersonation_refused' => self::Warning,
 
             'clone_suspected', 'verification_refused' => self::Critical,
 

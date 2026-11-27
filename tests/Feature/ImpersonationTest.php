@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Auth\Events\Login;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -10,6 +11,7 @@ use Illuminate\Session\Middleware\AuthenticateSession as LaravelAuthenticateSess
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -34,8 +36,10 @@ use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
+use Keyring\Sessions\DatabaseSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
+use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
 use Keyring\Tests\Fixtures\PlainFormRequest;
 use Keyring\Tests\Fixtures\User;
@@ -92,6 +96,52 @@ function impersonating(): string
 function record(string $id): ?RegisteredSession
 {
     return app(SessionRegistry::class)->find($id);
+}
+
+/**
+ * A session registry whose $method lets the first $works calls through and
+ * throws on the $fails after them (every one, without $fails), as a
+ * database that went away.
+ */
+function registryThatGoesAway(int $works, string $method = 'revoke', int $fails = PHP_INT_MAX): void
+{
+    $calls = new ArrayObject;
+
+    app(SessionRegistryManager::class)->extend('failing', fn () => new class(app('db')->connection(), $calls, $works, $method, $fails) extends DatabaseSessionRegistry
+    {
+        public function __construct(ConnectionInterface $connection, protected ArrayObject $calls, protected int $works, protected string $method, protected int $fails)
+        {
+            parent::__construct($connection);
+        }
+
+        public function revoke(string $id): ?RegisteredSession
+        {
+            $this->call('revoke');
+
+            return parent::revoke($id);
+        }
+
+        public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+        {
+            $this->call('replace');
+
+            return parent::replace($id, $successor, $revoke);
+        }
+
+        protected function call(string $method): void
+        {
+            if ($method !== $this->method) {
+                return;
+            }
+
+            $this->calls->append($method);
+
+            if (count($this->calls) > $this->works && count($this->calls) - $this->works <= $this->fails) {
+                throw new RuntimeException('The database went away.');
+            }
+        }
+    });
+    config(['keyring.sessions.driver' => 'failing']);
 }
 
 /**
@@ -361,6 +411,29 @@ describe('starting', function () {
     });
 });
 
+describe('laravel\'s intended url', function () {
+    it('is forgotten when the browser changes hands, either way', function () {
+        Route::middleware(['web', 'auth'])->get('/intend', function (Request $request) {
+            redirect()->setIntendedUrl('/somewhere-'.Auth::id());
+
+            return 'noted';
+        });
+        adminSignsIn();
+        $this->get('/intend');
+
+        impersonate($this->user)->assertRedirect('/dashboard');
+
+        expect(session('url.intended'))->toBeNull();
+
+        // A page of the user's chooses where the admin goes next.
+        $this->get('/intend');
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect(session('url.intended'))->toBeNull()
+            ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
+    });
+});
+
 describe('while impersonating', function () {
     it('refuses keyring\'s security changes', function (string $method, Closure $url, array $data = []) {
         impersonating();
@@ -383,6 +456,7 @@ describe('while impersonating', function () {
         'signing out a device' => ['DELETE', fn () => route('keyring.devices.destroy', 'anything')],
         'confirming it\'s them' => ['POST', fn () => route('keyring.confirm.verify', 'password'), ['password' => 'password']],
         'the confirm page' => ['GET', fn () => route('keyring.confirm.challenge')],
+        'sending the verification email again' => ['POST', fn () => route('verification.send')],
     ]);
 
     it('refuses the app\'s own routes behind keyring.not-impersonating, and lets them through otherwise', function () {
@@ -1177,6 +1251,49 @@ describe('signing out while impersonating', function () {
             && $event->reason === ImpersonationEndReason::SignedOut);
     });
 
+    it('signs out when the registry fails, ending the admin\'s parked session on the guard\'s second go', function () {
+        Exceptions::fake();
+        Event::fake([ImpersonationEnded::class]);
+        $own = impersonating();
+        $impersonated = session(Sessions::KEY);
+        $this->user->forceFill(['remember_token' => 'the users own'])->save();
+
+        // Only the first revocation, of the parked session, fails.
+        registryThatGoesAway(works: 0, fails: 1);
+
+        $this->post('/logout')->assertServerError();
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(session()->has(Auth::guard('web')->getName()))->toBeFalse()
+            ->and(session()->has(Impersonation::KEY))->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($impersonated)->revokedAt)->not->toBeNull()
+            ->and($this->user->fresh()->remember_token)->toBe('the users own');
+        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
+    });
+
+    it('signs out with the registry down, changing the admin\'s "remember me" token rather than the user\'s', function (string $url) {
+        Route::middleware(['web', 'auth'])->post('/my-logout-device', function () {
+            Auth::logoutCurrentDevice();
+
+            return 'bye';
+        });
+        Exceptions::fake();
+        adminSignsIn(remember: true);
+        impersonate($this->user);
+        $this->user->forceFill(['remember_token' => 'the users own'])->save();
+        $token = $this->admin->fresh()->remember_token;
+        registryThatGoesAway(works: 0);
+
+        $this->post($url);
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(session()->has(Auth::guard('web')->getName()))->toBeFalse()
+            ->and($this->user->fresh()->remember_token)->toBe('the users own')
+            ->and($this->admin->fresh()->remember_token)->not->toBe($token)->not->toBeNull();
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The database went away.');
+    })->with(['keyring\'s sign-out' => '/logout', 'the app\'s Auth::logoutCurrentDevice()' => '/my-logout-device']);
+
     // Signing in ends what the session still held, wherever it came from:
     // here it's left behind with the session middleware out of the way.
     it('leaves nothing parked for whoever signs in next on the session', function () {
@@ -1311,6 +1428,122 @@ describe('the security log and events', function () {
         Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->impersonator->is($this->admin) && $event->user->is($this->user)
             && $event->reason === ImpersonationEndReason::Stopped && $event->returned);
         Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => $event->reason === SessionEndReason::ImpersonationEnded && $event->userId === (string) $this->user->getKey());
+    });
+
+    it('logs a refused start on the impersonator\'s account, with why and the ID asked for', function (Closure $refuse, string $reason) {
+        adminSignsIn();
+
+        $id = $refuse($this);
+
+        expect(logEntry('impersonation_refused'))
+            ->authenticatable_id->toBe($this->admin->getKey())
+            ->severity->value->toBe('warning')
+            ->meta->toBe(['reason' => $reason, 'user' => $id]);
+    })->with([
+        'not allowed' => [function ($test) {
+            Keyring::allowImpersonationWhen(fn () => false);
+            impersonate($test->user)->assertForbidden();
+
+            return (string) $test->user->getKey();
+        }, 'not_allowed'],
+        'themselves' => [function ($test) {
+            Keyring::allowImpersonationWhen(fn () => true);
+            impersonate($test->admin)->assertForbidden();
+
+            return (string) $test->admin->getKey();
+        }, 'self'],
+        'an ID nobody has' => [function ($test) {
+            impersonate(new User(['id' => 999]))->assertForbidden();
+
+            return '999';
+        }, 'not_found'],
+        'a session with no record' => [function ($test) {
+            Route::middleware(['web', 'auth'])->post('/become/{id}', function (Request $request, string $id) {
+                $request->session()->forget(Sessions::KEY);
+                Keyring::impersonate($request, User::findOrFail($id));
+            });
+            $test->post('/become/'.$test->user->getKey())->assertForbidden();
+
+            return (string) $test->user->getKey();
+        }, 'unregistered'],
+        'one already going' => [function ($test) {
+            Route::middleware(['web', 'auth'])->post('/become/{id}', fn (Request $request, string $id) => Keyring::impersonate($request, User::findOrFail($id)));
+            $other = User::create(['name' => 'Other', 'email' => 'other@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+            impersonate($test->user);
+            $test->post('/become/'.$other->getKey())->assertForbidden();
+
+            return (string) $other->getKey();
+        }, 'impersonating'],
+    ]);
+
+    it('answers an ID nobody has as it answers one that may not be impersonated, logging which it was', function () {
+        Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => false);
+        adminSignsIn();
+
+        $missing = impersonate(new User(['id' => 999]), json: true)->assertForbidden();
+        $refused = impersonate($this->user, json: true)->assertForbidden();
+
+        expect($missing->getContent())->toBe($refused->getContent())
+            ->and(SecurityEvent::query()->where('type', 'impersonation_refused')->oldest('id')->get()->pluck('meta.reason')->all())->toBe(['not_found', 'not_allowed']);
+    });
+
+    it('refuses the start, leaving the admin where they were, when it can\'t be logged', function () {
+        Exceptions::fake();
+        Event::fake([ImpersonationStarted::class]);
+        adminSignsIn();
+        $own = session(Sessions::KEY);
+        Schema::drop('keyring_events');
+
+        impersonate($this->user)->assertServerError();
+
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
+            ->and(Keyring::impersonating())->toBeFalse()
+            ->and(session(Sessions::KEY))->toBe($own)
+            ->and(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty();
+        Event::assertNotDispatched(ImpersonationStarted::class);
+    });
+
+    it('logs the start before a listener of the app\'s that throws can stop it', function () {
+        // Ahead of Keyring's own listeners, as an app's can be.
+        $events = app('events');
+        $listeners = (fn () => $this->listeners)->call($events);
+        $listeners[ImpersonationStarted::class] ??= [];
+        array_unshift($listeners[ImpersonationStarted::class], $events->makeListener(fn () => throw new RuntimeException('The mail server went away.')));
+        (fn () => $this->listeners = $listeners)->call($events);
+        adminSignsIn();
+
+        impersonate($this->user)->assertServerError();
+
+        expect(SecurityEvent::query()->where('type', 'impersonation_started')->oldest('id')->get()->pluck('meta.role')->all())->toBe(['impersonator', 'impersonated']);
+    });
+
+    it('logs the end when signing out fails after the sessions have ended', function () {
+        Exceptions::fake();
+        Event::fake([ImpersonationEnded::class]);
+        $own = impersonating();
+        $this->user->forceFill(['remember_token' => 'the users own'])->save();
+        app(SessionRegistry::class)->revoke($own);
+
+        // Ending the two records works, and signing the browser out of the
+        // impersonated one again doesn't.
+        registryThatGoesAway(works: 2);
+
+        stopImpersonating()->assertServerError();
+
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::ImpersonatorSessionEnded && ! $event->returned);
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and($this->user->fresh()->remember_token)->toBe('the users own');
+    });
+
+    it('logs the end when moving the admin\'s record fails on the way back', function () {
+        Exceptions::fake();
+        Event::fake([ImpersonationEnded::class]);
+        impersonating();
+        registryThatGoesAway(works: 0, method: 'replace');
+
+        stopImpersonating()->assertServerError();
+
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::Stopped && $event->returned);
     });
 
     it('names the user who was impersonated, whoever the app has signed in since', function () {
