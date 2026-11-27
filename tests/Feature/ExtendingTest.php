@@ -204,7 +204,7 @@ it('says so when an email code has no notification to go out in', function () {
     Keyring::notifications(['verification_code' => null]);
 
     $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password']);
+        ->postJson(route('keyring.authenticators.store', 'email-code'));
 })->throws(MissingNotification::class, 'No notification is registered for [verification_code]');
 
 class CustomConfirmEmailChange extends ConfirmEmailChange

@@ -100,7 +100,7 @@ it('keeps a sent code, its guesses and an enrollment\'s confirmation under keys 
     $code = Notification::sent($this->user, VerificationCode::class)->sole()->code;
     $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code])->assertRedirect('/dashboard');
 
-    $this->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
+    $this->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
     $code = Notification::sent($this->user, VerificationCode::class)->last()->code;
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk();
 });

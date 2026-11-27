@@ -156,7 +156,7 @@ it('sends email codes of the length the app picks, for as long as it picks', fun
     Keyring::factors([Password::class, EmailCode::asExtraStep(length: 6, expireAfter: '5m')]);
 
     $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])
+        ->postJson(route('keyring.authenticators.store', 'email-code'))
         ->assertJsonPath('enrollment.length', 6);
 
     Notification::assertSentTo(auth()->user(), VerificationCode::class, fn (VerificationCode $code) => strlen($code->code) === 6 && $code->minutes === 5);

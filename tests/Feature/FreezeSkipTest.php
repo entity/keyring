@@ -108,7 +108,7 @@ describe('a frozen account', function () {
     });
 
     it('says so for new recovery codes too', function () {
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))
             ->assertUnprocessable()
             ->assertJsonPath('frozen.skip', ['passkey']);
     });
@@ -274,7 +274,7 @@ describe('a frozen account', function () {
     it('replaces recovery codes with a proof sent when they\'re made', function () {
         $credential = $this->key->assert(skipOptions('replace', 'recovery'));
 
-        $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
+        $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertOk()
             ->json('enrollment.codes');
 
@@ -288,7 +288,7 @@ describe('a frozen account', function () {
     it('doesn\'t take a challenge for replacing another factor\'s', function () {
         $credential = $this->key->assert(skipOptions('replace', 'totp'));
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('proof');
     });
@@ -638,10 +638,10 @@ describe('the emails about a new sign-in method or new codes', function () {
     it('link to the app\'s page for sign-in methods, from APP_URL, and say what to do', function () {
         config(['keyring.authenticators_url' => '/settings/security', 'app.url' => 'https://app.example']);
 
-        $this->withHeader('Host', 'evil.example')->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
+        $this->withHeader('Host', 'evil.example')->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
         $key = new VirtualAuthenticator;
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 
         $added = Notification::sent($this->user, AuthenticatorAddedNotice::class)->sole();
@@ -664,14 +664,14 @@ describe('the emails about a new sign-in method or new codes', function () {
     it('keep a full URL as it is', function () {
         config(['keyring.authenticators_url' => 'https://account.example/security']);
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
 
         expect(Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole()->url)->toBe('https://account.example/security');
     });
 
     it('have no link without the page, and still say what to do', function () {
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
 
         $codes = Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole();

@@ -934,7 +934,7 @@ describe('saying when an address is taken', function () {
 
             // Signed in, but the address is unverified, so no passkey can be planted.
             $this->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])
+                ->postJson(route('keyring.authenticators.store', 'passkey'))
                 ->assertForbidden()
                 ->assertJsonPath('message', __('keyring::keyring.verify_email_first'));
         });
@@ -950,7 +950,7 @@ describe('saying when an address is taken', function () {
 
             $this->withoutExceptionHandling()->actingAs(staff(), 'staff')->withAssurance(Assurance::AAL1);
 
-            expect(fn () => $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password']))
+            expect(fn () => $this->postJson(route('keyring.authenticators.store', 'totp')))
                 ->toThrow(EmailVerificationRequired::class, 'implement MustVerifyEmail');
         });
 
@@ -964,7 +964,7 @@ describe('saying when an address is taken', function () {
             $this->flushSession();
 
             $this->actingAs(taylor(['name' => 'Abigail', 'email' => 'abigail@example.com']))->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
+                ->postJson(route('keyring.authenticators.store', 'totp'))
                 ->assertForbidden();
         });
     });

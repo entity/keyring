@@ -31,13 +31,13 @@ it('needs every factor signing in would, not just one, to manage authenticators'
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->freshAt(now()->subHour());
 
-    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertStatus(423);
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
     $this->inertia()->get(route('keyring.confirm.challenge'))->assertJsonPath('props.factor', 'totp');
     $this->flushHeaders();
 
     // One factor isn't enough for a user with two.
     $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)]);
-    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertStatus(423);
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
 
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
     $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
@@ -46,7 +46,7 @@ it('needs every factor signing in would, not just one, to manage authenticators'
 it('still lets password-only users confirm with their password', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
 
-    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertStatus(423);
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
 
     $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
@@ -58,7 +58,7 @@ it('refuses to enroll authenticators until the email address is verified', funct
     $this->user->forceFill(['email_verified_at' => null])->save();
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
+        ->postJson(route('keyring.authenticators.store', 'totp'))
         ->assertForbidden();
 });
 

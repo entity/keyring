@@ -1285,7 +1285,7 @@ describe('ending other sessions along with a change to how the user signs in', f
         Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         $old = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'), ['sign_out_others' => true])->assertOk();
 
         expect($old->fresh())->toBeNull();

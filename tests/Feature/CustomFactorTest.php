@@ -134,7 +134,7 @@ it('keeps a single email code method, since every copy would go to the same addr
     Notification::fake();
     Authenticator::factory()->for($this->user, 'authenticatable')->create(['factor' => 'email-code', 'name' => 'Email']);
 
-    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password']);
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'));
 
     Notification::assertSentTo($this->user, VerificationCode::class, function (VerificationCode $notification) {
         $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $notification->code])->assertOk();

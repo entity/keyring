@@ -92,7 +92,7 @@ it('holds a user on the change-password page until they choose a new password', 
     $this->post('/settings/password')->assertOk();
     $this->inertia()->get(route('keyring.confirm.challenge'))->assertOk()->assertJsonPath('component', 'auth/confirm');
     $this->flushHeaders();
-    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertForbidden();
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertForbidden();
 
     chooseNewPassword();
 

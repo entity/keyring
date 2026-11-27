@@ -99,7 +99,7 @@ function addPasskey(bool $synced = false): array
  */
 function addEmailCode(): array
 {
-    test()->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
+    test()->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
     $code = Notification::sent(test()->user, VerificationCode::class)->last()->code;
 
     return test()->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk()->json();
@@ -330,7 +330,7 @@ describe('enrolling', function () {
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
         $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->withSession([Detours::ENROLLMENT => savedFor($this->user)]);
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk()->assertJsonMissingPath('continue');
 
         expect(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/invoices/42');

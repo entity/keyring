@@ -45,7 +45,7 @@ function signInWithApp(Authenticator $totp, int $step = 0): TestResponse
 function addPasskeyFromSession(): VirtualAuthenticator
 {
     $key = new VirtualAuthenticator;
-    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
     test()->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 
     return $key;
@@ -53,7 +53,7 @@ function addPasskeyFromSession(): VirtualAuthenticator
 
 function replaceRecoveryCodes(): TestResponse
 {
-    $started = test()->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password']);
+    $started = test()->postJson(route('keyring.authenticators.store', 'recovery'));
 
     return $started->isOk() ? test()->postJson(route('keyring.authenticators.confirm', 'recovery')) : $started;
 }
@@ -199,7 +199,7 @@ describe('while a new sign-in method is not established', function () {
     });
 
     it('refuses new recovery codes before showing any', function () {
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))
             ->assertUnprocessable()
             ->assertJsonMissingPath('enrollment')
             ->assertJsonPath('frozen.reason', 'new-authenticator');
@@ -207,7 +207,7 @@ describe('while a new sign-in method is not established', function () {
 
     it('refuses new recovery codes from a session that began making them before it froze', function () {
         $this->passkey->delete();
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
 
         Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
 
@@ -249,7 +249,7 @@ describe('while a new sign-in method is not established', function () {
         Event::fake([AuthenticatorRemovalRefused::class, EnrollmentRefused::class]);
 
         $this->deleteJson(route('keyring.authenticators.destroy', $this->totp->id))->assertUnprocessable();
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertUnprocessable();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertUnprocessable();
 
         Event::assertDispatched(AuthenticatorRemovalRefused::class, fn (AuthenticatorRemovalRefused $event) => $event->reason === 'frozen' && $event->authenticator->is($this->totp));
         Event::assertDispatched(EnrollmentRefused::class, fn (EnrollmentRefused $event) => $event->reason === 'frozen' && $event->factor === 'recovery');
