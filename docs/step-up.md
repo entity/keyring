@@ -81,11 +81,12 @@ NIST SP 800-63B-4 (Sec. 4.1.2.1) binds a new authenticator at the highest level 
 - The window starts at the moment of verification, and it doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is also fresh for step-up. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
 
-Signing in counts, so whoever holds a copy of a session that has just signed in can use it for those 15 minutes, without proving anything. They can add a sign-in method of their own. They can't use it to shut the owner out:
+Signing in counts, so whoever holds a copy of a session that has just signed in can use it for those 15 minutes, without proving anything. On an account with an established second factor, they can add a sign-in method of their own. Keyring limits what that gets them:
 
+- A second factor on an account with none established yet, such as a password-only account, takes [the current password](authenticators.md#the-password-for-a-first-second-factor) in the request. A copy of the cookie doesn't have it. An account without a password has nothing to ask for, so this doesn't cover it.
 - A new sign-in method isn't [established](authenticators.md#established-authenticators) for 7 days. Until then, it doesn't make `noDowngrade()` ask for a passkey, so the owner's password and authenticator app still sign them in.
-- While the account has a sign-in method that isn't established, it can't remove an established one, or replace its recovery codes. The owner can still remove the new one.
-- One such removal or replacement freezes the rest for 7 days too. So a fresh session can do at most one of them, and only when the account had nothing new.
+- While the account has a sign-in method that isn't established, it can't remove, rename or replace an established one, or replace established recovery codes. The owner can still remove the new one.
+- One such removal or replacement freezes the rest for 7 days too. So a fresh session can do at most one of them, and only when the account had nothing new. It can't take the last second factor, which needs the password.
 
 See [Frozen Sign-In Methods](authenticators.md#frozen-sign-in-methods).
 

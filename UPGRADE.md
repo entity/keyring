@@ -19,15 +19,23 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-Until you do, removing an established sign-in method and replacing recovery codes fail with a database error.
+Until you do, removing, renaming or replacing an established sign-in method, replacing established recovery codes, `keyring:prune`, and force deleting a user all fail with a database error.
 
 An authenticator is now [established](docs/authenticators.md#established-authenticators) once the account has had it for `authenticator_changes.established_after`, 7 days by default. Authenticators added before the upgrade go by when they were added, so most are established already. Three things change:
 
 - `noDowngrade()` only asks for a passkey or security key once the account has an established one. A user who added their first key in the last 7 days can still sign in with their password and authenticator app until it's established.
 - A fresh verification only asks for a key that can't leave its device when that key is established.
-- An account's sign-in methods are [frozen](docs/authenticators.md#frozen-sign-in-methods) while it has an authenticator that isn't established, and for 7 days after it removes or replaces an established one, or recovery codes that had codes left. While frozen, removing an established authenticator and replacing recovery codes get a `422` on `authenticator`. A settings page that shows validation errors on `authenticator` shows the message, which says how long is left. JSON also has `frozen`, with `reason`, `until` and `skip`. When `skip` names a key factor, your page can offer to [make the change with that key](docs/authenticators.md#making-a-change-with-an-established-key), using `proveWithKey()` from `@keyringjs/keyring`.
+- An account's sign-in methods are [frozen](docs/authenticators.md#frozen-sign-in-methods) while it has an authenticator that isn't established, and for 7 days after it removes or replaces an established one, or an established set of recovery codes that had codes left. While frozen, removing, renaming or replacing an established authenticator, and replacing established recovery codes, get a `422` on `authenticator`. Recovery codes are established 7 days after that set was made, so a set made in the last 7 days can always be replaced. A settings page that shows validation errors on `authenticator` shows the message, which says how long is left. JSON also has `frozen`, with `reason`, `until` and `skip`. When `skip` names a key factor, your page can offer to [make the change with that key](docs/authenticators.md#making-a-change-with-an-established-key), using `proveWithKey()` from `@keyringjs/keyring`.
 
-If your support tools remove authenticators or replace recovery codes for users, pass `ignoreFreeze: true` to `AuthenticatorChanges::remove()` or `add()`. A subclass that overrides either needs the new argument too.
+If your support tools remove authenticators or replace recovery codes for users, pass `ignoreFreeze: true` to `AuthenticatorChanges::remove()` or `add()`, and to `update()` for a rename. A subclass that overrides any of them needs the new arguments too.
+
+### The Password for a First Second Factor
+
+Adding a second factor (an authenticator app, a passkey, a security key, or a factor of your own) to an account with no [established](docs/authenticators.md#established-authenticators) second factor now takes the user's current password, as `password` when the enrollment begins. That's every password-only account, and accounts whose second factors were all added in the last 7 days. Without it, beginning gets a `422` on `password`. Your settings page and enrollment page (the one `keyring.enrolled` sends users to) need a password field for that case. `@keyringjs/keyring`'s `enroll()` sends `password` with the beginning only. Accounts without a password, and recovery codes and email codes, don't need one. See [The Password for a First Second Factor](docs/authenticators.md#the-password-for-a-first-second-factor).
+
+Your own code that calls `AuthenticatorChanges::add()` for such an account has to pass `passwordConfirmed: true`, once it has made sure who it's adding for, or it gets a `ValidationException` on `password`. `EnrollmentRefused` can have the new reason `password`.
+
+In your tests, a request that adds a user's first second factor needs `'password' => 'password'` (or whatever the test user's password is) when it begins.
 
 `AuthenticatorRemovalRefused` has a new `reason` property, and its log entry has `reason` in `meta`. `EnrollmentRefused` can have the reason `frozen`.
 

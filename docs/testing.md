@@ -92,6 +92,14 @@ The factory's `established` method does the same, a month back. An authenticator
 Authenticator::factory()->passkey()->established()->for($user, 'authenticatable')->create();
 ```
 
+A test that adds a second factor to an account with none established sends the user's password when it begins, as a real user does. See [The Password for a First Second Factor](authenticators.md#the-password-for-a-first-second-factor):
+
+```php
+$this->actingAs($user)->withAssurance(Assurance::AAL1)
+    ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
+    ->assertOk();
+```
+
 The `verifiedWith` method accepts any number of authenticators and pretends the session verified the password and each one you pass. The level is whatever those reach, so a password and an authenticator app give AAL2. This means `verifiedWith` takes the place of `withAssurance`, and you may still chain `freshAt` with it, as before. Reach for `verifiedWith` when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method. That route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
 
 ## Faking Factors
