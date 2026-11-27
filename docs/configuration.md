@@ -155,6 +155,14 @@ The `algorithms` option lists the signature algorithms that keys may use, in ord
 This is extra middleware for adding, renaming, and removing authenticators, ending sessions, revoking devices, changing the password, and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default, these routes need a verification from the last 15 minutes, as [Step-Up](step-up.md#fresh-verification) explains.
 
 ```php
+'authenticator_changes' => [
+    'established_after' => '7d',
+],
+```
+
+The `established_after` option sets how long the account must have had an authenticator before it's [established](authenticators.md#established-authenticators). Until then, a new passkey or security key doesn't make `noDowngrade()` ask for one. It also sets how long the account's sign-in methods stay [frozen](authenticators.md#frozen-sign-in-methods) after one is added, or after an established one or a set of recovery codes is removed or replaced. Setting it to `0` turns both off, so a stolen session that has just signed in could shut the owner out again. It's separate from `email_changes.established_after`.
+
+```php
 'enrollment_url' => null,
 ```
 
@@ -271,7 +279,7 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 ],
 ```
 
-The `confirmable_for` option sets how long the emailed confirmation link works. The `revertable_for` option sets how long the old address can undo the change afterwards. The `established_after` option sets how long the account must have had a second factor before proving it lets a change skip the old address's confirmation. It also sets how far back undoing a change removes sign-in methods. See [Confirming](protected-changes.md#confirming). When an email change applies, `sign_out_others` ends the account's other sessions. The `keep_ended_for` option sets how long a finished change is kept before `keyring:prune` deletes it.
+The `confirmable_for` option sets how long the emailed confirmation link works. The `revertable_for` option sets how long the old address can undo the change afterwards. The `established_after` option sets how long the account must have had a second factor before proving it lets a change skip the old address's confirmation. It also sets how far back undoing a change removes sign-in methods. See [Confirming](protected-changes.md#confirming). It's separate from [`authenticator_changes.established_after`](#account-changes-and-enrollment), which decides when a new sign-in method counts for policies and can freeze the rest. When an email change applies, `sign_out_others` ends the account's other sessions. The `keep_ended_for` option sets how long a finished change is kept before `keyring:prune` deletes it.
 
 The `Features::updatePasswords()` feature adds `password` to the protected attributes, and `Features::emailChanges()` adds the [`email` attribute](#guard-and-users). You may list any others in `protected`. See [Protected Changes](protected-changes.md).
 

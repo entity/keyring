@@ -296,6 +296,23 @@ await removeAuthenticator(added.authenticator.id)
 | `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
+Removing an established authenticator, or replacing recovery codes, while the account's sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) throws a `KeyringRequestError` with a `422`. Show `error.errors.authenticator`, which says how long is left. `error.data.frozen` is a `FrozenChanges`, with the `reason` and an ISO 8601 `until`, for a page that formats the time itself:
+
+```ts
+import { KeyringRequestError, type FrozenChanges, removeAuthenticator } from '@keyringjs/keyring'
+
+try {
+  await removeAuthenticator(id)
+} catch (error) {
+  if (!(error instanceof KeyringRequestError) || !error.data?.frozen) {
+    throw error
+  }
+
+  const { until }: FrozenChanges = error.data.frozen
+  message.value = `${error.errors.authenticator[0]} (${new Date(until).toLocaleString()})`
+}
+```
+
 If `recoveryCodes` comes back, show the codes and ask the user to save them. If `continue` comes back too, it's the page the user was going to when Keyring sent them to enroll, and the account can now meet what sent them. Offer it as a "Continue" link once the codes are saved. See [Carrying On Afterwards](policies.md#carrying-on-afterwards).
 
 ## Sessions

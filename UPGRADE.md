@@ -8,7 +8,36 @@ What counts as a change you'd need to act on is in the README's [What's Stable](
 
 ### Published Config
 
-If you published `config/keyring.php`, you may add `'pages' => true`. Leaving it out is the same.
+If you published `config/keyring.php`, you may add `'pages' => true` and `'authenticator_changes' => ['established_after' => '7d']`. Leaving them out is the same.
+
+### Frozen Sign-In Methods
+
+Keyring has a new table, `keyring_sign_in_changes`. Run `keyring:install` again to publish the migration, then run it:
+
+```bash
+php artisan keyring:install
+php artisan migrate
+```
+
+Until you do, removing an established sign-in method and replacing recovery codes fail with a database error.
+
+An authenticator is now [established](docs/authenticators.md#established-authenticators) once the account has had it for `authenticator_changes.established_after`, 7 days by default. Authenticators added before the upgrade go by when they were added, so most are established already. Three things change:
+
+- `noDowngrade()` only asks for a passkey or security key once the account has an established one. A user who added their first key in the last 7 days can still sign in with their password and authenticator app until it's established.
+- A fresh verification only asks for a key that can't leave its device when that key is established.
+- An account's sign-in methods are [frozen](docs/authenticators.md#frozen-sign-in-methods) while it has an authenticator that isn't established, and for 7 days after it removes or replaces an established one, or recovery codes that had codes left. While frozen, removing an established authenticator and replacing recovery codes get a `422` on `authenticator`. A settings page that shows validation errors on `authenticator` shows the message, which says how long is left. JSON also has `frozen`, with `reason` and `until`.
+
+If your support tools remove authenticators or replace recovery codes for users, pass `ignoreFreeze: true` to `AuthenticatorChanges::remove()` or `add()`. A subclass that overrides either needs the new argument too.
+
+`AuthenticatorRemovalRefused` has a new `reason` property, and its log entry has `reason` in `meta`. `EnrollmentRefused` can have the reason `frozen`.
+
+In your tests, an authenticator made with `Authenticator::factory()` was added just now, so it isn't established. A test that makes a passkey and expects `noDowngrade()` to ask for it, or that removes an authenticator or replaces recovery codes while one like that is there, needs `->established()` on the factory:
+
+```php
+Authenticator::factory()->passkey()->established()->for($user, 'authenticatable')->create();
+```
+
+To turn the freeze off, set `authenticator_changes.established_after` to `0`. That brings back the lockout it prevents.
 
 ### Pages Asked For With JSON or an XHR
 

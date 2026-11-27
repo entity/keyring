@@ -72,14 +72,22 @@ app(SessionAssurance::class)->level()->atLeast(Assurance::AAL2);
 NIST SP 800-63B-4 (Sec. 4.1.2.1) binds a new authenticator at the highest level the account can authenticate at, or at the level the new one will be used at if that's lower. Keyring always asks for the highest level, so what's asked here follows the account, not the sign-in policy:
 
 - Users with only a password confirm with their password, so an account can always add its first sign-in method.
-- Users with two factors prove both again, even where the policy would sign them in with one. A stolen session plus one phished factor can't add, remove, or change anything.
-- Users with a key that can't leave its device use that key, with its own user verification or their password alongside it. A password and an authenticator app's code isn't enough for them, whatever the policy says. This applies to an attested key, which could reach AAL3, and to a key that nothing vouches for.
+- Users with two factors prove both again, even where the policy would sign them in with one. A stolen session that's no longer fresh, plus one phished factor, can't add, remove, or change anything.
+- Users with a key that can't leave its device use that key, with its own user verification or their password alongside it. A password and an authenticator app's code isn't enough for them, whatever the policy says. This applies to an attested key, which could reach AAL3, and to a key that nothing vouches for. Only an [established](authenticators.md#established-authenticators) key counts here. So a key added from a stolen session isn't the one thing the owner has to prove to remove it.
 - A recovery code stands in for a lost key, along with the password, as it does at sign in. A policy that takes no codes there (`noDowngrade(except: [])`, or an explicit `phishingResistant()`) takes none here either. A code is never the whole of a confirmation. A user whose only other sign-in method is a set of recovery codes confirms with the password, and isn't offered the codes.
 - Users who have any possession factor (an authenticator app, a passkey, or a security key) always use one. An [email code](factors.md#email-codes) isn't a possession factor, so it can't stand in. A user whose only other sign-in method is an emailed code proves the password and that code. That's what lets them add a real second factor.
 - A policy the user can't fully meet yet, such as one that asks for a passkey they haven't added, counts as far as they can go, so they can still add it.
 - A policy that asks for more than that is honoured. A [policy closure](policies.md#deciding-per-user-and-attempt) is asked about the browser the request comes from, and about an attempt nothing is known of, and the stricter answer stands. A policy that asks more of a new device is honoured, and a trusted device gets no discount. Risk isn't assessed again, so a policy that reads `$attempt->risk` is asked with none.
 - The window starts at the moment of verification, and it doesn't slide with activity. Using the app doesn't keep it fresh.
 - Signing in counts as a verification, so a fresh login is also fresh for step-up. So does [adding a sign-in method](authenticators.md#confirming), for the method that was added.
+
+Signing in counts, so whoever holds a copy of a session that has just signed in can use it for those 15 minutes, without proving anything. They can add a sign-in method of their own. They can't use it to shut the owner out:
+
+- A new sign-in method isn't [established](authenticators.md#established-authenticators) for 7 days. Until then, it doesn't make `noDowngrade()` ask for a passkey, so the owner's password and authenticator app still sign them in.
+- While the account has a sign-in method that isn't established, it can't remove an established one, or replace its recovery codes. The owner can still remove the new one.
+- One such removal or replacement freezes the rest for 7 days too. So a fresh session can do at most one of them, and only when the account had nothing new.
+
+See [Frozen Sign-In Methods](authenticators.md#frozen-sign-in-methods).
 
 Keyring uses `keyring.fresh:15m` on its own sensitive routes. It applies this through the `changes_middleware` config option, on top of `auth:{guard}`. Those routes cover managing authenticators, ending sessions, signing out devices, changing the password, and starting an email change.
 

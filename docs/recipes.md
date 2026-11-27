@@ -607,7 +607,7 @@ You can also configure how long Keyring keeps records:
 'email_changes' => ['keep_ended_for' => '7d'],
 ```
 
-The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, and log entries at the same time.
+The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, sign-in changes, and log entries at the same time.
 
 You can also keep less by leaving features off. To keep no devices at all, leave `Features::devices()` off. The `keyring_events` table is always created, but without `Features::securityLog()` nothing is written to it, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
 

@@ -27,6 +27,13 @@
 
 ### Security
 
+- An authenticator is established once the account has had it for `authenticator_changes.established_after`, 7 days by default. Signing in counts as a fresh verification, so a stolen copy of a session that had just signed in could add a passkey and lock the owner out. Under `noDowngrade()` the new key made the owner's password and authenticator app stop working at once. Without it, the copy could add a key and then remove the owner's app. Either way it could replace their recovery codes, and a password reset left all of it in place. See the [upgrade guide](UPGRADE.md#frozen-sign-in-methods).
+- `noDowngrade()` only asks for a passkey or security key once the account has an established one. A newer key signs in like any other. A fresh verification only asks for a key that can't leave its device when that key is established. An explicit `phishingResistant()`, `deviceBound()` or `aal3()` takes any key that qualifies.
+- An account's sign-in methods are frozen while it has an authenticator that isn't established, and for 7 days after it removes or replaces an established one or recovery codes that had codes left. While frozen, removing an established authenticator and replacing recovery codes are refused with a `422` on `authenticator`. The JSON says why and until when as `frozen`. Removing a newer authenticator always works, and freezes nothing, so the owner can remove one someone else added. Making the first recovery codes always works too. It's checked in `AuthenticatorChanges`, under the row lock removals already take, so JSON clients and your own code get it too. `remove()` and `add()` take `ignoreFreeze: true` for your own support tools. See [Frozen Sign-In Methods](docs/authenticators.md#frozen-sign-in-methods).
+- `AuthenticatorRemovalRefused` has a `reason`, `last_factor` or `frozen`, and so does the `authenticator_removal_refused` log entry. `EnrollmentRefused` and `enrollment_refused` can have the reason `frozen`.
+- `keyring:import` keeps when an imported authenticator app or passkey was first confirmed as when it was added, so it's established from the start.
+- The authenticator factory has an `established()` state, for a test's authenticator that the user has had a while.
+- `@keyringjs/keyring` has a `FrozenChanges` type for the `frozen` in a refusal.
 - `json()` only sends the `X-XSRF-TOKEN` header to the page's own origin or the `baseUrl`, never to a full URL on another origin. It decides that from the URL as the browser parses it, so a URL that only looks like a path, such as `/\evil.test`, gets no token either. See the [upgrade guide](UPGRADE.md#the-xsrf-token-stays-on-your-origins).
 
 ## v0.3.0 - 2026-11-21

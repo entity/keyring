@@ -10,6 +10,9 @@
 - [Recovery Codes](#recovery-codes)
 - [Renaming and Choosing the Default](#renaming-and-choosing-the-default)
 - [Removing Authenticators](#removing-authenticators)
+- [Frozen Sign-In Methods](#frozen-sign-in-methods)
+    - [Established Authenticators](#established-authenticators)
+    - [Getting Past the Freeze](#getting-past-the-freeze)
 - [Signing Out Other Sessions](#signing-out-other-sessions)
 - [Responses](#responses)
 - [From JavaScript](#from-javascript)
@@ -128,7 +131,7 @@ Confirming an authenticator also proves it, so the session counts it as verified
 
 The first time a user adds an extra factor while they have no recovery codes, or have used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once, and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) doesn't count as a second factor, so adding one comes with no codes.
 
-To give the user a new set, enroll the `recovery` factor. Beginning returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored. An email code doesn't count as that second factor.
+To give the user a new set, enroll the `recovery` factor. Beginning returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Replacing a set that has codes left is refused while the account's sign-in methods are [frozen](#frozen-sign-in-methods), both when beginning and when confirming. Making the first set, or replacing one with no codes left, never is. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored. An email code doesn't count as that second factor.
 
 Each code works only once. The challenge page shows how many are left as `remaining`, and the `Keyring\Events\RecoveryCodeUsed` event carries the same count.
 
@@ -165,6 +168,8 @@ The default authenticator is offered first when a second factor is needed. Recov
 
 Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes are removed with it. The policy is checked against what will actually remain.
 
+Removing an [established](#established-authenticators) authenticator is refused while the account's sign-in methods are [frozen](#frozen-sign-in-methods).
+
 Removing an authenticator also stops trusting all of the user's devices. See [Trusted Devices](devices-and-sessions.md#trusted-devices).
 
 An authenticator that failed too many times in a row is refused until it's set up again (see [At the Cap](security.md#at-the-cap)). Removing it clears those failures. So a user in that position signs in another way, removes the authenticator, and adds it back, and the new one starts from nothing. The password is set up again by resetting or changing it.
@@ -172,6 +177,83 @@ An authenticator that failed too many times in a row is refused until it's set u
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
 Removing the user's last second factor (the last one beyond recovery codes and email codes) also requires their current password in the request, as `password`. While a second factor sat beside it, their password may have been as short as `min_with_mfa`. On its own, though, NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so at this point it checks the length. A missing or wrong password, or one that's too short, gets an error on `password` asking the user to change it first.
+
+## Frozen Sign-In Methods
+
+Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a stolen copy of a session that has just signed in can add a sign-in method of its own. Without anything more, it could then remove the owner's authenticator app, or replace their recovery codes, and the owner couldn't get back in. A password reset leaves sign-in methods alone.
+
+So Keyring freezes an account's sign-in methods for a while, as some large providers do. The account is frozen while either of these is true:
+
+- It has an authenticator that isn't [established](#established-authenticators) yet. That means one added in the last 7 days.
+- In the last 7 days, it removed an established authenticator, replaced one, or replaced recovery codes that had codes left.
+
+While it's frozen, these are refused:
+
+- Removing an established authenticator.
+- Confirming a factor that allows only one per user, when that replaces an established one. For `recovery`, that's replacing a set that has codes left. Beginning is refused too, so the user isn't shown codes that can't be saved.
+
+The rest still works. The user can add sign-in methods, rename them, and choose the default. They can remove an authenticator that isn't established, and that doesn't freeze anything. So an owner can remove a passkey someone else added, and the account is no longer frozen for it. They can make their first set of recovery codes. A refused change ends no sessions.
+
+A change that goes through and takes something established freezes the account for 7 days from then. That's removing an established authenticator, replacing one, or replacing recovery codes that had codes left.
+
+A refusal is a validation error on `authenticator`. Its message says how long is left, such as `keyring::keyring.frozen_new_authenticator` with "another 3 days". JSON gets a `422` with the usual `message` and `errors`, plus `frozen`. It holds the `reason`, `new-authenticator` or `recent-change`, and `until`, an ISO 8601 time:
+
+```json
+{
+    "message": "A sign-in method was added recently. To keep your account safe, your other sign-in methods and your recovery codes can't be removed or replaced for another 1 week. The new one can still be removed.",
+    "errors": {
+        "authenticator": ["A sign-in method was added recently. To keep your account safe, your other sign-in methods and your recovery codes can't be removed or replaced for another 1 week. The new one can still be removed."]
+    },
+    "frozen": {
+        "reason": "new-authenticator",
+        "until": "2026-12-04T14:32:45+00:00"
+    }
+}
+```
+
+Keyring throws it as a `Keyring\Exceptions\SignInChangesFrozen`, a `ValidationException` that also has the `freeze`. The refusal dispatches `AuthenticatorRemovalRefused` with the reason `frozen`, or `EnrollmentRefused` with the reason `frozen`. One removal or replacement runs at a time for each user, so two at once can't both find the account unfrozen.
+
+To show it before the user tries, ask `Keyring\Changes\AuthenticatorChanges`. The `frozen` method returns a `Keyring\Changes\Freeze`, with `reason` (a `Keyring\Enums\FreezeReason`) and `until`, or `null`:
+
+```php
+use Keyring\Changes\AuthenticatorChanges;
+
+$freeze = app(AuthenticatorChanges::class)->frozen($user);
+
+$freeze?->until;      // a CarbonImmutable
+$freeze?->message();  // what the user is told
+```
+
+The `authenticator_changes.established_after` option sets the 7 days. See [Configuration](configuration.md#account-changes-and-enrollment). Setting it to `0` turns the freeze off, and with it the protection it gives.
+
+When each account last lost something established is kept in `keyring_sign_in_changes`, one row per user. `keyring:prune` deletes a row once it no longer holds anything back.
+
+### Established Authenticators
+
+An authenticator is established once the account has had it for `authenticator_changes.established_after`. That's 7 days by default, from when it was added (`created_at`). Recovery codes, an emailed code, and the password aren't factors in this sense, so they always count as established.
+
+An authenticator that isn't established works like any other. It signs in, and it can confirm a [fresh verification](step-up.md#fresh-verification). It just doesn't raise the bar yet:
+
+- [`noDowngrade()`](policies.md#no-downgrade) only asks for a passkey or security key once the account has an established one.
+- A fresh verification only asks for a key that can't leave its device when that key is established.
+- An explicit requirement, such as `aal3()`, `phishingResistant()` or the `keyring:device-bound` middleware, is met by any key that qualifies, new or not. Those come from your app, not from the user's keyring, so a new key can't make them stricter.
+
+`$user->keyring->isEstablished($authenticator)` says whether one is, and `$user->keyring->established()` is the keyring without the ones that aren't.
+
+`keyring:import` keeps when an imported authenticator app or passkey was first confirmed, so one a user has had for a while is established from the start. When Fortify didn't record it, the authenticator counts as added at the import.
+
+### Getting Past the Freeze
+
+Your app's own code, such as a support tool, may need to remove an authenticator or replace recovery codes while the account is frozen. For example, after your support team has checked who they're talking to. Pass `ignoreFreeze: true`:
+
+```php
+use Keyring\Changes\AuthenticatorChanges;
+
+app(AuthenticatorChanges::class)->remove($user, $authenticatorId, ignoreFreeze: true);
+app(AuthenticatorChanges::class)->add($user, $factor, $authenticator, ignoreFreeze: true);
+```
+
+Only do this from code the user can't reach on their own. Keyring's own routes never pass it. The change still freezes the account afterwards, and every other check, such as keeping a way to sign in, still applies.
 
 ## Signing Out Other Sessions
 
@@ -236,6 +318,7 @@ $user->keyring->find($id);
 $user->keyring->has(Category::Possession);
 $user->keyring->canMeet($requirement);
 $user->keyring->canSignIn();                 // can anything start a login?
+$user->keyring->isEstablished($authenticator); // has the account had it long enough to count on?
 ```
 
 Keyring caches the result on the model. If you change authenticators within the same request, call `$user->keyring->refresh()` afterward.
@@ -252,8 +335,8 @@ The events are in `Keyring\Events`:
 | `AuthenticatorRemoved` | `user`, `authenticator` |
 | `RecoveryCodesGenerated` | `user`, `authenticator` |
 | `RecoveryCodeUsed` | `authenticator`, `remaining` |
-| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid` or `not_allowed`) |
-| `AuthenticatorRemovalRefused` | `user`, `authenticator` |
+| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid`, `not_allowed` or `frozen`) |
+| `AuthenticatorRemovalRefused` | `user`, `authenticator`, `reason` (`last_factor` or `frozen`) |
 | `AccessRefused` | `user`, `resource`, `id` |
 
 Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.

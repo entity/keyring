@@ -86,6 +86,12 @@ $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(
 $this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
 ```
 
+The factory's `established` method does the same, a month back. An authenticator made without it was added just now, so it isn't [established](authenticators.md#established-authenticators). A passkey made that way doesn't make `noDowngrade()` ask for a passkey, and the account's other sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) while it's there. Use `established` for one the user has had a while:
+
+```php
+Authenticator::factory()->passkey()->established()->for($user, 'authenticatable')->create();
+```
+
 The `verifiedWith` method accepts any number of authenticators and pretends the session verified the password and each one you pass. The level is whatever those reach, so a password and an authenticator app give AAL2. This means `verifiedWith` takes the place of `withAssurance`, and you may still chain `freshAt` with it, as before. Reach for `verifiedWith` when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method. That route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
 
 ## Faking Factors

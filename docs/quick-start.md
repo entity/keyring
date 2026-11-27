@@ -230,7 +230,7 @@ Next:
 2. Build the `challenge` and `confirm` pages, and the part of [your settings page](#your-settings-page) that adds and removes sign-in methods.
 3. If everyone should set one up, uncomment the `keyring.enrolled` line below them and set `enrollment_url` to that page. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
 
-The `Requirement::aal2()->ifEnrolled()` policy asks for a second factor once a user has set one up. Adding `noDowngrade()` ensures a user with a passkey can't be talked into using something weaker. To learn more, see the [Factors](factors.md) and [Policies](policies.md) documentation.
+The `Requirement::aal2()->ifEnrolled()` policy asks for a second factor once a user has set one up. Adding `noDowngrade()` ensures a user with a passkey can't be talked into using something weaker, once they've had it for [7 days](authenticators.md#established-authenticators). To learn more, see the [Factors](factors.md) and [Policies](policies.md) documentation.
 
 ## What Keyring Does Without Being Asked
 

@@ -219,7 +219,7 @@ The `challenge` prop holds these values for the built-in factors:
 | `email-code` | `length` (the number of digits), `sent` (whether a code has been sent), and `expiresAt` (the code's expiry, or `null`). |
 | `passkey`, `security-key` | `options`, the WebAuthn request options for the browser. |
 
-Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, a user who has a passkey or security key is only offered their other keys, plus recovery codes unless the policy refuses those too.
+Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, a user who has an established passkey or security key is only offered their other keys, plus recovery codes unless the policy refuses those too.
 
 ### Choosing an Authenticator
 
