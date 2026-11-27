@@ -45,6 +45,8 @@ use Keyring\Tests\Fixtures\User;
 // How a sign in with a provider counts toward a recent verification, and
 // confirming a step-up by going back to the provider.
 beforeEach(function () {
+    // Timestamps here are compared with now() to the second.
+    $this->freezeSecond();
     Http::preventStrayRequests();
     Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SingleSignOn::class]);
 
