@@ -58,7 +58,7 @@ use Throwable;
  * The user's own sign-in events don't fire, so nothing that listens for a
  * sign in (new device emails, risk, "last signed in") takes it for one.
  *
- * @phpstan-type Parked array{impersonator: string, type: string, name: ?string, session: string, handle: string, user: string, user_type: string, remembered: bool, started_at: int, expires_at: int, password: ?string, parked: array<string, mixed>, announced?: bool}
+ * @phpstan-type Parked array{impersonator: string, type: string, name: ?string, session: string, handle?: string, user: string, user_type: string, remembered: bool, started_at: int, expires_at: int, password: ?string, parked: array<string, mixed>, announced?: bool}
  */
 class Impersonation
 {
@@ -272,7 +272,7 @@ class Impersonation
                 $this->sessions->reregister($request);
             }
         } finally {
-            if ($handle !== null && ($impersonator !== null || $target !== null) && ($parked['announced'] ?? false) !== true) {
+            if (($impersonator !== null || $target !== null) && ($parked['announced'] ?? false) !== true) {
                 ImpersonationEnded::dispatch($impersonator, $target, $reason, $returned, $handle);
             }
         }
@@ -324,7 +324,7 @@ class Impersonation
             if ($announce) {
                 $this->noteAnnounced($request, $parked);
 
-                ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false, $parked['handle']);
+                ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false, $parked['handle'] ?? null);
             }
 
             throw $e;
@@ -333,7 +333,7 @@ class Impersonation
         $this->forget($request);
 
         if ($announce) {
-            ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false, $parked['handle']);
+            ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false, $parked['handle'] ?? null);
         }
     }
 

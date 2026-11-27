@@ -20,7 +20,9 @@ use Keyring\Enums\ImpersonationEndReason;
  *
  * $handle is the impersonated session's handle, as ImpersonationStarted
  * gave it: the same one Sessions::handle() gives and RegisteredSessionEnded
- * carries.
+ * carries. It's null only when neither the session nor the impersonated
+ * record says which session it was, such as an impersonation that started
+ * before Keyring noted it. The event still fires, and the end is logged.
  */
 class ImpersonationEnded
 {
@@ -31,6 +33,6 @@ class ImpersonationEnded
         public readonly ?Authenticatable $user,
         public readonly ImpersonationEndReason $reason,
         public readonly bool $returned,
-        public readonly string $handle,
+        public readonly ?string $handle,
     ) {}
 }

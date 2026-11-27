@@ -9,6 +9,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Middleware\AuthenticateSession as LaravelAuthenticateSession;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Event;
@@ -1143,13 +1144,16 @@ describe('ending by itself', function () {
             && $event->reason === ImpersonationEndReason::Lost && ! $event->returned && $event->handle === $handle);
     });
 
-    it('goes back when the impersonated session has no record', function () {
+    it('goes back when the impersonated session has no record, naming it by the handle it started with', function () {
+        Event::fake([ImpersonationEnded::class]);
         $own = impersonating();
+        $handle = app(Sessions::class)->handle(record(session(Sessions::KEY)));
         session()->forget(Sessions::KEY);
 
         $this->get('/whoami')->assertRedirect('/dashboard');
 
         expect(session(Sessions::KEY))->toBe(record($own)->replacedBy);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->returned && $event->handle === $handle);
     });
 
     it('ends, back to the admin, once they may no longer impersonate the user', function () {
@@ -1318,11 +1322,13 @@ describe('signing out while impersonating', function () {
         });
         Event::fake([ImpersonationEnded::class]);
         $own = impersonating();
+        $handle = app(Sessions::class)->handle(record(session(Sessions::KEY)));
 
         $this->post('/my-logout')->assertOk();
 
         expect(record($own)->revokedAt)->not->toBeNull();
-        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::SignedOut && ! $event->returned);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::SignedOut && ! $event->returned
+            && $event->handle === $handle);
     });
 
     it('does the same when the app empties the session before its Auth::logout()', function () {
@@ -1582,6 +1588,21 @@ describe('the security log and events', function () {
         expect(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['expired']);
     });
 
+    it('still fires ImpersonationEnded, and logs the end, when nothing says which session it was', function () {
+        $ended = new ArrayObject;
+        Event::listen(fn (ImpersonationEnded $event) => $ended->append($event));
+        impersonating();
+        session()->put(Impersonation::KEY, Arr::except(session(Impersonation::KEY), 'handle'));
+        session()->forget(Sessions::KEY);
+
+        $this->get('/whoami')->assertRedirect('/dashboard');
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->returned)->toBeTrue()
+            ->and($ended[0]->handle)->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(2);
+    });
+
     it('fires events with who, why, and the impersonated session\'s handle', function () {
         Event::fake([ImpersonationStarted::class, ImpersonationEnded::class, RegisteredSessionEnded::class]);
         impersonating();
@@ -1606,7 +1627,7 @@ describe('the security log and events', function () {
         $this->artisan('keyring:sweep')->assertSuccessful();
 
         $started = Event::dispatched(ImpersonationStarted::class)->sole()[0];
-        Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => $event->handle === $started->handle && $event->reason === SessionEndReason::Expired);
+        Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => in_array($started->handle, $event->handles, true) && $event->reason === SessionEndReason::Expired);
     });
 
     it('logs a refused start on the impersonator\'s account, with why and the ID asked for', function (Closure $refuse, ImpersonationRefusal $reason) {

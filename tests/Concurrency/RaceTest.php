@@ -388,6 +388,7 @@ it('leaves nothing of the admin signed in when they stop impersonating as they\'
             'type' => RegisteredSession::typeOf($admin),
             'name' => 'Taylor',
             'session' => $own->id,
+            'handle' => app(Sessions::class)->handle($impersonated),
             'user' => (string) $user->id,
             'user_type' => RegisteredSession::typeOf($user),
             'remembered' => false,
