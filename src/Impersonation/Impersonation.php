@@ -43,8 +43,8 @@ use Symfony\Component\HttpFoundation\Response;
  *   on their own clocks as they would in that session: a request after a
  *   level's idle limit lapses it.
  * - Coming back takes that record still being good, the impersonator still
- *   being someone who may sign in, and the browser's session still being
- *   the impersonation it started. Otherwise the browser is signed out, and
+ *   being someone who may sign in, on the password their session had, and
+ *   the browser's session still being the impersonation it started. Otherwise the browser is signed out, and
  *   the parked record ends with it. An impersonator who may no longer
  *   impersonate the user ends it too, and goes back. They come back at the
  *   level they had, but nothing counts as fresh: a page of the user's could
@@ -405,8 +405,9 @@ class Impersonation
     /**
      * The impersonator and their session, when the browser can go back to
      * it: the record is still good and theirs, they may still sign in, with
-     * no password change they're held for, and, under
-     * sessions.end_on_lapse, the level it signed in at hasn't lapsed.
+     * no password change they're held for, their password is the one the
+     * session parked, and, under sessions.end_on_lapse, the level it signed
+     * in at hasn't lapsed.
      *
      * @param  Parked  $parked
      * @return array{0: Authenticatable&Model, 1: RegisteredSession}|null
@@ -418,11 +419,34 @@ class Impersonation
 
         if ($impersonator === null || $own === null || ! $own->isActive($now) || $this->sessions->idledOut($own, $now)
             || ! $own->belongsTo($impersonator) || ! $this->keyring->allowsSignIn($impersonator) || $this->keyring->requiresPasswordChange($impersonator)
-            || $this->catchUp($parked['parked'])[1] !== null) {
+            || $this->passwordChanged($parked['parked'], $impersonator) || $this->catchUp($parked['parked'])[1] !== null) {
             return null;
         }
 
         return [$impersonator, $own];
+    }
+
+    /**
+     * Whether the impersonator's password changed since their session
+     * parked its hash, compared as Laravel's auth.session middleware
+     * compares it: the guard's keyed hash, or the raw hash an older session
+     * kept. Decided here rather than left to that middleware, whose step
+     * after the response stores the current hash over the one put back, so
+     * a stop it wraps would come back signed in. Nothing to compare for an
+     * impersonator without a password, which it skips too.
+     *
+     * @param  array<string, mixed>  $parked
+     */
+    protected function passwordChanged(array $parked, Authenticatable $impersonator): bool
+    {
+        $stored = $parked[$this->passwordHashKey()] ?? null;
+        $password = $impersonator->getAuthPassword();
+        $guard = $this->keyring->guard();
+
+        assert($guard instanceof SessionGuard);
+
+        return is_string($stored) && filled($password)
+            && ! hash_equals($guard->hashPasswordForCookie($password), $stored) && ! hash_equals($password, $stored);
     }
 
     /**
@@ -560,7 +584,8 @@ class Impersonation
     /**
      * What the impersonator's session keeps aside: what it proved, and the
      * password hash Laravel's auth.session middleware compares, so a
-     * password changed elsewhere meanwhile still signs them out after.
+     * password changed elsewhere meanwhile ends the impersonation and signs
+     * them out rather than going back (passwordChanged()).
      *
      * @return list<string>
      */

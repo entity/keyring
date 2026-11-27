@@ -28,9 +28,9 @@ enum ImpersonationEndReason: string
 
     /**
      * The impersonator's own session has ended (revoked, timed out), or the
-     * impersonator was deleted, is no longer allowed to sign in, or is held
-     * for a new password, so there was nobody to go back to and the browser
-     * was signed out.
+     * impersonator was deleted, is no longer allowed to sign in, is held
+     * for a new password, or their password changed, so there was nobody to
+     * go back to and the browser was signed out.
      */
     case ImpersonatorSessionEnded = 'impersonator_session_ended';
 

@@ -719,18 +719,83 @@ describe('stopping', function () {
         Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::ImpersonatorSessionEnded);
     });
 
-    it('still signs the admin out after, with laravel\'s auth.session middleware, when their password changed meanwhile', function () {
+    // Laravel's auth.session middleware would sign them out on its own, but
+    // only where it runs, and its step after the response stores the
+    // current hash over the one put back. Keyring compares them itself.
+    it('signs the admin out rather than going back, when their password changed meanwhile', function () {
         Route::middleware(['web', 'auth', LaravelAuthenticateSession::class])->get('/checked', fn () => (string) Auth::id());
         adminSignsIn();
         $this->get('/checked');
+        $own = session(Sessions::KEY);
         impersonate($this->user);
+        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
 
         // Saved behind Keyring's back, so nothing else signs the admin out.
         User::query()->whereKey($this->admin->getKey())->update(['password' => Hash::make('changed somewhere else')]);
 
+        stopImpersonating()->assertRedirect('/login')->assertSessionHas('status', 'signed-out');
+
+        expect(record($own)->revokedAt)->not->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['impersonator_session_ended']);
+        $this->get('/checked')->assertRedirect('/login');
+    });
+
+    it('signs the admin out on a stop that laravel\'s auth.session middleware wraps, when their password changed meanwhile', function (Closure $change) {
+        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
+        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
+        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+        $own = impersonating();
+        $this->get('/whoami')->assertOk();
+
+        $change($this->admin);
+        Auth::forgetGuards();
+
+        stopImpersonating()->assertRedirect('/login');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull();
+        Auth::forgetGuards();
+        $this->get('/whoami')->assertRedirect('/login');
+        $this->get('/billing')->assertRedirect('/login');
+    })->with([
+        'with the query builder' => [fn (User $admin) => User::query()->whereKey($admin->getKey())->update(['password' => Hash::make('changed somewhere else')])],
+        'without keyring\'s protection' => [fn (User $admin) => Keyring::withoutProtection(fn () => $admin->fresh()->forceFill(['password' => Hash::make('changed somewhere else')])->save())],
+    ]);
+
+    it('goes back as before when laravel\'s auth.session middleware wraps the stop and the password is the same', function () {
+        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
+        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
+        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+        $own = impersonating();
+        $this->get('/whoami')->assertOk();
+        Auth::forgetGuards();
+
         stopImpersonating()->assertRedirect('/dashboard');
 
-        $this->get('/checked')->assertRedirect('/login');
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy);
+        Auth::forgetGuards();
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+    });
+
+    // Laravel's auth.session middleware has nothing to compare either.
+    it('goes back when the admin no longer has a password', function () {
+        impersonating();
+        User::query()->whereKey($this->admin->getKey())->update(['password' => null]);
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
+    });
+
+    // A session from before Laravel kept a keyed hash holds the raw one,
+    // which its auth.session middleware still takes.
+    it('goes back with the raw password hash parked, as laravel\'s auth.session middleware takes it', function () {
+        impersonating();
+        session()->put(Impersonation::KEY.'.parked.password_hash_web', $this->admin->fresh()->getAuthPassword());
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
     });
 
     it('has an inertia visit load the next page in full, starting and stopping', function () {
@@ -790,6 +855,40 @@ describe('ending by itself', function () {
         expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and(record($impersonated)->revokedAt)->not->toBeNull()
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
+    });
+
+    it('signs out on the next request once the admin\'s password changed', function () {
+        $own = impersonating();
+        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
+        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
+        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+
+        User::query()->whereKey($this->admin->getKey())->update(['password' => Hash::make('changed somewhere else')]);
+        Auth::forgetGuards();
+
+        $this->get('/welcome')->assertRedirect('/login')->assertSessionHas('status', 'signed-out');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull();
+    });
+
+    it('signs out after impersonation.lifetime rather than going back, with laravel\'s auth.session middleware, once the admin\'s password changed', function () {
+        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
+        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
+        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+        $own = impersonating();
+        $this->get('/whoami')->assertOk();
+
+        User::query()->whereKey($this->admin->getKey())->update(['password' => Hash::make('changed somewhere else')]);
+        $this->travel(61)->minutes();
+        Auth::forgetGuards();
+
+        $this->get('/whoami')->assertRedirect('/login');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull();
+        Auth::forgetGuards();
+        $this->get('/whoami')->assertRedirect('/login');
     });
 
     it('tells a json client with a 409', function () {
