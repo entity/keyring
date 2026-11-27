@@ -49,6 +49,22 @@ it('never lets two removals at once take the last way in', function () {
         ->and(Authenticator::query()->where('factor', 'passkey')->count())->toBe(1);
 });
 
+it('lets one of two removals at once take a sign-in method the account counts on, and freezes the other', function () {
+    $user = taylor();
+    $first = Authenticator::factory()->totp()->established()->for($user, 'authenticatable')->create();
+    $second = Authenticator::factory()->totp()->established()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->passkey()->established()->for($user, 'authenticatable')->create();
+
+    $results = contend($user, [
+        ['remove-authenticator', $user->id, $first->id],
+        ['remove-authenticator', $user->id, $second->id],
+    ]);
+
+    expect(outcomes($results, true))->toBe(1)
+        ->and(outcomes($results, 'refused'))->toBe(1)
+        ->and(Authenticator::query()->where('factor', 'totp')->count())->toBe(1);
+});
+
 it('spends a recovery code once, however many requests bring it', function () {
     $user = taylor();
     $codes = Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa', 'bbbb-bbbb-bbbb-bbbb-bbbb-bbbb-bb'])->for($user, 'authenticatable')->create();

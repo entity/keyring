@@ -52,7 +52,9 @@ export function makeDefault(id: string) {
  * Remove an authenticator. Removing the user's last second factor also needs
  * their password, so Keyring can check it's long enough on its own; without
  * it the request fails with an error on `password`. `signOutOthers` ends the
- * user's other sessions along with it.
+ * user's other sessions along with it. While the account's sign-in methods
+ * are frozen, removing an established one fails with a `422` whose `data`
+ * holds `frozen` (see `FrozenChanges`).
  */
 export function removeAuthenticator(id: string, password?: string, { signOutOthers }: { signOutOthers?: boolean } = {}) {
   const body = {

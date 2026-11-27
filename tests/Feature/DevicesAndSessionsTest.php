@@ -1057,7 +1057,7 @@ function expectNoTrustedDevices(): void
 
 describe('ending trust', function () {
     beforeEach(function () {
-        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         trustThisDevice($this->totp);
         $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'elsewhere'), 'trusted_until' => now()->addDay()]);
     });
@@ -1282,7 +1282,7 @@ describe('ending other sessions along with a change to how the user signs in', f
 
     it('ends them when new recovery codes ask it to', function () {
         ($this->signInTwice)();
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         $old = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();

@@ -62,6 +62,9 @@ class AuthenticatorController
         // Anything that isn't text is left out of it, as before.
         Input::validate($request, ['name' => [Factor::validText()]]);
 
+        // New recovery codes that couldn't be saved yet aren't shown at all.
+        $this->changes->ensureMayAdd($this->keyring->user(), $factor);
+
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
         if ($factor instanceof SendsCodes) {
             $this->throttle->sending($factor->key(), $this->keyring->user());

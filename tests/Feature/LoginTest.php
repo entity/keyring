@@ -493,7 +493,7 @@ it('does not offer a used-up recovery set under a one-factor no downgrade', func
     Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
     Keyring::require(Requirement::aal1()->noDowngrade());
     $user = taylor();
-    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->securityKey()->established()->for($user, 'authenticatable')->create();
     Authenticator::factory()->recoveryCodes([])->for($user, 'authenticatable')->create();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])
@@ -508,7 +508,7 @@ it('keeps no-downgrade when the rest of the policy is out of reach', function ()
     Keyring::factors([Password::class, WebAuthn::securityKeys(), Totp::class, RecoveryCodes::class]);
     Keyring::require(Requirement::factors(3)->ifEnrolled()->noDowngrade());
     $user = taylor();
-    Authenticator::factory()->securityKey()->for($user, 'authenticatable')->create();
+    Authenticator::factory()->securityKey()->established()->for($user, 'authenticatable')->create();
     totpFor($user);
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])

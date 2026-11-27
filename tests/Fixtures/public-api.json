@@ -39,6 +39,9 @@
         "changes_middleware": [
             "keyring.fresh:15m"
         ],
+        "authenticator_changes": {
+            "established_after": "7d"
+        },
         "enrollment_url": null,
         "enrollment_except": [],
         "password_change_url": null,
@@ -302,11 +305,13 @@
         "canMeet(Keyring\\Login\\Requirement $requirement): bool",
         "canSignIn(): bool",
         "default(): ?Keyring\\Models\\Authenticator",
+        "established(): static",
         "find(?string $id): ?Keyring\\Models\\Authenticator",
         "has(Keyring\\Enums\\Category $category): bool",
         "hasFactorToRecover(): bool",
         "hasRecoveryCodes(): bool",
         "hasSecondFactor(): bool",
+        "isEstablished(Keyring\\Models\\Authenticator $authenticator): bool",
         "of(string $factor): Illuminate\\Support\\Collection",
         "reachable(Keyring\\Login\\Requirement $requirement): Keyring\\Login\\Requirement",
         "refresh(): static",
@@ -506,6 +511,7 @@
         ],
         "Keyring\\Events\\AuthenticatorRemovalRefused": [
             "authenticator",
+            "reason",
             "user"
         ],
         "Keyring\\Events\\AuthenticatorRemoved": [

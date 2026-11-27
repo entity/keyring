@@ -326,7 +326,7 @@ describe('enrolling', function () {
     });
 
     it('hands nothing back for new recovery codes, and keeps it for the factor they still need', function () {
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
         $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->withSession([Detours::ENROLLMENT => savedFor($this->user)]);
 

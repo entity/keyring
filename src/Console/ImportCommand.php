@@ -286,12 +286,15 @@ class ImportCommand extends Command
      */
     protected function createTwoFactor(Model $user, string $secret, array $codes): void
     {
+        // Added when it was first confirmed, so a factor the user has had
+        // for a while is established from the start.
         $this->create($user, [
             'factor' => 'totp',
             'name' => __('Authenticator app'),
             'secret' => $secret,
             'is_default' => true,
             'confirmed_at' => $user->getAttribute('two_factor_confirmed_at') ?? now(),
+            'created_at' => $user->getAttribute('two_factor_confirmed_at') ?? now(),
             'meta' => ['imported_from' => 'fortify'],
         ]);
 
@@ -365,6 +368,7 @@ class ImportCommand extends Command
             'aaguid' => $credential['aaguid'] ?? null,
             'transports' => $credential['transports'] ?? [],
             'confirmed_at' => $passkey->created_at ?? now(),
+            'created_at' => $passkey->created_at ?? now(),
             'last_used_at' => $passkey->last_used_at ?? null,
             'meta' => ['imported_from' => 'laravel/passkeys', 'user_verified' => (bool) ($credential['uvInitialized'] ?? true)],
         ]);

@@ -739,12 +739,12 @@ describe('asking for the strongest combination the account can give', function (
         $this->flushHeaders();
         expect(mayAddSignInMethod())->toBeTrue();
     })->with([
-        'attested, so the account can reach aal3' => fn () => Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a'),
-        'not attested, so only its own word for it' => fn () => Authenticator::factory()->securityKey(),
+        'attested, so the account can reach aal3' => fn () => Authenticator::factory()->securityKey()->established()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a'),
+        'not attested, so only its own word for it' => fn () => Authenticator::factory()->securityKey()->established(),
     ]);
 
     it('takes a recovery code and the password in a lost key\'s place', function () {
-        Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->securityKey()->established()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->verifiedWith($this->totp);
@@ -760,7 +760,7 @@ describe('asking for the strongest combination the account can give', function (
 
     it('takes no recovery code in the key\'s place where the policy takes none at sign in', function () {
         Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade(except: []));
-        Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->securityKey()->established()->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->verifiedWith($this->totp);
@@ -1477,7 +1477,7 @@ describe('asking from a controller', function () {
             Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()->requireAttestation(), Totp::class, RecoveryCodes::class]);
             Keyring::fake()->pass('security-key');
 
-            Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
+            Authenticator::factory()->securityKey()->established()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
             Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
             $this->actingAs($this->user);
         });

@@ -174,7 +174,7 @@ it('logs it, and still has the sign-in method', function () {
 
     $this->withAssurance(Assurance::AAL2)->deleteJson(route('keyring.authenticators.destroy', $totp->id))->assertJsonValidationErrors('authenticator');
 
-    expect(logEntry('authenticator_removal_refused'))->factor->toBe('totp')->meta->toBe(['name' => 'Phone'])->severity->toBe(Severity::Warning)
+    expect(logEntry('authenticator_removal_refused'))->factor->toBe('totp')->meta->toBe(['name' => 'Phone', 'reason' => 'last_factor'])->severity->toBe(Severity::Warning)
         ->and($totp->fresh())->not->toBeNull()
         ->and(loggedTypes())->toBe(['authenticator_removal_refused']);
 });

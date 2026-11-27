@@ -171,8 +171,11 @@ class KeyringManager
             $requirement = $requirement->ifEnrolled();
         }
 
+        // Only a key the account has had a while raises the bar: one added
+        // from a stolen session signs in, but doesn't shut out the owner's
+        // other factors until it's established.
         if ($requirement->noDowngrade && ! $requirement->requiresPhishingResistance
-            && $attempt->keyring()->canMeet(Requirement::aal1()->phishingResistant())) {
+            && $attempt->keyring()->established()->canMeet(Requirement::aal1()->phishingResistant())) {
             $requirement = $requirement->withoutDowngrades();
         }
 

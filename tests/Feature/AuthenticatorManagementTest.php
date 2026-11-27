@@ -469,7 +469,7 @@ it('tells the user when a sign-in method is added', function () {
 });
 
 it('tells the user when their recovery codes are replaced, unless the app turned the notice off', function () {
-    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
     $this->verifiedWith($totp);
     Notification::fake();
     Keyring::notifications(['recovery_codes_generated' => null]);
@@ -562,7 +562,7 @@ class UnnotifiableAccount extends Authenticatable
 // since been confirmed.
 describe('a browser that sends back an earlier copy of its session', function () {
     it('cannot bring back recovery codes that were replaced', function () {
-        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         $this->verifiedWith($totp);
 
         $first = $this->postJson(route('keyring.authenticators.store', 'recovery'))->json('enrollment.codes');
@@ -640,6 +640,9 @@ describe('counting a new sign-in method as proved', function () {
     });
 
     it('counts nothing for new recovery codes, which are only shown', function () {
+        // New codes straight after a new factor would be refused otherwise.
+        config(['keyring.authenticator_changes.established_after' => 0]);
+
         $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
@@ -680,7 +683,7 @@ describe('counting a new sign-in method as proved', function () {
 // them to make a set.
 describe('replacing recovery codes once one is used', function () {
     beforeEach(function () {
-        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->post('/logout');

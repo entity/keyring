@@ -16,6 +16,8 @@ return [
     'password_context' => 'Your password can\'t be made up of your name, your email address or the name of this site. Add some words of your own.',
     'password_unchanged' => 'That is your current password. Choose another.',
     'password_unchecked' => 'We couldn\'t check that password against known data breaches just now. Please try again in a moment.',
+    'frozen_new_authenticator' => 'A sign-in method was added recently. To keep your account safe, your other sign-in methods and your recovery codes can\'t be removed or replaced for another :time. The new one can still be removed.',
+    'frozen_recent_change' => 'A sign-in method or your recovery codes were removed or replaced recently. To keep your account safe, your other sign-in methods and recovery codes can\'t be removed or replaced for another :time.',
     'password_to_remove_last_factor' => 'Enter your password to remove your last second factor.',
     'password_too_short_alone' => 'Without a second factor your password needs at least :min characters. Change it first, then remove this.',
     'enrollment_expired' => 'Setting this up took too long. Please start again.',

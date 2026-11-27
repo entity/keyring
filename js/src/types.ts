@@ -23,6 +23,17 @@ export interface Authenticator extends AuthenticatorSummary {
 }
 
 /**
+ * Why an established sign-in method, or a set of recovery codes, can't be
+ * removed or replaced just now, and until when (ISO 8601). It comes with a
+ * `422`, as `data.frozen` on the `KeyringRequestError`, beside the usual
+ * `message` and `errors.authenticator`.
+ */
+export interface FrozenChanges {
+  reason: 'new-authenticator' | 'recent-change'
+  until: string
+}
+
+/**
  * Props Keyring sends to the challenge and confirm pages.
  */
 export interface ChallengeProps {

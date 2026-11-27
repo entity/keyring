@@ -14,6 +14,7 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Support\Duration;
 
 /**
  * Everything a user can sign in with, across every registered factor.
@@ -115,9 +116,7 @@ class UserKeyring
      */
     public function hasFactorToRecover(): bool
     {
-        return $this->all()->contains(fn (Authenticator $authenticator) => ! $authenticator->isVirtual()
-            && $authenticator->factor !== RecoveryCodes::KEY
-            && array_any($authenticator->factor()->categories($authenticator), fn (Category $category) => $category->authenticates()));
+        return $this->all()->contains($this->isFactor(...));
     }
 
     /**
@@ -146,6 +145,40 @@ class UserKeyring
     public function withoutFallbacks(): static
     {
         return $this->without(...$this->of(RecoveryCodes::KEY)->all());
+    }
+
+    /**
+     * Whether the account has had the authenticator long enough to count on
+     * it: for "authenticator_changes.established_after". Only factors can be
+     * anything else. Recovery codes, an emailed code and what isn't stored,
+     * like the password, always are.
+     */
+    public function isEstablished(Authenticator $authenticator): bool
+    {
+        return ! $this->isFactor($authenticator)
+            || $authenticator->created_at === null
+            || $authenticator->created_at->lte(Duration::ago(config('keyring.authenticator_changes.established_after')));
+    }
+
+    /**
+     * The keyring without the factors that aren't established yet: what
+     * policies like noDowngrade() go by, so that a factor added from a
+     * stolen session can sign in, but can't shut out the owner's.
+     */
+    public function established(): static
+    {
+        return $this->without(...$this->all()->reject($this->isEstablished(...))->all());
+    }
+
+    /**
+     * Whether it's a stored factor, rather than recovery codes or a step
+     * like an emailed code.
+     */
+    protected function isFactor(Authenticator $authenticator): bool
+    {
+        return ! $authenticator->isVirtual()
+            && $authenticator->factor !== RecoveryCodes::KEY
+            && array_any($authenticator->factor()->categories($authenticator), fn (Category $category) => $category->authenticates());
     }
 
     /**

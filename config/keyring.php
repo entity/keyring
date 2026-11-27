@@ -160,9 +160,21 @@ return [
     | signed in to Keyring's guard). By default they need a recent
     | verification.
     |
+    | An authenticator is established once the account has had it for
+    | "established_after". Until then it signs in like any other, but
+    | doesn't make noDowngrade() ask for a passkey. While the account has
+    | one that isn't established yet, or lost or replaced one that was
+    | within that time, it can't remove or replace established ones, or its
+    | recovery codes. So whoever got into a session can't add a factor and
+    | then take away the owner's.
+    |
     */
 
     'changes_middleware' => ['keyring.fresh:15m'],
+
+    'authenticator_changes' => [
+        'established_after' => '7d',
+    ],
 
     /*
     |--------------------------------------------------------------------------

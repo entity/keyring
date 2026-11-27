@@ -316,6 +316,8 @@ it('removes recovery codes with the last factor an undo removes', function () {
 });
 
 it('leaves nothing but the password to confirm with once an undo removes a replaced authenticator app', function () {
+    // Replacing the app the day the new one is added would be refused otherwise.
+    config(['keyring.authenticator_changes.established_after' => 0]);
     Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
     $signIn = function (?string $code = null) {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);

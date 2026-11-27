@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Keyring\Changes;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
@@ -12,18 +13,24 @@ use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Enums\Category;
+use Keyring\Enums\FreezeReason;
 use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemovalRefused;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\RecoveryCodesGenerated;
+use Keyring\Exceptions\SignInChangesFrozen;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
+use Keyring\Models\SignInChange;
 use Keyring\Sessions\Sessions;
+use Keyring\Support\Duration;
 use Keyring\Support\PasswordRules;
 use Keyring\Support\RowLock;
+use Keyring\UserKeyring;
 
 /**
  * Adding, changing and removing a user's authenticators, and the rules that
@@ -44,6 +51,11 @@ class AuthenticatorChanges
      * An emailed code isn't a factor, so it comes with none: there would be
      * nothing for them to recover.
      *
+     * Replacing recovery codes that have some left, or a factor the account
+     * has had for a while, is refused while the account is frozen(), unless
+     * $ignoreFreeze says otherwise (for an app's own support tools, never a
+     * user's request), and freezes it in turn.
+     *
      * With the request it came in, the session that asked has to still be
      * signed in when it's saved: one ended while the request ran (an email
      * change undone, say) adds nothing.
@@ -51,22 +63,29 @@ class AuthenticatorChanges
      * @return list<string>|null
      *
      * @throws AuthenticationException
+     * @throws SignInChangesFrozen
      */
-    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator, ?Request $request = null): ?array
+    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator, ?Request $request = null, bool $ignoreFreeze = false): ?array
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
         $recoverable = array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
         $recovery = ! $isRecovery && $recoverable && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
-        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $keyring, $authenticator, $isRecovery, $recovery) {
-            if (! $factor->multiple()) {
-                $replaced = $keyring->of($factor->key())->each->delete();
+        // One change to a user's sign-in methods at a time, so two can't each
+        // find the account unfrozen.
+        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $authenticator, $isRecovery, $recovery, $ignoreFreeze) {
+            $keyring = $this->keyring->for($user);
+            $replaced = $factor->multiple() ? collect() : $keyring->of($factor->key());
+            $lost = $recovery === null ? $replaced : $replaced->merge($keyring->of(RecoveryCodes::KEY));
 
-                // New recovery codes are upkeep, not a change of sign-in method.
-                if (! $isRecovery && $replaced->isNotEmpty()) {
-                    $this->sessions->distrustDevices($user);
-                }
+            $destructive = $this->ensureMayLose($user, $keyring, $lost, $ignoreFreeze);
+
+            $replaced->each->delete();
+
+            // New recovery codes are upkeep, not a change of sign-in method.
+            if (! $isRecovery && $replaced->isNotEmpty()) {
+                $this->sessions->distrustDevices($user);
             }
 
             $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
@@ -75,9 +94,21 @@ class AuthenticatorChanges
                 $keyring->of(RecoveryCodes::KEY)->each->delete();
                 $this->save($user, $recovery['authenticator']);
             }
+
+            if ($destructive) {
+                $this->recordChange($user);
+            }
         });
 
-        $request === null ? $save() : $this->sessions->whileSignedIn($request, $user, $save);
+        try {
+            $request === null ? RowLock::hold($user, $save) : $this->sessions->whileSignedIn($request, $user, $save);
+        } catch (SignInChangesFrozen $e) {
+            // Out here, once the lock's transaction is over: a log entry
+            // written inside it would be rolled back with it.
+            EnrollmentRefused::dispatch($user, $factor->key(), 'frozen');
+
+            throw $e;
+        }
 
         $isRecovery
             ? RecoveryCodesGenerated::dispatch($user, $authenticator)
@@ -88,6 +119,94 @@ class AuthenticatorChanges
         }
 
         return $recovery['codes'] ?? null;
+    }
+
+    /**
+     * Refuse to start adding a factor that would replace something the
+     * account counts on while it's frozen, such as new recovery codes, so
+     * the user isn't shown codes that can't be saved. add() checks again.
+     *
+     * @throws SignInChangesFrozen
+     */
+    public function ensureMayAdd(Authenticatable&Model $user, Enrollable $factor): void
+    {
+        $keyring = $this->keyring->for($user);
+
+        if (! $factor->multiple() && $keyring->of($factor->key())->contains(fn (Authenticator $old) => $this->countedOn($keyring, $old))) {
+            $freeze = $this->frozen($user);
+
+            if ($freeze !== null) {
+                EnrollmentRefused::dispatch($user, $factor->key(), 'frozen');
+
+                throw new SignInChangesFrozen($freeze);
+            }
+        }
+    }
+
+    /**
+     * Why the user's established sign-in methods and recovery codes can't be
+     * removed or replaced just now, and until when, or null when they can.
+     * An account is frozen for "authenticator_changes.established_after"
+     * after a factor is added, and after one it counted on is removed or
+     * replaced, so whoever got into a session can't add a factor of their
+     * own and then take away the owner's. Factors that aren't established
+     * yet can always be removed.
+     */
+    public function frozen(Authenticatable&Model $user): ?Freeze
+    {
+        $for = Duration::seconds(config('keyring.authenticator_changes.established_after'));
+        $keyring = $this->keyring->for($user);
+        $added = $keyring->all()->reject($keyring->isEstablished(...))->max(fn (Authenticator $authenticator) => $authenticator->created_at?->getTimestamp());
+        $changed = SignInChange::query()->ownedBy($user)->first()?->changed_at;
+
+        return collect([
+            $added === null ? null : new Freeze(FreezeReason::NewAuthenticator, CarbonImmutable::createFromTimestamp($added, now()->getTimezone())->addSeconds($for)),
+            $changed === null ? null : new Freeze(FreezeReason::RecentChange, CarbonImmutable::instance($changed)->addSeconds($for)),
+        ])
+            ->filter(fn (?Freeze $freeze) => $freeze !== null && $freeze->until->isFuture())
+            ->sortBy(fn (Freeze $freeze) => $freeze->until->getTimestamp())
+            ->last();
+    }
+
+    /**
+     * Whether losing these takes something the account counts on, refused
+     * while it's frozen.
+     *
+     * @param  iterable<Authenticator>  $lost
+     *
+     * @throws SignInChangesFrozen
+     */
+    protected function ensureMayLose(Authenticatable&Model $user, UserKeyring $keyring, iterable $lost, bool $ignoreFreeze): bool
+    {
+        $destructive = collect($lost)->contains(fn (Authenticator $authenticator) => $this->countedOn($keyring, $authenticator));
+
+        if ($destructive && ! $ignoreFreeze && ($freeze = $this->frozen($user)) !== null) {
+            throw new SignInChangesFrozen($freeze);
+        }
+
+        return $destructive;
+    }
+
+    /**
+     * Whether the account counts on it: a factor it has had for
+     * "authenticator_changes.established_after", or recovery codes with
+     * some left. Not an emailed code, which isn't a factor.
+     */
+    protected function countedOn(UserKeyring $keyring, Authenticator $authenticator): bool
+    {
+        return $keyring->isEstablished($authenticator)
+            && array_any($authenticator->factor()->categories($authenticator), fn (Category $category) => $category->authenticates());
+    }
+
+    /**
+     * Start the freeze over: the account just lost something it counted on.
+     */
+    protected function recordChange(Authenticatable&Model $user): void
+    {
+        SignInChange::query()->updateOrCreate(
+            ['authenticatable_type' => $user->getMorphClass(), 'authenticatable_id' => $user->getKey()],
+            ['changed_at' => now()],
+        );
     }
 
     /**
@@ -120,18 +239,32 @@ class AuthenticatorChanges
      * time, so two at once can't each count on the other's authenticator
      * still being there.
      *
+     * Removing a factor the account has had for a while, or its recovery
+     * codes, is refused while the account is frozen(), unless $ignoreFreeze
+     * says otherwise (for an app's own support tools, never a user's
+     * request), and freezes it in turn. A factor that isn't established
+     * yet can always go, so the owner can remove one someone else added.
+     *
      * @throws ValidationException
+     * @throws SignInChangesFrozen
      */
-    public function remove(Authenticatable&Model $user, string $id, #[\SensitiveParameter] ?string $password = null): Authenticator
+    public function remove(Authenticatable&Model $user, string $id, #[\SensitiveParameter] ?string $password = null, bool $ignoreFreeze = false): Authenticator
     {
-        [$authenticator, $removed] = RowLock::hold($user, function () use ($user, $id, $password) {
+        [$authenticator, $removed, $frozen] = RowLock::hold($user, function () use ($user, $id, $password, $ignoreFreeze) {
             $authenticator = $this->owned($user, $id);
 
             if ($authenticator === null) {
-                return [null, false];
+                return [null, false, null];
             }
 
             $keyring = $this->keyring->for($user);
+
+            try {
+                $destructive = $this->ensureMayLose($user, $keyring, [$authenticator], $ignoreFreeze);
+            } catch (SignInChangesFrozen $e) {
+                return [$authenticator, false, $e];
+            }
+
             $remaining = $keyring->without($authenticator);
 
             // Recovery codes are only useful while there's a second factor to
@@ -144,7 +277,7 @@ class AuthenticatorChanges
             $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
 
             if (! $left->canSignIn() || (! $policy->onlyIfEnrolled && ! $left->canMeet($policy))) {
-                return [$authenticator, false];
+                return [$authenticator, false, null];
             }
 
             if ($keyring->hasSecondFactor() && ! $left->hasSecondFactor()) {
@@ -154,13 +287,23 @@ class AuthenticatorChanges
             collect([$authenticator, ...$cascade])->each->delete();
             $this->sessions->distrustDevices($user);
 
-            return [$authenticator, true];
+            if ($destructive) {
+                $this->recordChange($user);
+            }
+
+            return [$authenticator, true, null];
         });
 
         // Refused out here, once the lock's transaction is over: a log entry
         // written inside it would be rolled back with it.
         if ($authenticator === null) {
             $this->keyring->authenticatorModel()::refuse($user, $id);
+        }
+
+        if ($frozen !== null) {
+            AuthenticatorRemovalRefused::dispatch($user, $authenticator, 'frozen');
+
+            throw $frozen;
         }
 
         if (! $removed) {

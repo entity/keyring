@@ -346,7 +346,7 @@ describe('keyring:install', function () {
             ->assertSuccessful();
 
         expect(glob(database_path('migrations/*_create_keyring_authenticators_table.php')))->toHaveCount(1)
-            ->and(glob(database_path('migrations/*_create_keyring_*')))->toHaveCount(7)
+            ->and(glob(database_path('migrations/*_create_keyring_*')))->toHaveCount(8)
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBe('<?php // mine');
     });
 
@@ -368,7 +368,7 @@ describe('keyring:install', function () {
 
         $published = array_map(basename(...), glob(database_path('migrations/*_create_keyring_*')));
 
-        expect($published)->toHaveCount(7)
+        expect($published)->toHaveCount(8)
             ->and(glob(database_path('migrations/*_create_keyring_sessions_table.php')))->toBe($kept)
             // In Keyring's order, after the ones the app already had.
             ->and(array_map(fn (string $name) => Str::after($name, '_create_'), array_slice($published, -2)))
