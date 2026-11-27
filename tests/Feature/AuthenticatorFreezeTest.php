@@ -26,6 +26,8 @@ use Keyring\Tests\Fixtures\SigningToken;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
+    $this->freezeSecond();
+
     $this->user = taylor();
     $this->totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->default()->create();
     $this->codes = Authenticator::factory()->recoveryCodes()->established()->for($this->user, 'authenticatable')->create();
