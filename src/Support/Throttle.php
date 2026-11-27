@@ -438,6 +438,25 @@ class Throttle
     }
 
     /**
+     * The answer to an attempt the limits refused, on the field. A lock
+     * that lifts by itself says how long it has left. Past "longest_lock"
+     * it's the cap on failures in a row, or a lock that's held, and
+     * counting it down helps nobody: it says what ends it instead. A
+     * password reset clears a factor that can start a sign in. Any other is
+     * set up again, once its user has signed in another way.
+     */
+    public static function lockedOut(Factor $factor, string $field, ?int $retryAfter): ValidationException
+    {
+        if ($retryAfter !== null && $retryAfter <= Duration::seconds(config('keyring.limits.longest_lock'))) {
+            return static::exception($field, $retryAfter);
+        }
+
+        $locked = $factor instanceof PrimaryFactor && $factor->startsLogin() ? 'keyring::keyring.locked' : 'keyring::keyring.factor_locked';
+
+        return ValidationException::withMessages([$field => __($locked)])->status(429);
+    }
+
+    /**
      * How a user is named in rate limits. By model as well as ID, so two
      * kinds of account with the same ID don't share a count.
      */

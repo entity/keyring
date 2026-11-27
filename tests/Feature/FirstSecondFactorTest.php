@@ -7,8 +7,11 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Enums\Assurance;
+use Keyring\Events\AccountLocked;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
+use Keyring\Events\Lockout;
+use Keyring\Exceptions\PasswordRequired;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
@@ -106,13 +109,34 @@ describe('a password-only account', function () {
     });
 
     it('holds wrong passwords to the password\'s rate limits', function () {
+        Event::fake([Lockout::class]);
         config(['keyring.limits.per_account' => 2]);
 
         $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'wrong'])->assertUnprocessable();
         $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'wrong'])->assertUnprocessable();
         $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
             ->assertStatus(429)
-            ->assertJsonValidationErrors('password');
+            ->assertJsonValidationErrors(['password' => __('auth.throttle', ['seconds' => 60, 'minutes' => 1])]);
+
+        Event::assertDispatched(Lockout::class, fn (Lockout $event) => $event->factor === 'password' && $event->retryAfter === 60);
+    });
+
+    it('locks the password at the cap on failures in a row, and tells the owner', function () {
+        Event::fake([Lockout::class, AccountLocked::class]);
+        config(['keyring.limits.consecutive' => 2]);
+
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'wrong'])->assertUnprocessable();
+        Event::assertNotDispatched(AccountLocked::class);
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'wrong'])->assertUnprocessable();
+        Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->user->is($this->user) && $event->factor === 'password');
+
+        // No count down: waiting won't lift it.
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
+            ->assertStatus(429)
+            ->assertJsonValidationErrors(['password' => __('keyring::keyring.locked')]);
+
+        Event::assertDispatched(Lockout::class, fn (Lockout $event) => $event->factor === 'password' && $event->retryAfter === null);
+        expect($this->user->keyring->refresh()->of('totp'))->toBeEmpty();
     });
 
     it('takes the password once, for the enrollment it began', function () {
@@ -162,11 +186,19 @@ it('asks for the password when the only second factor is as new as one a session
 });
 
 it('doesn\'t ask once the account has an established second factor', function () {
+    Event::fake([FactorFailed::class]);
     Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
     Authenticator::factory()->recoveryCodes()->established()->for($this->user, 'authenticatable')->create();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
 
+    expect(app(AuthenticatorChanges::class)->needsPassword($this->user, Keyring::factor('passkey')))->toBeFalse();
+
     $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+
+    // One sent anyway isn't checked, so a wrong one counts for nothing.
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'wrong'])->assertOk();
+    Event::assertNotDispatched(FactorFailed::class);
 });
 
 it('adds the first factor of an account without a password with no password to type', function () {
@@ -174,8 +206,10 @@ it('adds the first factor of an account without a password with no password to t
     Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
 
-    expect(app(AuthenticatorChanges::class)->needsPassword($this->user, Keyring::factor('totp')))->toBeFalse();
+    expect(app(AuthenticatorChanges::class)->needsPassword($this->user, Keyring::factor('totp')))->toBeFalse()
+        ->and(app(AuthenticatorChanges::class)->needsPassword($this->user, Keyring::factor('passkey')))->toBeFalse();
 
+    $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk();
     addAppFromSession();
 
     expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
@@ -198,6 +232,7 @@ it('has no password to ask for where the app doesn\'t sign in with one', functio
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk();
 });
 
 describe('your own code', function () {
@@ -205,10 +240,20 @@ describe('your own code', function () {
         $factor = Keyring::factor('totp');
 
         expect(fn () => app(AuthenticatorChanges::class)->add($this->user, $factor, Authenticator::factory()->totp()->make()))
-            ->toThrow(ValidationException::class, __('keyring::keyring.password_to_add_factor'));
+            ->toThrow(PasswordRequired::class, __('keyring::keyring.password_to_add_factor'));
 
         app(AuthenticatorChanges::class)->add($this->user, $factor, Authenticator::factory()->totp()->make(), passwordConfirmed: true);
 
         expect($this->user->keyring->refresh()->of('totp'))->toHaveCount(1);
+    });
+
+    it('only records a refusal for the password when that\'s what refused it', function () {
+        Event::fake([EnrollmentRefused::class]);
+        Authenticator::saving(fn () => throw ValidationException::withMessages(['name' => 'Not that one.']));
+
+        expect(fn () => app(AuthenticatorChanges::class)->add($this->user, Keyring::factor('totp'), Authenticator::factory()->totp()->make(), passwordConfirmed: true))
+            ->toThrow(ValidationException::class, 'Not that one.');
+
+        Event::assertNotDispatched(EnrollmentRefused::class);
     });
 });

@@ -8,8 +8,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Factor;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Purpose;
+use Keyring\Events\AccountLocked;
 use Keyring\Events\FactorFailed;
+use Keyring\Events\Lockout;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Pipeline\Context;
@@ -30,20 +33,27 @@ class FactorCheck
     /**
      * The authenticator, of those given, that the input proves, or null when
      * it proves none of them. A refusal by the rate limits is an error on
-     * $field.
+     * $field, answered as a sign in's would be, and goes on record as a
+     * Lockout. A failure that gets a factor that can start a sign in
+     * refused until its limits are cleared tells the user, as a sign in's
+     * would (AccountLocked).
      *
      * @param  Collection<int, Authenticator>  $authenticators  the first is the one the factor is shown
      * @param  array<string, mixed>  $input  what the factor reads its answer from
      *
      * @throws ValidationException
      */
-    public function check(Request $request, Attempt $attempt, Factor $factor, Collection $authenticators, array $input, string $field): ?Authenticator
+    public function check(Request $request, Attempt $attempt, Factor $factor, Collection $authenticators, #[\SensitiveParameter] array $input, string $field): ?Authenticator
     {
         $authenticator = $authenticators->firstOrFail();
         $limits = $this->throttle->aim($factor->limits($request, $attempt), new Context($request, Purpose::Confirm, $factor, $attempt, $authenticator));
 
         if (($refusing = $this->throttle->hit($limits)) !== null) {
-            throw Throttle::exception($field, $this->throttle->retryAfter($refusing) ?? 0);
+            $retryAfter = $this->throttle->retryAfter($refusing);
+
+            Lockout::dispatch($request, $factor->key(), $retryAfter);
+
+            throw Throttle::lockedOut($factor, $field, $retryAfter);
         }
 
         try {
@@ -60,7 +70,10 @@ class FactorCheck
         $used = $verification === null ? null : $authenticators->firstWhere('id', '===', $verification->authenticator ?? $authenticator->id);
 
         if ($used === null) {
-            $this->throttle->failed($limits);
+            if ($this->throttle->failed($limits) && $factor instanceof PrimaryFactor && $factor->startsLogin()) {
+                AccountLocked::dispatch($attempt->user(), $factor->key());
+            }
+
             FactorFailed::dispatch($attempt, $authenticator, $factor->key(), $request);
 
             return null;

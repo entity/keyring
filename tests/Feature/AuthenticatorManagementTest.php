@@ -18,9 +18,12 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
+use Keyring\Events\AccountLocked;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
+use Keyring\Events\Lockout;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Facades\Keyring;
@@ -335,13 +338,36 @@ it('keeps a name that isn\'t valid text as what can be read of it, however it is
 });
 
 it('limits password guesses when removing the last second factor', function () {
+    Event::fake([FactorFailed::class, Lockout::class]);
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-    foreach (range(1, 6) as $guess) {
-        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => "guess {$guess}"])->assertUnprocessable();
+    // The password's own limits, not only the form's.
+    foreach (range(1, 5) as $guess) {
+        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => "guess {$guess}"])
+            ->assertJsonValidationErrors(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
     }
 
-    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])->assertTooManyRequests();
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])
+        ->assertTooManyRequests()
+        ->assertJsonValidationErrors(['password' => __('auth.throttle', ['seconds' => 60, 'minutes' => 1])]);
+
+    Event::assertDispatchedTimes(FactorFailed::class, 5);
+    Event::assertDispatched(Lockout::class, fn (Lockout $event) => $event->factor === 'password');
+    expect($totp->fresh())->not->toBeNull();
+});
+
+it('counts wrong passwords at removal toward the cap on failures in a row', function () {
+    Event::fake([AccountLocked::class]);
+    config(['keyring.limits.consecutive' => 2]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'wrong'])->assertUnprocessable();
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'wrong'])->assertUnprocessable();
+
+    Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->factor === 'password');
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])
+        ->assertTooManyRequests()
+        ->assertJsonValidationErrors(['password' => __('keyring::keyring.locked')]);
 });
 
 it('asks a user without a password for none when removing the last second factor', function () {

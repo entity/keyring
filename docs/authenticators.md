@@ -204,7 +204,7 @@ An authenticator that failed too many times in a row is refused until it's set u
 
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
-Removing the user's last second factor (the last one beyond recovery codes and email codes) also requires their current password in the request, as `password`. While a second factor sat beside it, their password may have been as short as `min_with_mfa`. On its own, though, NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so at this point it checks the length. A missing or wrong password, or one that's too short, gets an error on `password` asking the user to change it first.
+Removing the user's last second factor (the last one beyond recovery codes and email codes) also requires their current password in the request, as `password`. While a second factor sat beside it, their password may have been as short as `min_with_mfa`. On its own, though, NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so at this point it checks the length. A missing or wrong password, or one that's too short, gets an error on `password` asking the user to change it first. The password is checked under its own [rate limits](security.md#rate-limiting), as at a step-up: a wrong one counts as a failed password, and once they're used up the request gets a `429` on `password`.
 
 ## Frozen Sign-In Methods
 

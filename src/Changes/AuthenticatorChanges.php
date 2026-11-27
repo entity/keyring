@@ -21,6 +21,7 @@ use Keyring\Events\AuthenticatorRemovalRefused;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\RecoveryCodesGenerated;
+use Keyring\Exceptions\PasswordRequired;
 use Keyring\Exceptions\SignInChangesFrozen;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
@@ -74,8 +75,8 @@ class AuthenticatorChanges
      * @return list<string>|null
      *
      * @throws AuthenticationException
+     * @throws PasswordRequired
      * @throws SignInChangesFrozen
-     * @throws ValidationException
      */
     public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator, ?Request $request = null, bool $ignoreFreeze = false, bool $passwordConfirmed = false): ?array
     {
@@ -128,8 +129,7 @@ class AuthenticatorChanges
             EnrollmentRefused::dispatch($user, $factor->key(), 'frozen');
 
             throw $e;
-        } catch (ValidationException $e) {
-            // The only other refusal in there: it needed the password.
+        } catch (PasswordRequired $e) {
             EnrollmentRefused::dispatch($user, $factor->key(), 'password');
 
             throw $e;
@@ -242,9 +242,9 @@ class AuthenticatorChanges
             && array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
     }
 
-    protected function passwordRequired(): ValidationException
+    protected function passwordRequired(): PasswordRequired
     {
-        return ValidationException::withMessages(['password' => __('keyring::keyring.password_to_add_factor')]);
+        return PasswordRequired::withMessages(['password' => __('keyring::keyring.password_to_add_factor')]);
     }
 
     /**
@@ -374,7 +374,16 @@ class AuthenticatorChanges
      */
     public function remove(Authenticatable&Model $user, string $id, #[\SensitiveParameter] ?string $password = null, bool $ignoreFreeze = false): Authenticator
     {
-        [$authenticator, $removed, $frozen] = RowLock::hold($user, function () use ($user, $id, $password, $ignoreFreeze) {
+        // A password given is checked before the lock, so a wrong one stays
+        // counted whatever happens to the removal: the lock's transaction
+        // would roll the count back with it. One that's missing is asked
+        // for once the removal is otherwise allowed.
+        $passwordChecked = $password !== null && $password !== ''
+            && ($owned = $this->owned($user, $id)) !== null
+            && $this->leavesNoSecondFactor($this->keyring->for($user), $owned)
+            && $this->ensurePasswordStandsAlone($user, $password);
+
+        [$authenticator, $removed, $frozen] = RowLock::hold($user, function () use ($user, $id, $ignoreFreeze, $passwordChecked) {
             $authenticator = $this->owned($user, $id);
 
             if ($authenticator === null) {
@@ -389,14 +398,7 @@ class AuthenticatorChanges
                 return [$authenticator, false, $e];
             }
 
-            $remaining = $keyring->without($authenticator);
-
-            // Recovery codes are only useful while there's a second factor to
-            // recover, so they go too when this was the last one. The policy
-            // is checked against what will actually be left.
-            $onlyRecoveryLeft = ! $remaining->hasFactorToRecover();
-            $cascade = $onlyRecoveryLeft ? $remaining->of(RecoveryCodes::KEY)->all() : [];
-            $left = $remaining->without(...$cascade);
+            [$left, $cascade] = $this->leftAfter($keyring, $authenticator);
 
             $policy = $this->keyring->policy($user, Attempt::start(Purpose::Login, $user));
 
@@ -404,8 +406,11 @@ class AuthenticatorChanges
                 return [$authenticator, false, null];
             }
 
-            if ($keyring->hasSecondFactor() && ! $left->hasSecondFactor()) {
-                $this->ensurePasswordStandsAlone($user, $password);
+            // Without a password checked above, removing what's now the
+            // last second factor asks for one. Decided here, where no other
+            // change can come between.
+            if (! $passwordChecked && $this->leavesNoSecondFactor($keyring, $authenticator) && $this->hasPassword($user)) {
+                throw $this->passwordToRemove();
             }
 
             collect([$authenticator, ...$cascade])->each->delete();
@@ -442,21 +447,55 @@ class AuthenticatorChanges
     }
 
     /**
+     * What's left once the authenticator is removed, and the recovery codes
+     * that go with it. Recovery codes are only useful while there's a second
+     * factor to recover, so they go too when this was the last one. The
+     * policy is checked against what will actually be left.
+     *
+     * @return array{UserKeyring, list<Authenticator>}
+     */
+    protected function leftAfter(UserKeyring $keyring, Authenticator $authenticator): array
+    {
+        $remaining = $keyring->without($authenticator);
+        $cascade = $remaining->hasFactorToRecover() ? [] : array_values($remaining->of(RecoveryCodes::KEY)->all());
+
+        return [$remaining->without(...$cascade), $cascade];
+    }
+
+    protected function leavesNoSecondFactor(UserKeyring $keyring, Authenticator $authenticator): bool
+    {
+        return $keyring->hasSecondFactor() && ! $this->leftAfter($keyring, $authenticator)[0]->hasSecondFactor();
+    }
+
+    /**
      * The password may have been as short as min_with_mfa while it had a
      * second factor beside it. On its own it needs min_without_mfa, and only
      * the user can say how long it is, so removing the last second factor
-     * takes it, typed again.
+     * takes it, typed again. It's checked under the password's rate limits,
+     * and a wrong one counts as a failed password, as one would at a
+     * step-up. True once it's checked, false when the user has none.
      *
      * @throws ValidationException
      */
-    protected function ensurePasswordStandsAlone(Authenticatable&Model $user, #[\SensitiveParameter] ?string $password): void
+    protected function ensurePasswordStandsAlone(Authenticatable&Model $user, #[\SensitiveParameter] string $password): bool
     {
-        if (blank($user->getAuthPassword())) {
-            return;
+        if (! $this->hasPassword($user)) {
+            return false;
         }
 
-        if ($password === null || ! $this->keyring->provider()->validateCredentials($user, ['password' => PasswordRules::forVerifying($password, $user->getAuthPassword())])) {
-            throw ValidationException::withMessages(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
+        $passwords = $this->keyring->hasFactor(Password::KEY) ? $this->keyring->factor(Password::KEY) : app(Password::class);
+
+        $checked = $this->checks->check(
+            app(Request::class),
+            Attempt::start(Purpose::Confirm, $user),
+            $passwords,
+            new Collection([Authenticator::virtual($passwords, $user, __('Password'))]),
+            ['password' => $password],
+            'password',
+        );
+
+        if ($checked === null) {
+            throw $this->passwordToRemove();
         }
 
         $min = PasswordRules::min();
@@ -464,6 +503,18 @@ class AuthenticatorChanges
         if (mb_strlen(PasswordRules::normalize($password)) < $min) {
             throw ValidationException::withMessages(['password' => __('keyring::keyring.password_too_short_alone', ['min' => $min])]);
         }
+
+        return true;
+    }
+
+    protected function hasPassword(Authenticatable&Model $user): bool
+    {
+        return ! blank($user->getAuthPassword());
+    }
+
+    protected function passwordToRemove(): ValidationException
+    {
+        return ValidationException::withMessages(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
     }
 
     /**
