@@ -68,13 +68,7 @@ Whatever the callback says, Keyring always refuses:
 - a user the application doesn't let sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)),
 - starting while already impersonating someone. It's one at a time.
 
-A [risk](risk.md) lock doesn't refuse an impersonation: it only refuses sign ins, so a locked user can still be impersonated, and a locked impersonator whose session is still signed in can still start one. If a lock should keep support out too, refuse locked accounts in your callback:
-
-```php
-use Keyring\Risk\RiskLocks;
-
-Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => $impersonator->isAdmin() && ! app(RiskLocks::class)->locked($user));
-```
+A [risk](risk.md) lock doesn't refuse an impersonation: it only refuses sign ins, so a locked user can still be impersonated, and a locked impersonator whose session is still signed in can still start one. If a lock should keep support out too, refuse those accounts in your callback.
 
 The callback is asked again on every request while the impersonation lasts, so taking someone's admin role away, or protecting a user, ends an impersonation that's already running. The browser goes back to the impersonator's own session, with the `ended` [reason](#security-log-and-events).
 
