@@ -17,6 +17,7 @@ use Keyring\Enrollment\Enrollment;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\Enums\SsoFreshness;
+use Keyring\Events\ProviderIdentityAccepted;
 use Keyring\Exceptions\SsoFailed;
 use Keyring\Facades\Keyring;
 use Keyring\Http\Responses\ChoosesFormat;
@@ -90,6 +91,19 @@ class SingleSignOn extends Factor implements Enrollable, PrimaryFactor
      * for identify() and confirmEnrollment() to read.
      */
     public const string IDENTITY = 'keyring.sso.identity';
+
+    /**
+     * How much of a provider's "amr" and "acr" a verification keeps: the
+     * first AMR_VALUES distinct amr values that match AMR_VALUE, and an acr
+     * that matches ACR_VALUE, printable ASCII up to 255 characters.
+     * Anything else is left out, so a provider can't fill the session with
+     * what it sends.
+     */
+    public const int AMR_VALUES = 10;
+
+    public const string AMR_VALUE = '/^[A-Za-z0-9._:\/-]{1,64}$/D';
+
+    public const string ACR_VALUE = '/^[\x21-\x7E]{1,255}$/D';
 
     public function key(): string
     {
@@ -229,6 +243,10 @@ class SingleSignOn extends Factor implements Enrollable, PrimaryFactor
      * in the config is offered on the confirm page again. Otherwise the
      * link keeps its own, so the stricter of the two goes on counting
      * however many sign ins come through the other.
+     *
+     * Accepted, it dispatches ProviderIdentityAccepted with the identity,
+     * before the rest of the pipeline has run: a second factor may still
+     * be asked for.
      */
     public function verify(Attempt $attempt, Authenticator $authenticator, Request $request): ?Verification
     {
@@ -244,11 +262,13 @@ class SingleSignOn extends Factor implements Enrollable, PrimaryFactor
 
         $proved = match (true) {
             $attempt->purpose !== Purpose::Confirm => $this->provedBy($authenticator, $identity),
-            $this->freshness($authenticator, $identity) === SsoFreshness::Never => Verification::of($authenticator, authenticatedAt: Verification::UNKNOWN),
-            default => Verification::of($authenticator),
+            $this->freshness($authenticator, $identity) === SsoFreshness::Never => $this->proved($authenticator, $identity, Verification::UNKNOWN),
+            default => $this->proved($authenticator, $identity),
         };
 
         $this->bringUpToDate($authenticator, $identity);
+
+        ProviderIdentityAccepted::dispatch($attempt->user(), $authenticator, $identity, $attempt->purpose === Purpose::Confirm ? self::CONFIRM : self::LOGIN);
 
         return $proved;
     }
@@ -277,15 +297,32 @@ class SingleSignOn extends Factor implements Enrollable, PrimaryFactor
      * freshness() says: with Reauthenticate, proved when the provider says
      * the user signed in there, and with no auth_time at
      * Verification::UNKNOWN, with Never at Verification::UNKNOWN whatever
-     * it says, so it never counts as recent, and with RoundTrip now.
+     * it says, so it never counts as recent, and with RoundTrip now. It
+     * keeps the provider's amr and acr (proved()).
      */
     public function provedBy(Authenticator $authenticator, Identity $identity): Verification
     {
         return match ($this->freshness($authenticator, $identity)) {
-            SsoFreshness::Reauthenticate => Verification::of($authenticator, authenticatedAt: $identity->authTime ?? Verification::UNKNOWN),
-            SsoFreshness::Never => Verification::of($authenticator, authenticatedAt: Verification::UNKNOWN),
-            SsoFreshness::RoundTrip => Verification::of($authenticator),
+            SsoFreshness::Reauthenticate => $this->proved($authenticator, $identity, $identity->authTime ?? Verification::UNKNOWN),
+            SsoFreshness::Never => $this->proved($authenticator, $identity, Verification::UNKNOWN),
+            SsoFreshness::RoundTrip => $this->proved($authenticator, $identity),
         };
+    }
+
+    /**
+     * A verification of the link now, proved at $authenticatedAt if
+     * that's earlier, with what the provider said of how the user signed
+     * in there: its amr and acr, as far as they're kept (AMR_VALUES,
+     * AMR_VALUE, ACR_VALUE). They're the provider's say, and count toward
+     * nothing: what the link proves is the same whatever they are.
+     */
+    protected function proved(Authenticator $authenticator, Identity $identity, ?int $authenticatedAt = null): Verification
+    {
+        // A custom driver may hand over anything in a claim, whatever Identity's docblock says.
+        $amr = array_values(array_unique(array_filter($identity->amr, fn (mixed $value) => is_string($value) && preg_match(self::AMR_VALUE, $value) === 1))); // @phpstan-ignore function.alreadyNarrowedType
+        $acr = $identity->acr !== null && preg_match(self::ACR_VALUE, $identity->acr) === 1 ? $identity->acr : null;
+
+        return Verification::of($authenticator, authenticatedAt: $authenticatedAt, providerAmr: array_slice($amr, 0, self::AMR_VALUES), providerAcr: $acr);
     }
 
     /**

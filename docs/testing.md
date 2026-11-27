@@ -102,6 +102,7 @@ Keyring::fake()->pass('passkey', 'totp')->fail('email-code');
 - Passed factors verify with whatever is posted, even nothing at all. Their validation rules are skipped.
 - Failed factors always fail.
 - Any factor you don't name is checked for real.
+- Passing `sso` skips the provider, so no `ProviderIdentityAccepted` is dispatched and the verification has no `providerAmr` or `providerAcr`. Use `FakeIdentityProvider` to test those.
 
 Identifying the user still happens for real. For example, posting an unknown email to `/login` fails even when `password` passes. Rate limiting, devices, risk, and your policy all run as normal.
 

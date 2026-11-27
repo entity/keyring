@@ -254,12 +254,14 @@ Each item is a `Keyring\Login\Verification`, with these public properties:
 | `deviceBound` | `bool` | Whether the key can't leave its device. |
 | `attested` | `bool` | Whether the key was added with a verified attestation. |
 | `authenticatedAt` | `?int` | When the user really proved it, if earlier than `at`, as a Unix timestamp. Only a sign in with an [identity provider](sso.md) that says, with `auth_time`, that the user signed in there earlier sets it. `Verification::UNKNOWN` (`0`) means the provider should have said when and didn't: treat it as unknown, and never as recent. `null` when it's the same as `at`. |
+| `providerAmr` | `list<string>` | For an [identity provider](sso.md#second-factors-and-policies), the `amr` values its ID token sent, as it named them, at most 10. Empty for every other factor, and when the provider sent none. It's the provider's claim: Keyring counts it toward nothing, not the categories, the level, or phishing resistance. |
+| `providerAcr` | `?string` | For an identity provider, the `acr` its ID token sent, or `null`. Like `providerAmr`, the provider's claim, and counted toward nothing. |
 
-`provedAt()` returns when the user last proved it: `authenticatedAt`, or `at` when that's `null` or earlier. It returns `Verification::UNKNOWN` when that's unknown. Freshness (`keyring.fresh`, and `StepUp` with a moment) goes by `provedAt()`.
+`provedAt()` returns when the user last proved it: `authenticatedAt`, or `at` when that's `null` or earlier. It returns `Verification::UNKNOWN` (`0`) when that's unknown. Freshness (`keyring.fresh`, and `StepUp` with a moment) goes by `provedAt()`. `provedAtIfKnown()` returns the same, or `null` when it's unknown. Use it whenever you report the time, so an unknown one can't come out as a sign in on 1 January 1970, as it would from `min()` or a date formatted from `provedAt()`.
 
 To ask whether a set of verifications meets a requirement, use `Requirement::isMetBy(array $verifications): bool`. `Requirement::factors(2)` counts distinct authentication categories, so two codes of the same kind aren't multi-factor. `Assurance::of(array $verifications)` returns the highest level a set of verifications reaches.
 
-Report `auth_time` as the oldest `provedAt()` among the verifications you build `amr` from, not the newest, and leave it out when that's `Verification::UNKNOWN`: a provider didn't say when the user signed in there. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
+Report `auth_time` as the oldest `provedAtIfKnown()` among the verifications you build `amr` from, not the newest, and leave it out when any of them is `null`: a provider didn't say when the user signed in there. The claims say every method in `amr` was proved at or after `auth_time`. Say a session proved the password and an authenticator app 20 hours ago, and only the password again a minute ago. Its `amr` is `password`, `totp`, and `mfa`, and the newest time would claim all of that happened a minute ago. The authenticator app was proved 20 hours ago.
 
 When you asked with `$since`, build the claims from what was proved since that moment, so they describe the proof this authorization asked for. `level()` and `countingToward()` take a Unix timestamp for that. They count only what was proved since then, with each level still on its own clock. Don't work the level out again with `Assurance::of()` from what counts toward a lower level. Say AAL2 lapsed after an hour idle, and the session is at AAL1. What counts toward AAL1 still holds the authenticator app proved before the lapse, so `Assurance::of()` would give AAL2. For the same reason, only report `mfa` at AAL2 or higher, and at AAL1 only report the one factor that holds it. Listing the authenticator app beside the password would read as two factors to a client that looks at `amr`. For example:
 
@@ -282,7 +284,8 @@ if ($level === Assurance::AAL1) {
     $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
 }
 
-$provedAt = $proved === [] ? Verification::UNKNOWN : min(array_map(fn (Verification $verification) => $verification->provedAt(), $proved));
+// Null for a verification proved at an unknown time.
+$times = array_map(fn (Verification $verification) => $verification->provedAtIfKnown(), $proved);
 
 $claims = [
     'acr' => $level === Assurance::None ? null : strtolower($level->name),
@@ -292,13 +295,13 @@ $claims = [
     ],
     // Left out (null) when nothing was proved, or when it was proved at an
     // unknown time.
-    'auth_time' => $provedAt === Verification::UNKNOWN ? null : $provedAt,
+    'auth_time' => $times === [] || in_array(null, $times, true) ? null : min($times),
 ];
 ```
 
 Work the claims out in the authorization request, while the user's browser session is there, and keep them with the authorization code. `SessionAssurance` reads that session. The token endpoint is called by the client, with no session, so it would read nothing.
 
-Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect. Tell your clients to read `acr` for the level, and not to work it out from `amr`. An `otp` in `amr` says a code was proved, not that it still counts as a second factor.
+Keyring's factor keys aren't the registered `amr` values (RFC 8176), so map them to the ones your clients expect. A sign in with an identity provider has that provider's own `amr` and `acr` as `providerAmr` and `providerAcr`, which you may pass on, say as what the upstream provider claimed, but don't let them raise `acr` or add `mfa`: Keyring doesn't count them, and nor does the level it reports. Tell your clients to read `acr` for the level, and not to work it out from `amr`. An `otp` in `amr` says a code was proved, not that it still counts as a second factor.
 
 ## The Confirm Flow
 

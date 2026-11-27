@@ -436,6 +436,19 @@ it('restores an attempt serialised by 0.2 with its keyring looked up, and looks 
         ->and($copy->keyring()->all()->pluck('factor')->all())->toContain('totp');
 });
 
+it('restores a verification serialised by 0.2 with the provider\'s claims at their defaults', function () {
+    // 0.2 had no authenticatedAt, providerAmr or providerAcr.
+    $properties = array_diff_key((array) new Verification(factor: 'password', authenticator: null, categories: [Category::Knowledge], at: 1700000000), ['authenticatedAt' => true, 'providerAmr' => true, 'providerAcr' => true]);
+    $old = preg_replace('/^a:(\d+):/', 'O:'.strlen(Verification::class).':"'.Verification::class.'":$1:', serialize($properties));
+
+    $copy = unserialize($old);
+
+    expect($copy->authenticatedAt)->toBeNull()
+        ->and($copy->providerAmr)->toBe([])
+        ->and($copy->providerAcr)->toBeNull()
+        ->and($copy->toArray())->toBe(['factor' => 'password', 'authenticator' => null, 'categories' => ['knowledge'], 'phishing_resistant' => false, 'at' => 1700000000, 'device_bound' => false, 'attested' => false]);
+});
+
 it('queues a removed authenticator without its secret or the user\'s password hash', function () {
     Event::listen(AuthenticatorRemoved::class, QueuedKeyringListener::class);
 

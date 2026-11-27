@@ -89,6 +89,16 @@ final class AuthorizationRequest
     }
 
     /**
+     * The request without its state, nonce or code verifier, each blank:
+     * what's left of one that's spent, for an event that's queued. It can
+     * never finish a sign in.
+     */
+    public function withoutSecrets(): self
+    {
+        return new self($this->provider, $this->purpose, $this->redirectUri, '', '', '', $this->expiresAt, $this->createdAt, $this->data, $this->maxAge, $this->loginHint);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array

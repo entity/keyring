@@ -447,7 +447,7 @@ final readonly class Requirement
     private function recent(array $verifications): array
     {
         return $this->requiresFreshness
-            ? array_values(array_filter($verifications, fn (Verification $verification) => $verification->authenticatedAt !== Verification::UNKNOWN))
+            ? array_values(array_filter($verifications, fn (Verification $verification) => $verification->provedAtIfKnown() !== null))
             : $verifications;
     }
 

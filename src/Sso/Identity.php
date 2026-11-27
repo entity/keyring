@@ -35,4 +35,17 @@ final readonly class Identity
         public ?string $acr = null,
         public array $claims = [],
     ) {}
+
+    /**
+     * The identity with its request's state, nonce and code verifier left
+     * out (AuthorizationRequest::withoutSecrets()), for an event that's
+     * queued. The ID token's own nonce, at_hash and c_hash go with them.
+     */
+    public function withoutSecrets(): self
+    {
+        return clone ($this, [
+            'request' => $this->request->withoutSecrets(),
+            'claims' => array_diff_key($this->claims, array_flip(['nonce', 'at_hash', 'c_hash'])),
+        ]);
+    }
 }

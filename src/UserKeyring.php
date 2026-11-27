@@ -226,7 +226,7 @@ class UserKeyring
     public function freshlyProvable(): static
     {
         return $this->without(...$this->all()
-            ->filter(fn (Authenticator $authenticator) => $this->wouldProve($authenticator)->authenticatedAt === Verification::UNKNOWN)
+            ->filter(fn (Authenticator $authenticator) => $this->wouldProve($authenticator)->provedAtIfKnown() === null)
             ->all());
     }
 

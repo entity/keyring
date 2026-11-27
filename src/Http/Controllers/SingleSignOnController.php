@@ -18,6 +18,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Enums\SsoFailure;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
+use Keyring\Events\ProviderIdentityAccepted;
 use Keyring\Exceptions\SsoFailed;
 use Keyring\Factors\SingleSignOn;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
@@ -364,6 +365,7 @@ class SingleSignOnController
         if ($linked !== null) {
             $factor->bringUpToDate($linked, $identity)->save();
             $this->enrollments->forget($factor->key());
+            ProviderIdentityAccepted::dispatch($user, $linked, $identity, SingleSignOn::LINK);
 
             return $this->status('authenticator-updated', ['authenticator' => $factor->present($linked)], $return)->toResponse($request);
         }
@@ -390,6 +392,7 @@ class SingleSignOnController
 
         $this->enrollments->forget($factor->key());
         $this->signIn->enrolled($request, $authenticator, $factor->provedBy($authenticator, $identity));
+        ProviderIdentityAccepted::dispatch($user, $authenticator, $identity, SingleSignOn::LINK);
 
         return $this->status('authenticator-added', array_filter([
             'authenticator' => $factor->present($authenticator),

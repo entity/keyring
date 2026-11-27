@@ -13,6 +13,7 @@
 - [Linking and Unlinking](#linking-and-unlinking)
 - [How It Fits With the Rest](#how-it-fits-with-the-rest)
     - [Second Factors and Policies](#second-factors-and-policies)
+    - [Hearing About Accepted Identities](#hearing-about-accepted-identities)
     - [Step-Up](#step-up)
     - [Users Whose Only Way In Is Never Fresh](#users-whose-only-way-in-is-never-fresh)
     - [Password Resets and Email Changes](#password-resets-and-email-changes)
@@ -345,7 +346,19 @@ A link is never asked for as a second step, so it doesn't count as a second fact
 - Linking an account doesn't come with recovery codes, and doesn't keep them. A user who removes their last authenticator app loses their recovery codes, whatever they've linked.
 - A link is never made the default, and never offered on the challenge page. `PATCH /user/authenticators/{authenticator}` with `default` is refused for one, with an error on `default`, as it is for recovery codes.
 
-The `Identity` behind each sign in has the provider's `amr`, `acr`, and `authTime`, when it sends them. Keyring doesn't read `amr` or `acr`. It reads `authTime` for [step-up](#step-up).
+The `Identity` behind each sign in has the provider's `amr`, `acr`, and `authTime`, when it sends them. Keyring reads `authTime` for [step-up](#step-up). It never counts `amr` or `acr` toward anything: an `amr` of `mfa` or `hwk` doesn't make the sign in a second factor, phishing resistant, or any more than the one knowledge proof it is. It does keep them, as the provider's claim, on the session's [`Verification`](step-up.md#reading-what-was-proved) for a sign in, a confirm, or a new link, as `providerAmr` and `providerAcr`, so an app that reports how the user signed in, such as an identity provider of its own built on Keyring, can pass them on. Only so much is kept, so a provider can't fill the session: the first 10 distinct `amr` values of 1 to 64 letters, digits, and `.`, `_`, `:`, `/`, or `-`, and an `acr` of 1 to 255 printable ASCII characters with no spaces. Anything else is left out, and an `acr` that doesn't fit is `null`. The whole `Identity`, with the claims the provider sent (a queued listener's without the ID token's `nonce`, `at_hash`, and `c_hash`), comes with the [`ProviderIdentityAccepted`](#hearing-about-accepted-identities) event.
+
+### Hearing About Accepted Identities
+
+`Keyring\Events\ProviderIdentityAccepted` fires each time a provider's account is accepted as one of the user's links. Its `purpose` says what for, as one of the factor's constants:
+
+| `purpose` | When |
+|---|---|
+| `SingleSignOn::LOGIN` (`login`) | A sign in, once the account the provider vouched for matched a link of a user who may sign in. An account nobody linked, or one whose user the app keeps out, fires nothing. |
+| `SingleSignOn::CONFIRM` (`confirm`) | A confirm at the provider brought back the account of the link it was started for. |
+| `SingleSignOn::LINK` (`link`) | A new link was added, or a link the user already had was brought up to date. A link refused because someone else linked the account fires nothing. |
+
+It carries the `user`, the link as `authenticator`, the `identity` (`Keyring\Sso\Identity`, with `amr`, `acr`, `authTime`, and the provider's `claims`), and the `purpose`. For a sign in or a confirm it fires when the provider's proof is accepted, before the rest of the pipeline: the user may still be asked for a second factor, or be refused by a risk lock, so it doesn't mean they're signed in. `Authenticated` or `Confirmed` says that. The identity's `request` holds the state, nonce, and PKCE code verifier of a request that's spent, which a listener in the request sees, and a queued listener gets the request with all three blank, and the claims without the ID token's `nonce`, `at_hash`, and `c_hash`.
 
 ### Step-Up
 

@@ -610,6 +610,12 @@
         "Keyring\\Events\\ProtectionBypassed": [
             "reason"
         ],
+        "Keyring\\Events\\ProviderIdentityAccepted": [
+            "authenticator",
+            "identity",
+            "purpose",
+            "user"
+        ],
         "Keyring\\Events\\RateLimited": [
             "limiter",
             "retryAfter",

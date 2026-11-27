@@ -640,6 +640,7 @@ Every event here lives in the `Keyring\Events` namespace:
 | `Attempting` | A verification starts. | `request`, `factor` (key), `purpose` |
 | `FactorChallenged` | The challenge page shows a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
+| `ProviderIdentityAccepted` | An [identity provider](sso.md#hearing-about-accepted-identities)'s account was accepted as the user's link, for a sign in, a confirm, or a link. For a sign in or a confirm it fires before the rest of the pipeline, so a second factor may still be asked for. | `user`, `authenticator`, `identity` (`Keyring\Sso\Identity`), `purpose` (`login`, `confirm`, or `link`) |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (nullable), `authenticator` (nullable), `factor`, `request` |
 | `Lockout` | A rate limit was hit. It's dispatched for each request the limit refuses. | `request`, `factor`, `retryAfter` (`null` when waiting won't help) |
 | `VerificationRefused` | The final gate refused because a [mandatory step](#mandatory-steps) hadn't run. | `attempt`, `factor`, `skipped` |

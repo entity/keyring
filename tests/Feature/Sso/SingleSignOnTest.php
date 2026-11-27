@@ -24,6 +24,7 @@ use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
+use Keyring\Events\ProviderIdentityAccepted;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Exceptions\SsoFailed;
 use Keyring\Facades\Keyring;
@@ -34,12 +35,14 @@ use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Http\Controllers\SingleSignOnController;
 use Keyring\Login\Attempt;
+use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
 use Keyring\Notifications\SecondFactorFailed;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\RegisteredSession;
+use Keyring\Sessions\SessionAssurance;
 use Keyring\Sso\AuthorizationRequest;
 use Keyring\Sso\Identity;
 use Keyring\Sso\PendingAuthorizations;
@@ -1030,5 +1033,163 @@ describe('the factor', function () {
         expect(SingleSignOn::credentialId('https://idp.test', SSO_SUBJECT))->toBe('sso:'.hash('sha256', "https://idp.test\0".SSO_SUBJECT))
             ->and(SingleSignOn::credentialId('https://idp.test', 'someone else'))->not->toBe(SingleSignOn::credentialId('https://idp.test', SSO_SUBJECT))
             ->and(SingleSignOn::credentialId('https://idp.test/x', SSO_SUBJECT))->not->toBe(SingleSignOn::credentialId('https://idp.test', SSO_SUBJECT));
+    });
+});
+
+describe('what the provider said of how the user signed in', function () {
+    it('keeps the provider\'s amr and acr on the verification, and counts them toward nothing', function () {
+        Route::get('/aal2-only', fn () => 'aal2')->middleware(['web', 'auth', 'keyring:aal2']);
+        linkFor($this->user);
+        $this->idp->signIn(['amr' => ['mfa', 'hwk'], 'acr' => 'urn:example:aal3']);
+
+        $this->get(signInAtProvider($this->idp))->assertRedirect('/dashboard');
+
+        $assurance = app(SessionAssurance::class);
+        $verification = $assurance->all()[0];
+        expect($verification->providerAmr)->toBe(['mfa', 'hwk'])
+            ->and($verification->providerAcr)->toBe('urn:example:aal3')
+            ->and($verification->categories)->toBe([Category::Knowledge])
+            ->and($verification->phishingResistant)->toBeFalse()
+            ->and($verification->deviceBound)->toBeFalse()
+            ->and($assurance->level())->toBe(Assurance::AAL1);
+        // Nothing else to prove AAL2 with, so the page sends them to enroll.
+        $this->getJson('/aal2-only')->assertForbidden()->assertJsonPath('status', 'enroll-first');
+    });
+
+    it('keeps no more of them than fits, and nothing that doesn\'t look like one', function () {
+        linkFor($this->user);
+        $this->idp->signIn([
+            'amr' => ['pwd', "otp\n", '', 'mfa', 'pwd', str_repeat('a', 65), 'urn:x/y-z.1', 'has space', null, ['pwd'], 7, ...array_map(fn (int $i) => "v{$i}", range(1, 12))],
+            'acr' => str_repeat('a', 256),
+        ]);
+
+        $this->get(signInAtProvider($this->idp));
+
+        $verification = app(SessionAssurance::class)->all()[0];
+        expect($verification->providerAmr)->toBe(['pwd', 'mfa', 'urn:x/y-z.1', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7'])
+            ->and($verification->providerAcr)->toBeNull();
+    });
+
+    it('takes an acr up to its length, of printable characters only', function (string $acr, ?string $kept) {
+        $link = linkFor($this->user);
+        $request = Request::create('/');
+        $request->attributes->set(SingleSignOn::IDENTITY, new Identity(AuthorizationRequest::make('fake', SingleSignOn::LOGIN, SSO_CALLBACK), 'fake', 'https://idp.test', SSO_SUBJECT, acr: $acr));
+
+        expect(Keyring::factor('sso')->verify(Attempt::start(Purpose::Login, $this->user), $link, $request)->providerAcr)->toBe($kept);
+    })->with([
+        'the longest' => [str_repeat('a', 255), str_repeat('a', 255)],
+        'a URI' => ['http://schemas.openid.net/pape/policies/2007/06/multi-factor', 'http://schemas.openid.net/pape/policies/2007/06/multi-factor'],
+        'empty' => ['', null],
+        'with a space' => ['urn:a b', null],
+        'with a newline at the end' => ["urn:a\n", null],
+        'not ASCII' => ['urn:é', null],
+    ]);
+
+    it('keeps them on a new link\'s verification', function () {
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $this->get($this->idp->signIn(['amr' => ['pwd'], 'acr' => 'silver'])->approve(beginLink()))->assertSessionHas('status', 'authenticator-added');
+
+        $link = $this->user->keyring->refresh()->of('sso')->sole();
+        $verification = array_find(app(SessionAssurance::class)->all(), fn (Verification $verification) => $verification->authenticator === $link->id);
+        expect($verification->providerAmr)->toBe(['pwd'])
+            ->and($verification->providerAcr)->toBe('silver');
+    });
+
+    it('leaves them out for a provider that says nothing of them', function () {
+        linkFor($this->user);
+
+        $this->get(signInAtProvider($this->idp));
+
+        $verification = app(SessionAssurance::class)->all()[0];
+        expect($verification->providerAmr)->toBe([])
+            ->and($verification->providerAcr)->toBeNull()
+            ->and($verification->toArray())->not->toHaveKeys(['provider_amr', 'provider_acr']);
+    });
+});
+
+describe('the identity accepted event', function () {
+    it('fires for a sign in once the account matched the link, with the identity', function () {
+        Event::fake([ProviderIdentityAccepted::class]);
+        $link = linkFor($this->user);
+        $this->idp->signIn(['amr' => ['mfa']]);
+
+        $this->get(signInAtProvider($this->idp))->assertRedirect('/dashboard');
+
+        Event::assertDispatchedTimes(ProviderIdentityAccepted::class, 1);
+        Event::assertDispatched(ProviderIdentityAccepted::class, fn (ProviderIdentityAccepted $event) => $event->user->is($this->user)
+            && $event->authenticator->is($link)
+            && $event->identity->subject === SSO_SUBJECT
+            && $event->identity->amr === ['mfa']
+            && $event->purpose === SingleSignOn::LOGIN);
+    });
+
+    it('fires before a second factor that is still to come', function () {
+        Event::fake([ProviderIdentityAccepted::class]);
+        linkFor($this->user);
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $this->get(signInAtProvider($this->idp))->assertRedirect(route('keyring.login.challenge'));
+
+        $this->assertGuest();
+        Event::assertDispatched(ProviderIdentityAccepted::class, fn (ProviderIdentityAccepted $event) => $event->purpose === SingleSignOn::LOGIN);
+    });
+
+    it('doesn\'t fire for an account nobody linked, or one the app keeps out', function () {
+        Event::fake([ProviderIdentityAccepted::class]);
+
+        $this->get(signInAtProvider($this->idp))->assertSessionHasErrors('email');
+
+        linkFor($this->user);
+        Keyring::allowSignInWhen(fn () => false);
+        $this->get(signInAtProvider($this->idp))->assertSessionHasErrors('email');
+
+        Event::assertNotDispatched(ProviderIdentityAccepted::class);
+    });
+
+    it('fires for a new link, and for one only brought up to date', function () {
+        Event::fake([ProviderIdentityAccepted::class]);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $this->get($this->idp->approve(beginLink()))->assertSessionHas('status', 'authenticator-added');
+        $this->get($this->idp->approve(beginLink()))->assertSessionHas('status', 'authenticator-updated');
+
+        $link = $this->user->keyring->refresh()->of('sso')->sole();
+        Event::assertDispatchedTimes(ProviderIdentityAccepted::class, 2);
+        Event::assertDispatched(ProviderIdentityAccepted::class, fn (ProviderIdentityAccepted $event) => $event->user->is($this->user)
+            && $event->authenticator->is($link)
+            && $event->purpose === SingleSignOn::LINK);
+    });
+
+    it('doesn\'t fire for a link to an account someone else linked', function () {
+        Event::fake([ProviderIdentityAccepted::class]);
+        linkFor(User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]));
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $this->get($this->idp->approve(beginLink()))->assertSessionHasErrors('provider');
+
+        Event::assertNotDispatched(ProviderIdentityAccepted::class);
+    });
+
+    it('queues the identity without its request\'s secrets', function () {
+        $link = linkFor($this->user);
+        $identity = new Identity(AuthorizationRequest::make('fake', SingleSignOn::LOGIN, SSO_CALLBACK), 'fake', 'https://idp.test', SSO_SUBJECT, 'taylor@example.com', true, claims: ['sub' => SSO_SUBJECT, 'nonce' => 'n', 'at_hash' => 'a', 'c_hash' => 'c', 'groups' => ['staff']]);
+
+        $copy = unserialize(serialize(new ProviderIdentityAccepted($this->user, $link, $identity, SingleSignOn::LOGIN)));
+
+        expect($copy->identity->request->state)->toBe('')
+            ->and($copy->identity->request->nonce)->toBe('')
+            ->and($copy->identity->request->codeVerifier)->toBe('')
+            ->and($copy->identity->request->provider)->toBe('fake')
+            ->and($copy->identity->request->expiresAt)->toBe($identity->request->expiresAt)
+            ->and($copy->identity->subject)->toBe(SSO_SUBJECT)
+            ->and($copy->identity->claims)->not->toHaveKeys(['nonce', 'at_hash', 'c_hash'])
+            ->and($copy->identity->claims['groups'])->toBe(['staff'])
+            ->and($copy->authenticator->is($link))->toBeTrue()
+            ->and($copy->user->is($this->user))->toBeTrue()
+            ->and($copy->purpose)->toBe(SingleSignOn::LOGIN)
+            // The event in the request keeps them.
+            ->and($identity->request->state)->not->toBe('')
+            ->and($identity->claims['nonce'])->toBe('n');
     });
 });

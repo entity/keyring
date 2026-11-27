@@ -1442,7 +1442,8 @@ describe('asking from a controller', function () {
                 $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
             }
 
-            $provedAt = $proved === [] ? Verification::UNKNOWN : min(array_map(fn (Verification $verification) => $verification->provedAt(), $proved));
+            // Null for a verification proved at an unknown time.
+            $times = array_map(fn (Verification $verification) => $verification->provedAtIfKnown(), $proved);
 
             return [
                 'acr' => $level === Assurance::None ? null : strtolower($level->name),
@@ -1450,7 +1451,7 @@ describe('asking from a controller', function () {
                     ...array_values(array_unique(array_column($proved, 'factor'))),
                     ...($level->atLeast(Assurance::AAL2) ? ['mfa'] : []),
                 ],
-                'auth_time' => $provedAt === Verification::UNKNOWN ? null : $provedAt,
+                'auth_time' => $times === [] || in_array(null, $times, true) ? null : min($times),
             ];
         }
 

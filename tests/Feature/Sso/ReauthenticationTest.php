@@ -19,6 +19,7 @@ use Keyring\Events\Confirmed;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
+use Keyring\Events\ProviderIdentityAccepted;
 use Keyring\Exceptions\SsoFailed;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
@@ -350,6 +351,22 @@ describe('confirming', function () {
         Event::assertDispatched(FactorVerified::class, fn (FactorVerified $event) => $event->authenticator->is($this->link));
     });
 
+    it('keeps what the provider said of the new sign in, and says the identity was accepted for the confirm', function () {
+        Event::fake([ProviderIdentityAccepted::class]);
+        $this->google->signIn(['amr' => ['pwd', 'mfa'], 'acr' => 'urn:example:strong']);
+
+        $this->get($this->google->approve(confirmAtProvider()))->assertRedirect('http://localhost/settings/danger');
+
+        $proved = array_find(app(SessionAssurance::class)->all(), fn (Verification $verification) => $verification->authenticator === $this->link->id);
+        expect($proved->providerAmr)->toBe(['pwd', 'mfa'])
+            ->and($proved->providerAcr)->toBe('urn:example:strong')
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        Event::assertDispatched(ProviderIdentityAccepted::class, fn (ProviderIdentityAccepted $event) => $event->user->is($this->user)
+            && $event->authenticator->is($this->link)
+            && $event->identity->acr === 'urn:example:strong'
+            && $event->purpose === SingleSignOn::CONFIRM);
+    });
+
     it('sends no login_hint for a link without an address', function () {
         $this->link->forceFill(['meta' => [...$this->link->meta, 'email' => null]])->save();
 
@@ -409,7 +426,7 @@ describe('confirming', function () {
     });
 
     it('refuses another account at the provider, even one the user linked too', function () {
-        Event::fake([FactorFailed::class]);
+        Event::fake([FactorFailed::class, ProviderIdentityAccepted::class]);
         googleLink($this->user, '43');
         $this->get('/settings/danger');
         $url = $this->get(route('keyring.sso.confirm', ['authenticator' => $this->link->id]))->assertRedirect()->headers->get('Location');
@@ -420,6 +437,7 @@ describe('confirming', function () {
 
         $this->get('/settings/danger')->assertRedirect(route('keyring.confirm.challenge'));
         Event::assertDispatched(FactorFailed::class, fn (FactorFailed $event) => $event->factor === 'sso' && $event->attempt?->purpose === Purpose::Confirm);
+        Event::assertNotDispatched(ProviderIdentityAccepted::class);
     });
 
     it('refuses a confirm finished by someone other than who started it', function () {
