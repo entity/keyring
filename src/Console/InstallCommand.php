@@ -273,6 +273,7 @@ class InstallCommand extends Command
                     Features::devices() => 'Devices: "trust this device" and where you\'re signed in',
                     Features::emailChanges() => 'Email changes, confirmed and undoable',
                     Features::securityLog() => 'Security log and "was this you?" alerts',
+                    Features::impersonation() => 'Impersonation: signing in as another user, once you say who may',
                 ],
                 default: [...self::FEATURES, ...$factors === [] ? [] : [Features::manageAuthenticators()]],
                 scroll: 8,

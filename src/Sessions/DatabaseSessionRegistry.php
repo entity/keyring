@@ -48,6 +48,13 @@ class DatabaseSessionRegistry implements SessionRegistry, SweepsSessions
             unset($row['origin']);
         }
 
+        // The same for the impersonation columns, which only an
+        // impersonated session fills, so an app that never impersonates
+        // anyone needs no migration for them.
+        if ($row['impersonator_id'] === null) {
+            unset($row['impersonator_id'], $row['impersonator_type'], $row['impersonator_session']);
+        }
+
         $this->withoutBindings(fn () => $this->query()->upsert([$row], ['id'], array_values(array_diff(array_keys($row), ['id', 'revoked_at', 'replaced_by', 'replaced_at']))));
     }
 

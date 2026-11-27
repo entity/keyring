@@ -17,6 +17,7 @@ use Keyring\Events\Authenticated;
 use Keyring\Events\Confirmed;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Features;
+use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
@@ -187,12 +188,22 @@ class SignIn
      * does. A session that ends on its own (a timeout, say) leaves the token
      * alone, or one ending would sign out every remembered browser: its
      * record is revoked, and that is what stops this browser's cookies
-     * bringing it back (Sessions::end).
+     * bringing it back (Sessions::end). Nor does signing out of an
+     * impersonation: the token is the user's, and they didn't sign out.
      */
     public function out(Request $request, bool $onlyThisBrowser = false): ?Authenticatable
     {
         $guard = $this->keyring->guard();
         $user = $guard->user();
+
+        // Signing out of an impersonation is the impersonator's doing, so
+        // the user's own "remember me" token is left alone, and the
+        // impersonator's parked session ends with this one.
+        if (app(Impersonation::class)->active($request)) {
+            $onlyThisBrowser = true;
+
+            app(Impersonation::class)->signedOut($request, $user);
+        }
 
         // Signed out whatever happens to the registry: a revocation that
         // fails is thrown on, but never leaves the browser signed in with no

@@ -49,7 +49,7 @@ class SecurityLog
         'password_changed', 'password_reset', 'protection_bypassed', 'clone_suspected', 'risk_step_up',
         'risk_reauthenticate', 'risk_notified', 'risk_password_change', 'risk_denied', 'risk_locked',
         'risk_revoked_sessions', 'access_refused', 'enrollment_refused', 'authenticator_removal_refused',
-        'link_refused', 'verification_refused', 'refusals_limited',
+        'link_refused', 'verification_refused', 'refusals_limited', 'impersonation_started', 'impersonation_ended',
     ];
 
     public function __construct(

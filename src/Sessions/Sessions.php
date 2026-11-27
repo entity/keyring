@@ -25,6 +25,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Features;
+use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
 use Keyring\Models\Device;
 use Keyring\Support\Cookies;
@@ -89,6 +90,53 @@ class Sessions
         }
 
         return $session;
+    }
+
+    /**
+     * Register the session someone signs in to as $user (Impersonation),
+     * naming them and the record of their own session, which is left as it
+     * is to come back to. It proved nothing, is never remembered, is on no
+     * device, and lasts no longer than the impersonation may. It's saved as
+     * it is: it ends none of the user's sessions to keep them to
+     * "sessions.max", and none of the impersonator's.
+     */
+    public function startImpersonation(Request $request, Authenticatable $user, Authenticatable $impersonator, #[\SensitiveParameter] RegisteredSession $parked, int $until): RegisteredSession
+    {
+        $now = now()->getTimestamp();
+
+        $session = new RegisteredSession(
+            id: Str::random(40),
+            userId: (string) $user->getAuthIdentifier(),
+            userType: RegisteredSession::typeOf($user),
+            guard: config('keyring.guard'),
+            deviceId: null,
+            assurance: Assurance::None,
+            ip: $this->keyring->recordedIp($request),
+            userAgent: UserAgent::from($request),
+            authenticatedAt: $now,
+            lastActivityAt: $now,
+            expiresAt: min($now + $this->absolute(), $until),
+            impersonatorId: (string) $impersonator->getAuthIdentifier(),
+            impersonatorType: RegisteredSession::typeOf($impersonator),
+            impersonatorSession: $parked->id,
+        );
+
+        $this->registry->save($session);
+
+        return $session;
+    }
+
+    /**
+     * Point the request's session at a record it's moving to without a new
+     * "remember me" cookie: the browser keeps the one it has, which still
+     * names the record it was issued with (Impersonation).
+     */
+    public function rebind(Request $request, #[\SensitiveParameter] RegisteredSession $session, bool $remembered): void
+    {
+        $request->session()->put(self::KEY, $session->id);
+        $request->attributes->set(self::KEY, $session->id);
+
+        $remembered ? $request->session()->put(self::REMEMBERED, true) : $request->session()->forget(self::REMEMBERED);
     }
 
     /**
@@ -408,26 +456,35 @@ class Sessions
 
     /**
      * The user's sessions for a "where you're signed in" page, most recently
-     * active first, each under its handle.
+     * active first, each under its handle. One someone else is signed in to
+     * as the user is marked "impersonated", with who it is, as long as
+     * "impersonation.show_in_sessions" is on. With it off, it's left out,
+     * unless it's the session asking.
      *
-     * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool}>
+     * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool, impersonated: bool, impersonator: ?string}>
      */
     public function list(Request $request, Authenticatable $user): Collection
     {
         $current = $request->session()->get(self::KEY);
         $time = fn (int $timestamp) => now()->setTimestamp($timestamp)->toIso8601String();
+        $shown = config('keyring.impersonation.show_in_sessions') !== false;
 
-        return $this->active($user)->map(fn (RegisteredSession $session) => [
-            'id' => $this->handle($session),
-            'name' => $this->keyring->describeDevice($session->userAgent),
-            'ip' => $session->ip,
-            'device' => $session->deviceId,
-            'remembered' => $session->remembered,
-            'signedInAt' => $time($session->authenticatedAt),
-            'lastActiveAt' => $time($session->lastActivityAt),
-            'expiresAt' => $time($session->expiresAt),
-            'current' => $session->id === $current,
-        ]);
+        return $this->active($user)
+            ->reject(fn (RegisteredSession $session) => $session->isImpersonated() && ! $shown && $session->id !== $current)
+            ->values()
+            ->map(fn (RegisteredSession $session) => [
+                'id' => $this->handle($session),
+                'name' => $this->keyring->describeDevice($session->userAgent),
+                'ip' => $session->ip,
+                'device' => $session->deviceId,
+                'remembered' => $session->remembered,
+                'signedInAt' => $time($session->authenticatedAt),
+                'lastActiveAt' => $time($session->lastActivityAt),
+                'expiresAt' => $time($session->expiresAt),
+                'current' => $session->id === $current,
+                'impersonated' => $session->isImpersonated(),
+                'impersonator' => $session->isImpersonated() ? app(Impersonation::class)->describe($session) : null,
+            ]);
     }
 
     /**
@@ -717,6 +774,9 @@ class Sessions
         // middle of the app's sign-out. The record that would refuse the
         // "remember me" cookies is still open then, and logoutCurrentDevice()
         // leaves the token as it was, so it's cycled here instead.
+        // Signing out while impersonating leaves nobody to come back to.
+        app(Impersonation::class)->signedOut($request, $event->user);
+
         rescue(fn () => $this->unlessGiven(SessionEndReason::LoggedOut, fn () => $this->end($request)), function () use ($event) {
             if ($event instanceof CurrentDeviceLogout && $event->user !== null) {
                 rescue(fn () => $this->cycleRememberToken($event->user));

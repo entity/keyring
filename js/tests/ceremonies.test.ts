@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '../src/enroll'
 import { KeyringRequestError } from '../src/http'
 import { endOtherSessions, endSession, listSessions } from '../src/sessions'
+import { impersonate, stopImpersonating } from '../src/impersonation'
 import { createCredential, fromBase64Url, getCredential, toBase64Url } from '../src/webauthn'
 import { standIn } from './browser'
 
@@ -231,7 +232,7 @@ describe('enrolling', () => {
 
 describe('sessions', () => {
   test('lists the sessions the server returns', async () => {
-    const session = { id: '9f2c', name: 'Firefox on Windows', ip: '203.0.113.7', device: null, remembered: false, signedInAt: 'a', lastActiveAt: 'b', expiresAt: 'c', current: true }
+    const session = { id: '9f2c', name: 'Firefox on Windows', ip: '203.0.113.7', device: null, remembered: false, signedInAt: 'a', lastActiveAt: 'b', expiresAt: 'c', current: true, impersonated: true, impersonator: 'Ada Admin' }
     answers.push({ status: 200, body: { sessions: [session] } })
 
     expect(await listSessions()).toEqual([session])
@@ -261,6 +262,27 @@ describe('sessions', () => {
 
     expect((await endSession('nope').catch(error => error)).status).toBe(404)
     expect((await endOtherSessions().catch(error => error)).data.redirect).toBe('/confirm')
+  })
+})
+
+describe('impersonation', () => {
+  test('starts by the user\'s id, and stops', async () => {
+    answers.push({ status: 200, body: { status: 'impersonation-started', redirect: '/dashboard' } }, { status: 200, body: { status: 'impersonation-ended', redirect: '/dashboard' } })
+
+    expect(await impersonate(42)).toEqual({ status: 'impersonation-started', redirect: '/dashboard' })
+    expect(await stopImpersonating()).toEqual({ status: 'impersonation-ended', redirect: '/dashboard' })
+
+    expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
+      { method: 'POST', url: '/impersonate/42' },
+      { method: 'DELETE', url: '/impersonate' },
+    ])
+  })
+
+  test('throws when it\'s refused, or needs a fresh second factor', async () => {
+    answers.push({ status: 403, body: { message: 'You can\'t sign in as that user.' } }, { status: 423, body: { message: 'Confirm first', redirect: '/confirm' } })
+
+    expect((await impersonate('7').catch(error => error)).status).toBe(403)
+    expect((await impersonate('7').catch(error => error)).data.redirect).toBe('/confirm')
   })
 })
 

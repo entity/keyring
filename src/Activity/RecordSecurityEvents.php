@@ -58,6 +58,8 @@ class RecordSecurityEvents
             Events\AuthenticatorRemovalRefused::class => 'authenticatorRemovalRefused',
             Events\LinkRefused::class => 'linkRefused',
             Events\VerificationRefused::class => 'verificationRefused',
+            Events\ImpersonationStarted::class => 'impersonationStarted',
+            Events\ImpersonationEnded::class => 'impersonationEnded',
         ];
     }
 
@@ -274,5 +276,43 @@ class RecordSecurityEvents
         $this->log->recordRefusal('verification_refused', $event->attempt->user(), $event->factor, meta: [
             'skipped' => array_map(class_basename(...), $event->skipped),
         ]);
+    }
+
+    /**
+     * Logged on both accounts, each entry naming both: "role" says which of
+     * them the entry's account was.
+     */
+    public function impersonationStarted(Events\ImpersonationStarted $event): void
+    {
+        $meta = $this->impersonation($event->impersonator, $event->user);
+
+        $this->log->record('impersonation_started', $event->impersonator, meta: [...$meta, 'role' => 'impersonator']);
+        $this->log->record('impersonation_started', $event->user, meta: [...$meta, 'role' => 'impersonated']);
+    }
+
+    /**
+     * On both accounts, as it started, unless the impersonator has since
+     * been deleted: then on the user's alone.
+     */
+    public function impersonationEnded(Events\ImpersonationEnded $event): void
+    {
+        $meta = [...$this->impersonation($event->impersonator, $event->user), 'reason' => $event->reason->value, 'returned' => $event->returned];
+
+        if ($event->impersonator !== null) {
+            $this->log->record('impersonation_ended', $event->impersonator, meta: [...$meta, 'role' => 'impersonator']);
+        }
+
+        $this->log->record('impersonation_ended', $event->user, meta: [...$meta, 'role' => 'impersonated']);
+    }
+
+    /**
+     * @return array{impersonator: ?string, user: string}
+     */
+    protected function impersonation(?Authenticatable $impersonator, Authenticatable $user): array
+    {
+        return [
+            'impersonator' => $impersonator === null ? null : (string) $impersonator->getAuthIdentifier(),
+            'user' => (string) $user->getAuthIdentifier(),
+        ];
     }
 }

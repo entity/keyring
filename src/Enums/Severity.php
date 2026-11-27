@@ -31,7 +31,7 @@ enum Severity: string
         return match ($type) {
             'new_device', 'authenticator_added', 'authenticator_removed', 'recovery_code_used', 'email_changed',
             'password_changed', 'password_reset', 'risk_step_up', 'risk_reauthenticate', 'risk_notified',
-            'risk_password_change' => self::Notice,
+            'risk_password_change', 'impersonation_started' => self::Notice,
 
             'factor_failed', 'second_factor_failed', 'locked_out', 'rate_limited', 'account_locked', 'device_reported',
             'remember_me_reused', 'email_change_reverted', 'protection_bypassed', 'access_refused',

@@ -33,6 +33,7 @@ use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\MissingAction;
 use Keyring\Exceptions\UnknownFeature;
 use Keyring\Http\Middleware\AuthenticateSession;
+use Keyring\Http\Middleware\RefuseWhileImpersonating;
 use Keyring\Http\Middleware\RequireAssurance;
 use Keyring\Http\Middleware\RequireEnrollment;
 use Keyring\Http\Middleware\RequireFreshVerification;
@@ -151,6 +152,7 @@ class KeyringServiceProvider extends ServiceProvider
         $router->aliasMiddleware('keyring.enrolled', RequireEnrollment::class);
         $router->aliasMiddleware('keyring.password', RequirePasswordChange::class);
         $router->aliasMiddleware('keyring.signed', ValidateSignature::class);
+        $router->aliasMiddleware('keyring.not-impersonating', RefuseWhileImpersonating::class);
 
         if (config('keyring.sessions.middleware')) {
             $this->app->make(HttpKernel::class)->appendMiddlewareToGroup('web', AuthenticateSession::class);

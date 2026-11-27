@@ -7,10 +7,12 @@ namespace Keyring\Http\Middleware;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Devices\DeviceManager;
 use Keyring\Devices\UserAgent;
+use Keyring\Enums\ImpersonationEndReason;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\NewDeviceSignedIn;
 use Keyring\Events\RememberMeReused;
@@ -18,6 +20,7 @@ use Keyring\Events\SessionEnded;
 use Keyring\Events\SessionResumed;
 use Keyring\Events\SessionsRevoked;
 use Keyring\Http\Responses\ChoosesFormat;
+use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Risk\Assessment;
@@ -46,6 +49,7 @@ class AuthenticateSession
         protected RiskEngine $risk,
         protected RiskLocks $locks,
         protected SignIn $signIn,
+        protected Impersonation $impersonation,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -56,10 +60,11 @@ class AuthenticateSession
             return $next($request);
         }
 
-        // An app's own Auth::login() (Socialite, impersonation) is registered
-        // on the response that signs in, so every copy of that session's
-        // cookie can be revoked, on the cookie driver too. One that ticked
-        // "remember me" gets Keyring's cookie next to Laravel's.
+        // An app's own Auth::login() (Socialite, an impersonation of its
+        // own) is registered on the response that signs in, so every copy of
+        // that session's cookie can be revoked, on the cookie driver too.
+        // One that ticked "remember me" gets Keyring's cookie next to
+        // Laravel's.
         if (! $guard->check()) {
             return tap($next($request), function () use ($request, $guard) {
                 if (($user = $guard->user()) !== null && ! $request->session()->has(Sessions::KEY)) {
@@ -69,6 +74,14 @@ class AuthenticateSession
         }
 
         $user = $this->keyring->user();
+        $session = $this->sessions->current($request);
+
+        // A browser that's impersonating someone is held to the
+        // impersonation, in place of what the user's own sessions are: it
+        // ends, back to the impersonator, rather than signing anyone out.
+        if ($this->impersonation->active($request) || $session?->isImpersonated()) {
+            return $this->impersonating($request, $next, $user, $session);
+        }
 
         // Someone the app has stopped letting sign in (Keyring::allowSignInWhen)
         // isn't left signed in, whatever kept them so: a session, a "remember
@@ -76,8 +89,6 @@ class AuthenticateSession
         if (! $this->keyring->allowsSignIn($user)) {
             return $this->keepOut($request, $user);
         }
-
-        $session = $this->sessions->current($request);
 
         if ($session === null) {
             // The session was registered, but its record is gone (revoked and
@@ -122,6 +133,51 @@ class AuthenticateSession
         }
 
         return $next($request);
+    }
+
+    /**
+     * Carry on impersonating, or end it: once it has run for
+     * impersonation.lifetime, its session was ended, or the impersonator's
+     * own one has. Nothing here counts as the user's own activity: no risk
+     * signals, and no level the user signed in at to lapse.
+     */
+    protected function impersonating(Request $request, Closure $next, Authenticatable&Model $user, ?RegisteredSession $session): Response
+    {
+        if (($reason = $this->impersonation->ending($request, $session, $user)) !== null) {
+            return $this->endImpersonation($request, $reason);
+        }
+
+        assert($session !== null);
+
+        $this->assurance->touch();
+        $this->impersonation->touch($session, now()->getTimestamp());
+
+        return $next($request);
+    }
+
+    /**
+     * End an impersonation the request found over. Back in the
+     * impersonator's own session, the page they were on was the user's, so
+     * they're sent to impersonation.return_to with the
+     * "impersonation-ended" status, and a JSON client gets a 409 saying so.
+     * With nobody to go back to, the browser is signed out, as for any
+     * session that ended.
+     */
+    protected function endImpersonation(Request $request, ImpersonationEndReason $reason): Response
+    {
+        if ($this->impersonation->end($request, $reason) === null) {
+            return $this->keyring->response(SignedOutResponse::class, reason: $reason->value)->toResponse($request);
+        }
+
+        $url = $this->impersonation->returnTo();
+
+        if ($this->wantsJson($request)) {
+            return $this->clearSiteData(new JsonResponse(['status' => 'impersonation-ended', 'message' => $this->keyring->statusMessage('impersonation-ended'), 'redirect' => $url], 409));
+        }
+
+        $request->session()->flash('status', 'impersonation-ended');
+
+        return $this->clearSiteData($request->hasHeader('X-Inertia') ? $this->loadInFull($url) : redirect()->to($url));
     }
 
     /**

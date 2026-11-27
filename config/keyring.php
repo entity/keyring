@@ -50,6 +50,7 @@ return [
         // Features::manageAuthenticators(),
         // Features::devices(),
         // Features::emailChanges(),
+        // Features::impersonation(),
     ],
 
     /*
@@ -350,6 +351,32 @@ return [
         'continue_as_guest' => [],
         'sweep_every' => null,
         'sweep_limit' => 1000,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Impersonation
+    |--------------------------------------------------------------------------
+    |
+    | With Features::impersonation(), whoever Keyring::allowImpersonationWhen()
+    | lets can sign in as another user, and come back to their own account.
+    | Starting takes the "middleware": by default, two factors proved in the
+    | last 15 minutes. It ends by itself after "lifetime". Nothing proved
+    | before carries over, and Keyring refuses every change to how the user
+    | signs in until it ends.
+    |
+    | With "show_in_sessions" the user sees it in their sessions list, with
+    | who is in it, and can end it. Starting goes to "redirect_to" and
+    | stopping to "return_to": null for "home".
+    |
+    */
+
+    'impersonation' => [
+        'lifetime' => '1h',
+        'show_in_sessions' => true,
+        'middleware' => ['keyring:aal2', 'keyring.fresh:15m'],
+        'redirect_to' => null,
+        'return_to' => null,
     ],
 
     /*
