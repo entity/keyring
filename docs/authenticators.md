@@ -6,10 +6,15 @@
     - [Who May Enroll](#who-may-enroll)
 - [Adding an Authenticator](#adding-an-authenticator)
     - [Beginning](#beginning)
+    - [The Password for a First Second Factor](#the-password-for-a-first-second-factor)
     - [Confirming](#confirming)
 - [Recovery Codes](#recovery-codes)
 - [Renaming and Choosing the Default](#renaming-and-choosing-the-default)
 - [Removing Authenticators](#removing-authenticators)
+- [Frozen Sign-In Methods](#frozen-sign-in-methods)
+    - [Established Authenticators](#established-authenticators)
+    - [Making a Change With an Established Key](#making-a-change-with-an-established-key)
+    - [Getting Past the Freeze](#getting-past-the-freeze)
 - [Signing Out Other Sessions](#signing-out-other-sessions)
 - [Responses](#responses)
 - [From JavaScript](#from-javascript)
@@ -32,10 +37,11 @@ Without this feature, users have no way to set up a sign-in method besides the p
 
 | Method | URI | Name | Does |
 |---|---|---|---|
-| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begins an enrollment: returns a QR code, WebAuthn options, recovery codes, and so on. Uses the session lock. |
+| `POST` | `/user/authenticators/{factor}` | `keyring.authenticators.store` | Begins an enrollment: returns a QR code, WebAuthn options, recovery codes, and so on. Uses the session lock. It may check the [password](#the-password-for-a-first-second-factor), under the password's own rate limits. |
 | `POST` | `/user/authenticators/{factor}/confirm` | `keyring.authenticators.confirm` | Finishes it by proving the new authenticator works. Uses the `keyring` rate limiter and the session lock. |
 | `PATCH` | `/user/authenticators/{authenticator}` | `keyring.authenticators.update` | Renames the authenticator, or makes it the default. |
 | `DELETE` | `/user/authenticators/{authenticator}` | `keyring.authenticators.destroy` | Removes the authenticator. Uses the `keyring` rate limiter, because it may check the password. |
+| `POST` | `/user/authenticators/{factor}/proof-options` | `keyring.authenticators.proof-options` | Returns WebAuthn options, or a factor's challenge, for one change while the account is [frozen](#making-a-change-with-an-established-key). Uses the `keyring` rate limiter. |
 
 These routes require `auth:{guard}` middleware, along with the middleware set in the `changes_middleware` configuration option. By default, that is `['keyring.fresh:15m']`. Users must have verified, within the last 15 minutes, the strongest combination their account can offer. For example, someone with a key that can't leave its device uses that key before adding another, and someone with only a password uses the password. See [Fresh Verification](step-up.md#fresh-verification).
 
@@ -93,7 +99,34 @@ Adding an authenticator always takes two steps. Nothing is saved until the secon
 }
 ```
 
+Every factor also takes `password` and `proof` when beginning, and never when confirming:
+
+- `password`, the user's current password, when they're adding a second factor and the account has no [established](#established-authenticators) one yet. See [The Password for a First Second Factor](#the-password-for-a-first-second-factor).
+- `proof`, when the enrollment would replace something while the account's sign-in methods are [frozen](#frozen-sign-in-methods). See [Making a Change With an Established Key](#making-a-change-with-an-established-key).
+
+Each is checked before anything is shown, so the user never sees a QR code or codes that can't be saved. The enrollment remembers that it had them, and its one confirm uses that.
+
 Authenticator apps and email codes accept an optional `name` when beginning or confirming. If you send one in both places, the name sent when confirming wins. Passkeys and security keys accept a `name` when confirming. If no name is sent, it defaults to "Authenticator app", "Email", "Passkey", or "Security key", depending on the factor. A name given when beginning is cut to 64 characters. When confirming, a name over 64 characters is refused with a `422` on `name`, which is what passkeys and security keys get, since they only take one then. A name that isn't valid UTF-8, or that holds a NUL character, is refused with an error on `name`.
+
+### The Password for a First Second Factor
+
+Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a copy of a session that has just signed in could otherwise give a password-only account a second factor. The owner would then be asked for a factor they don't have at every sign in, and a password reset wouldn't change that. A passkey would let someone else sign in without the password at all.
+
+So adding a second factor (an authenticator app, a passkey, a security key, or a factor of your own) takes the current password, typed for that enrollment, while the account has no [established](#established-authenticators) second factor. That's an account with only a password, or one whose second factors are all from the last 7 days, since a copy of the session could have added the first of those too. Recovery codes and an emailed code aren't second factors, so they never need it.
+
+A first password set from a session (with no current one to type, see [Changing the Password](protected-changes.md#changing-the-password)) doesn't count for this until it's [established](#established-authenticators), 7 days later. A copy of the session could have chosen it, so typing it proves nothing. Until then the account adds factors as one without a password does, and a factor added that way isn't asked for at sign in until it's established. Removing the account's last second factor still takes that password, though. So an owner who signs in with an identity provider, and finds a password and an authenticator app they didn't add, resets the password first. The reset proves the address, and the app isn't asked for at sign in.
+
+Linking an account at an [identity provider](sso.md#linking-and-unlinking) takes it on the same terms. A link is never a second factor, but it signs in without the password, so a copy of the session could otherwise link an account of its own and keep signing in after the session ends. Beside an established second factor, a sign in with the link is still asked for that factor, so a copy of the session gains nothing it didn't have and the password isn't needed. A link never counts as the established second factor itself.
+
+Send it as `password` when beginning. A recent sign in or step-up doesn't count in its place, because whoever copied the session has those too. A missing password is a `422` on `password` (`keyring::keyring.password_to_add_factor`). A wrong one is a `422` on `password` too (`validation.current_password`). It counts against the password's rate limits, as a step-up's would, so too many get a `429`, with `keyring::keyring.locked` once it reaches the cap on failures in a row, which locks password sign in as it would at the login form and dispatches `AccountLocked`. It dispatches `FactorFailed` for the password, and `EnrollmentRefused` with the reason `password`.
+
+The password goes with the beginning only, and counts for that one enrollment. The confirm checks again, under the same lock as the freeze. If the account lost its established second factor in between, the confirm is refused on `password` and the enrollment is spent, so the user begins again with the password. For a link, that check is at the provider's callback, which goes back to the page the link began on with the error on `password`.
+
+A user [`keyring.enrolled`](policies.md#requiring-a-second-factor) sends to add their first factor straight after registering types their password again for it.
+
+An account without a password, such as one that only signs in with a passkey, or an app that doesn't register the `Password` factor, has nothing to type. It adds a factor on the fresh verification alone, as before. Keyring can't tell that account's own new passkey from one a session added, so on such an account a copied session can still add one. See [Other Limits](security.md#other-limits).
+
+Your own code passes `passwordConfirmed: true` to `AuthenticatorChanges::add()` once it has made sure who it's adding for. `$changes->needsPassword($user, $factor)` says whether the routes would ask.
 
 ### Confirming
 
@@ -106,7 +139,7 @@ Authenticator apps and email codes accept an optional `name` when beginning or c
 | `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 | `sso` | none: the provider's callback confirms it, and this route can't. See [Linking and Unlinking](sso.md#linking-and-unlinking). |
 
-A wrong proof fails with `keyring::keyring.invalid`. An expired or missing enrollment, or one that has already been confirmed, fails with `keyring::keyring.enrollment_expired`. Both errors appear on the factor's field: `code`, or `credential` for passkeys and security keys. Email enrollment codes keep their guess count between tries, as email codes at sign in do.
+A wrong proof fails with `keyring::keyring.invalid`. An expired or missing enrollment, or one that has already been confirmed, fails with `keyring::keyring.enrollment_expired`. Those two errors appear on the factor's field: `code`, or `credential` for passkeys and security keys. A confirm refused because the account was frozen since the enrollment began fails on `authenticator`, and one refused because it lost its established second factor fails on `password`. Either spends the enrollment, so begin again, with a `proof` or the `password`. Email enrollment codes keep their guess count between tries, as email codes at sign in do.
 
 On success, the response contains the new authenticator, as its factor's `present` method gives it:
 
@@ -130,7 +163,7 @@ Confirming an authenticator also proves it, so the session counts it as verified
 
 The first time a user adds an extra factor while they have no recovery codes, or have used them all, Keyring creates a set of eight and returns them as `recoveryCodes`. Show them once, and ask the user to save them. This only happens when the `recovery` factor is registered. An [email code](factors.md#email-codes) doesn't count as a second factor, so adding one comes with no codes. Nor does linking an [identity provider](sso.md), which is never asked for as a second step.
 
-To give the user a new set, enroll the `recovery` factor. Beginning returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored. An email code doesn't count as that second factor.
+To give the user a new set, enroll the `recovery` factor. Beginning returns the new `codes`, and confirming replaces the old set. A user only ever has one set. Replacing an [established](#established-authenticators) set that has codes left is refused while the account's sign-in methods are [frozen](#frozen-sign-in-methods), both when beginning and when confirming, unless beginning [proves an established key](#making-a-change-with-an-established-key) for it. Making the first set, replacing one with no codes left, or replacing one made in the last 7 days never is. So a user who has just turned on two factor can make a new set straight away. Recovery codes are a fallback, so confirming them without another second factor fails with `keyring::keyring.recovery_needs_second_factor` on `authenticator`, and no set is stored. An email code doesn't count as that second factor.
 
 Each code works only once. The challenge page shows how many are left as `remaining`, and the `Keyring\Events\RecoveryCodeUsed` event carries the same count.
 
@@ -161,11 +194,15 @@ Users with no codes left keep the empty set until they make a new one, add anoth
 
 The default authenticator is offered first when a second factor is needed. Recovery codes are only a fallback, and a factor whose `answersChallenges()` is `false` is never offered there (an identity provider link is only offered for a [confirm](sso.md#step-up)), so neither can be made the default. Sending `default` for one fails with an error on `default`.
 
+Renaming an [established](#established-authenticators) authenticator is refused while the account's sign-in methods are [frozen](#frozen-sign-in-methods), unless the request [proves an established key](#making-a-change-with-an-established-key) for renaming it. Otherwise a copy of the session could rename the owner's key so it looks like the one to remove. Renaming a newer authenticator, and choosing the default, always work. A rename freezes nothing. A session can still name its own new key after the owner's, so your settings page should show `createdAt` beside each one.
+
 ## Removing Authenticators
 
 `DELETE /user/authenticators/{authenticator}` removes an authenticator. The request fails, though, if what remains would leave the user unable to sign in, or unable to meet the policy (for policies without `ifEnrolled()`). In that case, the error is `keyring::keyring.last_factor`, on `authenticator`.
 
 Recovery codes are only useful while there's a factor to recover, so when a user removes their last extra factor, their recovery codes are removed with it. A linked identity provider doesn't keep them. The policy is checked against what will actually remain.
+
+Removing an [established](#established-authenticators) authenticator is refused while the account's sign-in methods are [frozen](#frozen-sign-in-methods), unless the request [proves an established key](#making-a-change-with-an-established-key) for it.
 
 Removing an authenticator also stops trusting all of the user's devices. See [Trusted Devices](devices-and-sessions.md#trusted-devices).
 
@@ -173,7 +210,113 @@ An authenticator that failed too many times in a row is refused until it's set u
 
 The password can't be removed this way. It isn't stored in `keyring_authenticators`.
 
-Removing the user's last second factor (the last one beyond recovery codes, email codes, and [identity provider](sso.md) links) also requires their current password in the request, as `password`. While a second factor sat beside it, their password may have been as short as `min_with_mfa`. On its own, though, NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so at this point it checks the length. A missing or wrong password, or one that's too short, gets an error on `password` asking the user to change it first.
+Removing the user's last second factor (the last one beyond recovery codes, email codes, and [identity provider](sso.md) links) also requires their current password in the request, as `password`. While a second factor sat beside it, their password may have been as short as `min_with_mfa`. On its own, though, NIST SP 800-63B-4 asks for `min_without_mfa` (15 characters, Sec. 3.1.1.2). Keyring only stores a hash, so at this point it checks the length. A missing or wrong password, or one that's too short, gets an error on `password` asking the user to change it first. The password is checked under its own [rate limits](security.md#rate-limiting), as at a step-up: a wrong one counts as a failed password, and once they're used up the request gets a `429` on `password`. A user without a password, or in an app that doesn't register the password factor, has none to type.
+
+## Frozen Sign-In Methods
+
+Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a stolen copy of a session that has just signed in can add a sign-in method of its own. Without anything more, it could then remove the owner's authenticator app, or replace their recovery codes, and the owner couldn't get back in. A password reset leaves second factors alone.
+
+So Keyring freezes an account's sign-in methods for a while, as some large providers do. The account is frozen while either of these is true:
+
+- It has an authenticator that isn't [established](#established-authenticators) yet. That means one added in the last 7 days, a newly linked [identity provider](sso.md#linking-and-unlinking) included, or a first password set from a session in the last 7 days.
+- In the last 7 days, it removed an established authenticator, replaced one, or replaced recovery codes that had codes left.
+
+While it's frozen, these are refused:
+
+- Removing an established authenticator, which includes unlinking an established identity provider.
+- Renaming an established authenticator.
+- Confirming a factor that allows only one per user, when that replaces an established one. For `recovery`, that's replacing an established set that has codes left. That's the same for a factor of your own whose `multiple()` is `false`. Beginning is refused too, so the user isn't shown codes that can't be saved.
+
+The rest still works. The user can add sign-in methods (with [the password](#the-password-for-a-first-second-factor) while the account has no established second factor), rename newer ones, and choose the default. They can remove or replace an authenticator, or recovery codes, that isn't established, and that doesn't freeze anything. So an owner can remove a passkey someone else added, and the account is no longer frozen for it. They can make their first set of recovery codes. A refused change ends no sessions.
+
+A change that goes through and takes something established freezes the account for 7 days from then. That's removing an established authenticator, replacing one, or replacing an established set of recovery codes that had codes left.
+
+[Undoing an email change](protected-changes.md#reverting) isn't subject to the freeze. It's started from a link sent to the old address, never from the session, and it signs every session out. What it removes are sign-in methods a session could have added, so it doesn't start the freeze over either. Nor is the unlinking a [password reset](sso.md#password-resets-and-email-changes) does, which is proved with the address and signs every session out too.
+
+A refusal is a validation error on `authenticator`. Its message says how long is left, such as `keyring::keyring.frozen_new_authenticator` with "another 3 days". JSON gets a `422` with the usual `message` and `errors`, plus `frozen`. It holds the `reason`, `new-authenticator` or `recent-change`, `until`, an ISO 8601 time, and `skip`. `skip` lists the factors that could make this change now, by key, as the next section explains. It's empty when none can:
+
+```json
+{
+    "message": "A sign-in method was added recently. To keep your account safe, your other sign-in methods and your recovery codes can't be removed, replaced or renamed for another 1 week. The new one can still be removed.",
+    "errors": {
+        "authenticator": ["A sign-in method was added recently. To keep your account safe, your other sign-in methods and your recovery codes can't be removed, replaced or renamed for another 1 week. The new one can still be removed."]
+    },
+    "frozen": {
+        "reason": "new-authenticator",
+        "until": "2026-12-04T14:32:45+00:00",
+        "skip": ["passkey"]
+    }
+}
+```
+
+Keyring throws it as a `Keyring\Exceptions\SignInChangesFrozen`, a `ValidationException` that also has the `freeze` and the `skip` list. A refused removal dispatches `AuthenticatorRemovalRefused` with the reason `frozen`, and a refused enrollment `EnrollmentRefused` with the reason `frozen`. One removal, replacement or rename runs at a time for each user, so two at once can't both find the account unfrozen.
+
+To show it before the user tries, ask `Keyring\Changes\AuthenticatorChanges`. The `frozen` method returns a `Keyring\Changes\Freeze`, with `reason` (a `Keyring\Enums\FreezeReason`) and `until`, or `null`:
+
+```php
+use Keyring\Changes\AuthenticatorChanges;
+
+$freeze = app(AuthenticatorChanges::class)->frozen($user);
+
+$freeze?->until;      // a CarbonImmutable
+$freeze?->message();  // what the user is told
+```
+
+The `authenticator_changes.established_after` option sets the 7 days. See [Configuration](configuration.md#account-changes-and-enrollment). Setting it to `0` turns the freeze off, and with it the protection it gives.
+
+When each account last lost something established, and when it got a first password from a session, is kept in `keyring_sign_in_changes`, one row per user. `keyring:prune` deletes a row once it no longer holds anything back.
+
+### Established Authenticators
+
+An authenticator is established once the account has had it for `authenticator_changes.established_after`. That's 7 days by default, from when it was added (`created_at`). A set of recovery codes goes by when that set was made. An emailed code always counts as established, and so does the password, except a first one set from a session, with no current password to type. That one is established 7 days after it was set, changed since or not, or once a password reset proves the address. New recovery codes don't freeze the account on their own.
+
+An authenticator that isn't established works like any other. It signs in, and it can confirm a [fresh verification](step-up.md#fresh-verification). It just doesn't raise the bar yet:
+
+- [`noDowngrade()`](policies.md#no-downgrade) only asks for a passkey or security key once the account has an established one.
+- A fresh verification only asks for a key that can't leave its device when that key is established.
+- Under a policy with [`ifEnrolled()`](policies.md#only-when-enrolled), only established authenticators decide what the policy asks for. A newer one is offered, and counts when it's used, but doesn't add a kind of factor to what's asked, and never counts as phishing resistant, device bound or attested. So `factors(3)->ifEnrolled()` asks a user with a password and an established authenticator app for those two, even after a passkey is added, and `aal2()->phishingResistant()->ifEnrolled()`, `aal2()->deviceBound()->ifEnrolled()` and `aal3()->ifEnrolled()` only ask for a key once the account has an established one that qualifies.
+- The exception is an account with an established password and no established second factor, where adding one takes [the password](#the-password-for-a-first-second-factor). A copy of a session can't add one there, so a new factor is asked for as a factor straight away: a user with only a password who adds an authenticator app needs it at their next sign in under `aal2()->ifEnrolled()`. A factor `add()` saved without the password checked, such as one added before the account had a password, keeps that in its `meta` (`AuthenticatorChanges::ADDED_WITHOUT_PASSWORD`), and is never asked for until it's established, whatever password the account has since. A factor your own code saves some other way, as `keyring:import` does, isn't marked.
+- A first password set from a session isn't asked for at all until it's established.
+- A requirement your app asks for outright, such as a policy without `ifEnrolled()` or the `keyring:aal3` and `keyring:aal2,device-bound` middleware, is met by any key that qualifies, new or not. It isn't worked out from the user's keyring, so a new key can't make it stricter.
+
+That goes for the owner's own new key too. For its first 7 days, a security key or passkey the owner just added isn't asked for at sign in under `noDowngrade()` or an `ifEnrolled()` policy, or at a fresh verification, so their password and authenticator app still work. Nor is any other factor they add beside an established second factor. It's accepted when they use it. Keyring can't tell the owner's new key from one a copy of their session added.
+
+`$user->keyring->isEstablished($authenticator)` says whether one is, and `$user->keyring->established()` is the keyring without the ones that aren't.
+
+`keyring:import` keeps when an imported authenticator app or passkey was first confirmed, so one a user has had for a while is established from the start. Imported recovery codes go by when the authenticator app was confirmed. When Fortify didn't record it, as with its `confirm` option off, they count as added at the import, so those accounts are frozen for 7 days afterwards. See [Importing Two Factor Data](upgrading-from-fortify.md#importing-two-factor-data).
+
+### Making a Change With an Established Key
+
+The owner can still make one change while the account is frozen, by proving a passkey or security key in the same request, as some large providers allow. The key has to be one the account has had for `authenticator_changes.established_after`, and since before this session signed in. A key added in this session never counts, however long ago. Whoever added a key from a copied session can't use it in that session, or in a new one, until it's established. Once it is, any session that signed in after it was added can use it, so the owner has those 7 days, and the [security emails](security-log-and-emails.md), to remove it. That's the same rule as [skipping the current address's confirmation](protected-changes.md#confirming) for an email change.
+
+A recent sign in or step-up doesn't count, even with that same key. The proof travels in the request that makes the change, and it's answered for that change alone. Nothing about it is kept for the session afterwards. So a copy of the session cookie can't make the change, however recently the session was verified.
+
+It takes two requests:
+
+1. `POST /user/authenticators/{factor}/proof-options`, where `{factor}` is the key's factor, such as `passkey`. Send `action`, `remove`, `rename` or `replace`, and `target`, the authenticator's ID for `remove` and `rename`, or the factor's key for `replace` (`recovery` for new recovery codes). A `rename` also sends the new `name`, and its proof only works for that name. For a key, the answer is `{ "options": {...} }`, WebAuthn request options that only list the keys that can do it. If the user has none that can, it's a `422` on `proof`. A factor that isn't registered gets a `404`.
+2. Run the ceremony, then send the change's own request again with `proof`: `{ "factor": "passkey", "credential": {...} }`. For a removal, that's the `DELETE`. For a rename, the `PATCH` with the same `name`. For new recovery codes, or a factor a user has one of, it's the `POST` that begins them. The enrollment remembers the proof, so the confirm needs nothing more. A confirm never takes a proof. One that's refused as frozen, for an enrollment begun before the account froze, spends it, so the client begins again with the proof.
+
+The challenge is kept in the session, with the change and the account it's for, for `webauthn.login_options_for` (5 minutes). It works once, like [every other WebAuthn challenge](security.md#single-use-codes). The first answer uses it up, right or wrong, in whichever copy of the session it comes back, and however many requests bring it at once. An answer to a challenge for another change, another authenticator, another name, or a sign in or step-up is refused. A proof that doesn't hold, or a method that can't make the change, is a `422` on `proof`. Each try counts against the factor's rate limits, as a step-up's would, and a wrong one dispatches `FactorFailed`. Sending no `proof` changes nothing: the request is refused as frozen, as before.
+
+The change still freezes the account afterwards, as any other would. Every other check still applies too, such as keeping a way to sign in. The key that proved it may remove itself in the same request. Whoever holds it is the owner, as far as Keyring can tell.
+
+A factor of your own can make the change when its `phishingResistant()` says the authenticator is. Its `challenge()` is called for the options request, with an attempt for that change alone, and the state it puts on the attempt is kept in the session as a key's is, and taken out by the first answer. The answer is whatever the factor's `verify()` reads, sent beside `factor` in `proof`, such as `{ "factor": "token", "signature": "..." }`. Its challenge is what binds the answer to the change, so a factor that checks nothing it was given in `challenge()` shouldn't say it's phishing resistant. Keyring claims each challenge on the server with its first answer, so an answer can't be used twice, even from a copy of the session on the `cookie` driver. The attempt's `id` is the same when the answer comes back as when the challenge was issued, so a factor that remembers what it has answered can still refuse an answer it has seen before, as a second line of defence. A factor that isn't phishing resistant can never make the change, apart from the authenticator app below.
+
+An authenticator app can do the same, but only when `authenticator_changes.skip_with_totp` is `true`. Its six digit codes can be phished as they're typed, so it's off by default. When it's on, `skip` lists `totp` too. Send `{ "factor": "totp", "code": "123456" }` as `proof`, with no options request first. With more than one app, name the one the code is from as `authenticator`, its ID. Without it, the code is checked against the first. The app named has to be one that can make the change, and a wrong code counts as a failure. The code is used up as it is everywhere else. Recovery codes, an emailed code and the password can never make the change, since whoever holds the session may have them.
+
+### Getting Past the Freeze
+
+Your app's own code, such as a support tool, may need to remove, rename or replace an authenticator or recovery codes while the account is frozen. For example, after your support team has checked who they're talking to. Pass `ignoreFreeze: true`:
+
+```php
+use Keyring\Changes\AuthenticatorChanges;
+
+app(AuthenticatorChanges::class)->remove($user, $authenticatorId, ignoreFreeze: true);
+app(AuthenticatorChanges::class)->add($user, $factor, $authenticator, ignoreFreeze: true, passwordConfirmed: true);
+app(AuthenticatorChanges::class)->update($authenticator, ['name' => 'Work phone'], ignoreFreeze: true);
+```
+
+Only do this from code the user can't reach on their own. Keyring's own routes only pass it for a request that proved an established key for that change. `add()` also needs `passwordConfirmed: true` while the account has no established second factor (see [The Password for a First Second Factor](#the-password-for-a-first-second-factor)). A factor added without it is marked as one a copy of a session could have added, so an `ifEnrolled()` policy doesn't ask for it until it's [established](#established-authenticators). Pass it when your code has made sure who it's adding for. The change still freezes the account afterwards, and every other check, such as keeping a way to sign in, still applies.
 
 ## Signing Out Other Sessions
 
@@ -202,24 +345,32 @@ Every route answers with a [status response](sign-in-flow.md#status-responses). 
 | Update | `authenticator-updated` | `authenticator` |
 | Remove | `authenticator-removed` | |
 
+`proof-options` isn't a status response. It always answers with JSON: what the factor's challenge gives, which for a key is `{ "options": {...} }`.
+
 Other requests are redirected back with the `status` flashed to the session. The extra data is flashed too, encrypted, for the next request. Read it with `Keyring::result()`, or read a single key with `Keyring::result('enrollment')`. The [browser package](frontend.md#managing-authenticators) uses the JSON form instead.
 
 ## From JavaScript
 
 ```ts
-import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
+import { beginEnrollment, confirmEnrollment, enroll, makeDefault, proveWithKey, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
 
-// Passkeys, security keys and recovery codes need no input in between.
-const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })
+// Passkeys, security keys and recovery codes need no input in between. The
+// password goes with the beginning, for an account with no established second factor.
+const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop', password })
 
-// Authenticator apps: show the QR code, then ask for a code.
-const { enrollment } = await beginEnrollment('totp')
+// Authenticator apps: show the QR code, then ask for a code. The passkey
+// above isn't established yet, so this still takes the password.
+const { enrollment } = await beginEnrollment('totp', { password })
 // ...render enrollment.qr...
 await confirmEnrollment('totp', enrollment, { code })
 
 await renameAuthenticator(id, 'Work phone')
 await makeDefault(id)
 await removeAuthenticator(id)
+
+// While frozen, with the owner's established passkey.
+const proof = await proveWithKey('passkey', { action: 'remove', target: id })
+await removeAuthenticator(id, undefined, { proof })
 ```
 
 For `passkey` and `security-key`, `confirmEnrollment()` runs the browser's WebAuthn ceremony. If a helper fails, it throws a `KeyringRequestError`. That includes the `423` response from step-up. See [Frontend](frontend.md#managing-authenticators).
@@ -240,6 +391,7 @@ $user->keyring->canMeet($requirement);
 $user->keyring->canConfirm($requirement);    // could the confirm page meet it, building on what's proved?
 $user->keyring->freshlyProvable();           // without what can never count as fresh, like a `never` identity provider link
 $user->keyring->canSignIn();                 // can anything start a login?
+$user->keyring->isEstablished($authenticator); // has the account had it long enough to count on?
 ```
 
 Keyring caches the result on the model. If you change authenticators within the same request, call `$user->keyring->refresh()` afterward.
@@ -256,8 +408,8 @@ The events are in `Keyring\Events`:
 | `AuthenticatorRemoved` | `user`, `authenticator` |
 | `RecoveryCodesGenerated` | `user`, `authenticator` |
 | `RecoveryCodeUsed` | `authenticator`, `remaining` |
-| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid` or `not_allowed`) |
-| `AuthenticatorRemovalRefused` | `user`, `authenticator` |
+| `EnrollmentRefused` | `user`, `factor`, `reason` (`invalid`, `not_allowed`, `frozen` or `password`) |
+| `AuthenticatorRemovalRefused` | `user`, `authenticator`, `reason` (`last_factor` or `frozen`) |
 | `AccessRefused` | `user`, `resource`, `id` |
 
 Confirming the `recovery` factor dispatches `RecoveryCodesGenerated` instead of `AuthenticatorAdded`.

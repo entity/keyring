@@ -50,11 +50,11 @@ Here, `/billing` and `/account` stand for routes of your own, behind `keyring:aa
 
 You may chain both methods, in either order. The level defaults to AAL1, so calling `freshAt` on its own gives the user a password verification at that time.
 
-A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, ask for step-up. A JSON request gets a `423` status, and any other request is redirected to the confirm page. For those routes, add `withAssurance`:
+A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, ask for step-up. A JSON request gets a `423` status, and any other request is redirected to the confirm page. For those routes, add `withAssurance`. A user with only a password also sends it to add their first second factor (see [Factories](#factories)):
 
 ```php
 $this->actingAs($user)->withAssurance(Assurance::AAL1)
-    ->postJson(route('keyring.authenticators.store', 'totp'))
+    ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
     ->assertOk();
 ```
 
@@ -85,6 +85,20 @@ use Keyring\Models\Authenticator;
 $totp = Authenticator::factory()->totp()->for($user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
 
 $this->actingAs($user)->verifiedWith($totp)->post('/user/email', ['email' => 'new@example.com']);
+```
+
+The factory's `established` method does the same, a month back. An authenticator made without it was added just now, so it isn't [established](authenticators.md#established-authenticators). A passkey made that way doesn't make `noDowngrade()` ask for a passkey, and the account's other sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) while it's there. Use `established` for one the user has had a while:
+
+```php
+Authenticator::factory()->passkey()->established()->for($user, 'authenticatable')->create();
+```
+
+A test that adds a second factor to an account with none established sends the user's password when it begins, as a real user does. See [The Password for a First Second Factor](authenticators.md#the-password-for-a-first-second-factor):
+
+```php
+$this->actingAs($user)->withAssurance(Assurance::AAL1)
+    ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
+    ->assertOk();
 ```
 
 The `verifiedWith` method accepts any number of authenticators and pretends the session verified the password and each one you pass. The level is whatever those reach, so a password and an authenticator app give AAL2. This means `verifiedWith` takes the place of `withAssurance`, and you may still chain `freshAt` with it, as before. Reach for `verifiedWith` when a test's user has a passkey or security key and calls a route behind `keyring.fresh`, such as adding another sign-in method. That route asks for the key, which `withAssurance(Assurance::AAL2)` doesn't pretend to have proved.
@@ -182,9 +196,9 @@ use Keyring\Testing\VirtualAuthenticator;
 
 $key = new VirtualAuthenticator;
 
-// Register it.
+// Register it, with the password, as the user's first second factor.
 $this->actingAs($user)->withAssurance(Assurance::AAL1);
-$options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+$options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 $this->post('/logout');
 
@@ -235,7 +249,7 @@ config(['keyring.webauthn.attestation_roots' => [$maker->root]]);
 
 $key = $maker->key('2fc0579f-8113-47ea-b116-bb5a8db9202a');
 
-$options = $this->postJson(route('keyring.authenticators.store', 'security-key'))->json('enrollment.options');
+$options = $this->postJson(route('keyring.authenticators.store', 'security-key'), ['password' => 'password'])->json('enrollment.options');
 $this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $key->register($options)])->assertOk();
 ```
 

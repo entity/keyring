@@ -175,7 +175,7 @@ Only the root changes. The paths stay Keyring's, so the frontend serves a page a
 | Email change, confirm or undo | `/auth/email-changes/{change}/confirm/{token}`, `/auth/email-changes/{change}/revert/{token}` | `email-change` |
 | "This wasn't me" | `/auth/devices/{device}/report?expires=...&signature=...` | `device-report` |
 
-Some emails also link to `/auth/login` and `/auth/forgot-password`, such as the one sent when someone tries to register with an address that has an account.
+Some emails also link to `/auth/login` and `/auth/forgot-password`, such as the one sent when someone tries to register with an address that has an account. The emails about a new sign-in method and new recovery codes link to your own settings page when you set [`authenticators_url`](configuration.md#account-changes-and-enrollment). A path there is put after the same root, so `/settings/security` opens on the frontend.
 
 Signed links are signed over their path and query only, so their signatures hold under the frontend's root. The frontend's page sends the same path, and the query, to Laravel, and Laravel checks the signature as if the link had opened there. A root with a path of its own works too: `https://app.example.com/account` starts the reset link at `https://app.example.com/account/auth/reset-password/...`, and the frontend leaves `/account` off the path it sends to Laravel.
 
@@ -280,6 +280,8 @@ Keyring's answers carry a `redirect`, a URL on Laravel or one from your config. 
 | `403` `enroll-first` | | `enrollment_url` |
 | `403` `change-password` | | `password_change_url` |
 | `422` with `page`, a sign in or step-up that ran out or used up its guesses | `login` or `confirm` | That page. The reason is in `errors`, on the username field or the factor's. |
+| `422` with `frozen`, a removal, rename or replacement while sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) | | Stay. `frozen.skip` says whether a key can make the change now, with `proof` sent through `POST /auth/user/authenticators/{factor}/proof-options` first. For an enrollment, the proof goes with `POST /auth/user/authenticators/{factor}`, which begins it, and a refused confirm means beginning again. See [Making a Change With an Established Key](authenticators.md#making-a-change-with-an-established-key). |
+| `422` with `errors.password`, beginning to add a second factor | | Stay. Ask for the current password and begin again with it as `password`. An account with no [established](authenticators.md#established-authenticators) second factor needs it. See [The Password for a First Second Factor](authenticators.md#the-password-for-a-first-second-factor). |
 | `200` `email-verified` | | The intended URL, or `home` with `?verified=1` when the link just verified the address. `justNow` says which. |
 | A [status](sign-in-flow.md#status-responses) such as `password-reset`, `registration-received` or `device-reported` | `login`, `register`, `forgot-password`, `verify-email`, `challenge` or `confirm`, when that's where it goes | Where to go, when it isn't back. |
 

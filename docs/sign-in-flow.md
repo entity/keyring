@@ -223,7 +223,7 @@ The `challenge` prop holds these values for the built-in factors:
 | `passkey`, `security-key` | `options`, the WebAuthn request options for the browser. |
 | `sso` (confirm page only) | `provider`, its `label`, and `url`, which sends the user to the provider to sign in again. See [Single Sign-On](sso.md#step-up). |
 
-Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, a user who has a passkey or security key is only offered their other keys, plus recovery codes unless the policy refuses those too.
+Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, a user who has an established passkey or security key is only offered their other keys, plus recovery codes unless the policy refuses those too.
 
 ### Choosing an Authenticator
 

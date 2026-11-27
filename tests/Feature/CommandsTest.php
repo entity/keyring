@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Console\InstallCommand;
 use Keyring\Contracts\ResetsUserPasswords;
 use Keyring\Contracts\SessionRegistry;
@@ -30,6 +31,7 @@ use Keyring\Contracts\UpdatesUserPasswords;
 use Keyring\Contracts\ValidatesEmailChanges;
 use Keyring\Devices\NullLocator;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\FreezeReason;
 use Keyring\Events\RiskAssessed;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
@@ -346,7 +348,7 @@ describe('keyring:install', function () {
             ->assertSuccessful();
 
         expect(glob(database_path('migrations/*_create_keyring_authenticators_table.php')))->toHaveCount(1)
-            ->and(glob(database_path('migrations/*_create_keyring_*')))->toHaveCount(7)
+            ->and(glob(database_path('migrations/*_create_keyring_*')))->toHaveCount(8)
             ->and(file_get_contents($this->sandbox.'/app/Providers/KeyringServiceProvider.php'))->toBe('<?php // mine');
     });
 
@@ -368,7 +370,7 @@ describe('keyring:install', function () {
 
         $published = array_map(basename(...), glob(database_path('migrations/*_create_keyring_*')));
 
-        expect($published)->toHaveCount(7)
+        expect($published)->toHaveCount(8)
             ->and(glob(database_path('migrations/*_create_keyring_sessions_table.php')))->toBe($kept)
             // In Keyring's order, after the ones the app already had.
             ->and(array_map(fn (string $name) => Str::after($name, '_create_'), array_slice($published, -2)))
@@ -577,6 +579,37 @@ describe('keyring:import fortify', function () {
         $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
         $this->get(route('keyring.login.challenge', ['recovery']));
         $this->post(route('keyring.login.verify', 'recovery'), ['code' => 'aBcDeFgHi1-JkLmNoPqR2'])->assertRedirect('/dashboard');
+    });
+
+    it('keeps when fortify\'s two factor and a laravel passkey were added, so they\'re established', function () {
+        $this->freezeSecond();
+
+        $confirmed = now()->subMonths(3)->startOfSecond();
+        DB::table('users')->update([
+            'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
+            'two_factor_recovery_codes' => encrypt(json_encode(['aBcDeFgHi1-JkLmNoPqR2'])),
+            'two_factor_confirmed_at' => $confirmed,
+        ]);
+        passkeysTable();
+        DB::table('passkeys')->insert(['user_id' => $this->user->id, 'name' => 'MacBook', ...passkeyRow($this->user), 'created_at' => now()->subYear()->startOfSecond()]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        $keyring = $this->user->keyring->refresh();
+        expect($keyring->of('totp')->sole()->created_at->toIso8601String())->toBe($confirmed->toIso8601String())
+            ->and($keyring->of('recovery')->sole()->created_at->toIso8601String())->toBe($confirmed->toIso8601String())
+            ->and($keyring->of('passkey')->sole()->created_at->toIso8601String())->toBe(now()->subYear()->startOfSecond()->toIso8601String())
+            ->and($keyring->all()->every($keyring->isEstablished(...)))->toBeTrue()
+            ->and(app(AuthenticatorChanges::class)->frozen($this->user))->toBeNull();
+    });
+
+    it('adds a secret fortify never confirmed as new, so the account is frozen until it\'s established', function () {
+        config(['fortify.features' => ['two-factor-authentication']]);
+        DB::table('users')->update(['two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey())]);
+
+        $this->artisan('keyring:import', ['source' => 'fortify'])->assertSuccessful();
+
+        expect(app(AuthenticatorChanges::class)->frozen($this->user)?->reason)->toBe(FreezeReason::NewAuthenticator);
     });
 
     it('keeps the case of fortify\'s recovery codes, which is what makes them long enough to store hashed', function () {
@@ -828,7 +861,7 @@ describe('keyring:import fortify', function () {
         $key = new VirtualAuthenticator;
 
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options), 'name' => 'MacBook']);
         $this->post('/logout');
 

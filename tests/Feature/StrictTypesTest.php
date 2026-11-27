@@ -83,7 +83,7 @@ it('answers a second factor with the key that signed, not one whose id only look
 
         $this->actingAs($user);
         $keys === [] ? $this->withAssurance(Assurance::AAL2) : $this->verifiedWith(...$keys);
-        $options = $this->postJson(route('keyring.authenticators.store', 'security-key'))->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'security-key'), ['password' => 'password'])->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $key->register($options)])->assertOk();
         $this->post('/logout');
     }

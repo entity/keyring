@@ -141,7 +141,7 @@ it('refuses to confirm with a factor that can only start a sign in', function ()
 it('sends a user with nothing else the confirm page can ask for to enroll before they prove anything', function () {
     Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/account', fn () => 'danger zone');
     $this->user->forceFill(['password' => null])->saveQuietly();
-    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
 
     $this->get('/sso/callback')->assertRedirect(route('keyring.login.challenge'));
     $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('/dashboard');

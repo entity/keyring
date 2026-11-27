@@ -738,7 +738,7 @@ describe('asking for the strongest combination the account can give', function (
      */
     function mayAddSignInMethod(): bool
     {
-        return test()->postJson(route('keyring.authenticators.store', 'totp'))->status() === 200;
+        return test()->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->status() === 200;
     }
 
     it('takes the key, not a password and a code, from a user who holds one that can\'t leave its device', function (Closure $key) {
@@ -759,12 +759,12 @@ describe('asking for the strongest combination the account can give', function (
         $this->flushHeaders();
         expect(mayAddSignInMethod())->toBeTrue();
     })->with([
-        'attested, so the account can reach aal3' => fn () => Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a'),
-        'not attested, so only its own word for it' => fn () => Authenticator::factory()->securityKey(),
+        'attested, so the account can reach aal3' => fn () => Authenticator::factory()->securityKey()->established()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a'),
+        'not attested, so only its own word for it' => fn () => Authenticator::factory()->securityKey()->established(),
     ]);
 
     it('takes a recovery code and the password in a lost key\'s place', function () {
-        Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->securityKey()->established()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->verifiedWith($this->totp);
@@ -780,7 +780,7 @@ describe('asking for the strongest combination the account can give', function (
 
     it('takes no recovery code in the key\'s place where the policy takes none at sign in', function () {
         Keyring::require(Requirement::aal2()->ifEnrolled()->noDowngrade(except: []));
-        Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->securityKey()->established()->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->verifiedWith($this->totp);
@@ -825,7 +825,7 @@ describe('asking for the strongest combination the account can give', function (
 
         $this->verifiedWith($this->totp);
 
-        expect($this->postJson(route('keyring.authenticators.store', 'security-key'))->status())->toBe(200);
+        expect($this->postJson(route('keyring.authenticators.store', 'security-key'), ['password' => 'password'])->status())->toBe(200);
     });
 });
 
@@ -847,7 +847,7 @@ describe('an app whose every page needs aal2', function () {
         $this->get('/app')->assertRedirect('/settings/security');
         $this->get('/settings/security')->assertOk();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         // Adding it proved it, so the session is at AAL2 from here.
@@ -1513,7 +1513,7 @@ describe('asking from a controller', function () {
             Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys()->requireAttestation(), Totp::class, RecoveryCodes::class]);
             Keyring::fake()->pass('security-key');
 
-            Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
+            Authenticator::factory()->securityKey()->established()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a')->for($this->user, 'authenticatable')->create();
             Authenticator::factory()->recoveryCodes(['aaaa-aaaa-aaaa-aaaa-aaaa-aaaa-aa'])->for($this->user, 'authenticatable')->create();
             $this->actingAs($this->user);
         });

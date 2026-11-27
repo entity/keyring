@@ -85,7 +85,7 @@ beforeEach(function () {
 it('keeps what a custom code factor collects at enrollment', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-    $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900001'])->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'sms'), ['password' => 'password', 'phone' => '+447700900001'])->assertOk();
     $this->postJson(route('keyring.authenticators.confirm', 'sms'), ['code' => SmsCode::$sent['+447700900001'], 'name' => 'Work phone'])
         ->assertOk();
 
@@ -147,7 +147,7 @@ it('keeps a single email code method, since every copy would go to the same addr
 
 it('keeps enrollments small in the session', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'totp'))
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
         ->assertJsonStructure(['enrollment' => ['qr']]);
 
     expect(json_decode(Crypt::decryptString(session('keyring.enrollment.totp')), true))->not->toHaveKey('props');
@@ -157,7 +157,7 @@ it('keeps what a custom factor sets aside at enrollment on the server until it i
     Keyring::factors([Password::class, CarrierSmsCode::class]);
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-    $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900001', 'carrier' => 'Vodafone'])
+    $this->postJson(route('keyring.authenticators.store', 'sms'), ['password' => 'password', 'phone' => '+447700900001', 'carrier' => 'Vodafone'])
         ->assertOk()
         ->assertDontSee('Vodafone');
 
@@ -168,7 +168,7 @@ it('keeps what a custom factor sets aside at enrollment on the server until it i
 
 it('takes an enrollment kept in a shape it can\'t read back as one that has gone', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 
     // As a release that kept enrollments differently might have left it.
     $kept = json_decode(Crypt::decryptString(session('keyring.enrollment.totp')), true);
@@ -293,10 +293,10 @@ describe('a browser that sends back an earlier copy of its session', function ()
 
     it('cannot enroll one phone with the code sent to another', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-        $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900001'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'sms'), ['password' => 'password', 'phone' => '+447700900001'])->assertOk();
         $firstPhone = session()->all();
 
-        $this->postJson(route('keyring.authenticators.store', 'sms'), ['phone' => '+447700900002'])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'sms'), ['password' => 'password', 'phone' => '+447700900002'])->assertOk();
 
         sendBackSession($firstPhone);
 

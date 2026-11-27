@@ -71,7 +71,7 @@ it('uses keyring\'s guard for every route, not the app default', function () {
     Keyring::routes();
 
     $this->actingAs($this->user, 'admin')->withAssurance(Assurance::AAL1)
-        ->postJson('/user/authenticators/totp')
+        ->postJson('/user/authenticators/totp', ['password' => 'password'])
         ->assertOk();
 });
 

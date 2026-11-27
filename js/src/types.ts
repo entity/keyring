@@ -23,6 +23,45 @@ export interface Authenticator extends AuthenticatorSummary {
 }
 
 /**
+ * Why an established sign-in method, or a set of recovery codes, can't be
+ * removed or replaced just now, and until when (ISO 8601). It comes with a
+ * `422`, as `data.frozen` on the `KeyringRequestError`, beside the usual
+ * `message` and `errors.authenticator`. `skip` names the factors that could
+ * make the change now (see `proveWithKey()`), and is empty when none can.
+ */
+export interface FrozenChanges {
+  reason: 'new-authenticator' | 'recent-change'
+  until: string
+  skip: string[]
+}
+
+/**
+ * A change an established sign-in method can make while the account's
+ * sign-in methods are frozen: removing or renaming an authenticator, by
+ * its ID, or replacing a factor's, by its key (`recovery` for new recovery
+ * codes). A rename gives the `name` it renames to, and its proof only
+ * works for that name.
+ */
+export type ProvableChange =
+  | { action: 'remove' | 'replace', target: string }
+  | { action: 'rename', target: string, name: string }
+
+/**
+ * What the change's own request sends as `proof`: a key's answer to a
+ * challenge for that change, or a code from an authenticator app where
+ * the server allows it. `authenticator` names which of the user's
+ * authenticators of the factor to check, such as one of two apps. A
+ * factor of the app's own reads its answer from its own fields.
+ */
+export interface FreezeProof {
+  factor: string
+  authenticator?: string
+  credential?: Record<string, any>
+  code?: string
+  [field: string]: unknown
+}
+
+/**
  * A linked account at an identity provider, as the `sso` factor presents
  * it: the provider's name in `keyring.sso.providers`, and the address the
  * provider had for the account when it last signed in, if it gave one.

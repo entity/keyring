@@ -40,7 +40,7 @@ it('needs every factor signing in would, not just one, to manage authenticators'
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
 
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 });
 
 it('still lets password-only users confirm with their password', function () {
@@ -49,7 +49,7 @@ it('still lets password-only users confirm with their password', function () {
     $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
     $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
 
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 });
 
 it('refuses to enroll authenticators until the email address is verified', function () {

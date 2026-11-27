@@ -35,10 +35,13 @@ export async function confirmWithProvider(authenticator: string): Promise<void> 
  * `sso` enrollment, then send the browser to the provider. Keyring finishes
  * the link when the provider sends the user back, so there's nothing to
  * confirm. A missing fresh verification throws a 423 KeyringRequestError,
- * as every enrollment does, before the browser goes anywhere.
+ * as every enrollment does, before the browser goes anywhere. So does a
+ * missing or wrong `password`, a 422 on `password`, which an account with
+ * a password and no established second factor needs to link one, as it
+ * does to add any other sign-in method.
  */
-export async function linkProvider(provider: string): Promise<void> {
-  const { enrollment } = await beginEnrollment('sso', { provider })
+export async function linkProvider(provider: string, { password }: { password?: string } = {}): Promise<void> {
+  const { enrollment } = await beginEnrollment('sso', { provider, ...(password !== undefined && { password }) })
 
   location.assign((enrollment as SsoEnrollment).url)
 }

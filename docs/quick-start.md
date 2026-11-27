@@ -232,7 +232,7 @@ Next:
 
 To let users sign in with Google, Microsoft, GitHub, or another identity provider, add `Factors\SingleSignOn::class` to the list and configure the providers. See [Single Sign-On](sso.md).
 
-The `Requirement::aal2()->ifEnrolled()` policy asks for a second factor once a user has set one up. Adding `noDowngrade()` ensures a user with a passkey can't be talked into using something weaker. To learn more, see the [Factors](factors.md) and [Policies](policies.md) documentation.
+The `Requirement::aal2()->ifEnrolled()` policy asks for a second factor once a user has set one up. Adding `noDowngrade()` ensures a user with a passkey can't be talked into using something weaker, once they've had it for [7 days](authenticators.md#established-authenticators). To learn more, see the [Factors](factors.md) and [Policies](policies.md) documentation.
 
 ## What Keyring Does Without Being Asked
 

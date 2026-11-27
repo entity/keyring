@@ -342,10 +342,14 @@ class StepUp
      * place, as it is at sign in, unless the policy takes none there. An
      * account with nothing beyond one factor proves that, so it can always
      * add its first.
+     *
+     * Only established keys count, as they do for noDowngrade(): otherwise
+     * a key added from a stolen session would be the one thing the owner
+     * had to prove to remove it.
      */
     protected function strongest(UserKeyring $keyring, Requirement $policy): Requirement
     {
-        $strongest = array_find([Requirement::aal3(), Requirement::aal2()->deviceBound()], $keyring->canMeet(...));
+        $strongest = array_find([Requirement::aal3(), Requirement::aal2()->deviceBound()], $keyring->established()->canMeet(...));
 
         return $strongest?->acceptingInstead($policy->noDowngrade ? $policy->downgradeExceptions : [RecoveryCodes::KEY])
             ?? $keyring->reachable(Requirement::aal2());

@@ -25,6 +25,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\SingleSignOn;
+use Keyring\Factors\Totp;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
@@ -56,9 +57,14 @@ $worker = new class('worker') extends TestCase
      */
     public function linkAccount(User $user, string $session, FakeIdentityProvider $idp): string
     {
-        $this->actingAs($user)->withAssurance(Assurance::AAL1)->withSession([Sessions::KEY => $session]);
+        $this->actingAs($user)->withSession([Sessions::KEY => $session]);
 
-        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])->assertOk()->json('enrollment.url');
+        // Beside an established authenticator app, the session proved it, and
+        // links without the password.
+        $app = $user->keyring->of(Totp::KEY)->first();
+        $app === null ? $this->withAssurance(Assurance::AAL1) : $this->verifiedWith($app);
+
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake', 'password' => 'password'])->assertOk()->json('enrollment.url');
         $response = $this->getJson($idp->approve($url));
 
         return match (true) {
@@ -139,7 +145,7 @@ try {
 
             $user = User::findOrFail($id);
 
-            app(AuthenticatorChanges::class)->add($user, Keyring::factor('totp'), Authenticator::factory()->totp()->for($user, 'authenticatable')->make(), $request);
+            app(AuthenticatorChanges::class)->add($user, Keyring::factor('totp'), Authenticator::factory()->totp()->for($user, 'authenticatable')->make(), $request, passwordConfirmed: true);
 
             return 'added';
         })(),

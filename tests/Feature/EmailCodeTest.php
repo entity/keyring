@@ -386,7 +386,7 @@ it('limits how often starting an enrollment sends a code', function () {
         ->assertJsonValidationErrors('code');
     Notification::assertSentToTimes($this->user, VerificationCode::class, 3);
 
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 });
 
 it('enrolls email codes by confirming a sent code', function () {
@@ -796,7 +796,7 @@ describe('a step, not a factor', function () {
         $this->post(route('keyring.confirm.send', 'email-code'));
         $this->post(route('keyring.confirm.verify', 'email-code'), ['code' => sentCode($this->user)])->assertSessionHasNoErrors();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
         $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         expect($response->json('recoveryCodes'))->toHaveCount(8)
@@ -819,7 +819,7 @@ describe('a step, not a factor', function () {
 
         $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
         $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertSessionHasNoErrors();
-        $this->post(route('keyring.authenticators.store', 'totp'))->assertSessionHas('status', 'enrollment-started');
+        $this->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertSessionHas('status', 'enrollment-started');
     });
 
     it('takes the recovery codes with it when the last real second factor is removed', function () {

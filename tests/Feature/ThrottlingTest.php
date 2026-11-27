@@ -51,7 +51,7 @@ it('does not let junk passkey requests lock everyone out of passkey sign in', fu
     $key = new VirtualAuthenticator;
 
     test()->actingAs($user)->withAssurance(Assurance::AAL1);
-    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
     test()->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
     test()->post('/logout');
 
@@ -1800,7 +1800,7 @@ describe('a second factor at the cap', function () {
         expect(FailureCount::query()->count())->toBe(0);
 
         $added = Authenticator::factory()->totp()->make();
-        app(AuthenticatorChanges::class)->add($this->user, Keyring::factor('totp'), $added);
+        app(AuthenticatorChanges::class)->add($this->user, Keyring::factor('totp'), $added, passwordConfirmed: true);
 
         signInWithCodeFrom($added)->assertOk();
         $this->assertAuthenticatedAs($this->user);

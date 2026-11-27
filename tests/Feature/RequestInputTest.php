@@ -67,7 +67,7 @@ it('takes no password from the query string of a step-up', function () {
 it('takes no code from the query string when confirming a new sign-in method', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
 
     $this->postJson(route('keyring.authenticators.confirm', 'totp').'?code='.totpCode($secret))->assertJsonValidationErrors('code');
     expect(Authenticator::count())->toBe(0);

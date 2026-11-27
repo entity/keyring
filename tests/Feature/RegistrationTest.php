@@ -958,7 +958,7 @@ describe('saying when an address is taken', function () {
             Keyring::allowEnrollmentWhen(fn ($user) => $user->name === 'Taylor');
 
             $this->actingAs(taylor(['email_verified_at' => null]))->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', 'totp'))
+                ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
                 ->assertOk();
 
             $this->flushSession();

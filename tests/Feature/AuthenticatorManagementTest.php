@@ -18,9 +18,12 @@ use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
+use Keyring\Events\AccountLocked;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
+use Keyring\Events\Lockout;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Events\RecoveryCodeUsed;
 use Keyring\Facades\Keyring;
@@ -49,7 +52,7 @@ beforeEach(function () {
 it('enrolls an authenticator app in two steps', function () {
     Event::fake([AuthenticatorAdded::class, RecoveryCodesGenerated::class]);
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => '1Password'])
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password', 'name' => '1Password'])
         ->assertOk()
         ->assertJsonPath('factor', 'totp')
         ->assertJsonStructure(['enrollment' => ['secret', 'url', 'qr']])
@@ -80,7 +83,7 @@ it('only hands out recovery codes automatically the first time', function () {
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
 
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
         ->assertOk()
@@ -146,7 +149,7 @@ it('issues new recovery codes when a factor is added and the old set has run out
     Event::fake([RecoveryCodesGenerated::class]);
     $old = Authenticator::factory()->recoveryCodes([])->for($this->user, 'authenticatable')->create();
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
     $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     $sets = $this->user->keyring->refresh()->of('recovery');
@@ -162,7 +165,7 @@ it('does not touch a set that still has codes when a factor is added', function 
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
     $set = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
         ->assertOk()
         ->assertJsonMissingPath('recoveryCodes');
@@ -173,7 +176,7 @@ it('does not touch a set that still has codes when a factor is added', function 
 it('adds no recovery codes when that factor is not registered', function () {
     Keyring::factors([Password::class, Totp::class]);
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
 
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
         ->assertOk()
@@ -299,7 +302,7 @@ it('refuses a password that is not a string when removing the last second factor
 });
 
 it('gives an authenticator its usual name when the one sent is not text', function () {
-    $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => ['x']])->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password', 'name' => ['x']])->assertOk();
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000', 'name' => ['x']])
         ->assertJsonValidationErrors('name');
 });
@@ -315,7 +318,7 @@ it('refuses a name that isn\'t valid text, on a rename and when adding one', fun
 
     $this->post(route('keyring.authenticators.store', 'totp'), ['name' => "\xff"], $json)->assertJsonValidationErrors('name');
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
     $this->post(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), 'name' => "Phone \xff"], $json)
         ->assertJsonValidationErrors('name');
 
@@ -335,26 +338,61 @@ it('keeps a name that isn\'t valid text as what can be read of it, however it is
 });
 
 it('limits password guesses when removing the last second factor', function () {
+    Event::fake([FactorFailed::class, Lockout::class]);
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-    foreach (range(1, 6) as $guess) {
-        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => "guess {$guess}"])->assertUnprocessable();
+    // The password's own limits, not only the form's.
+    foreach (range(1, 5) as $guess) {
+        $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => "guess {$guess}"])
+            ->assertJsonValidationErrors(['password' => __('keyring::keyring.password_to_remove_last_factor')]);
     }
 
-    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])->assertTooManyRequests();
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])
+        ->assertTooManyRequests()
+        ->assertJsonValidationErrors(['password' => __('auth.throttle', ['seconds' => 60, 'minutes' => 1])]);
+
+    Event::assertDispatchedTimes(FactorFailed::class, 5);
+    Event::assertDispatched(Lockout::class, fn (Lockout $event) => $event->factor === 'password');
+    expect($totp->fresh())->not->toBeNull();
 });
 
-it('asks a user without a password for none when removing the last second factor', function () {
+it('counts wrong passwords at removal toward the cap on failures in a row', function () {
+    Event::fake([AccountLocked::class]);
+    config(['keyring.limits.consecutive' => 2]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'wrong'])->assertUnprocessable();
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'wrong'])->assertUnprocessable();
+
+    Event::assertDispatched(AccountLocked::class, fn (AccountLocked $event) => $event->factor === 'password');
+    $this->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'password'])
+        ->assertTooManyRequests()
+        ->assertJsonValidationErrors(['password' => __('keyring::keyring.locked')]);
+});
+
+it('asks a user without a password for none when removing the last second factor', function (array $body) {
     Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SingleSignOn::class]);
     $this->user->forceFill(['password' => null])->saveQuietly();
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
     $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)
-        ->deleteJson(route('keyring.authenticators.destroy', $totp->id))
+        ->deleteJson(route('keyring.authenticators.destroy', $totp->id), $body)
         ->assertOk();
 
     expect(Authenticator::find($totp->id))->toBeNull()
         ->and($this->user->keyring->refresh()->all()->pluck('factor')->all())->toBe(['sso']);
+})->with([
+    'none sent' => [[]],
+    'one sent anyway, which isn\'t checked' => [['password' => 'anything']],
+]);
+
+it('asks for no password to remove the last second factor where the app doesn\'t sign in with one', function () {
+    Keyring::factors([Totp::class, RecoveryCodes::class, SingleSignOn::class]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+        ->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'wrong'])
+        ->assertOk();
 });
 
 it('gives a virtual authenticator its user\'s type and ID, so it can look them up again', function () {
@@ -403,13 +441,13 @@ it('404s for factors that cannot be enrolled', function () {
 });
 
 it('keeps the session verified when enrolling from an inertia page', function () {
-    $this->inertia()->post(route('keyring.authenticators.store', 'totp'))->assertRedirect();
+    $this->inertia()->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertRedirect();
     $this->flushHeaders();
 
     // The enrollment details are flashed for the page, without wiping
     // Keyring's other session data (verifications, the session registry).
     expect(Keyring::result('enrollment.secret'))->not->toBeNull();
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 });
 
 // What a form or Inertia page is handed goes through the session store, and
@@ -423,7 +461,7 @@ it('keeps a secret being set up and new recovery codes out of the stored session
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
     $stored = fn () => implode('', array_map(file_get_contents(...), glob($directory.'/*') ?: []));
 
-    $this->inertia()->post(route('keyring.authenticators.store', 'totp'))->assertRedirect();
+    $this->inertia()->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertRedirect();
     $this->flushHeaders();
     $secret = Keyring::result('enrollment.secret');
 
@@ -462,14 +500,14 @@ it('only allows the shorter password with a real second factor, not recovery cod
 it('tells the user when a sign-in method is added', function () {
     Notification::fake();
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     Notification::assertSentTo($this->user, AuthenticatorAddedNotice::class);
 });
 
 it('tells the user when their recovery codes are replaced, unless the app turned the notice off', function () {
-    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
     $this->verifiedWith($totp);
     Notification::fake();
     Keyring::notifications(['recovery_codes_generated' => null]);
@@ -494,7 +532,7 @@ it('tells them about the recovery codes that come with a first sign-in method to
     Notification::fake();
     sendNotifications(['recovery_codes_generated']);
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     Notification::assertSentToTimes($this->user, RecoveryCodesGeneratedNotice::class, 1);
@@ -516,7 +554,7 @@ it('shows a name someone typed as plain text in the email, never as a link', fun
     Notification::fake();
     sendNotifications();
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['name' => $name])->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password', 'name' => $name])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     $notice = Notification::sent($this->user, AuthenticatorAddedNotice::class)->sole();
@@ -562,7 +600,7 @@ class UnnotifiableAccount extends Authenticatable
 // since been confirmed.
 describe('a browser that sends back an earlier copy of its session', function () {
     it('cannot bring back recovery codes that were replaced', function () {
-        $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         $this->verifiedWith($totp);
 
         $first = $this->postJson(route('keyring.authenticators.store', 'recovery'))->json('enrollment.codes');
@@ -587,7 +625,7 @@ describe('a browser that sends back an earlier copy of its session', function ()
     });
 
     it('cannot add the same authenticator app twice from one enrollment', function () {
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $unconfirmed = session()->all();
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
@@ -617,7 +655,7 @@ describe('counting a new sign-in method as proved', function () {
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
         $before = session()->getId();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         expect($response->json('recoveryCodes'))->toHaveCount(8)
@@ -632,7 +670,7 @@ describe('counting a new sign-in method as proved', function () {
     });
 
     it('counts nothing when the proof is wrong', function () {
-        $this->postJson(route('keyring.authenticators.store', 'totp'));
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password']);
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000'])->assertUnprocessable();
 
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
@@ -640,7 +678,7 @@ describe('counting a new sign-in method as proved', function () {
     });
 
     it('counts nothing for new recovery codes, which are only shown', function () {
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
@@ -651,7 +689,7 @@ describe('counting a new sign-in method as proved', function () {
 
     it('doesn\'t make the password any fresher', function () {
         $this->travel(10)->minutes();
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
         $this->get('/account')->assertOk();
 
@@ -662,7 +700,7 @@ describe('counting a new sign-in method as proved', function () {
 
     it('counts a new passkey for what it proved, and no more', function () {
         $key = new VirtualAuthenticator;
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 
         $proved = collect(app(SessionAssurance::class)->all())->firstWhere('factor', 'passkey');
@@ -680,7 +718,7 @@ describe('counting a new sign-in method as proved', function () {
 // them to make a set.
 describe('replacing recovery codes once one is used', function () {
     beforeEach(function () {
-        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->post('/logout');
@@ -772,7 +810,7 @@ describe('what a sign-in method shows of itself', function () {
         $this->travelTo('2026-11-08 09:30:00');
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
         $added = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
             ->assertOk()
             ->assertJsonPath('authenticator.createdAt', '2026-11-08T09:30:00+00:00');

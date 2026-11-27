@@ -9,16 +9,17 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Facades\Keyring;
+use Keyring\Models\SignInChange;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 #[AsCommand(name: 'keyring:prune')]
 #[Signature('keyring:prune')]
-#[Description('Forget old devices, email changes, security events and ended sessions')]
+#[Description('Forget old devices, email changes, security events, sign-in changes and ended sessions')]
 class PruneCommand extends Command
 {
     public function handle(SessionRegistry $sessions): int
     {
-        $this->call('model:prune', ['--model' => [Keyring::deviceModel(), Keyring::pendingChangeModel(), Keyring::securityEventModel()]]);
+        $this->call('model:prune', ['--model' => [Keyring::deviceModel(), Keyring::pendingChangeModel(), Keyring::securityEventModel(), SignInChange::class]]);
 
         $this->components->info("Pruned {$sessions->prune()} ended sessions.");
 

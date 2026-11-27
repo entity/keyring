@@ -26,7 +26,7 @@ function enrollKey(string $factor, VirtualAuthenticator $key): void
 {
     test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
 
-    $options = test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', $factor), ['password' => 'password'])->assertOk()->json('enrollment.options');
     test()->postJson(route('keyring.authenticators.confirm', $factor), ['credential' => $key->register($options)])->assertOk();
 
     test()->post('/logout');
@@ -132,7 +132,7 @@ it('refuses the challenge of a step-up once the confirmation it belongs to has r
 
 it('refuses the challenge of a new key once the enrollment it belongs to has run out', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     $this->travel(16)->minutes();
     // Still signed in and freshly verified, so only the enrollment has aged.

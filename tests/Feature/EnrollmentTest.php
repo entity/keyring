@@ -84,6 +84,6 @@ it('lets users reach the routes they need to enroll and sign out', function () {
     $this->app['router']->pushMiddlewareToGroup('web', 'keyring.enrolled');
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
     $this->post(route('logout'))->assertRedirect();
 });

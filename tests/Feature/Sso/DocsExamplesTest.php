@@ -283,7 +283,7 @@ it('links as "Testing" shows', function () {
     $user = taylor();
 
     $url = $this->actingAs($user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google'])
+        ->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'google', 'password' => 'password'])
         ->json('enrollment.url');
 
     $this->get($google->approve($url))->assertSessionHas('status', 'authenticator-added');

@@ -166,7 +166,7 @@ it('names the issuer an authenticator app shows, when the app gives one', functi
     Keyring::factors([Password::class, new Totp(app(Google2FA::class), issuer: 'Acme Staff')]);
 
     $url = $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'totp'))
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
         ->json('enrollment.url');
 
     expect($url)->toContain('issuer=Acme%20Staff');
