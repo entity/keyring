@@ -695,6 +695,7 @@ That isn't enough where the whole application is meant to be AAL2, or where you 
 - devices revoked more than 30 days ago, or not seen for a year (`devices.keep_revoked_for` and `devices.keep_unseen_for`),
 - email changes that ended (expired, cancelled, reverted, or past their revert window) more than 30 days ago (`email_changes.keep_ended_for`), since they hold both addresses,
 - security log entries older than `security_log.keep_for`,
+- when an account last removed or replaced an established sign-in method, once that no longer [freezes](authenticators.md#frozen-sign-in-methods) anything (`authenticator_changes.established_after`),
 - registered sessions that have expired or been revoked, through the registry's `prune` method. A record "remember me" replaced stays until it would have expired, so its cookie is still recognised as used. Once the [sweep's migration](#sweeping-ended-sessions) has run, a session waits until a sweep has ended and announced it, or for a day, and one the sweep ended for timing out waits until a day after it expired. The cache driver's records expire on their own.
 
 Keyring adds the prune task to Laravel's scheduler itself, every day at 03:00. That means it runs wherever your application's `schedule:run` does, and nothing is kept past its time because a line was left out of `routes/console.php`. `php artisan schedule:list` shows it. To run it at another time, change `prune_at`:

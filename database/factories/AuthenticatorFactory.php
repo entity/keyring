@@ -112,6 +112,16 @@ class AuthenticatorFactory extends Factory
         return $this->state(['is_default' => true]);
     }
 
+    /**
+     * Added long enough ago to be established: a key that counts for
+     * noDowngrade(), and a factor the account may only lose while it isn't
+     * frozen. Without this, it was added just now.
+     */
+    public function established(): static
+    {
+        return $this->state(fn () => ['created_at' => now()->subMonth(), 'confirmed_at' => now()->subMonth()]);
+    }
+
     public function unconfirmed(): static
     {
         return $this->state(['confirmed_at' => null]);

@@ -256,11 +256,11 @@ export default function Login({ providers, status }: LoginProps) {
 
 The browser leaves your site for the provider, so use a plain link. When the sign in doesn't work, the user comes back to the login page with the error on the username field, in the page's `errors`.
 
-To link an account at a provider from a settings page, `linkProvider(name)` begins the `sso` enrollment and sends the browser to the provider. It throws a `KeyringRequestError` before going anywhere when the request fails, such as with the `423` of [step-up](#handling-step-up-in-javascript). When the provider sends the user back, Keyring finishes the link and returns them to the page they started from, with the `authenticator-added` status. A linked account is presented as an `SsoAuthenticator`, with its `provider` and `email` added.
+To link an account at a provider from a settings page, `linkProvider(name, { password })` begins the `sso` enrollment and sends the browser to the provider. The `password` is needed while the account has a password and no [established](authenticators.md#established-authenticators) second factor, as it is for any other sign-in method. It throws a `KeyringRequestError` before going anywhere when the request fails, such as with the `423` of [step-up](#handling-step-up-in-javascript), or a `422` on `password`. When the provider sends the user back, Keyring finishes the link and returns them to the page they started from, with the `authenticator-added` status. A linked account is presented as an `SsoAuthenticator`, with its `provider` and `email` added.
 
 | Function | Does |
 |---|---|
-| `linkProvider(provider)` | `POST /user/authenticators/sso` with `provider`, then `location.assign()` to the provider's URL in the answer. |
+| `linkProvider(provider, { password? })` | `POST /user/authenticators/sso` with `provider`, and `password` when it's given, then `location.assign()` to the provider's URL in the answer. |
 | `signInWithProvider(provider, { remember? })` | Asks `GET /auth/{provider}/redirect` for the provider's URL as JSON, then `location.assign()` to it. A link does the same on a page Laravel serves, so this is for a [frontend on another origin](#frontends-on-another-origin). |
 | `confirmWithProvider(authenticator)` | Asks `GET /confirm/sso/redirect` for the provider's URL for that link as JSON, then `location.assign()` to it, to [confirm a step-up](sso.md#step-up) by signing in there. |
 
@@ -306,15 +306,17 @@ The enrollment helpers call the [authenticator routes](authenticators.md) with J
 ```ts
 import { beginEnrollment, confirmEnrollment, enroll, linkProvider, makeDefault, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
 
-// One step for factors that need no input in between.
-const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })
+// One step for factors that need no input in between. An account with no
+// established second factor sends its password with the first one.
+const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop', password })
 const { enrollment } = await enroll('recovery')   // enrollment.codes holds the new codes
 
-// An identity provider: the browser goes there, and comes back linked.
-await linkProvider('google')
+// An identity provider: the browser goes there, and comes back linked. It
+// takes the password when adding a second factor would.
+await linkProvider('google', { password })
 
 // Two steps for authenticator apps and email codes.
-const started = await beginEnrollment('totp', { name: 'Work phone' })
+const started = await beginEnrollment('totp', { name: 'Work phone', password })
 showQrCode(started.enrollment.qr)
 const added = await confirmEnrollment('totp', started.enrollment, { code })
 
@@ -325,14 +327,44 @@ await removeAuthenticator(added.authenticator.id)
 
 | Function | Does |
 |---|---|
-| `beginEnrollment(factor, data?)` | `POST /user/authenticators/{factor}`. Resolves to `{ factor, enrollment }`. |
-| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first. If the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes?, continue? }`, where `authenticator` is typed `Authenticator`: `factor`, `id`, `name`, `createdAt`, and `lastUsedAt`, along with any extras specific to the factor. |
-| `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
-| `renameAuthenticator(id, name)` | `PATCH` with `name`. Resolves to `{ authenticator }`. |
+| `beginEnrollment(factor, data?)` | `POST /user/authenticators/{factor}`. Resolves to `{ factor, enrollment }`. Send `password` in `data` when the account has no [established](authenticators.md#established-authenticators) second factor yet, or the request fails with an error on `password`. See [The Password for a First Second Factor](authenticators.md#the-password-for-a-first-second-factor). A `proof` goes here too. |
+| `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first. If the server rejects the response, or refuses it as frozen, the enrollment is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes?, continue? }`, where `authenticator` is typed `Authenticator`: `factor`, `id`, `name`, `createdAt`, and `lastUsedAt`, along with any extras specific to the factor. |
+| `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests, apart from `password` and `proof`, which only go with the first. |
+| `renameAuthenticator(id, name, { proof }?)` | `PATCH` with `name`. Resolves to `{ authenticator }`. Renaming an established authenticator while frozen needs `proof` from `proveWithKey()`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. Recovery codes and identity provider links can't be the default, and throw a `KeyringRequestError` with a `422` on `default`. |
-| `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
-| `linkProvider(provider)` | Begins linking an account at an [identity provider](#signing-in-with-an-identity-provider), and sends the browser there. |
+| `removeAuthenticator(id, password?, { signOutOthers, proof }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. `proof` comes from `proveWithKey()`. |
+| `linkProvider(provider, { password? })` | Begins linking an account at an [identity provider](#signing-in-with-an-identity-provider), and sends the browser there. |
+| `proveWithKey(factor, { action, target, name? })` | `POST /user/authenticators/{factor}/proof-options`, then the browser's ceremony. Resolves to a `FreezeProof`, `{ factor, credential }`, for the one change it was asked for. See below. |
+| `frozenChanges(error)` | The `FrozenChanges` a request was refused for, or `null` when it wasn't refused as frozen. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
+
+Removing or renaming an established authenticator, or replacing established recovery codes, while the account's sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) throws a `KeyringRequestError` with a `422`. Show `error.errors.authenticator`, which says how long is left. `error.data.frozen` is a `FrozenChanges`, with the `reason`, an ISO 8601 `until` for a page that formats the time itself, and `skip`. `frozenChanges(error)` reads it for you.
+
+`skip` lists the factors that could make the change now. When it names a passkey or security key, offer "Use your passkey to do this now". `proveWithKey()` asks for a challenge for that one change, runs the ceremony, and returns the proof to send the request again with. See [Making a Change With an Established Key](authenticators.md#making-a-change-with-an-established-key):
+
+```ts
+import { frozenChanges, KeyringRequestError, proveWithKey, removeAuthenticator } from '@keyringjs/keyring'
+
+try {
+  await removeAuthenticator(id)
+} catch (error) {
+  const frozen = frozenChanges(error)
+
+  if (!(error instanceof KeyringRequestError) || frozen === null) {
+    throw error
+  }
+
+  message.value = `${error.errors.authenticator[0]} (${new Date(frozen.until).toLocaleString()})`
+  // Offer a button for this when frozen.skip has the user's key factor.
+  canUseKey.value = frozen.skip.includes('passkey')
+}
+
+// When they press it:
+const proof = await proveWithKey('passkey', { action: 'remove', target: id })
+await removeAuthenticator(id, undefined, { proof })
+```
+
+For a rename, prove `{ action: 'rename', target: id, name }` and pass the proof to `renameAuthenticator(id, name, { proof })` with the same name. For new recovery codes, prove `{ action: 'replace', target: 'recovery' }` and pass the proof to `beginEnrollment('recovery', { proof })`, or to `enroll()`. The confirm needs nothing more, and never takes a proof: if it's refused as frozen, begin again with one. Where the server allows an authenticator app (`skip_with_totp`), `skip` lists `totp`. Send `{ factor: 'totp', code }` as the proof instead, with no ceremony, and `authenticator`, the app's ID, when the user has more than one.
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them. If `continue` comes back too, it's the page the user was going to when Keyring sent them to enroll, and the account can now meet what sent them. Offer it as a "Continue" link once the codes are saved. See [Carrying On Afterwards](policies.md#carrying-on-afterwards).
 
@@ -369,7 +401,7 @@ import { router } from '@inertiajs/vue3'
 
 async function addPasskey() {
   try {
-    await enroll('passkey')
+    await enroll('passkey', { password })
   } catch (error) {
     if (error instanceof KeyringRequestError && error.status === 423) {
       router.visit(error.data.redirect)
@@ -443,7 +475,7 @@ configureRoutes({
 })
 ```
 
-The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `sessions`, `session`, `ssoRedirect`, `ssoCallback`, `ssoConfirm`, `impersonate`, and `stopImpersonating`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `proofOptions`, `sessions`, `session`, `ssoRedirect`, `ssoCallback`, `ssoConfirm`, `impersonate`, and `stopImpersonating`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
 
 ```ts
 configureRoutes({

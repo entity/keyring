@@ -262,7 +262,7 @@ it('signs out a copy of a cookie session from before a step-up, and keeps the us
     // The browser that stepped up carries on, with what it proved.
     session()->flush();
     app('auth')->forgetGuards();
-    $this->withCredentials()->withCookies($current)->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->withCredentials()->withCookies($current)->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 
     expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
 })->with('drivers');

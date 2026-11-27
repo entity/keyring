@@ -7,15 +7,19 @@ namespace Keyring;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
+use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\SingleSignOn;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
+use Keyring\Models\SignInChange;
+use Keyring\Support\Duration;
 
 /**
  * Everything a user can sign in with, across every registered factor.
@@ -134,10 +138,7 @@ class UserKeyring
      */
     public function hasFactorToRecover(): bool
     {
-        return $this->all()->contains(fn (Authenticator $authenticator) => ! $authenticator->isVirtual()
-            && $authenticator->factor !== RecoveryCodes::KEY
-            && $this->answers($authenticator)
-            && array_any($authenticator->factor()->categories($authenticator), fn (Category $category) => $category->authenticates()));
+        return $this->all()->contains(fn (Authenticator $authenticator) => $this->isFactor($authenticator) && $this->answers($authenticator));
     }
 
     /**
@@ -169,6 +170,46 @@ class UserKeyring
     }
 
     /**
+     * Whether the account has had the authenticator long enough to count on
+     * it: for "authenticator_changes.established_after". Only factors,
+     * recovery codes and the password can be anything else. An emailed code
+     * always is, and so is a password, unless it's the account's first and
+     * was set from a session that long ago or less (see
+     * PasswordChanges::change()): whoever holds a copy of the session could
+     * have chosen that one.
+     */
+    public function isEstablished(Authenticator $authenticator): bool
+    {
+        if (! $this->isFactor($authenticator) && ! in_array($authenticator->factor, [RecoveryCodes::KEY, Password::KEY], true)) {
+            return true;
+        }
+
+        return $authenticator->created_at === null
+            || $authenticator->created_at->lte(Duration::ago(config('keyring.authenticator_changes.established_after')));
+    }
+
+    /**
+     * The keyring without the factors that aren't established yet: what
+     * policies like noDowngrade() go by, so that a factor added from a
+     * stolen session can sign in, but can't shut out the owner's.
+     */
+    public function established(): static
+    {
+        return $this->without(...$this->all()->reject($this->isEstablished(...))->all());
+    }
+
+    /**
+     * Whether it's a stored factor, rather than recovery codes or a step
+     * like an emailed code.
+     */
+    protected function isFactor(Authenticator $authenticator): bool
+    {
+        return ! $authenticator->isVirtual()
+            && $authenticator->factor !== RecoveryCodes::KEY
+            && array_any($authenticator->factor()->categories($authenticator), fn (Category $category) => $category->authenticates());
+    }
+
+    /**
      * Whether the user's authenticators could, together, meet the requirement.
      */
     public function canMeet(Requirement $requirement): bool
@@ -181,12 +222,64 @@ class UserKeyring
      * of it when they can, else the strongest version they can give.
      * Recovery codes aren't counted on, or a user with nothing else beyond
      * one factor would spend a code every time.
+     *
+     * Only established authenticators decide how much that is: otherwise a
+     * key added from a stolen session would raise what an ifEnrolled()
+     * policy asks, as a factor of a new kind or as a phishing-resistant,
+     * device-bound or attested key, and the owner, who doesn't have it,
+     * would be shut out. A new one still counts toward meeting it when it's
+     * used, and is offered beside the rest. A first password set from a
+     * session isn't established either, so it's never asked for until it
+     * is.
+     *
+     * The exception is an account whose new factors took its password to
+     * add (see AuthenticatorChanges::needsPassword()): one with an
+     * established password and no established second factor. A copy of a
+     * session can't add one there, so the owner's own new factor is asked
+     * for, as a factor and nothing more until it's established. Except one
+     * AuthenticatorChanges::add() saved without the password checked for it
+     * (ADDED_WITHOUT_PASSWORD): one added before the account had a password,
+     * or while its only one was a first one set from a session, proves
+     * nothing about who added it, whatever the password is now. A factor
+     * your own code saves some other way, as an import does, isn't marked.
      */
     public function reachable(Requirement $requirement): Requirement
     {
-        $provable = $this->withoutFallbacks()->provable();
+        $keyring = $this->withoutFallbacks();
+        $vouched = $keyring->addsFactorsWithPassword();
+        $counted = $keyring->without(...$keyring->all()
+            ->reject(fn (Authenticator $authenticator) => $keyring->isEstablished($authenticator)
+                || ($vouched && $authenticator->meta(AuthenticatorChanges::ADDED_WITHOUT_PASSWORD) !== true))
+            ->all());
+        $provable = array_values($counted->all()->map($keyring->provableNow(...))->all());
 
         return $requirement->isMetBy($provable) ? $requirement : $requirement->limitedTo($provable);
+    }
+
+    /**
+     * Whether adding a factor takes the password, typed for it: the account
+     * has an established one and no established second factor.
+     * AuthenticatorChanges asks the same.
+     */
+    protected function addsFactorsWithPassword(): bool
+    {
+        $established = $this->established();
+
+        return $established->of(Password::KEY)->isNotEmpty() && ! $established->hasSecondFactor();
+    }
+
+    /**
+     * What the authenticator would prove, as far as the account can count
+     * on it yet (wouldProve()): a key that isn't established is a factor
+     * and nothing more.
+     */
+    protected function provableNow(Authenticator $authenticator): Verification
+    {
+        $verification = $this->wouldProve($authenticator);
+
+        return $this->isEstablished($authenticator)
+            ? $verification
+            : new Verification($verification->factor, $verification->authenticator, $verification->categories, at: $verification->at, authenticatedAt: $verification->authenticatedAt);
     }
 
     /**
@@ -333,11 +426,24 @@ class UserKeyring
     {
         return $this->keyring->registered()
             ->flatMap(fn (Factor $factor) => $factor->authenticators($this->user, $this->stored()))
+            ->each($this->datePassword(...))
             ->sortBy([
                 fn (Authenticator $a, Authenticator $b) => $b->is_default <=> $a->is_default,
                 fn (Authenticator $a, Authenticator $b) => $b->factor()->priority() <=> $a->factor()->priority(),
                 fn (Authenticator $a, Authenticator $b) => $a->created_at <=> $b->created_at,
             ])
             ->values();
+    }
+
+    /**
+     * Give the password the date it was set, where that's on record: a
+     * first password set from a session (PasswordChanges::change()), until
+     * a reset proves the address. Any other has none, and is established.
+     */
+    protected function datePassword(Authenticator $authenticator): void
+    {
+        if ($authenticator->isVirtual() && $authenticator->factor === Password::KEY) {
+            $authenticator->created_at = SignInChange::query()->ownedBy($this->user)->first()?->password_set_at;
+        }
     }
 }

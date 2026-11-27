@@ -35,7 +35,7 @@ function totpAccepts(Authenticator $authenticator, string $code): bool
 }
 
 it('makes sha1 codes unless told otherwise, and says so in the url the app scans', function () {
-    $enrollment = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment');
+    $enrollment = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment');
 
     parse_str((string) parse_url($enrollment['url'], PHP_URL_QUERY), $query);
 
@@ -50,7 +50,7 @@ it('makes sha1 codes unless told otherwise, and says so in the url the app scans
 it('can be set up with a stronger digest, which the url and the qr code then name', function (string $algorithm) {
     totpWith($algorithm);
 
-    $enrollment = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment');
+    $enrollment = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment');
 
     parse_str((string) parse_url($enrollment['url'], PHP_URL_QUERY), $query);
 
@@ -76,7 +76,7 @@ it('can be set up with a stronger digest, which the url and the qr code then nam
 it('keeps verifying an authenticator under the digest it was set up with when the setting changes', function (string $from, string $to) {
     totpWith($from);
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => $this->totpCode($secret, algorithm: $from)])->assertOk();
 
     totpWith($to);
@@ -94,7 +94,7 @@ it('keeps verifying an authenticator under the digest it was set up with when th
 ]);
 
 it('finishes an enrollment under the digest its qr code named when the setting changes meanwhile', function () {
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
 
     totpWith('sha256');
 

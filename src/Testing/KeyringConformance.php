@@ -296,9 +296,10 @@ trait KeyringConformance
             $this->markTestSkipped('No sign-in methods to set up: register some, and turn on Features::manageAuthenticators().');
         }
 
+        // Its first second factor takes the password, typed again.
         foreach ($this->enrollableFactors() as $factor) {
             $response = $this->actingAs($user)->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', $factor->key()));
+                ->postJson(route('keyring.authenticators.store', $factor->key()), ['password' => $this->keyringPassword()]);
 
             // Linking an identity provider begins by asking it where to send
             // the user, which a test can't do without one standing in for

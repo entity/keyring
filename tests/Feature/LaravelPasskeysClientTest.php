@@ -20,7 +20,7 @@ beforeEach(function () {
     $this->key = new VirtualAuthenticator;
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $this->key->register($options)])->assertOk();
     $this->post('/logout');
 });

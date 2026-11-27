@@ -114,7 +114,7 @@ it('still identifies users for real', function () {
 
 it('enforces no downgrade for users with phishing resistant factors', function () {
     Keyring::require(Requirement::aal2()->noDowngrade());
-    Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->securityKey()->established()->for($this->user, 'authenticatable')->create();
     Authenticator::factory()->totp()->for($this->user, 'authenticatable')->default()->create();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
@@ -144,7 +144,7 @@ it('still offers recovery codes under no downgrade, so a lost key is not a locko
 
 it('can refuse recovery codes under no downgrade as well', function () {
     Keyring::require(Requirement::aal2()->noDowngrade(except: []));
-    Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')->create();
+    Authenticator::factory()->securityKey()->established()->for($this->user, 'authenticatable')->create();
     Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);

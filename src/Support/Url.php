@@ -27,6 +27,15 @@ final class Url
     }
 
     /**
+     * A page of the app's own, from config: a full URL as it is, and a path
+     * after the link root.
+     */
+    public static function page(string $url): string
+    {
+        return parse_url($url, PHP_URL_SCHEME) === null ? Keyring::linkRoot().'/'.ltrim($url, '/') : $url;
+    }
+
+    /**
      * @param  array<string, mixed>  $parameters
      */
     public static function signed(string $name, DateTimeInterface $expires, array $parameters = []): string

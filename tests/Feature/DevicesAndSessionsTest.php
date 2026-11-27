@@ -1057,7 +1057,7 @@ function expectNoTrustedDevices(): void
 
 describe('ending trust', function () {
     beforeEach(function () {
-        $this->totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        $this->totp = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         trustThisDevice($this->totp);
         $this->user->devices()->forceCreate(['token_hash' => hash('sha256', 'elsewhere'), 'trusted_until' => now()->addDay()]);
     });
@@ -1254,7 +1254,7 @@ describe('ending other sessions along with a change to how the user signs in', f
     it('ends them when adding an authenticator asks it to', function (string $driver) {
         ($this->signInTwice)($driver);
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
         $id = session()->getId();
 
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), 'sign_out_others' => true])
@@ -1282,7 +1282,7 @@ describe('ending other sessions along with a change to how the user signs in', f
 
     it('ends them when new recovery codes ask it to', function () {
         ($this->signInTwice)();
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
         $old = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
 
         $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
@@ -1297,7 +1297,7 @@ describe('ending other sessions along with a change to how the user signs in', f
         Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
         $backup = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), ...$data])->assertOk();
         $this->deleteJson(route('keyring.authenticators.destroy', $backup->id), $data)->assertOk();
 
@@ -1313,7 +1313,7 @@ describe('ending other sessions along with a change to how the user signs in', f
         Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
         $backup = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret), 'sign_out_others' => 'perhaps'])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('sign_out_others');
@@ -2042,6 +2042,8 @@ describe('the records the registry says it revoked', function () {
     // As it always has: the database driver matches a record by whether it
     // was revoked, not whether it has expired.
     it('revokes and returns an expired record that was never revoked, on the database driver', function (Closure $revoke) {
+        $this->freezeSecond();
+
         $registry = app(SessionRegistry::class);
         ($this->session)('expired', ['expiresAt' => now()->subMinute()->getTimestamp()]);
 

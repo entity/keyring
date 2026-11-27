@@ -212,9 +212,29 @@ return [
     | signed in to Keyring's guard). By default they need a recent
     | verification.
     |
+    | An authenticator, or a set of recovery codes, is established once the
+    | account has had it for "established_after". Until then it signs in
+    | like any other, but doesn't make noDowngrade() ask for a passkey.
+    | While the account has a factor that isn't established yet, or lost or
+    | replaced something that was within that time, it can't remove,
+    | rename or replace established ones. So whoever got into a session
+    | can't add a factor and then take away the owner's. Adding a second
+    | factor to an account with none established takes the password.
+    |
+    | The owner can still make one of those changes by proving, in the same
+    | request, a passkey or security key the account has had that long and
+    | since before the session signed in. "skip_with_totp" lets an
+    | authenticator app do it too. Its codes can be phished as they're
+    | typed, so it's off.
+    |
     */
 
     'changes_middleware' => ['keyring.fresh:15m'],
+
+    'authenticator_changes' => [
+        'established_after' => '7d',
+        'skip_with_totp' => false,
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -232,6 +252,20 @@ return [
     'enrollment_url' => null,
 
     'enrollment_except' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sign-In Methods Page
+    |--------------------------------------------------------------------------
+    |
+    | Your page where users see and remove their sign-in methods. The emails
+    | about a new sign-in method and new recovery codes link to it, so the
+    | owner can remove one they didn't add. A path is put after APP_URL (or
+    | Keyring::linkRootUsing()). Null leaves the link out.
+    |
+    */
+
+    'authenticators_url' => null,
 
     /*
     |--------------------------------------------------------------------------

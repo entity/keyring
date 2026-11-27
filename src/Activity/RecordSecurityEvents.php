@@ -259,7 +259,7 @@ class RecordSecurityEvents
 
     public function authenticatorRemovalRefused(Events\AuthenticatorRemovalRefused $event): void
     {
-        $this->log->recordRefusal('authenticator_removal_refused', $event->user, $event->authenticator->factor, meta: ['name' => $event->authenticator->name]);
+        $this->log->recordRefusal('authenticator_removal_refused', $event->user, $event->authenticator->factor, meta: ['name' => $event->authenticator->name, 'reason' => $event->reason]);
     }
 
     /**

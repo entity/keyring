@@ -71,7 +71,7 @@ class SendSecurityNotifications
 
     public function authenticatorAdded(Events\AuthenticatorAdded $event): void
     {
-        $this->send($event->user, 'authenticator_added', ['name' => $event->authenticator->name]);
+        $this->send($event->user, 'authenticator_added', ['name' => $event->authenticator->name, ...$this->authenticatorsPage()]);
     }
 
     public function authenticatorRemoved(Events\AuthenticatorRemoved $event): void
@@ -109,7 +109,7 @@ class SendSecurityNotifications
      */
     public function recoveryCodesGenerated(Events\RecoveryCodesGenerated $event): void
     {
-        $this->send($event->user, 'recovery_codes_generated');
+        $this->send($event->user, 'recovery_codes_generated', $this->authenticatorsPage());
     }
 
     public function riskAssessed(Events\RiskAssessed $event): void
@@ -132,6 +132,19 @@ class SendSecurityNotifications
     public function accountLocked(Events\AccountLocked $event): void
     {
         $this->send($event->user, 'account_locked', Route::has('password.request') ? ['url' => Url::route('password.request')] : []);
+    }
+
+    /**
+     * The app's page for sign-in methods ("authenticators_url"), where the
+     * owner can remove one they didn't add, when it has one.
+     *
+     * @return array{url?: string}
+     */
+    protected function authenticatorsPage(): array
+    {
+        $url = config('keyring.authenticators_url');
+
+        return is_string($url) && $url !== '' ? ['url' => Url::page($url)] : [];
     }
 
     /**

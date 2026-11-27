@@ -314,7 +314,7 @@ Register the factor alongside your others:
 Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SmsCode::class]);
 ```
 
-Users can then add it like any other sign-in method. Your form posts `phone` to `POST /user/authenticators/sms`, and then posts the code to `POST /user/authenticators/sms/confirm`.
+Users can then add it like any other sign-in method. Your form posts `phone` to `POST /user/authenticators/sms`, and then posts the code to `POST /user/authenticators/sms/confirm`. While the account has no [established](authenticators.md#established-authenticators) second factor, the first request also needs the user's `password` (see [The Password for a First Second Factor](authenticators.md#the-password-for-a-first-second-factor)).
 
 Don't queue the notification, so the code arrives while the user is still waiting. Confirming the enrollment proves that the number can receive codes, and a code only verifies the phone it was sent to.
 
@@ -405,7 +405,7 @@ You can also configure how long Keyring keeps records:
 'email_changes' => ['keep_ended_for' => '7d'],
 ```
 
-The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, and log entries at the same time.
+The `keyring:prune` Artisan command deletes records older than those periods, and Keyring [schedules it to run daily](devices-and-sessions.md#pruning) for you. Force deleting a user also deletes their devices, sign-in methods, pending changes, sign-in changes, and log entries at the same time.
 
 You can also keep less by leaving features off. To keep no devices at all, leave `Features::devices()` off. The `keyring_events` table is always created, but without `Features::securityLog()` nothing is written to it, and the events are written to [your application's log](security-log-and-emails.md#without-the-table) instead. How long those entries are kept is then up to that log channel. [What Keyring Keeps](security.md#what-keyring-keeps) lists everything Keyring stores.
 
@@ -490,7 +490,7 @@ Last, end the session when AAL2 runs out. Otherwise, the session would carry on 
 With these settings in place:
 
 - A session that signed in with two factors ends after an hour without a request, or 24 hours after those factors were proved, and the user signs in again with both. To change those numbers, edit `sessions.levels.aal2`.
-- A new user's first session is signed in with one factor, so it isn't ended. That session can reach the enrollment page and Keyring's own routes, but nothing in the group above. Adding the second factor proves it, which takes the session to AAL2 for as long as that level lasts. After that, `keyring:aal2` asks for both factors again.
+- A new user's first session is signed in with one factor, so it isn't ended. That session can reach the enrollment page and Keyring's own routes, but nothing in the group above. The enrollment page asks for the password along with the new factor, since the account has no [established](authenticators.md#the-password-for-a-first-second-factor) second factor yet. Adding the second factor proves it, which takes the session to AAL2 for as long as that level lasts. After that, `keyring:aal2` asks for both factors again.
 - "Remember me" doesn't bring a session back, so leave it off your login form.
 - Laravel's own `session.lifetime` still ends an idle session sooner if it's shorter than an hour. Set it to 60 or more.
 

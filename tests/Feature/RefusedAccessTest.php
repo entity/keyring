@@ -95,7 +95,7 @@ it('cannot be used to fill the log, one made-up ID at a time', function () {
 
 it('records a sign-in method that was not added because its proof was wrong', function () {
     Event::fake([EnrollmentRefused::class]);
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000'])
         ->assertUnprocessable()
@@ -105,7 +105,7 @@ it('records a sign-in method that was not added because its proof was wrong', fu
 });
 
 it('logs a refused enrollment, but not a form that was only filled in wrong', function () {
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
 
     // No code at all is a validation error, not a proof that failed.
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), [])->assertJsonValidationErrors('code');
@@ -123,7 +123,7 @@ it('logs a refused enrollment, but not a form that was only filled in wrong', fu
 
 it('records a key the factor refused with a message of its own', function () {
     Keyring::factors([Password::class, WebAuthn::passkeys()->requireAttestation()]);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => new VirtualAuthenticator()->register($options)])
         ->assertJsonValidationErrors(['credential' => __('keyring::keyring.key_not_accepted')]);
@@ -174,7 +174,7 @@ it('logs it, and still has the sign-in method', function () {
 
     $this->withAssurance(Assurance::AAL2)->deleteJson(route('keyring.authenticators.destroy', $totp->id))->assertJsonValidationErrors('authenticator');
 
-    expect(logEntry('authenticator_removal_refused'))->factor->toBe('totp')->meta->toBe(['name' => 'Phone'])->severity->toBe(Severity::Warning)
+    expect(logEntry('authenticator_removal_refused'))->factor->toBe('totp')->meta->toBe(['name' => 'Phone', 'reason' => 'last_factor'])->severity->toBe(Severity::Warning)
         ->and($totp->fresh())->not->toBeNull()
         ->and(loggedTypes())->toBe(['authenticator_removal_refused']);
 });

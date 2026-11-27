@@ -45,8 +45,13 @@
         "changes_middleware": [
             "keyring.fresh:15m"
         ],
+        "authenticator_changes": {
+            "established_after": "7d",
+            "skip_with_totp": false
+        },
         "enrollment_url": null,
         "enrollment_except": [],
+        "authenticators_url": null,
         "password_change_url": null,
         "support_contact": null,
         "devices": {
@@ -164,6 +169,7 @@
     "routes": {
         "keyring.authenticators.confirm": "POST /user/authenticators/{factor}/confirm",
         "keyring.authenticators.destroy": "DELETE /user/authenticators/{authenticator}",
+        "keyring.authenticators.proof-options": "POST /user/authenticators/{factor}/proof-options",
         "keyring.authenticators.store": "POST /user/authenticators/{factor}",
         "keyring.authenticators.update": "PATCH /user/authenticators/{authenticator}",
         "keyring.confirm.challenge": "GET /confirm/{factor?}",
@@ -336,12 +342,14 @@
         "canMeet(Keyring\\Login\\Requirement $requirement): bool",
         "canSignIn(): bool",
         "default(): ?Keyring\\Models\\Authenticator",
+        "established(): static",
         "find(?string $id): ?Keyring\\Models\\Authenticator",
         "freshlyProvable(): static",
         "has(Keyring\\Enums\\Category $category): bool",
         "hasFactorToRecover(): bool",
         "hasRecoveryCodes(): bool",
         "hasSecondFactor(): bool",
+        "isEstablished(Keyring\\Models\\Authenticator $authenticator): bool",
         "of(string $factor): Illuminate\\Support\\Collection",
         "reachable(Keyring\\Login\\Requirement $requirement): Keyring\\Login\\Requirement",
         "refresh(): static",
@@ -350,6 +358,16 @@
         "usefulFor(Keyring\\Login\\Requirement $requirement, array $verifications, ?Keyring\\Enums\\Purpose $purpose = null): Illuminate\\Support\\Collection",
         "without(Keyring\\Models\\Authenticator ...$authenticators): static",
         "withoutFallbacks(): static"
+    ],
+    "authenticator_changes": [
+        "add(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor, Keyring\\Models\\Authenticator $authenticator, ?Illuminate\\Http\\Request $request = null, bool $ignoreFreeze = false, bool $passwordConfirmed = false): ?array",
+        "confirmPassword(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor, Illuminate\\Http\\Request $request, ?string $password): void",
+        "ensureMayAdd(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor): void",
+        "find(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, string $id): Keyring\\Models\\Authenticator",
+        "frozen(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user): ?Keyring\\Changes\\Freeze",
+        "needsPassword(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor): bool",
+        "remove(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, string $id, ?string $password = null, bool $ignoreFreeze = false): Keyring\\Models\\Authenticator",
+        "update(Keyring\\Models\\Authenticator $authenticator, array $changes, bool $ignoreFreeze = false): void"
     ],
     "contracts": {
         "Keyring\\Contracts\\CreatesNewUsers": [
@@ -549,6 +567,7 @@
         ],
         "Keyring\\Events\\AuthenticatorRemovalRefused": [
             "authenticator",
+            "reason",
             "user"
         ],
         "Keyring\\Events\\AuthenticatorRemoved": [

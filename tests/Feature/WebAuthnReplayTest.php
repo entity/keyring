@@ -32,7 +32,7 @@ function addKey(string $factor, VirtualAuthenticator $key): void
 {
     test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
 
-    $options = test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', $factor), ['password' => 'password'])->assertOk()->json('enrollment.options');
     test()->postJson(route('keyring.authenticators.confirm', $factor), ['credential' => $key->register($options)])->assertOk();
 
     test()->post('/logout');
@@ -158,7 +158,7 @@ describe('a browser that sends back an earlier copy of its session', function ()
 
     it('cannot add a key with a challenge that an answer has already failed', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
         $unconfirmed = session()->all();
 
         $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => new VirtualAuthenticator(origin: 'https://evil.example')->register($options)])
@@ -177,7 +177,7 @@ describe('a browser that sends back an earlier copy of its session', function ()
 
     it('cannot add a key again with the answer that added it', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
         $unconfirmed = session()->all();
         $answer = $this->key->register($options);
 
