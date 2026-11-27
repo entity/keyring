@@ -479,6 +479,12 @@ class KeyringManager
      *
      *     Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => $impersonator->isAdmin() && ! $user->isAdmin());
      *
+     * It's asked again on every request while the impersonation lasts,
+     * when the signed-in user is the one being impersonated, so decide
+     * from its two arguments alone: not auth()->user(), $request->user()
+     * or Gate::allows(), which would ask about the user. For a gate, ask
+     * Gate::forUser($impersonator)->allows(...).
+     *
      * @param  Closure(Authenticatable&Model, Authenticatable&Model): bool  $callback
      */
     public function allowImpersonationWhen(Closure $callback): static
