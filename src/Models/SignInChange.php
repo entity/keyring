@@ -17,12 +17,14 @@ use Keyring\Support\Duration;
 
 /**
  * When an account last lost or replaced a sign-in method it had for
- * "authenticator_changes.established_after", or its recovery codes. Until
- * that long after, it can't do so again. One per user, pruned once it no
- * longer holds anything back.
+ * "authenticator_changes.established_after", or its recovery codes: until
+ * that long after, it can't do so again. And when its first password was
+ * set from a session, which isn't established until that long after. One
+ * per user, pruned once it no longer holds anything back.
  *
  * @property string $id
- * @property CarbonInterface $changed_at
+ * @property CarbonInterface|null $changed_at
+ * @property CarbonInterface|null $password_set_at
  */
 #[Table('keyring_sign_in_changes')]
 #[Unguarded]
@@ -35,6 +37,7 @@ class SignInChange extends Model
     {
         return [
             'changed_at' => 'datetime',
+            'password_set_at' => 'datetime',
         ];
     }
 
@@ -43,6 +46,10 @@ class SignInChange extends Model
      */
     public function prunable(): Builder
     {
-        return static::query()->where('changed_at', '<', Duration::ago(config('keyring.authenticator_changes.established_after')));
+        $before = Duration::ago(config('keyring.authenticator_changes.established_after'));
+
+        return static::query()
+            ->where(fn (Builder $query) => $query->whereNull('changed_at')->orWhere('changed_at', '<', $before))
+            ->where(fn (Builder $query) => $query->whereNull('password_set_at')->orWhere('password_set_at', '<', $before));
     }
 }

@@ -43,6 +43,13 @@ use Keyring\UserKeyring;
  */
 class AuthenticatorChanges
 {
+    /**
+     * In a factor's meta: add() saved it without the password checked for
+     * it, so a copy of a session could have added it. UserKeyring::reachable()
+     * never asks for one with it before it's established.
+     */
+    public const string ADDED_WITHOUT_PASSWORD = 'added_without_password';
+
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
@@ -68,7 +75,11 @@ class AuthenticatorChanges
      * needs the password, typed for this enrollment: see needsPassword().
      * $passwordConfirmed says it was, as the enrollment routes check with
      * confirmPassword() when it begins. Your own code passes it once it has
-     * made sure who it's adding for some other way.
+     * made sure who it's adding for some other way. A factor saved without
+     * it keeps that (ADDED_WITHOUT_PASSWORD): a copy of a session could
+     * have added it, so an ifEnrolled() policy never asks for it until it's
+     * established, whatever happens to the password since (see
+     * UserKeyring::reachable()).
      *
      * With the request it came in, the session that asked has to still be
      * signed in when it's saved: one ended while the request ran (an email
@@ -113,6 +124,10 @@ class AuthenticatorChanges
             // New recovery codes are upkeep, not a change of sign-in method.
             if (! $isRecovery && $replaced->isNotEmpty()) {
                 $this->sessions->distrustDevices($user);
+            }
+
+            if (! $passwordConfirmed && $this->isFactor($factor, $authenticator)) {
+                $authenticator->withMeta(self::ADDED_WITHOUT_PASSWORD, true);
             }
 
             $this->save($user, $authenticator, default: ! $isRecovery && $challengeable && $keyring->default() === null);
@@ -191,7 +206,11 @@ class AuthenticatorChanges
      * password factor, has nothing to type, and adds one on the fresh
      * verification alone: a passkey it signs in with is a second factor
      * once it's established, and one that isn't yet can't be told from one
-     * a session added.
+     * a session added. So does an account whose only password is a first
+     * one set from a session and not established yet (see
+     * UserKeyring::isEstablished()): whoever set it could type it, so it
+     * proves nothing, and a factor added with it is no more asked for than
+     * one added without.
      */
     public function needsPassword(Authenticatable&Model $user, Enrollable $factor): bool
     {
@@ -235,7 +254,9 @@ class AuthenticatorChanges
 
     protected function needsPasswordFor(Authenticatable&Model $user, UserKeyring $keyring): bool
     {
-        return $keyring->of(Password::KEY)->isNotEmpty() && ! $keyring->established()->hasSecondFactor();
+        $established = $keyring->established();
+
+        return $established->of(Password::KEY)->isNotEmpty() && ! $established->hasSecondFactor();
     }
 
     /**
@@ -257,9 +278,11 @@ class AuthenticatorChanges
      * Why the user's established sign-in methods and recovery codes can't be
      * removed, replaced or renamed just now, and until when, or null when
      * they can. An account is frozen for "authenticator_changes.established_after"
-     * after a factor is added, and after one it counted on is removed or
-     * replaced, so whoever got into a session can't add a factor of their
-     * own and then take away the owner's. Factors and recovery codes that
+     * after a factor is added, or a first password is set from a session
+     * (see PasswordChanges::change()), as for any new sign-in method, and
+     * after one it counted on is removed or replaced, so whoever got into a
+     * session can't add a factor of their own and then take away the
+     * owner's. Factors and recovery codes that
      * aren't established yet can always be removed or replaced, and new
      * recovery codes don't freeze anything on their own.
      */

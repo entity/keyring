@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Keyring\Changes;
 
+use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -18,6 +19,7 @@ use Keyring\Events\PasswordReset;
 use Keyring\Factors\SingleSignOn;
 use Keyring\KeyringManager;
 use Keyring\Models\Authenticator;
+use Keyring\Models\SignInChange;
 use Keyring\Risk\RiskLocks;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\PasswordRules;
@@ -55,6 +57,14 @@ class PasswordChanges
      * Saving it again as the new one is refused: nothing would have changed,
      * and a user held until they change it would be let go.
      *
+     * An account that had no password had nothing to prove, so whoever holds
+     * a copy of the session could have chosen the first one. Like any new
+     * sign-in method, it isn't established for
+     * "authenticator_changes.established_after" (see UserKeyring::isEstablished()):
+     * it freezes the account's sign-in methods, an ifEnrolled() policy
+     * doesn't ask for it, and adding a factor doesn't take it. A reset,
+     * which proves the address, makes the password established.
+     *
      * The save holds the user's row, and only goes ahead over the password
      * $user was loaded with, the one $current was checked against: a reset
      * or another change that finished since has stored a different one, and
@@ -71,12 +81,17 @@ class PasswordChanges
     {
         $checked = (string) $user->getAuthPassword();
 
-        $overChecked = function (Authenticatable&Model $stored, Closure $write) use ($checked): void {
+        $overChecked = function (Authenticatable&Model $stored, Closure $write) use ($checked, $user): void {
             if (! hash_equals($checked, (string) $stored->getAuthPassword())) {
                 throw ValidationException::withMessages(['current_password' => __('validation.current_password')]);
             }
 
             $write();
+
+            // Under the same hold as the password, so the two go together.
+            if ($checked === '') {
+                $this->datePassword($user, now());
+            }
         };
 
         $hold = fn (Closure $write) => $request === null
@@ -117,6 +132,10 @@ class PasswordChanges
     {
         $this->save($user, $save, new: $new, keepHold: true);
 
+        // Whoever chose it proved the address: it's the owner's, and
+        // established, whoever set the one before it.
+        $this->datePassword($user, null);
+
         // The links go before the sessions, so a sign in with one of them
         // that's under way either lands before the sign-out, which ends it,
         // or finds the link gone.
@@ -132,6 +151,19 @@ class PasswordChanges
         $this->throttle->clearAccount($user);
 
         PasswordReset::dispatch($user);
+    }
+
+    /**
+     * Note when a first password was set from a session, or forget it
+     * (null): see UserKeyring::isEstablished().
+     */
+    protected function datePassword(Authenticatable&Model $user, ?CarbonInterface $at): void
+    {
+        $owner = ['authenticatable_type' => $user->getMorphClass(), 'authenticatable_id' => $user->getKey()];
+
+        $at === null
+            ? SignInChange::query()->where($owner)->update(['password_set_at' => null])
+            : SignInChange::query()->updateOrCreate($owner, ['password_set_at' => $at]);
     }
 
     /**

@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password as PasswordBroker;
 use Illuminate\Support\Facades\Route;
 use Keyring\Changes\AuthenticatorChanges;
+use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enrollment\Enrollment;
 use Keyring\Enrollment\EnrollmentStore;
@@ -37,9 +38,11 @@ use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Http\Controllers\SingleSignOnController;
 use Keyring\Login\Attempt;
+use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
+use Keyring\Models\SignInChange;
 use Keyring\Notifications\AuthenticatorAdded as AuthenticatorAddedNotice;
 use Keyring\Notifications\SecondFactorFailed;
 use Keyring\Risk\RiskLocks;
@@ -1296,4 +1299,163 @@ describe('the identity accepted event', function () {
             ->and($identity->request->state)->not->toBe('')
             ->and($identity->claims['nonce'])->toBe('n');
     });
+});
+
+/**
+ * Add an authenticator app through the routes, as anyone holding the
+ * session could.
+ */
+function enrollAppThroughRoutes(?string $password = null): void
+{
+    $secret = test()->postJson(route('keyring.authenticators.store', 'totp'), array_filter(['password' => $password]))->assertOk()->json('enrollment.secret');
+    test()->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+}
+
+function setFirstPasswordFromSession(string $password = 'the intruder\'s passphrase'): void
+{
+    test()->putJson(route('user-password.update'), ['password' => $password, 'password_confirmation' => $password])->assertOk();
+}
+
+function leaveSession(): void
+{
+    Auth::logout();
+    session()->flush();
+}
+
+function resetPasswordWithLink(User $user, string $password = 'the owner\'s passphrase'): void
+{
+    $token = PasswordBroker::broker()->createToken($user->fresh());
+
+    test()->post(route('password.update'), ['token' => $token, 'email' => 'taylor@example.com', 'password' => $password, 'password_confirmation' => $password])
+        ->assertSessionHasNoErrors();
+}
+
+// A copy of the session can give an account without a password its first
+// one, and add a factor without a password to type. Neither can shut the
+// owner out of the way they signed in before, in either order, before or
+// after a password reset.
+describe('a session that sets the first password or adds a factor', function () {
+    beforeEach(function () {
+        Keyring::require(Requirement::aal2()->ifEnrolled());
+        $this->user->forceFill(['password' => null])->saveQuietly();
+        $this->link = Authenticator::factory()->sso()->established()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+    });
+
+    it('sets a password that adding a factor doesn\'t take, so the app it adds is never asked for', function () {
+        setFirstPasswordFromSession();
+        enrollAppThroughRoutes('the intruder\'s passphrase');
+        leaveSession();
+
+        // The owner still signs in with the provider alone.
+        $this->get(signInAtProvider($this->idp))->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+        leaveSession();
+
+        // A reset unlinks the provider, and the new password is enough.
+        resetPasswordWithLink($this->user);
+        expect($this->user->keyring->refresh()->of('sso'))->toBeEmpty()
+            ->and($this->user->keyring->of('totp'))->toHaveCount(1);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'the owner\'s passphrase'])->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('adds an app no password took, which the owner\'s reset doesn\'t make them asked for', function () {
+        enrollAppThroughRoutes();
+        leaveSession();
+
+        $this->get(signInAtProvider($this->idp))->assertRedirect('/dashboard');
+        leaveSession();
+
+        resetPasswordWithLink($this->user);
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'the owner\'s passphrase'])->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+
+        // With the password the reset gave, the owner's own new factor takes
+        // it, and is asked for at once.
+        $this->withAssurance(Assurance::AAL1);
+        $this->user->keyring->refresh()->of('totp')->each->delete();
+        enrollAppThroughRoutes('the owner\'s passphrase');
+
+        $user = $this->user->fresh();
+        expect($user->keyring->reachable(Keyring::policy($user, Attempt::start(Purpose::Login, $user))))->factors->toBe(2);
+    });
+
+    it('is not established, so it freezes the account, links without it, and never counts toward a sign in', function () {
+        setFirstPasswordFromSession();
+
+        $keyring = $this->user->keyring->refresh();
+        $password = $keyring->of('password')->sole();
+
+        expect($keyring->isEstablished($password))->toBeFalse()
+            ->and(app(AuthenticatorChanges::class)->frozen($this->user))->reason->toBe(FreezeReason::NewAuthenticator)
+            ->and(app(AuthenticatorChanges::class)->needsPassword($this->user, Keyring::factor('totp')))->toBeFalse()
+            ->and($keyring->reachable(Requirement::factors(2)->ifEnrolled())->factors)->toBe(1);
+
+        // Linking another account doesn't take it either.
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])->assertOk()->json('enrollment.url');
+        $this->get($this->idp->signIn(['sub' => 'work'])->approve($url))->assertSessionHas('status', 'authenticator-added');
+    });
+
+    it('is established once the first password set has been the account\'s a while, changed or not', function () {
+        setFirstPasswordFromSession();
+
+        // A change keeps the date of the first.
+        $this->travel(3)->days();
+        $user = $this->user->fresh();
+        app(PasswordChanges::class)->change($user, fn () => $user->forceFill(['password' => 'another long passphrase'])->save(), null, current: 'the intruder\'s passphrase');
+        $this->travel(4)->days();
+        $this->travel(1)->minute();
+
+        $user = $this->user->fresh();
+
+        expect($user->keyring->isEstablished($user->keyring->of('password')->sole()))->toBeTrue()
+            ->and(app(AuthenticatorChanges::class)->frozen($user))->toBeNull()
+            ->and(app(AuthenticatorChanges::class)->needsPassword($user, Keyring::factor('totp')))->toBeTrue();
+    });
+
+    it('is established once a reset proves the address', function () {
+        setFirstPasswordFromSession();
+        leaveSession();
+        resetPasswordWithLink($this->user);
+
+        $keyring = $this->user->keyring->refresh();
+
+        expect($keyring->isEstablished($keyring->of('password')->sole()))->toBeTrue()
+            ->and(app(AuthenticatorChanges::class)->frozen($this->user))->toBeNull();
+    });
+
+    it('is kept by keyring:prune until the password is established', function () {
+        setFirstPasswordFromSession();
+
+        $this->artisan('keyring:prune')->assertSuccessful();
+        expect(SignInChange::query()->count())->toBe(1);
+
+        $this->travel(8)->days();
+        $this->artisan('keyring:prune')->assertSuccessful();
+        expect(SignInChange::query()->count())->toBe(0);
+    });
+
+    it('notes nothing for a password changed from one the account had', function () {
+        $this->user->forceFill(['password' => 'password'])->saveQuietly();
+
+        $this->putJson(route('user-password.update'), ['current_password' => 'password', 'password' => 'a much longer passphrase', 'password_confirmation' => 'a much longer passphrase'])->assertOk();
+
+        expect(SignInChange::query()->count())->toBe(0);
+    });
+});
+
+it('asks a password-only user for the app they added with their password at once', function () {
+    Keyring::require(Requirement::aal2()->ifEnrolled());
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
+    $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+    Auth::logout();
+    session()->flush();
+
+    $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect(route('keyring.login.challenge'));
+    $this->assertGuest();
 });

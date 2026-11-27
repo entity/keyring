@@ -479,11 +479,20 @@ describe('which keys raise the bar', function () {
         if (! $password) {
             Keyring::withoutProtection(fn () => $this->user->forceFill(['password' => null])->save());
         }
-        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+        app(AuthenticatorChanges::class)->add($this->user, Keyring::factor('totp'), Authenticator::factory()->totp()->make(), passwordConfirmed: $password);
 
         $requirement = Keyring::requirementFor($this->user, Attempt::start(Purpose::Login, $this->user));
 
-        expect($requirement->factors)->toBe($factors);
+        expect($requirement->factors)->toBe($factors)
+            ->and($this->user->keyring->refresh()->of('totp')->sole()->meta(AuthenticatorChanges::ADDED_WITHOUT_PASSWORD))->toBe($password ? null : true);
+
+        // A password the account has since, as a reset gives, doesn't say
+        // who added it.
+        if (! $password) {
+            Keyring::withoutProtection(fn () => $this->user->forceFill(['password' => 'a much longer passphrase'])->save());
+
+            expect(Keyring::requirementFor($this->user, Attempt::start(Purpose::Login, $this->user))->factors)->toBe(1);
+        }
     })->with([
         'a password, which a copy of the session can\'t add a factor without' => [true, 2],
         'no password, so anyone with the session could have added it' => [false, 1],
