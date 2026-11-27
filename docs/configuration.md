@@ -298,8 +298,8 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
     'show_in_sessions' => true,
     'show_in_activity' => true,
     'middleware' => ['keyring:aal2', 'keyring.fresh:15m'],
-    'redirect_to' => null,
-    'return_to' => null,
+    'redirect_url' => null,
+    'return_url' => null,
 ],
 ```
 
@@ -311,8 +311,8 @@ These only matter with `Features::impersonation()` on, and once [`Keyring::allow
 | `show_in_sessions` | Whether the impersonated session is in the user's own [sessions list](impersonation.md#the-sessions-list), marked with who is in it, for the user to end. With `false` it's left out, but still ends with the rest of their sessions, and still counts in how many "sign out everywhere else" says it ended. |
 | `show_in_activity` | Whether `impersonation_started` and `impersonation_ended` are in [`Keyring::activity`](security-log-and-emails.md#showing-recent-activity), on both accounts. With `false` they're in `Keyring::unlistedActivityTypes()`, so it leaves them out, but they're still written. This is the only way to leave out any of Keyring's own types: listed in `security_log.unlisted`, they're still shown. It doesn't keep an impersonation secret either: what was done while impersonating, such as signing out, is still in the user's activity. See [The Security Log and Events](impersonation.md#security-log-and-events). |
 | `middleware` | What starting one takes, on top of being signed in and not impersonating already. By default, two factors proved in the last 15 minutes. An empty list asks for nothing more: any signed-in session the callback allows can start one, with no step-up. |
-| `redirect_to` | Where starting goes. `null` is `home`. |
-| `return_to` | Where stopping, or running out, goes. `null` is `home`. |
+| `redirect_url` | Where starting goes. `null` is `home`. |
+| `return_url` | Where stopping, or running out, goes. `null` is `home`. |
 
 See [Impersonation](impersonation.md).
 

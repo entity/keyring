@@ -167,7 +167,7 @@ class AuthenticateSession
     /**
      * End an impersonation the request found over. Back in the
      * impersonator's own session, the page they were on was the user's, so
-     * they're sent to impersonation.return_to with the
+     * they're sent to impersonation.return_url with the
      * "impersonation-ended" status, and a JSON client gets a 409 saying so.
      * With nobody to go back to, the browser is signed out, and answered
      * as for any session that ended, for the reason it ended for in the

@@ -455,19 +455,19 @@ class Impersonation
     }
 
     /**
-     * Where starting goes: impersonation.redirect_to, or "home".
+     * Where starting goes: impersonation.redirect_url, or "home".
      */
     public function redirectTo(): string
     {
-        return url()->to(config('keyring.impersonation.redirect_to') ?? config('keyring.home'));
+        return url()->to(config('keyring.impersonation.redirect_url') ?? config('keyring.home'));
     }
 
     /**
-     * Where coming back goes: impersonation.return_to, or "home".
+     * Where coming back goes: impersonation.return_url, or "home".
      */
     public function returnTo(): string
     {
-        return url()->to(config('keyring.impersonation.return_to') ?? config('keyring.home'));
+        return url()->to(config('keyring.impersonation.return_url') ?? config('keyring.home'));
     }
 
     /**

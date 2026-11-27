@@ -406,8 +406,8 @@ return [
     | secret: turned off, it still counts in the sessions "sign out
     | everywhere else" says it ended, and what was done while impersonating,
     | like signing out, is still in the user's activity.
-    | Starting goes to "redirect_to" and stopping to "return_to": null for
-    | "home".
+    | Starting goes to "redirect_url". Stopping, or running out, goes back to
+    | "return_url". Either is "home" when null.
     |
     */
 
@@ -416,8 +416,8 @@ return [
         'show_in_sessions' => true,
         'show_in_activity' => true,
         'middleware' => ['keyring:aal2', 'keyring.fresh:15m'],
-        'redirect_to' => null,
-        'return_to' => null,
+        'redirect_url' => null,
+        'return_url' => null,
     ],
 
     /*

@@ -99,8 +99,8 @@
                 "keyring:aal2",
                 "keyring.fresh:15m"
             ],
-            "redirect_to": null,
-            "return_to": null
+            "redirect_url": null,
+            "return_url": null
         },
         "protected": [],
         "email_changes": {

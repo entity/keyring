@@ -412,8 +412,8 @@ describe('starting', function () {
         ])->assertHeader('Clear-Site-Data', '"cache", "storage"');
     });
 
-    it('goes to impersonation.redirect_to', function () {
-        config(['keyring.impersonation.redirect_to' => '/support/view']);
+    it('goes to impersonation.redirect_url', function () {
+        config(['keyring.impersonation.redirect_url' => '/support/view']);
         adminSignsIn();
 
         impersonate($this->user)->assertRedirect('/support/view');
@@ -612,8 +612,8 @@ describe('stopping', function () {
         $this->get('/billing')->assertOk()->assertSee('billing');
     });
 
-    it('answers json clients, and goes to impersonation.return_to', function () {
-        config(['keyring.impersonation.return_to' => '/admin/users']);
+    it('answers json clients, and goes to impersonation.return_url', function () {
+        config(['keyring.impersonation.return_url' => '/admin/users']);
         impersonating();
 
         stopImpersonating(json: true)->assertOk()->assertJson([
@@ -940,7 +940,7 @@ describe('stopping', function () {
     })->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
 
     it('has an inertia visit load the next page in full, starting and stopping', function () {
-        config(['keyring.impersonation.return_to' => '/admin/users']);
+        config(['keyring.impersonation.return_url' => '/admin/users']);
         adminSignsIn();
 
         $this->inertia()->post(route('keyring.impersonation.store', $this->user->getKey()))
