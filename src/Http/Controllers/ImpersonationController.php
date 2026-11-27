@@ -41,7 +41,7 @@ class ImpersonationController
     {
         $found = $this->keyring->provider()->retrieveById($user);
 
-        $this->impersonation->start($request, $found instanceof Model ? $found : $this->impersonation->refuseUnknown($user));
+        $this->impersonation->start($request, $found instanceof Model ? $found : $this->impersonation->refuseUnknown($request, $user));
 
         return $this->answer($request, 'impersonation-started', $this->impersonation->redirectTo());
     }

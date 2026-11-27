@@ -24,6 +24,7 @@ use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Login\Verification;
+use Keyring\Sessions\AnnouncingSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
@@ -57,7 +58,7 @@ use Throwable;
  * The user's own sign-in events don't fire, so nothing that listens for a
  * sign in (new device emails, risk, "last signed in") takes it for one.
  *
- * @phpstan-type Parked array{impersonator: string, type: string, name: ?string, session: string, user: string, user_type: string, remembered: bool, started_at: int, expires_at: int, password: ?string, parked: array<string, mixed>}
+ * @phpstan-type Parked array{impersonator: string, type: string, name: ?string, session: string, user: string, user_type: string, remembered: bool, started_at: int, expires_at: int, password: ?string, parked: array<string, mixed>, announced?: bool}
  */
 class Impersonation
 {
@@ -135,10 +136,14 @@ class Impersonation
 
         // Logged here rather than by a listener, ahead of the app's: one of
         // those that throws, sending an email say, can't leave it unlogged.
+        // A start that can't be logged takes its record back unannounced,
+        // on the driver underneath, as nobody used the session.
         try {
             $this->logStart($impersonator, $user);
         } catch (Throwable $e) {
-            rescue(fn () => $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($record->id)));
+            $registry = $this->sessions->registry();
+
+            rescue(fn () => ($registry instanceof AnnouncingSessionRegistry ? $registry->inner() : $registry)->revoke($record->id));
 
             throw $e;
         }
@@ -154,13 +159,14 @@ class Impersonation
     /**
      * Refuse starting as an ID nobody has: answered as one that may not be
      * impersonated, so the answer doesn't say which IDs have an account,
-     * and logged as not_found.
+     * and logged as not_found, on whoever is impersonating when someone
+     * is, as start() logs its refusals.
      *
      * @throws ImpersonationRefused
      */
-    public function refuseUnknown(string $id): never
+    public function refuseUnknown(Request $request, string $id): never
     {
-        $this->refused($this->keyring->user(), $id, 'not_found', as: 'not_allowed');
+        $this->refused($this->impersonator($request) ?? $this->keyring->user(), $id, 'not_found', as: 'not_allowed');
     }
 
     /**
@@ -195,7 +201,9 @@ class Impersonation
      *
      * The reason it ended for is the one given, unless it couldn't go back:
      * then ImpersonatorSessionEnded or Lost. It went back when the reason
-     * returns().
+     * returns(). ImpersonationEnded says whether the browser did, which it
+     * hasn't when handing it back throws before the session is on the
+     * impersonator's record.
      */
     public function end(Request $request, ImpersonationEndReason $reason): ImpersonationEndReason
     {
@@ -234,7 +242,9 @@ class Impersonation
 
         // It has ended by now, whatever the registry does next, so it's
         // announced, and logged, even when signing out or moving the record
-        // throws.
+        // throws. Once only: a sign-out the registry failed announced it.
+        $returned = false;
+
         try {
             if ($back === null) {
                 app(SignIn::class)->out($request, onlyThisBrowser: true);
@@ -242,6 +252,7 @@ class Impersonation
                 $this->switchTo($request, $back[0]);
                 $this->restore($request, $this->catchUp($parked['parked'])[0]);
                 $this->sessions->rebind($request, $back[1], $parked['remembered']);
+                $returned = true;
 
                 // A copy of the session from while impersonating would lead
                 // back here again with what was parked: a cookie session's, in
@@ -252,8 +263,8 @@ class Impersonation
                 $this->sessions->reregister($request);
             }
         } finally {
-            if ($impersonator !== null || $target !== null) {
-                ImpersonationEnded::dispatch($impersonator, $target, $reason, $back !== null);
+            if (($impersonator !== null || $target !== null) && ($parked['announced'] ?? false) !== true) {
+                ImpersonationEnded::dispatch($impersonator, $target, $reason, $returned);
             }
         }
 
@@ -279,6 +290,10 @@ class Impersonation
      * them, so their token is cycled when it can't be ended, as
      * Sessions::signedOut() cycles a user's for their own session. Then it
      * throws.
+     *
+     * The browser is signed out either way, so ImpersonationEnded fires
+     * either way, and once: what's parked notes it was announced, so the
+     * go that ends it later, in this request or the next, doesn't again.
      */
     public function signedOut(Request $request): void
     {
@@ -287,6 +302,8 @@ class Impersonation
         }
 
         $impersonator = $this->impersonatorFrom($parked);
+        $user = $this->userFrom($parked, null);
+        $announce = ($parked['announced'] ?? false) !== true && ($impersonator !== null || $user !== null);
 
         try {
             $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($parked['session']));
@@ -295,14 +312,18 @@ class Impersonation
                 rescue(fn () => $this->sessions->cycleRememberToken($impersonator));
             }
 
+            if ($announce) {
+                $this->noteAnnounced($request, $parked);
+
+                ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false);
+            }
+
             throw $e;
         }
 
         $this->forget($request);
 
-        $user = $this->userFrom($parked, null);
-
-        if ($impersonator !== null || $user !== null) {
+        if ($announce) {
             ImpersonationEnded::dispatch($impersonator, $user, ImpersonationEndReason::SignedOut, false);
         }
     }
@@ -670,6 +691,25 @@ class Impersonation
 
         // @phpstan-ignore return.type (only start() and touch() write it, and always whole)
         return is_array($parked) ? $parked : null;
+    }
+
+    /**
+     * Note on what's parked that its end was announced, in the session, when
+     * it still holds it, and on the request, as parked() reads them.
+     *
+     * @param  Parked  $parked
+     */
+    protected function noteAnnounced(Request $request, array $parked): void
+    {
+        $parked['announced'] = true;
+
+        if ($request->session()->has(self::KEY)) {
+            $request->session()->put(self::KEY, $parked);
+        }
+
+        foreach ([$request, request()] as $noted) {
+            $noted->attributes->set(self::KEY, $parked);
+        }
     }
 
     /**
