@@ -157,10 +157,13 @@ This is extra middleware for adding, renaming, and removing authenticators, endi
 ```php
 'authenticator_changes' => [
     'established_after' => '7d',
+    'skip_with_totp' => false,
 ],
 ```
 
 The `established_after` option sets how long the account must have had an authenticator before it's [established](authenticators.md#established-authenticators). Until then, a new passkey or security key doesn't make `noDowngrade()` ask for one. It also sets how long the account's sign-in methods stay [frozen](authenticators.md#frozen-sign-in-methods) after one is added, or after an established one or a set of recovery codes is removed or replaced. Setting it to `0` turns both off, so a stolen session that has just signed in could shut the owner out again. It's separate from `email_changes.established_after`.
+
+While the account is frozen, the owner can still make one change by proving, in the same request, a passkey or security key the account has had for `established_after` and since before the session signed in. See [Making a Change With an Established Key](authenticators.md#making-a-change-with-an-established-key). Set `skip_with_totp` to `true` to let an established authenticator app do it too. It's off because a six digit code can be phished as it's typed, and then the person phishing it could make the change.
 
 ```php
 'enrollment_url' => null,
@@ -173,6 +176,12 @@ This is where the `keyring.enrolled` middleware sends users who still need a sec
 ```
 
 You may list more routes that those users can still reach in the meantime, by route name. Use `*` as a wildcard, such as `['billing.*', 'support']`. The enrollment page, Keyring's own routes, signing out, email verification, and changing the password are always let through.
+
+```php
+'authenticators_url' => null,
+```
+
+This is your page where users see and remove their sign-in methods. The `authenticator_added` and `recovery_codes_generated` emails link to it, so an owner can remove a method they didn't add. A path is put after `APP_URL`, or the root from `Keyring::linkRootUsing()`, never the request's host. A full URL is used as it is. If the value is `null`, the emails have no link. See [Email Types](security-log-and-emails.md#email-types).
 
 ```php
 'password_change_url' => null,

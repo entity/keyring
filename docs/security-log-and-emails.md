@@ -309,11 +309,11 @@ The security notices, each sent to the user:
 |---|---|---|
 | `new_device` | A sign in from a new device. | `url`, the ["this wasn't me" link](devices-and-sessions.md#the-this-wasnt-me-link) |
 | `password_changed` | The password was changed or reset. | |
-| `authenticator_added` | A sign-in method was added. | `name` |
+| `authenticator_added` | A sign-in method was added. | `name`, and `url`, your page for sign-in methods ([`authenticators_url`](configuration.md#account-changes-and-enrollment)), when you set one |
 | `authenticator_removed` | A sign-in method was removed. | `name` |
 | `second_factor_failed` | Someone got the password right but failed the next factor. | |
 | `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
-| `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. This is also sent for the set that comes with a user's first extra sign-in method. | |
+| `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. This is also sent for the set that comes with a user's first extra sign-in method. | `url`, your page for sign-in methods, when you set one |
 | `account_locked` | Failed attempts got the password or a passkey refused until the password is reset. This happens when the account reaches [the cap on failures in a row](security.md#at-the-cap), or when [`limits.lock_after`](security.md#locking-until-a-reset) holds it. Browsers the account has signed in from may still get in. | `url`, the password reset form (the `password.request` route), when the application has one. `device` and `ip` are those of the attempt that locked the account. |
 | `suspicious_activity` | A [risk action](risk.md#actions) with `notify()` ran. | `reasons` |
 | `clone_suspected` | A passkey or security key looked cloned. | `name` |
@@ -322,11 +322,13 @@ The security notices, each sent to the user:
 
 Every notice is also passed `when` (the time as text, in the application's timezone), `at` (the same moment as a date, to format for the user's own timezone or language), the `device` and `ip` of the request that caused it, and `contact`, which is [your support contact](#a-support-contact). The copy of `email_change_reverted` sent to the new address leaves out the `device` and `ip`, since that address may belong to whoever took over the account.
 
+Most notices end by telling a user who didn't do it to change their password and check their sign-in methods. `authenticator_added` and `recovery_codes_generated` say more, since someone else may be signed in. The first says to remove the new method, sign out everywhere and change the password. The second says to sign out everywhere, change the password and remove any method they don't recognise. With [`authenticators_url`](configuration.md#account-changes-and-enrollment) set, both have a "Review your sign-in methods" button to that page. The owner can always remove a method that was added recently, even while the account's others are [frozen](authenticators.md#frozen-sign-in-methods). The link is built from `APP_URL`, never the request's host, like every [emailed link](security.md#emailed-links). It carries no token, and nothing happens until the owner is signed in on that page.
+
 Renaming a sign-in method, or choosing another one as the default, sends nothing. Neither change affects what can sign in to the account.
 
 The `name`, `device`, and `reasons` values can contain what a user or browser sent. For example, a key's name is whatever was typed. Keyring cuts each value to one line of at most 500 characters. It's still text that you need to escape wherever you show it. Keyring's classes pass it through `Keyring\Support\MailText::plain`, because Laravel reads mail lines as Markdown. Without that step, a name could add a link to a genuine security email.
 
-Keyring's notices share an abstract `Keyring\Notifications\SecurityNotice` class, which holds the constructor and the `via` and `toMail` methods. Each notice only defines its `subject`, its `intro`, and, when it has a button, its `action`. Notices are queued once any open database transaction commits, so a change that's rolled back is never announced.
+Keyring's notices share an abstract `Keyring\Notifications\SecurityNotice` class, which holds the constructor and the `via` and `toMail` methods. Each notice only defines its `subject`, its `intro`, and, when it has a button, its `action`. A notice may also override `ifNotYou`, the line that says what to do if it wasn't the user. Notices are queued once any open database transaction commits, so a change that's rolled back is never announced.
 
 ### A Support Contact
 

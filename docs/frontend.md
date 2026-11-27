@@ -290,28 +290,41 @@ await removeAuthenticator(added.authenticator.id)
 |---|---|
 | `beginEnrollment(factor, data?)` | `POST /user/authenticators/{factor}`. Resolves to `{ factor, enrollment }`. |
 | `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first. If the server rejects the response, the challenge is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes?, continue? }`, where `authenticator` is typed `Authenticator`: `factor`, `id`, `name`, `createdAt`, and `lastUsedAt`, along with any extras specific to the factor. |
-| `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests. |
+| `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests, apart from `proof`, which only goes with the first. |
 | `renameAuthenticator(id, name)` | `PATCH` with `name`. Resolves to `{ authenticator }`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. |
-| `removeAuthenticator(id, password?, { signOutOthers }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. |
+| `removeAuthenticator(id, password?, { signOutOthers, proof }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. `proof` comes from `proveWithKey()`. |
+| `proveWithKey(factor, { action, target })` | `POST /user/authenticators/{factor}/proof-options`, then the browser's ceremony. Resolves to a `FreezeProof`, `{ factor, credential }`, for the one change it was asked for. See below. |
+| `frozenChanges(error)` | The `FrozenChanges` a request was refused for, or `null` when it wasn't refused as frozen. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
-Removing an established authenticator, or replacing recovery codes, while the account's sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) throws a `KeyringRequestError` with a `422`. Show `error.errors.authenticator`, which says how long is left. `error.data.frozen` is a `FrozenChanges`, with the `reason` and an ISO 8601 `until`, for a page that formats the time itself:
+Removing an established authenticator, or replacing recovery codes, while the account's sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods) throws a `KeyringRequestError` with a `422`. Show `error.errors.authenticator`, which says how long is left. `error.data.frozen` is a `FrozenChanges`, with the `reason`, an ISO 8601 `until` for a page that formats the time itself, and `skip`. `frozenChanges(error)` reads it for you.
+
+`skip` lists the factors that could make the change now. When it names a passkey or security key, offer "Use your passkey to do this now". `proveWithKey()` asks for a challenge for that one change, runs the ceremony, and returns the proof to send the request again with. See [Making a Change With an Established Key](authenticators.md#making-a-change-with-an-established-key):
 
 ```ts
-import { KeyringRequestError, type FrozenChanges, removeAuthenticator } from '@keyringjs/keyring'
+import { frozenChanges, KeyringRequestError, proveWithKey, removeAuthenticator } from '@keyringjs/keyring'
 
 try {
   await removeAuthenticator(id)
 } catch (error) {
-  if (!(error instanceof KeyringRequestError) || !error.data?.frozen) {
+  const frozen = frozenChanges(error)
+
+  if (!(error instanceof KeyringRequestError) || frozen === null) {
     throw error
   }
 
-  const { until }: FrozenChanges = error.data.frozen
-  message.value = `${error.errors.authenticator[0]} (${new Date(until).toLocaleString()})`
+  message.value = `${error.errors.authenticator[0]} (${new Date(frozen.until).toLocaleString()})`
+  // Offer a button for this when frozen.skip has the user's key factor.
+  canUseKey.value = frozen.skip.includes('passkey')
 }
+
+// When they press it:
+const proof = await proveWithKey('passkey', { action: 'remove', target: id })
+await removeAuthenticator(id, undefined, { proof })
 ```
+
+For new recovery codes, prove `{ action: 'replace', target: 'recovery' }` and pass the proof to `beginEnrollment('recovery', { proof })`, or to `enroll()`. The confirm needs nothing more. Where the server allows an authenticator app (`skip_with_totp`), `skip` lists `totp`. Send `{ factor: 'totp', code }` as the proof instead, with no ceremony.
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them. If `continue` comes back too, it's the page the user was going to when Keyring sent them to enroll, and the account can now meet what sent them. Offer it as a "Continue" link once the codes are saved. See [Carrying On Afterwards](policies.md#carrying-on-afterwards).
 
@@ -420,7 +433,7 @@ configureRoutes({
 })
 ```
 
-The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `sessions`, and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `proofOptions`, `sessions`, and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
 
 ```ts
 configureRoutes({

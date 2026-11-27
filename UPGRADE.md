@@ -8,7 +8,7 @@ What counts as a change you'd need to act on is in the README's [What's Stable](
 
 ### Published Config
 
-If you published `config/keyring.php`, you may add `'pages' => true` and `'authenticator_changes' => ['established_after' => '7d']`. Leaving them out is the same.
+If you published `config/keyring.php`, you may add `'pages' => true`, `'authenticator_changes' => ['established_after' => '7d', 'skip_with_totp' => false]` and `'authenticators_url' => null`. Leaving them out is the same. Set `authenticators_url` to your page for sign-in methods, so the emails about a new one link there.
 
 ### Frozen Sign-In Methods
 
@@ -25,7 +25,7 @@ An authenticator is now [established](docs/authenticators.md#established-authent
 
 - `noDowngrade()` only asks for a passkey or security key once the account has an established one. A user who added their first key in the last 7 days can still sign in with their password and authenticator app until it's established.
 - A fresh verification only asks for a key that can't leave its device when that key is established.
-- An account's sign-in methods are [frozen](docs/authenticators.md#frozen-sign-in-methods) while it has an authenticator that isn't established, and for 7 days after it removes or replaces an established one, or recovery codes that had codes left. While frozen, removing an established authenticator and replacing recovery codes get a `422` on `authenticator`. A settings page that shows validation errors on `authenticator` shows the message, which says how long is left. JSON also has `frozen`, with `reason` and `until`.
+- An account's sign-in methods are [frozen](docs/authenticators.md#frozen-sign-in-methods) while it has an authenticator that isn't established, and for 7 days after it removes or replaces an established one, or recovery codes that had codes left. While frozen, removing an established authenticator and replacing recovery codes get a `422` on `authenticator`. A settings page that shows validation errors on `authenticator` shows the message, which says how long is left. JSON also has `frozen`, with `reason`, `until` and `skip`. When `skip` names a key factor, your page can offer to [make the change with that key](docs/authenticators.md#making-a-change-with-an-established-key), using `proveWithKey()` from `@keyringjs/keyring`.
 
 If your support tools remove authenticators or replace recovery codes for users, pass `ignoreFreeze: true` to `AuthenticatorChanges::remove()` or `add()`. A subclass that overrides either needs the new argument too.
 
