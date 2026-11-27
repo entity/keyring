@@ -8,9 +8,11 @@ use Illuminate\Database\Eloquent\Attributes\WithoutTimestamps;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Process\FakeInvokedProcess;
 use Illuminate\Process\InvokedProcess;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Sleep;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\Factor;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
@@ -18,11 +20,13 @@ use Keyring\Factors\WebAuthn;
 
 /**
  * The same factors in the test and in every worker, so both sides agree on
- * what each user can sign in with.
+ * what each user can sign in with, and any a race needs as well.
+ *
+ * @param  class-string<Factor>  ...$more
  */
-function useRaceFactors(): void
+function useRaceFactors(string ...$more): void
 {
-    Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class]);
+    Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, ...$more]);
 }
 
 /**
@@ -53,16 +57,21 @@ function outcomes(array $results, mixed $value): int
  * process, check each one is waiting for the lock rather than running ahead,
  * then let go and collect what each did.
  *
+ * @param  Model|list<Model>  $locked  the row, or rows on one connection, to hold
  * @param  list<list<string|int>>  $operations  worker.php arguments
  * @param  (Closure(): void)|null  $meanwhile  work to finish, holding the lock, before letting go
  * @param  int|null  $waiting  how many of them should get as far as the lock, when the rest are turned away before it
  * @return list<mixed>
  */
-function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null): array
+function contend(Model|array $locked, array $operations, ?Closure $meanwhile = null, ?int $waiting = null): array
 {
-    $connection = $locked->getConnection();
+    $locked = is_array($locked) ? $locked : [$locked];
+    $connection = $locked[0]->getConnection();
     $connection->beginTransaction();
-    $locked->newQuery()->lockForUpdate()->find($locked->getKey());
+
+    foreach ($locked as $model) {
+        $model->newQuery()->lockForUpdate()->find($model->getKey());
+    }
 
     $env = ['DB_CONNECTION' => $connection->getName(), 'DB_DATABASE' => $connection->getDatabaseName()];
 
@@ -116,4 +125,22 @@ function contend(Model $locked, array $operations, ?Closure $meanwhile = null, ?
 
         return json_decode(str($result->output())->afterLast('ready')->trim()->value(), true)['result'];
     }, $workers);
+}
+
+/**
+ * Run one operation to the end in a worker, as another request finishing
+ * while a race holds its lock, and what it did.
+ *
+ * @param  list<string|int>  $arguments  worker.php arguments
+ */
+function work(array $arguments): mixed
+{
+    $connection = DB::connection();
+    $result = Process::env(['DB_CONNECTION' => $connection->getName(), 'DB_DATABASE' => $connection->getDatabaseName()])
+        ->timeout(30)
+        ->run([PHP_BINARY, __DIR__.'/worker.php', ...array_map(strval(...), $arguments)]);
+
+    expect($result->successful())->toBeTrue($result->output().$result->errorOutput());
+
+    return json_decode(str($result->output())->afterLast('ready')->trim()->value(), true)['result'];
 }
