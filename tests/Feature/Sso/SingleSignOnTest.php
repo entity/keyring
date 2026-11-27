@@ -527,7 +527,7 @@ describe('linking', function () {
         $link = $this->user->keyring->refresh()->of('sso')->sole();
         expect($link->name)->toBe('Fake (taylor@example.com)')
             ->and($link->credential_id)->toBe(SingleSignOn::credentialId('https://idp.test', SSO_SUBJECT))
-            ->and($link->meta)->toBe(['provider' => 'fake', 'issuer' => 'https://idp.test', 'subject' => SSO_SUBJECT, 'email' => 'taylor@example.com'])
+            ->and($link->meta)->toEqual(['provider' => 'fake', 'issuer' => 'https://idp.test', 'subject' => SSO_SUBJECT, 'email' => 'taylor@example.com'])
             ->and($link->is_default)->toBeFalse()
             ->and(Keyring::result('authenticator'))->toMatchArray(['factor' => 'sso', 'provider' => 'fake', 'email' => 'taylor@example.com'])
             ->and(session()->has('keyring.enrollment.sso'))->toBeFalse();

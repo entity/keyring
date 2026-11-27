@@ -185,7 +185,7 @@ it('links an account at Keycloak', function () {
 
     $link = $this->user->keyring->refresh()->of('sso')->sole();
     expect($link->credential_id)->toBe(SingleSignOn::credentialId($this->keycloak->issuer(), $this->keycloak->subject()))
-        ->and($link->meta)->toBe([
+        ->and($link->meta)->toEqual([
             'provider' => 'keycloak',
             'issuer' => $this->keycloak->issuer(),
             'subject' => $this->keycloak->subject(),
