@@ -261,7 +261,7 @@ export function ImpersonationBanner() {
 
   return (
     <div role="status">
-      {impersonation.impersonator.name} is signed in as you.
+      You ({impersonation.impersonator.name}) are signed in as this user.
       <button onClick={() => router.delete(impersonation.stopUrl!)}>Stop impersonating</button>
     </div>
   )
