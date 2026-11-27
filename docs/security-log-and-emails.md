@@ -102,6 +102,8 @@ How long those lines are kept, and who can read them, is up to that channel. The
 | `link_refused` | warning | An emailed link was refused. It's linked to the user whose email change it was, when there is one. | `link` and `reason`, [below](#refused-links) |
 | `verification_refused` | critical | A sign in or step-up was refused at the end, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `skipped`, the steps |
 | `refusals_limited` | warning | The entries above this one stopped being written for a while. See [Refusals That Repeat](#refusals-that-repeat). | `type`, the entry type that was left out |
+| `impersonation_started` | notice | Someone signed in as another user. It's logged on both accounts. See [Impersonation](impersonation.md#security-log-and-events). | `impersonator` and `user` (the two accounts' IDs), `role` (`impersonator` or `impersonated`, for the entry's account) |
+| `impersonation_ended` | info | An impersonation ended. It's logged on both accounts, or on the user's alone once the impersonator has been deleted. | `impersonator`, `user`, `role`, `reason` (`stopped`, `expired`, `ended`, `impersonator_session_ended` or `signed_out`), `returned` (whether the browser went back to the impersonator's session) |
 
 A wrong password for an unknown account is logged as `factor_failed`, with no user.
 

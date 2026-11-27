@@ -264,11 +264,15 @@ Laravel keeps one "remember me" token per user. Changing it signs out every reme
       "signedInAt": "2026-11-08T09:12:00+00:00",
       "lastActiveAt": "2026-11-08T13:55:00+00:00",
       "expiresAt": "2026-12-08T09:12:00+00:00",
-      "current": true
+      "current": true,
+      "impersonated": false,
+      "impersonator": null
     }
   ]
 }
 ```
+
+`impersonated` is `true` for a session someone else is signed in to as the user, through [impersonation](impersonation.md#the-sessions-list), and `impersonator` is their name, or `null` once they've been deleted. The user can end it like any other. With `impersonation.show_in_sessions` off, it's left out of the list.
 
 `device` is the ID of the session's [device](#listing-and-revoking-devices). It's `null` when the session has no device or when devices are off, so a page can show sessions under their devices. `lastActiveAt` is kept to the minute. A session that has been revoked, has expired, has [idled out](#timeouts), or has moved to another record isn't listed.
 
@@ -451,7 +455,7 @@ Keyring calls `replace`, `revokeAll`, and `revokeDevice`, and it stores a new se
 
 | Method | Does |
 |---|---|
-| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime, or what a record was replaced by. Store every field, `origin` included: `$session->toArray()` has them all. |
+| `save($session)` | Stores a new `RegisteredSession`. It must never clear a revocation made in the meantime, or what a record was replaced by. Store every field, `origin` and the [impersonation](impersonation.md) fields (`impersonatorId`, `impersonatorType`, `impersonatorSession`) included: `$session->toArray()` has them all. |
 | `find($id)` | Returns the session, or `null`, with every field it was saved with. `RegisteredSession::fromArray()` reads what `toArray()` gave, and a record saved without `origin` comes back with none. A driver that loses `origin` gives a session a new handle each time it moves. |
 | `forUser($user)` | Returns the user's sessions that haven't expired, been revoked, or been replaced, most recent first. A session belongs to a user by more than its ID. Match on the record's `userType` (`RegisteredSession::typeOf($user)`, the connection and table the ID is one of) and its `userId`, here and in `revokeAll` and `revokeDevice`. Otherwise, two user models with the same IDs would share sessions. `$session->belongsTo($user)` checks both. |
 | `update($id, $changes)` | Changes only the named fields, such as `['lastActivityAt' => $now]` or `['assurance' => $level, 'expiresAt' => $at]`. Field names match those on `RegisteredSession`. `RegisteredSession::columns($changes)` turns them into snake case columns. Writing only these fields means a request can't write back a stale copy of the rest. |
@@ -726,6 +730,7 @@ The events are in `Keyring\Events`:
 | `RegisteredSessionEnded` | `handle`, `handles`, `userId`, `userType`, `guard`, `deviceId`, `endedAt`, `reason`. One for every registered session that ends. See [Hearing About Ended Sessions](#hearing-about-ended-sessions). |
 | `EveryoneSignedOut` | `at`. Every user's sessions ended at once. |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended), `handle` |
+| `ImpersonationStarted`, `ImpersonationEnded` | See [Impersonation](impersonation.md#security-log-and-events). |
 | `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as), `handle` |
 | `AccessRefused` | `user`, `resource` (`device`, `session`, `authenticator`, or `email_verification`), `id`. A request for a device, session or authenticator that isn't the user's, answered with a 404, or a verification link made for another account. |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`). A "this wasn't me" link that was refused. |

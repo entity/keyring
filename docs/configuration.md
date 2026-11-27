@@ -13,6 +13,7 @@
 - [Account Changes and Enrollment](#account-changes-and-enrollment)
 - [Devices](#devices)
 - [Sessions](#sessions)
+- [Impersonation](#impersonation)
 - [Protected Attributes and Email Changes](#protected-attributes-and-email-changes)
 - [Passwords](#passwords)
 - [Risk](#risk)
@@ -64,6 +65,7 @@ use Keyring\Features;
     // Features::manageAuthenticators(),
     // Features::devices(),
     // Features::emailChanges(),
+    // Features::impersonation(),
 ],
 ```
 
@@ -166,7 +168,7 @@ The `algorithms` option lists the signature algorithms that keys may use, in ord
 'changes_middleware' => ['keyring.fresh:15m'],
 ```
 
-This is extra middleware for adding, renaming, and removing authenticators, ending sessions, revoking devices, changing the password, and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default, these routes need a verification from the last 15 minutes, as [Step-Up](step-up.md#fresh-verification) explains.
+This is extra middleware for adding, renaming, and removing authenticators, ending sessions, revoking devices, changing the password, and starting an email change. It's applied on top of `auth:{guard}`, which every signed-in Keyring route already has, so don't add `auth` here. By default, these routes need a verification from the last 15 minutes, as [Step-Up](step-up.md#fresh-verification) explains. Whatever this says, they also refuse a browser that's [impersonating](impersonation.md#whats-refused-while-impersonating) the user.
 
 ```php
 'enrollment_url' => null,
@@ -270,6 +272,30 @@ The `locator` option is the class that works out a request's location. See [Devi
 | `sweep_limit` | The most sessions one run of the sweep announces again, and the most it ends, each. Anything that isn't a positive number is taken as `1000`, and it's at most `10000`. |
 
 See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
+
+## Impersonation
+
+```php
+'impersonation' => [
+    'lifetime' => '1h',
+    'show_in_sessions' => true,
+    'middleware' => ['keyring:aal2', 'keyring.fresh:15m'],
+    'redirect_to' => null,
+    'return_to' => null,
+],
+```
+
+These only matter with `Features::impersonation()` on, and once [`Keyring::allowImpersonationWhen()`](impersonation.md#who-may-impersonate-whom) says who may.
+
+| Key | Meaning |
+|---|---|
+| `lifetime` | How long an impersonation lasts before it ends by itself and goes back to the impersonator. It's never longer than `sessions.absolute`. See [The Time Limit](impersonation.md#the-time-limit). |
+| `show_in_sessions` | Whether the impersonated session is in the user's own [sessions list](impersonation.md#the-sessions-list), marked with who is in it, for the user to end. With `false` it's left out, but still ends with the rest of their sessions. |
+| `middleware` | What starting one takes, on top of being signed in and not impersonating already. By default, two factors proved in the last 15 minutes. |
+| `redirect_to` | Where starting goes. `null` is `home`. |
+| `return_to` | Where stopping, or running out, goes. `null` is `home`. |
+
+See [Impersonation](impersonation.md).
 
 ## Protected Attributes and Email Changes
 
@@ -465,6 +491,8 @@ The `Keyring\Facades\Keyring` facade is the entry point for everything you set i
 | `Keyring::unlock($user)` | Lets a locked-out user try again without a password reset. It lifts their risk lock, and clears the limits, locks, and failures in a row on the factors that can start a sign in. `Keyring::unlock($user, 'totp')` clears one factor's instead, such as a second factor that was refused at the cap. See [At the Cap](security.md#at-the-cap). |
 | `Keyring::allowSignInWhen($callback)` | Decides who may be signed in at all, such as accounts that aren't banned. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowEnrollmentWhen($callback)` | Decides who may add a sign-in method, in place of the verified email rule. See [Who May Enroll](authenticators.md#who-may-enroll). |
+| `Keyring::allowImpersonationWhen($callback)` | Decides who may sign in as whom. Nobody may until it's called. See [Who May Impersonate Whom](impersonation.md#who-may-impersonate-whom). |
+| `Keyring::impersonate($request, $user)` | Signs in as another user, from a controller of your own. `Keyring::stopImpersonating($request)` goes back. See [From Your Own Code](impersonation.md#from-your-own-code). |
 | `Keyring::linkRootUsing($callback)` | Where emailed links start, in place of `APP_URL`. Identity providers' [callback URL](sso.md#the-callback-url) starts there too. See [Emailed Links](security.md#emailed-links). |
 | `Keyring::sso()` | The identity providers in `sso.providers`. `extend($driver, $resolver)` registers a [driver of your own](sso.md#custom-drivers), and `start()` and `complete()` sign in with a provider [from your own routes](sso.md#signing-up-with-a-provider). |
 | `Keyring::recordIpsUsing($callback)` | What Keyring stores as a request's IP address. See [What's Stored](security-log-and-emails.md#whats-stored). |
@@ -508,4 +536,6 @@ The facade also answers questions about your setup. These are useful in your own
 | `Keyring::recordedIp($request)` | The request's IP address as Keyring stores it. |
 | `Keyring::allowsSignIn($user)` | Whether the application lets this user be signed in. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowsEnrollment($user)` | Whether the user may add a sign-in method. See [Who May Enroll](authenticators.md#who-may-enroll). |
+| `Keyring::allowsImpersonation($impersonator, $user)` | Whether one user may impersonate another. See [Who May Impersonate Whom](impersonation.md#who-may-impersonate-whom). |
+| `Keyring::impersonating()` | Whether the session is impersonating someone. `Keyring::impersonator()` is who, and `Keyring::impersonation()` what a [banner](impersonation.md#showing-a-banner) needs. |
 | `Keyring::authenticatorModel()` | The authenticator model's class. `deviceModel()`, `pendingChangeModel()`, `securityEventModel()`, and `failureCountModel()` do the same for theirs. |

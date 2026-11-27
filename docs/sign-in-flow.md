@@ -354,6 +354,8 @@ Keyring::signInAfterRegistering(fn (User $user, Request $request) => ! $user->ne
 
 The response also sends `Clear-Site-Data: "cache", "storage"`. It leaves cookies alone, so the device cookie survives and the next sign in isn't treated as a new device.
 
+Signing out while [impersonating](impersonation.md#signing-out-while-impersonating) signs the browser out of the impersonator's own session too, and leaves the user's "remember me" token alone.
+
 To sign the current user out the same way from your own code, use the `out` method on `Keyring\Login\SignIn`. It returns the user who was signed out, or `null`. Keep in mind that it doesn't dispatch `LoggedOut`. For example:
 
 ```php
@@ -571,7 +573,7 @@ Two statuses can say where the user was going when Keyring sent them away. That 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password`, and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out`, `sso-cancelled` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `impersonating`, `impersonation-ended`, `impersonation-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out`, `sso-cancelled` and `verification-link-sent`.
 
 You can swap it the same way as the others. Your class receives the same named arguments:
 

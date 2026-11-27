@@ -8,7 +8,7 @@ What counts as a change you'd need to act on is in the README's [What's Stable](
 
 ### Published Config
 
-If you published `config/keyring.php`, you may add `'pages' => true` and the `sso` section. Leaving them out is the same.
+If you published `config/keyring.php`, you may add `'pages' => true`, the `sso` section, and the `impersonation` section. Leaving them out is the same.
 
 ### Single Sign-On Routes
 
@@ -35,6 +35,21 @@ Confirming through Keyring now sets Laravel's `auth.password_confirmed_at` to th
 `StepUp::unlessMet()` and `meets()` with both a level and a moment ask for the two in turn, the level first, when the account can't freshly prove the level, rather than sending the user to enroll.
 
 Laravel's `Failed` event now only takes the username from the request for a factor whose `identificationRules()` ask for it, such as the password. For another, such as a passkey nobody has, its credentials hold `null` for the username unless the user was found.
+
+### Impersonation
+
+Impersonation is a new feature, off until you add `Features::impersonation()` and register `Keyring::allowImpersonationWhen()`. See [Impersonation](docs/impersonation.md), which also covers moving from `lab404/laravel-impersonate`.
+
+Before you turn it on with the `database` session driver, run `keyring:install` to publish the new `*_add_impersonation_to_keyring_sessions_table.php` migration, then `php artisan migrate`. It adds three nullable columns. Nothing else writes them, so the upgrade itself needs no migration, and the `cache` driver never does.
+
+With the feature on, Keyring registers `POST /impersonate/{user}` and `POST|DELETE /impersonate`. A route of your own at either path, such as an impersonation package's, needs to move or go first.
+
+A few things change whether or not you turn it on:
+
+- Each session in `GET /user/sessions`, and in `Sessions::list()`, has two new keys, `impersonated` and `impersonator`. Code that compares whole entries, such as a test with `assertExactJson`, needs them.
+- `SessionEndReason` has a new case, `ImpersonationEnded`. A `match` over it with no `default` needs an arm for it.
+- `RegisteredSession` has three new constructor arguments and properties after `origin`, `impersonatorId`, `impersonatorType`, and `impersonatorSession`, and `toArray()` has `impersonator_id`, `impersonator_type`, and `impersonator_session`, which `fromArray()` reads as `null` when they're missing. A [driver of your own](docs/devices-and-sessions.md#writing-a-driver) that stores `toArray()` and reads it back with `fromArray()` needs no change. One that writes the array into a table of its own needs the three columns once anyone impersonates. `withoutIds()` blanks `impersonatorSession` too.
+- `AuthenticateSession` has a new constructor argument, `Impersonation $impersonation`. A subclass with a constructor of its own needs it too.
 
 ### Pages Asked For With JSON or an XHR
 

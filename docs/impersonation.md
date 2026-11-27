@@ -1,0 +1,342 @@
+# Impersonation
+
+- [Introduction](#introduction)
+- [Turning It On](#turning-it-on)
+- [Who May Impersonate Whom](#who-may-impersonate-whom)
+- [Routes](#routes)
+    - [Starting](#starting)
+    - [Stopping](#stopping)
+- [From Your Own Code](#from-your-own-code)
+- [What Happens to the Sessions](#what-happens-to-the-sessions)
+    - [Going Back](#going-back)
+    - [Signing Out While Impersonating](#signing-out-while-impersonating)
+- [What's Refused While Impersonating](#whats-refused-while-impersonating)
+    - [Your Own Routes](#your-own-routes)
+- [Showing a Banner](#showing-a-banner)
+- [The Time Limit](#the-time-limit)
+- [The Sessions List](#the-sessions-list)
+- [Security Log and Events](#security-log-and-events)
+- [Migrating From Another Package](#migrating-from-another-package)
+
+## Introduction
+
+Impersonation lets someone, usually support staff or an administrator, sign in as another user to see the application as they do, then come back to their own account. Keyring does it with its own [session registry](devices-and-sessions.md#the-session-registry) rather than by editing Laravel's session by hand:
+
+- Nobody may impersonate anyone until your application says who may.
+- Starting is a `POST` that needs two factors proved in the last 15 minutes.
+- The impersonated session is a session of its own, on a new session ID. Nothing the impersonator proved carries over, and nothing can be proved as the user while it lasts.
+- The impersonator's own session is parked, not ended, and their "remember me" cookies are left as they are. Coming back takes that session still being good. Otherwise the browser is signed out.
+- It ends by itself after an hour.
+- While it lasts, Keyring refuses every change to how the user signs in, and you can refuse your own routes the same way.
+- The start and the end are logged on both accounts, with why it ended.
+
+## Turning It On
+
+Add `Features::impersonation()` to the features in `config/keyring.php`:
+
+```php
+'features' => [
+    // ...
+    Features::impersonation(),
+],
+```
+
+On the `database` session registry driver, run the migration that adds three columns to `keyring_sessions` for it. `keyring:install` publishes it, and adds only the migrations you don't have yet:
+
+```bash
+php artisan keyring:install
+php artisan migrate
+```
+
+The columns are only written for an impersonated session, so nothing else needs them. The `cache` driver needs no migration.
+
+## Who May Impersonate Whom
+
+With the feature on, impersonation is still refused for everyone until you register a callback, usually in your `KeyringServiceProvider`. It's given the impersonator, then the user they want to sign in as, and only `true` lets them:
+
+```php
+use App\Models\User;
+use Keyring\Facades\Keyring;
+
+Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => $impersonator->isAdmin() && ! $user->isAdmin());
+```
+
+Whatever the callback says, Keyring always refuses:
+
+- impersonating yourself,
+- an account Keyring's guard wouldn't load, such as one of another user model,
+- a user the application doesn't let sign in ([`Keyring::allowSignInWhen`](sign-in-flow.md#who-may-sign-in)),
+- starting while already impersonating someone. It's one at a time.
+
+`Keyring::allowsImpersonation($impersonator, $user)` asks all of that but the last, for a button that only shows when it would work:
+
+```blade
+@if (Keyring::allowsImpersonation(auth()->user(), $user))
+    <form method="POST" action="{{ route('keyring.impersonation.store', $user) }}">
+        @csrf
+        <button>Sign in as {{ $user->name }}</button>
+    </form>
+@endif
+```
+
+## Routes
+
+| Method | URI | Name | Middleware | Does |
+|---|---|---|---|---|
+| `POST` | `/impersonate/{user}` | `keyring.impersonation.store` | `auth:{guard}`, `keyring.not-impersonating`, `impersonation.middleware`, `keyring` limiter | Signs in as the user with that ID. |
+| `POST`, `DELETE` | `/impersonate` | `keyring.impersonation.destroy` | `auth:{guard}` | Stops, and goes back. |
+
+Both are only registered with `Features::impersonation()` on. They sit in Keyring's route group, so they have the `web` middleware and its CSRF check. Neither answers `GET`, so a link or an image on a page can't start or stop one.
+
+### Starting
+
+`{user}` is the user's ID, as Keyring's guard loads them. An ID nobody has gets the same `403` as a user who may not be impersonated, so the answer doesn't say which IDs have an account.
+
+The route takes `impersonation.middleware`, which is `['keyring:aal2', 'keyring.fresh:15m']` by default: the impersonator has to have proved two factors, the second a possession factor or a passkey, in the last 15 minutes. One who hasn't is sent to confirm, as on any [step-up](step-up.md) route, and one without a second factor is sent to enroll.
+
+A refusal is a `403`, with Laravel's `{"message": "You can't sign in as that user."}` for JSON clients. Otherwise the answer is a [status response](sign-in-flow.md#status-responses) with `impersonation-started`, to `impersonation.redirect_to` (`home` when it's `null`). A JSON client gets `{"status": "impersonation-started", "message": "...", "redirect": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, so nothing the browser cached for the impersonator stays for the user's pages, and the other way round when stopping.
+
+### Stopping
+
+`POST` or `DELETE /impersonate` stops, so a plain form works as well as a `DELETE` from JavaScript. It answers with `impersonation-ended`, to `impersonation.return_to` (`home` when it's `null`). If the impersonator's own session ended meanwhile, the browser is signed out instead, and the answer is the same as for any session Keyring ended: back to the login page with the `signed-out` status, or a `401` for JSON clients. A browser that isn't impersonating anyone gets a `404`.
+
+```blade
+<form method="POST" action="{{ route('keyring.impersonation.destroy') }}">
+    @csrf
+    <button>Back to my account</button>
+</form>
+```
+
+From the [browser package](frontend.md):
+
+```ts
+import { impersonate, stopImpersonating } from '@keyringjs/keyring'
+
+await impersonate(user.id)     // { status: 'impersonation-started', redirect: '/dashboard' }
+await stopImpersonating()      // { status: 'impersonation-ended', redirect: '/dashboard' }
+```
+
+Load the page in full afterwards, at the `redirect` the answer gives, so nothing on the page is left from the other account.
+
+## From Your Own Code
+
+The routes call the same methods you can, for a controller of your own:
+
+```php
+use Keyring\Exceptions\ImpersonationRefused;
+use Keyring\Facades\Keyring;
+
+Route::post('/admin/users/{user}/impersonate', function (Request $request, User $user) {
+    Keyring::impersonate($request, $user);   // throws ImpersonationRefused
+
+    return redirect('/dashboard');
+})->middleware(['auth', 'keyring.not-impersonating', 'keyring:aal2', 'keyring.fresh:15m']);
+
+Route::delete('/admin/impersonation', function (Request $request) {
+    $impersonator = Keyring::stopImpersonating($request);   // null when it signed out instead
+
+    return $impersonator === null ? redirect('/login') : redirect('/admin/users');
+})->middleware('auth');
+```
+
+`Keyring::impersonate()` checks who may, but not how the request got there: keep it to a `POST` with the middleware above, as Keyring's route does. `ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`. Its `reason` says why: `not_allowed` (the feature is off, the callback said no or was never registered, the user may not sign in, or the guard wouldn't load them), `self`, `impersonating`, or `unregistered` (the impersonator's session has no record in the registry to come back to). `Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated.
+
+These answer questions about the current request:
+
+| Method | Returns |
+|---|---|
+| `Keyring::impersonating()` | Whether the session is impersonating someone. |
+| `Keyring::impersonator()` | Who is, as your user model, or `null`. It's `null` too once they've been deleted. |
+| `Keyring::impersonation()` | What a [banner](#showing-a-banner) needs, or `null`. |
+
+`Keyring::user()` and `Auth::user()` are the impersonated user throughout.
+
+## What Happens to the Sessions
+
+Starting gives the browser a new session ID, and a session record of its own for the user. That record:
+
+- names the impersonator and the record of their own session,
+- proved nothing, so its level is none, whatever the impersonator had proved,
+- is never remembered, and is on no device,
+- lasts no longer than `impersonation.lifetime`,
+- doesn't end any of the user's other sessions to keep them to `sessions.max`.
+
+The session keeps nothing the impersonator's had for Keyring: what they proved, a sign in or confirm in progress, Laravel's `auth.password_confirmed_at`, and the password hash Laravel's `auth.session` middleware compares. The rest of your application's session data is left as it is. Keyring doesn't call `Auth::login()`, so Laravel's `Login` event and Keyring's `Authenticated` don't fire for the user. Nothing that listens for a sign in, such as new device emails, risk signals, or a "last signed in" column of your own, takes it for one. Risk signals aren't assessed on the impersonated session's requests either.
+
+The impersonator's own session isn't ended. Its record stays good, and while the impersonator is busy it's kept from idling out along with the impersonated one. Their "remember me" cookies aren't touched. What it had proved is kept aside in the session, where nothing reads it until they come back.
+
+### Going Back
+
+Stopping, or the [time limit](#the-time-limit), ends the impersonated session's record and goes back to the impersonator's, on a new session ID, as long as:
+
+- the impersonator still exists, and may still sign in,
+- their session's record is still good: not revoked, not expired, and not idled out.
+
+They come back with what their own session had proved, under its own limits. The time spent impersonating counts as time their session was idle for its levels, so an AAL2 that had less than its idle limit left lapses as it would have, and the next `keyring:aal2` route asks for it again. Laravel's `password.confirm` asks again too. If their session had ticked "remember me", it still has.
+
+If any of that no longer holds, the browser is signed out, and the impersonator's session ends with it. That includes the impersonator's own session being ended from somewhere else while they were impersonating, such as by "sign out everywhere" on another browser. The next request notices and signs out.
+
+### Signing Out While Impersonating
+
+Signing out with Keyring's `POST /logout` while impersonating signs the browser out of both: the impersonated session, and the impersonator's parked one, since nobody can come back to it now. The user's "remember me" token is left alone, so the user's own remembered browsers aren't signed out.
+
+Your application's own `Auth::logout()` ends both sessions the same way. But Laravel's guard changes the user's "remember me" token whenever it logs out, which signs out every other browser where the user ticked "remember me", so use Keyring's sign-out, or `Auth::logoutCurrentDevice()`, while impersonating.
+
+## What's Refused While Impersonating
+
+Keyring refuses all of these with a `403`, and `{"status": "impersonating", "message": "..."}` for JSON clients:
+
+- changing the password,
+- changing the email address, or cancelling a change,
+- adding, confirming, renaming, and removing authenticators,
+- ending sessions and devices, "sign out everywhere else" included,
+- confirming who they are: the confirm page, its challenges, and the identity provider confirm,
+- starting another impersonation.
+
+Step-up can't be met either. A `keyring:{level}` or `keyring.fresh` route the session hasn't already met answers with the same `403`, rather than sending the impersonator to a confirm page that would refuse them. The impersonated session starts having proved nothing, so in practice that's every such route. A route with `keyring.enrolled`, or a user [held for a new password](protected-changes.md#requiring-a-password-change), lets the impersonator through, since only the user can do what those ask.
+
+Listing the user's sessions and devices still works, as does signing out.
+
+### Your Own Routes
+
+Put `keyring.not-impersonating` on the routes of your own that only the user should use, like deleting the account, changing billing details, or creating API tokens:
+
+```php
+Route::delete('/account', [AccountController::class, 'destroy'])
+    ->middleware(['auth', 'keyring.not-impersonating', 'keyring.fresh:5m']);
+```
+
+It answers with the same `403`, and lets everyone else through.
+
+## Showing a Banner
+
+`Keyring::impersonation()` gives what a page needs to say who is impersonating, with a way to stop, or `null` when nobody is. It's read from the session, so it costs no query. Share it through your Inertia middleware:
+
+```php
+use Keyring\Facades\Keyring;
+
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'impersonation' => fn () => Keyring::impersonation($request),
+    ];
+}
+```
+
+```json
+{
+  "impersonator": { "id": "1", "name": "Ada Admin" },
+  "startedAt": "2026-11-27T09:00:00+00:00",
+  "expiresAt": "2026-11-27T10:00:00+00:00",
+  "stopUrl": "https://example.com/impersonate"
+}
+```
+
+The name is the impersonator's `name` attribute, or their username without one. The browser package types it as `Impersonation`:
+
+```tsx
+import { router, usePage } from '@inertiajs/react'
+import type { Impersonation } from '@keyringjs/keyring'
+
+export function ImpersonationBanner() {
+  const { impersonation } = usePage<{ impersonation: Impersonation | null }>().props
+
+  if (!impersonation) return null
+
+  return (
+    <div role="status">
+      {impersonation.impersonator.name} is signed in as you.
+      <button onClick={() => router.delete(impersonation.stopUrl!)}>Stop impersonating</button>
+    </div>
+  )
+}
+```
+
+In Blade:
+
+```blade
+@if ($impersonation = Keyring::impersonation())
+    <div role="status">
+        Signed in as {{ auth()->user()->name }}.
+        <form method="POST" action="{{ route('keyring.impersonation.destroy') }}">
+            @csrf
+            <button>Back to my account</button>
+        </form>
+    </div>
+@endif
+```
+
+## The Time Limit
+
+An impersonation ends by itself `impersonation.lifetime` after it started, an hour by default. It's a [duration](configuration.md#durations), and never longer than `sessions.absolute`. On the next request after that, the [session middleware](devices-and-sessions.md#the-session-middleware) ends it and goes back to the impersonator's session, as stopping does.
+
+Left unused for `sessions.idle`, it ends sooner. The impersonator's own session has then gone unused as long, so unless it ticked "remember me", which gives it `sessions.remember_idle`, it has idled out too, and the browser is signed out. A page visit is sent to `impersonation.return_to` with the `impersonation-ended` status. An Inertia visit is told to load that page in full, and a JSON request gets a `409` with `{"status": "impersonation-ended", "message": "...", "redirect": "..."}`, since what it asked for was the user's.
+
+## The Sessions List
+
+With `impersonation.show_in_sessions` on, which is the default, the impersonated session is in the user's own [sessions list](devices-and-sessions.md#listing-and-ending-sessions), marked as such and with the impersonator's name:
+
+```json
+{
+  "id": "9f2c41d0...",
+  "name": "Firefox on Windows",
+  "ip": "203.0.113.7",
+  "device": null,
+  "remembered": false,
+  "signedInAt": "2026-11-27T09:00:00+00:00",
+  "lastActiveAt": "2026-11-27T09:12:00+00:00",
+  "expiresAt": "2026-11-27T10:00:00+00:00",
+  "current": false,
+  "impersonated": true,
+  "impersonator": "Ada Admin"
+}
+```
+
+The user can end it from there, like any of their sessions. The impersonator's next request then goes back to their own session. `impersonator` is `null` once the impersonator has been deleted.
+
+With `show_in_sessions` off, it's left out of the user's list. It's still one of their sessions: "sign out everywhere else", a password change, or anything else that ends all their sessions ends it too.
+
+## Security Log and Events
+
+Each start and end is logged on both accounts, as `impersonation_started` and `impersonation_ended`. Both entries carry `impersonator` and `user`, the two accounts' IDs, and `role`, which is `impersonator` or `impersonated` for the account the entry is on. An end also has `reason` and `returned`, which says whether the browser went back to the impersonator's session. Once the impersonator has been deleted, the end is only logged on the user's account, with a `null` `impersonator`. See [Entry Types](security-log-and-emails.md#entry-types).
+
+The reasons are the `Keyring\Enums\ImpersonationEndReason` enum:
+
+| Reason | When |
+|---|---|
+| `stopped` | The impersonator stopped. |
+| `expired` | It ran for `impersonation.lifetime`, or its session idled out. |
+| `ended` | Its session was ended some other way: by the user from their sessions list, by signing out everywhere, a password change, a risk response, or the user no longer being allowed to sign in. |
+| `impersonator_session_ended` | There was nobody to go back to: the impersonator's session had ended, or they were deleted or may no longer sign in. The browser was signed out. |
+| `signed_out` | The browser signed out while impersonating. |
+
+Every reason but the last two goes back, as long as the impersonator's session is still good. When it isn't, the reason is `impersonator_session_ended`.
+
+Keyring dispatches `ImpersonationStarted` (`impersonator`, `user`) and `ImpersonationEnded` (`impersonator`, which is `null` once deleted, `user`, `reason`, and `returned`). `ImpersonationEnded` fires in the request of the browser that was impersonating, when it stops or notices it has ended. An impersonation whose browser never comes back isn't announced by it, but its session's `RegisteredSessionEnded` still is, by the [sweep](devices-and-sessions.md#sweeping-ended-sessions) if nothing else, with the `expired` reason. The records an impersonation ends itself are announced with `impersonation_ended`. See [Events](events.md#sessions-and-devices).
+
+No email is sent by default. To tell users, listen for `ImpersonationStarted` and send your own. To keep the entries out of [`Keyring::activity`](security-log-and-emails.md#showing-recent-activity), add both types to `security_log.unlisted`, but note that hides them from the impersonator's activity too.
+
+## Migrating From Another Package
+
+From `lab404/laravel-impersonate`, or `stechstudio/filament-impersonate` and Nova's impersonation, which build on the same idea:
+
+| Before | With Keyring |
+|---|---|
+| `canImpersonate()` and `canBeImpersonated()` on the model | One `Keyring::allowImpersonationWhen()` callback, given both. Nobody may until it's registered. |
+| `Route::impersonate()`, with `GET /impersonate/take/{id}` and `GET /impersonate/leave` | `POST /impersonate/{user}` and `POST` or `DELETE /impersonate`, which need a fresh second factor to start. |
+| `$manager->take($from, $to)` and `$manager->leave()` | `Keyring::impersonate($request, $user)` and `Keyring::stopImpersonating($request)` |
+| `isImpersonating()`, `@impersonating` | `Keyring::impersonating()` |
+| `$manager->getImpersonatorId()` | `Keyring::impersonator()?->getKey()` |
+| The `impersonate.protect` middleware | `keyring.not-impersonating` |
+| `TakeImpersonation` and `LeaveImpersonation` events | `ImpersonationStarted` and `ImpersonationEnded` |
+| No time limit | `impersonation.lifetime`, an hour by default |
+
+Some things work differently:
+
+- Going back restores the impersonator's own session, and only while it's still good. The packages above sign the impersonator back in by their ID alone, and edit the password hash Laravel keeps in the session by hand.
+- Nothing the impersonator proved carries over, and the impersonated session can't step up, so routes behind `keyring:aal2` or `keyring.fresh` are refused while impersonating.
+- Keyring's own security changes are refused while impersonating, without any middleware of yours.
+- Both accounts' security logs say who impersonated whom, and why it ended.
+
+Take out the package's routes, its trait, and its middleware, register the callback, and swap its Blade directives and route names for Keyring's. Anyone impersonating when you deploy is left signed in as the user, on a session Keyring doesn't know is impersonated, until they sign out.

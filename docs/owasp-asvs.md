@@ -287,7 +287,7 @@ Everything in Level 2, and:
 | 7.4.2 Sessions end when an account is disabled or deleted | 1 | Partly | Deleting a user revokes their sessions. Disabling one is your app's flag, read by [`Keyring::allowSignInWhen()`](sign-in-flow.md#who-may-sign-in). While the flag is set, no session works, and the first request one of the account's signed-in sessions makes ends every session the account has. A refused sign-in attempt ends nothing. A session only finds out when it makes a request, though, so if none does before the account is let back in, they all still work. Call `app(Sessions::class)->signOutEverywhere($user)` as you set your flag to end them there and then. |
 | 7.4.3 The option to end other sessions after a factor changes | 2 | Met | A password change ends the other sessions unless you tell it not to. A reset ends them all, and an applied email change ends the others. Adding or removing a sign-in method, or making new recovery codes, ends them when the request sends `sign_out_others`. `DELETE /user/sessions` is always there. Offer the choice on your settings page. |
 | 7.4.4 Sign out is easy to find on every signed-in page | 2 | Yours | Put a button that posts to `/logout` in your layout. |
-| 7.4.5 Administrators can end a user's sessions, or everyone's | 2 | Met | `php artisan keyring:sign-out {user}` ends one user's sessions, and `--all` ends everyone's. From code, use `Sessions::signOutEverywhere($user)` and `SessionRegistry::revokeEveryone()`. See [For Administrators](devices-and-sessions.md#for-administrators). |
+| 7.4.5 Administrators can end a user's sessions, or everyone's | 2 | Met | `php artisan keyring:sign-out {user}` ends one user's sessions, and `--all` ends everyone's. From code, use `Sessions::signOutEverywhere($user)` and `SessionRegistry::revokeEveryone()`. Either also ends an [impersonation](impersonation.md) of the user, and ending the impersonator's own sessions ends theirs on its next request. See [For Administrators](devices-and-sessions.md#for-administrators). |
 
 #### V7.5 Defenses Against Session Abuse
 
@@ -458,7 +458,7 @@ Whatever you aim for, these are outside what a package can do:
 - **Your mail provider.** Verification links, reset links, and security notices are only as private and as prompt as the mail that carries them. Its bounce and delivery reports sit outside the request, where Keyring can't make two answers look alike.
 - **Your session and cache stores.** A server-side session driver, and a rate limiter store that doesn't lose its keys. The per-minute limits, their locks, sent codes, and answered WebAuthn challenges are kept there. Failures in a row are in your database.
 - **Your documentation.** ASVS asks for your password word list, your session timeouts, and your sign-in pathways in writing.
-- **Your administrators.** Who may run `keyring:sign-out`, send reset links, or remove a lost authenticator, and what a user must prove first.
+- **Your administrators.** Who may run `keyring:sign-out`, send reset links, remove a lost authenticator, or [impersonate](impersonation.md) a user (`Keyring::allowImpersonationWhen()`), and what a user must prove first.
 - **A second address.** NIST asks for two notification addresses and two recovery addresses. Keyring has the one on your user model.
 - **Bot checks.** A CAPTCHA or a challenge in front of your forms, if you want one.
 - **Identity providers.** Registering your app with them and keeping its secrets, and anything about the provider's own session. Keyring's [single sign-on](sso.md) takes the sign in from there.
