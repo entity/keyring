@@ -92,7 +92,7 @@ it('holds a user on the change-password page until they choose a new password', 
     $this->post('/settings/password')->assertOk();
     $this->inertia()->get(route('keyring.confirm.challenge'))->assertOk()->assertJsonPath('component', 'auth/confirm');
     $this->flushHeaders();
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertForbidden();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertForbidden();
 
     chooseNewPassword();
 
@@ -325,7 +325,7 @@ describe('as a risk response', function () {
     it('does nothing to an account that signed in without a password', function () {
         $key = new VirtualAuthenticator;
         $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
         $this->post('/logout');
 
@@ -390,7 +390,7 @@ describe('as a risk response', function () {
         it('looks at no password sent along with a sign in that didn\'t use one', function () {
             $key = new VirtualAuthenticator;
             $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-            $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+            $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
             $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
             $this->post('/logout');
 

@@ -61,7 +61,7 @@ function attestationOptions(string $factor = 'security-key'): array
     test()->actingAs(test()->user);
     $keys === [] ? test()->withAssurance(Assurance::AAL2) : test()->verifiedWith(...$keys);
 
-    return test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
+    return test()->postJson(route('keyring.authenticators.store', $factor), ['password' => 'password'])->assertOk()->json('enrollment.options');
 }
 
 /**
@@ -413,7 +413,7 @@ it('will not take a list of aaguids without checking attestation', function () {
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->withoutExceptionHandling();
 
-    expect(fn () => $this->postJson(route('keyring.authenticators.store', 'security-key')))
+    expect(fn () => $this->postJson(route('keyring.authenticators.store', 'security-key'), ['password' => 'password']))
         ->toThrow(LogicException::class, 'without checking attestation');
 });
 

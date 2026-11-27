@@ -14,8 +14,11 @@ export function isWebAuthn(enrollment: Record<string, any>): boolean {
 
 /**
  * Start enrolling: returns what to show (a QR code, recovery codes...).
- * New recovery codes replace the old ones, so while the account is frozen
- * they need `proof` in `data` (see `proveWithKey()`).
+ * Everything the server could ask for goes here, never with the confirm:
+ * `password` when the account has no established second factor yet (it
+ * fails with an error on `password` without it), and `proof` (see
+ * `proveWithKey()`) when it replaces recovery codes or a factor the user
+ * has one of while the account is frozen.
  */
 export function beginEnrollment(factor: string, data: Record<string, unknown> = {}) {
   return json<Enrollment>('POST', routes.enroll(factor), data)
@@ -23,6 +26,8 @@ export function beginEnrollment(factor: string, data: Record<string, unknown> = 
 
 /**
  * Finish enrolling. WebAuthn factors run the browser ceremony for you.
+ * When it's refused for the freeze (see `frozenChanges()`), the enrollment
+ * is spent: begin again, with a `proof`.
  */
 export async function confirmEnrollment(factor: string, enrollment: Record<string, any>, data: Record<string, unknown> = {}) {
   const payload = isWebAuthn(enrollment)
@@ -34,18 +39,23 @@ export async function confirmEnrollment(factor: string, enrollment: Record<strin
 
 /**
  * Begin and finish in one go, for factors that need no input in between
- * (passkeys, security keys, recovery codes). A `proof` goes with the
- * beginning only, which the server remembers it for.
+ * (passkeys, security keys, recovery codes). A `password` and a `proof` go
+ * with the beginning only, which the server remembers them for.
  */
 export async function enroll(factor: string, data: Record<string, unknown> = {}) {
   const { enrollment } = await beginEnrollment(factor, data)
-  const { proof: _, ...rest } = data
+  const { proof: _proof, password: _password, ...rest } = data
 
   return { enrollment, ...(await confirmEnrollment(factor, enrollment, rest)) }
 }
 
-export function renameAuthenticator(id: string, name: string) {
-  return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { name })
+/**
+ * Rename an authenticator. While the account's sign-in methods are frozen,
+ * renaming an established one fails with a `422` holding `frozen`, unless
+ * it comes with `proof` from `proveWithKey()` for `{ action: 'rename' }`.
+ */
+export function renameAuthenticator(id: string, name: string, { proof }: { proof?: FreezeProof } = {}) {
+  return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { name, ...(proof !== undefined && { proof }) })
 }
 
 export function makeDefault(id: string) {

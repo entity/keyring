@@ -239,6 +239,23 @@ describe('enrolling', () => {
     expect(requests[1].body).toEqual({})
   })
 
+  test('sends the password for a first second factor with the beginning only', async () => {
+    answers.push({ status: 200, body: { factor: 'recovery', enrollment: { codes: ['a'] } } }, { status: 200, body: { authenticator: { id: 'r1' } } })
+
+    await enroll('recovery', { password: 'secret', name: 'Codes' })
+
+    expect(requests[0].body).toEqual({ password: 'secret', name: 'Codes' })
+    expect(requests[1].body).toEqual({ name: 'Codes' })
+  })
+
+  test('renames a frozen authenticator with a proof', async () => {
+    answers.push({ status: 200, body: { authenticator: { id: 'a1', name: 'Laptop' } } })
+
+    await renameAuthenticator('a1', 'Laptop', { proof: { factor: 'totp', authenticator: 'a2', code: '123456' } })
+
+    expect(requests[0].body).toEqual({ name: 'Laptop', proof: { factor: 'totp', authenticator: 'a2', code: '123456' } })
+  })
+
   test('renames an authenticator and makes one the default', async () => {
     answers.push({ status: 200, body: { authenticator: { id: 'a1', name: 'Work laptop' } } }, { status: 200, body: { authenticator: { id: 'a1', default: true } } })
 

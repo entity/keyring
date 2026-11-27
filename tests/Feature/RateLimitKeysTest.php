@@ -100,7 +100,7 @@ it('keeps a sent code, its guesses and an enrollment\'s confirmation under keys 
     $code = Notification::sent($this->user, VerificationCode::class)->sole()->code;
     $this->post(route('keyring.login.verify', 'email-code'), ['code' => $code])->assertRedirect('/dashboard');
 
-    $this->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->withAssurance(Assurance::AAL2)->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
     $code = Notification::sent($this->user, VerificationCode::class)->last()->code;
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk();
 });
@@ -111,7 +111,7 @@ it('remembers an answered WebAuthn challenge under a key a Swoole table can hold
 
     // Adding the key answers one challenge, and signing in with it another.
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
     $this->post('/logout');
 

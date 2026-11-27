@@ -934,7 +934,7 @@ describe('saying when an address is taken', function () {
 
             // Signed in, but the address is unverified, so no passkey can be planted.
             $this->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', 'passkey'))
+                ->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])
                 ->assertForbidden()
                 ->assertJsonPath('message', __('keyring::keyring.verify_email_first'));
         });
@@ -950,7 +950,7 @@ describe('saying when an address is taken', function () {
 
             $this->withoutExceptionHandling()->actingAs(staff(), 'staff')->withAssurance(Assurance::AAL1);
 
-            expect(fn () => $this->postJson(route('keyring.authenticators.store', 'totp')))
+            expect(fn () => $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password']))
                 ->toThrow(EmailVerificationRequired::class, 'implement MustVerifyEmail');
         });
 
@@ -958,13 +958,13 @@ describe('saying when an address is taken', function () {
             Keyring::allowEnrollmentWhen(fn ($user) => $user->name === 'Taylor');
 
             $this->actingAs(taylor(['email_verified_at' => null]))->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', 'totp'))
+                ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
                 ->assertOk();
 
             $this->flushSession();
 
             $this->actingAs(taylor(['name' => 'Abigail', 'email' => 'abigail@example.com']))->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', 'totp'))
+                ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
                 ->assertForbidden();
         });
     });

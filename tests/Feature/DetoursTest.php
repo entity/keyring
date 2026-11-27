@@ -79,7 +79,7 @@ function signIn(string $email = 'taylor@example.com'): void
 
 function addAuthenticatorApp(): array
 {
-    $secret = test()->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+    $secret = test()->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
 
     return test()->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk()->json();
 }
@@ -89,7 +89,7 @@ function addAuthenticatorApp(): array
  */
 function addPasskey(bool $synced = false): array
 {
-    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     return test()->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => new VirtualAuthenticator(synced: $synced)->register($options)])->assertOk()->json();
 }
@@ -99,7 +99,7 @@ function addPasskey(bool $synced = false): array
  */
 function addEmailCode(): array
 {
-    test()->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    test()->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
     $code = Notification::sent(test()->user, VerificationCode::class)->last()->code;
 
     return test()->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $code])->assertOk()->json();
@@ -147,7 +147,7 @@ describe('enrolling', function () {
         signIn();
         $this->get('/invoices/42', NAVIGATE);
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->from('/settings/security')
             ->post(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])
             ->assertRedirect('/settings/security');
@@ -330,7 +330,7 @@ describe('enrolling', function () {
         Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
         $this->actingAs($this->user)->withAssurance(Assurance::AAL2)->withSession([Detours::ENROLLMENT => savedFor($this->user)]);
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk()->assertJsonMissingPath('continue');
 
         expect(session(Detours::ENROLLMENT)['url'])->toBe('http://localhost/invoices/42');
@@ -340,7 +340,7 @@ describe('enrolling', function () {
         signIn();
         $this->get('/invoices/42', NAVIGATE);
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => '000000'])->assertUnprocessable();
 
         expect(session()->has(Detours::ENROLLMENT))->toBeTrue();

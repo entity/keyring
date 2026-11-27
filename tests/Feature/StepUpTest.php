@@ -718,7 +718,7 @@ describe('asking for the strongest combination the account can give', function (
      */
     function mayAddSignInMethod(): bool
     {
-        return test()->postJson(route('keyring.authenticators.store', 'totp'))->status() === 200;
+        return test()->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->status() === 200;
     }
 
     it('takes the key, not a password and a code, from a user who holds one that can\'t leave its device', function (Closure $key) {
@@ -805,7 +805,7 @@ describe('asking for the strongest combination the account can give', function (
 
         $this->verifiedWith($this->totp);
 
-        expect($this->postJson(route('keyring.authenticators.store', 'security-key'))->status())->toBe(200);
+        expect($this->postJson(route('keyring.authenticators.store', 'security-key'), ['password' => 'password'])->status())->toBe(200);
     });
 });
 
@@ -827,7 +827,7 @@ describe('an app whose every page needs aal2', function () {
         $this->get('/app')->assertRedirect('/settings/security');
         $this->get('/settings/security')->assertOk();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
         $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         // Adding it proved it, so the session is at AAL2 from here.

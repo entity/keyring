@@ -63,7 +63,7 @@ it('spends a hash on a banned account, as checking its password would', function
 it('refuses a passkey', function () {
     $key = new VirtualAuthenticator;
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
     $this->post('/logout');
 

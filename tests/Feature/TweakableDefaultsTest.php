@@ -156,7 +156,7 @@ it('sends email codes of the length the app picks, for as long as it picks', fun
     Keyring::factors([Password::class, EmailCode::asExtraStep(length: 6, expireAfter: '5m')]);
 
     $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'email-code'))
+        ->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])
         ->assertJsonPath('enrollment.length', 6);
 
     Notification::assertSentTo(auth()->user(), VerificationCode::class, fn (VerificationCode $code) => strlen($code->code) === 6 && $code->minutes === 5);
@@ -166,7 +166,7 @@ it('names the issuer an authenticator app shows, when the app gives one', functi
     Keyring::factors([Password::class, new Totp(app(Google2FA::class), issuer: 'Acme Staff')]);
 
     $url = $this->actingAs(taylor())->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'totp'))
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
         ->json('enrollment.url');
 
     expect($url)->toContain('issuer=Acme%20Staff');

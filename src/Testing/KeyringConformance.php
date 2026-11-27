@@ -295,9 +295,10 @@ trait KeyringConformance
             $this->markTestSkipped('No sign-in methods to set up: register some, and turn on Features::manageAuthenticators().');
         }
 
+        // Its first second factor takes the password, typed again.
         foreach ($this->enrollableFactors() as $factor) {
             $this->actingAs($user)->withAssurance(Assurance::AAL1)
-                ->postJson(route('keyring.authenticators.store', $factor->key()))
+                ->postJson(route('keyring.authenticators.store', $factor->key()), ['password' => $this->keyringPassword()])
                 ->assertOk();
         }
     }

@@ -160,13 +160,14 @@ return [
     | signed in to Keyring's guard). By default they need a recent
     | verification.
     |
-    | An authenticator is established once the account has had it for
-    | "established_after". Until then it signs in like any other, but
-    | doesn't make noDowngrade() ask for a passkey. While the account has
-    | one that isn't established yet, or lost or replaced one that was
-    | within that time, it can't remove or replace established ones, or its
-    | recovery codes. So whoever got into a session can't add a factor and
-    | then take away the owner's.
+    | An authenticator, or a set of recovery codes, is established once the
+    | account has had it for "established_after". Until then it signs in
+    | like any other, but doesn't make noDowngrade() ask for a passkey.
+    | While the account has a factor that isn't established yet, or lost or
+    | replaced something that was within that time, it can't remove,
+    | rename or replace established ones. So whoever got into a session
+    | can't add a factor and then take away the owner's. Adding a second
+    | factor to an account with none established takes the password.
     |
     | The owner can still make one of those changes by proving, in the same
     | request, a passkey or security key the account has had that long and

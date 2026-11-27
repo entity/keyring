@@ -25,6 +25,7 @@ use Keyring\Notifications\PasswordChanged as PasswordChangedNotice;
 use Keyring\Notifications\RecoveryCodesGenerated as RecoveryCodesGeneratedNotice;
 use Keyring\Sessions\Sessions;
 use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\SigningToken;
 use Keyring\Tests\Fixtures\User;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -107,12 +108,14 @@ describe('a frozen account', function () {
     });
 
     it('says so for new recovery codes too', function () {
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])
             ->assertUnprocessable()
             ->assertJsonPath('frozen.skip', ['passkey']);
     });
 
     it('removes exactly the authenticator the key signed for, and starts the clock again', function () {
+        $this->freezeSecond();
+
         $options = skipOptions('remove', $this->spare->id);
 
         expect(array_column($options['allowCredentials'], 'id'))->toContain($this->passkey->credential_id)
@@ -271,7 +274,7 @@ describe('a frozen account', function () {
     it('replaces recovery codes with a proof sent when they\'re made', function () {
         $credential = $this->key->assert(skipOptions('replace', 'recovery'));
 
-        $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])
+        $codes = $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertOk()
             ->json('enrollment.codes');
 
@@ -285,27 +288,28 @@ describe('a frozen account', function () {
     it('doesn\'t take a challenge for replacing another factor\'s', function () {
         $credential = $this->key->assert(skipOptions('replace', 'totp'));
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('proof');
     });
 
-    it('takes the proof with the confirm, for codes begun before the account froze', function () {
+    it('spends codes begun before the account froze, and takes the proof when they\'re begun again', function () {
         $this->planted->delete();
         $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
         $this->planted = plantPasskey($this->user);
 
-        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))
+        // A proof with the confirm counts for nothing: it goes with the beginning.
+        $credential = $this->key->assert(skipOptions('replace', 'recovery'));
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertUnprocessable()
             ->assertJsonPath('frozen.skip', ['passkey']);
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertUnprocessable();
-        $this->planted->delete();
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
-        $this->planted = plantPasskey($this->user);
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))
+            ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_expired')]);
 
         $credential = $this->key->assert(skipOptions('replace', 'recovery'));
-        $this->postJson(route('keyring.authenticators.confirm', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['proof' => ['factor' => 'passkey', 'credential' => $credential]])->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
 
         expect($this->codes->fresh())->toBeNull();
     });
@@ -337,14 +341,45 @@ describe('a frozen account', function () {
         'a factor that isn\'t registered' => [['factor' => 'sms', 'code' => '123456']],
     ]);
 
-    it('has no options for a factor that isn\'t a key', function (string $factor) {
-        $this->postJson(route('keyring.authenticators.proof-options', $factor), ['action' => 'remove', 'target' => $this->spare->id])->assertNotFound();
-    })->with(['totp', 'recovery', 'sms']);
+    it('has no options for a factor that can\'t prove a change', function (string $factor) {
+        $this->postJson(route('keyring.authenticators.proof-options', $factor), ['action' => 'remove', 'target' => $this->spare->id])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_not_established')]);
+    })->with(['totp', 'recovery']);
+
+    it('has no options for a factor that isn\'t registered', function () {
+        $this->postJson(route('keyring.authenticators.proof-options', 'sms'), ['action' => 'remove', 'target' => $this->spare->id])->assertNotFound();
+    });
 
     it('checks what the options are asked for', function () {
-        $this->postJson(route('keyring.authenticators.proof-options', 'passkey'), ['action' => 'rename', 'target' => ['x']])
+        $this->postJson(route('keyring.authenticators.proof-options', 'passkey'), ['action' => 'nope', 'target' => ['x']])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['action', 'target']);
+    });
+
+    it('renames an established method with a proof signed for renaming it', function () {
+        $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['name' => 'Laptop'])
+            ->assertUnprocessable()
+            ->assertJsonPath('frozen.skip', ['passkey']);
+
+        $credential = $this->key->assert(skipOptions('remove', $this->spare->id));
+        $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['name' => 'Laptop', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
+            ->assertJsonValidationErrors('proof');
+
+        $credential = $this->key->assert(skipOptions('rename', $this->spare->id));
+        $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['name' => 'Laptop', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
+            ->assertOk();
+
+        expect($this->spare->fresh()->name)->toBe('Laptop')
+            ->and(SignInChange::query()->count())->toBe(0);
+    });
+
+    it('doesn\'t spend a proof on choosing the default', function () {
+        $options = skipOptions('rename', $this->spare->id);
+
+        $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['default' => true, 'proof' => ['factor' => 'passkey', 'credential' => []]])->assertOk();
+
+        expect(session()->has(FreezeSkips::OPTIONS.'.passkey'))->toBeTrue()
+            ->and($options)->toHaveKey('challenge');
     });
 
     it('checks the proof\'s shape', function () {
@@ -432,6 +467,40 @@ describe('with an authenticator app', function () {
             ->and($third->fresh())->not->toBeNull();
     });
 
+    it('checks the app the proof names', function () {
+        config(['keyring.authenticator_changes.skip_with_totp' => true]);
+        $third = Authenticator::factory()->totp()->established()->for($this->user, 'authenticatable')->create();
+
+        // Without one, a code from the second app is checked against the first.
+        removeWithProof($third, ['factor' => 'totp', 'code' => totpCode($this->other->secret, 1)])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+
+        removeWithProof($third, ['factor' => 'totp', 'authenticator' => $this->other->id, 'code' => totpCode($this->other->secret, 1)])->assertOk();
+
+        expect($third->fresh())->toBeNull();
+    });
+
+    it('counts a wrong code for the app it names as a failure', function () {
+        config(['keyring.authenticator_changes.skip_with_totp' => true]);
+        Event::fake([FactorFailed::class]);
+
+        removeWithProof($this->totp, ['factor' => 'totp', 'authenticator' => $this->other->id, 'code' => '000000'])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+
+        Event::assertDispatched(FactorFailed::class, fn (FactorFailed $event) => $event->authenticator?->is($this->other));
+    });
+
+    it('won\'t check an app that can\'t prove a change', function (Closure $authenticator) {
+        config(['keyring.authenticator_changes.skip_with_totp' => true]);
+
+        removeWithProof($this->other, ['factor' => 'totp', 'authenticator' => $authenticator()->id, 'code' => '000000'])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_not_established')]);
+    })->with([
+        'a newer app' => [fn () => Authenticator::factory()->totp()->for(test()->user, 'authenticatable')->create()],
+        'someone else\'s' => [fn () => Authenticator::factory()->totp()->established()->for(taylor(['email' => 'abigail@example.com']), 'authenticatable')->create()],
+        'a passkey' => [fn () => Authenticator::factory()->passkey()->established()->for(test()->user, 'authenticatable')->create()],
+    ]);
+
     it('holds wrong codes to the app\'s rate limits', function () {
         config(['keyring.authenticator_changes.skip_with_totp' => true, 'keyring.limits.per_account' => 2]);
 
@@ -460,6 +529,64 @@ describe('with an authenticator app', function () {
     });
 });
 
+describe('with a phishing resistant factor of the app\'s own', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, SigningToken::class]);
+        $this->passkey->delete();
+        $this->token = Authenticator::factory()->established()->for($this->user, 'authenticatable')->create(['factor' => 'token', 'name' => 'Token', 'secret' => 'token-secret']);
+        signInForSkip($this->totp);
+        plantPasskey($this->user);
+    });
+
+    it('names it, and makes a change with its answer to a challenge for that change', function () {
+        $this->deleteJson(route('keyring.authenticators.destroy', $this->codes->id))->assertJsonPath('frozen.skip', ['token']);
+
+        $nonce = $this->postJson(route('keyring.authenticators.proof-options', 'token'), ['action' => 'remove', 'target' => $this->codes->id])
+            ->assertOk()
+            ->json('nonce');
+
+        removeWithProof($this->codes, ['factor' => 'token', 'signature' => SigningToken::sign('token-secret', $nonce)])->assertOk();
+
+        expect($this->codes->fresh())->toBeNull()
+            ->and($this->token->fresh()->last_used_at)->not->toBeNull();
+    });
+
+    it('refuses its answer to a challenge for another change, or none', function () {
+        $nonce = $this->postJson(route('keyring.authenticators.proof-options', 'token'), ['action' => 'remove', 'target' => $this->totp->id])->json('nonce');
+
+        removeWithProof($this->codes, ['factor' => 'token', 'signature' => SigningToken::sign('token-secret', $nonce)])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+        removeWithProof($this->codes, ['factor' => 'token', 'signature' => SigningToken::sign('token-secret', $nonce)])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+
+        expect($this->codes->fresh())->not->toBeNull();
+    });
+
+    it('refuses a wrong answer as a failure', function () {
+        Event::fake([FactorFailed::class]);
+        $this->postJson(route('keyring.authenticators.proof-options', 'token'), ['action' => 'remove', 'target' => $this->codes->id]);
+
+        removeWithProof($this->codes, ['factor' => 'token', 'signature' => 'nope'])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+
+        Event::assertDispatched(FactorFailed::class, fn (FactorFailed $event) => $event->factor === 'token');
+    });
+
+    it('replaces the one a user has with a proof of another method, given when it begins', function () {
+        $this->postJson(route('keyring.authenticators.store', 'token'))
+            ->assertUnprocessable()
+            ->assertJsonPath('frozen.skip', ['token']);
+
+        $nonce = $this->postJson(route('keyring.authenticators.proof-options', 'token'), ['action' => 'replace', 'target' => 'token'])->json('nonce');
+        $this->postJson(route('keyring.authenticators.store', 'token'), ['proof' => ['factor' => 'token', 'signature' => SigningToken::sign('token-secret', $nonce)]])->assertOk();
+        $this->postJson(route('keyring.authenticators.confirm', 'token'))->assertOk();
+
+        expect($this->token->fresh())->toBeNull()
+            ->and($this->user->keyring->refresh()->of('token'))->toHaveCount(1)
+            ->and(SignInChange::query()->count())->toBe(1);
+    });
+});
+
 describe('the emails about a new sign-in method or new codes', function () {
     beforeEach(function () {
         Notification::fake();
@@ -472,10 +599,10 @@ describe('the emails about a new sign-in method or new codes', function () {
     it('link to the app\'s page for sign-in methods, from APP_URL, and say what to do', function () {
         config(['keyring.authenticators_url' => '/settings/security', 'app.url' => 'https://app.example']);
 
-        $this->withHeader('Host', 'evil.example')->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->withHeader('Host', 'evil.example')->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
         $key = new VirtualAuthenticator;
-        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+        $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
         $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 
         $added = Notification::sent($this->user, AuthenticatorAddedNotice::class)->sole();
@@ -498,14 +625,14 @@ describe('the emails about a new sign-in method or new codes', function () {
     it('keep a full URL as it is', function () {
         config(['keyring.authenticators_url' => 'https://account.example/security']);
 
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
 
         expect(Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole()->url)->toBe('https://account.example/security');
     });
 
     it('have no link without the page, and still say what to do', function () {
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))->assertOk();
 
         $codes = Notification::sent($this->user, RecoveryCodesGeneratedNotice::class)->sole();

@@ -149,14 +149,17 @@ class UserKeyring
 
     /**
      * Whether the account has had the authenticator long enough to count on
-     * it: for "authenticator_changes.established_after". Only factors can be
-     * anything else. Recovery codes, an emailed code and what isn't stored,
-     * like the password, always are.
+     * it: for "authenticator_changes.established_after". Only factors and
+     * recovery codes can be anything else. An emailed code and what isn't
+     * stored, like the password, always are.
      */
     public function isEstablished(Authenticator $authenticator): bool
     {
-        return ! $this->isFactor($authenticator)
-            || $authenticator->created_at === null
+        if (! $this->isFactor($authenticator) && $authenticator->factor !== RecoveryCodes::KEY) {
+            return true;
+        }
+
+        return $authenticator->created_at === null
             || $authenticator->created_at->lte(Duration::ago(config('keyring.authenticator_changes.established_after')));
     }
 

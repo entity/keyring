@@ -26,7 +26,7 @@ function addPasskey(VirtualAuthenticator $key): TestResponse
 {
     test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
 
-    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
     $response = test()->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)]);
 
     test()->post('/logout');
@@ -48,7 +48,7 @@ function offeredAlgorithms(): array
 {
     test()->actingAs(test()->user)->withAssurance(Assurance::AAL2);
 
-    return array_column(test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options.pubKeyCredParams'), 'alg');
+    return array_column(test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options.pubKeyCredParams'), 'alg');
 }
 
 it('offers es256 and ed25519, and leaves rs256 out, unless the app says otherwise', function () {
@@ -90,7 +90,7 @@ it('will not add a key whose algorithm was turned off after it was offered', fun
     $key = VirtualAuthenticator::rsa();
 
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 
     config(['keyring.webauthn.algorithms' => ['ES256']]);
 

@@ -59,7 +59,7 @@ function enroll(string $factor, VirtualAuthenticator $key, string $name = 'My ke
 {
     provedEveryKey();
 
-    $options = test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', $factor), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     test()->postJson(route('keyring.authenticators.confirm', $factor), [
         'credential' => $key->register($options),
@@ -88,7 +88,7 @@ it('keeps the user handle a user\'s keys already have when app_key changes', fun
     config(['app.key' => 'base64:'.base64_encode(random_bytes(32)), 'app.previous_keys' => [config('app.key')]]);
 
     provedEveryKey();
-    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 
     expect(Base64UrlSafe::decodeNoPadding($options['user']['id']))->toBe($handle);
 });
@@ -97,13 +97,13 @@ it('names the relying party by its id, whatever the app is called', function () 
     config(['app.name' => 'Acme', 'keyring.webauthn.relying_party.id' => 'acme.example']);
     provedEveryKey();
 
-    expect($this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.rp'))
+    expect($this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options.rp'))
         ->toBe(['id' => 'acme.example', 'name' => 'acme.example']);
 });
 
 it('reads back options that name the relying party, as ones stored before did', function () {
     provedEveryKey();
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     $read = app(Ceremonies::class)->fromJson(json_encode([...$options, 'rp' => ['id' => 'localhost', 'name' => 'Acme']]), PublicKeyCredentialCreationOptions::class);
 
@@ -113,14 +113,14 @@ it('reads back options that name the relying party, as ones stored before did', 
 
 it('gives two kinds of account that share an id their own user handles', function () {
     provedEveryKey();
-    $forUser = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.user.id');
+    $forUser = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options.user.id');
 
     // Staff accounts are made by admins, not registered, so needn't verify an email.
     config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $staff = staff();
     $this->flushSession();
     $this->actingAs($staff)->withAssurance(Assurance::AAL2);
-    $forStaff = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options.user.id');
+    $forStaff = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options.user.id');
 
     // An authenticator keeps one passkey per handle, so a shared one would
     // let either account's new passkey replace the other's.
@@ -222,7 +222,7 @@ it('fails a key whose stored record can not be read, and lets the user add anoth
     $this->assertGuest();
 
     provedEveryKey();
-    $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk();
 });
 
 it('caps a passkey that syncs at aal2, as nist does', function () {
@@ -376,7 +376,7 @@ it('keeps credential ids unique across models', function () {
     config(['keyring.features' => array_values(array_diff(Features::all(), [Features::registration()]))]);
     $this->user = staff();
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])
         ->assertUnprocessable();
@@ -434,7 +434,7 @@ it('makes a security key verify its user when the factor requires it', function 
     Keyring::factors([Password::class, WebAuthn::passkeys()->requireUserVerification(false), WebAuthn::securityKeys()->requireUserVerification()]);
     provedEveryKey();
 
-    $options = fn (string $factor) => test()->postJson(route('keyring.authenticators.store', $factor))->assertOk()->json('enrollment.options');
+    $options = fn (string $factor) => test()->postJson(route('keyring.authenticators.store', $factor), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     expect($options('passkey')['authenticatorSelection']['userVerification'])->toBe('preferred')
         ->and($options('security-key')['authenticatorSelection']['userVerification'])->toBe('required');
@@ -485,7 +485,7 @@ it('refuses a sign in answered with a registration, and a registration answered 
     $this->assertGuest();
 
     provedEveryKey();
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
 
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), [
         'credential' => new VirtualAuthenticator()->assert(['challenge' => $options['challenge'], 'rpId' => $options['rp']['id']]),
@@ -556,7 +556,7 @@ it('will not register the same key twice', function () {
     enroll('passkey', $key);
 
     provedEveryKey();
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 
     expect($options['excludeCredentials'])->toHaveCount(1);
 
@@ -698,7 +698,7 @@ it('spends a registration challenge when the confirm fails', function () {
     $key = new VirtualAuthenticator;
     $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
 
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => new VirtualAuthenticator(origin: 'https://evil.example')->register($options)])
         ->assertUnprocessable();
@@ -707,7 +707,7 @@ it('spends a registration challenge when the confirm fails', function () {
 
     expect(Authenticator::where('factor', 'passkey')->exists())->toBeFalse();
 
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])
         ->assertOk();
 });

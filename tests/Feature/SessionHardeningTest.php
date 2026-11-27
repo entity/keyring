@@ -256,13 +256,13 @@ it('signs out a copy of a cookie session from before a step-up, and keeps the us
     foreach ([$signedIn, $copied] as $old) {
         session()->flush();
         app('auth')->forgetGuards();
-        $this->withCredentials()->withCookies($old)->postJson(route('keyring.authenticators.store', 'totp'))->assertUnauthorized();
+        $this->withCredentials()->withCookies($old)->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertUnauthorized();
     }
 
     // The browser that stepped up carries on, with what it proved.
     session()->flush();
     app('auth')->forgetGuards();
-    $this->withCredentials()->withCookies($current)->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->withCredentials()->withCookies($current)->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 
     expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
 })->with('drivers');
@@ -640,12 +640,12 @@ it('signs out a copy of a cookie session from before a mid-session step-up', fun
     session()->flush();
     app('auth')->forgetGuards();
     $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookies($copied)
-        ->postJson(route('keyring.authenticators.store', 'totp'))->assertUnauthorized();
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertUnauthorized();
 
     session()->flush();
     app('auth')->forgetGuards();
     $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookies($current)
-        ->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertStatus(423);
 
     expect(app(SessionRegistry::class)->forUser($this->user))->toHaveCount(1);
 });
@@ -669,7 +669,7 @@ it('signs out a session whose older copy was saved over a mid-session step-up', 
     session()->flush();
     app('auth')->forgetGuards();
     $this->withHeader('User-Agent', CHROME)->withCredentials()->withCookie(config('session.cookie'), $id)
-        ->postJson(route('keyring.authenticators.store', 'totp'))->assertUnauthorized();
+        ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertUnauthorized();
 })->with('drivers');
 
 it('answers a signed-out json request with a 401, and remembers where a page visit was going', function () {

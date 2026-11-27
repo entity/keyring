@@ -150,7 +150,7 @@ describe('step-up', function () {
 
     it('names the confirm page, which comes back as json', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subDay())
-            ->postJson(route('keyring.authenticators.store', 'totp'))
+            ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
             ->assertStatus(423)
             ->assertJsonPath('page', 'confirm')
             ->assertJsonPath('redirect', route('keyring.confirm.challenge'));

@@ -10,6 +10,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
 use Keyring\Enums\Category;
@@ -21,6 +22,7 @@ use Keyring\Events\AuthenticatorRemoved;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\RecoveryCodesGenerated;
 use Keyring\Exceptions\SignInChangesFrozen;
+use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\KeyringManager;
 use Keyring\Login\Attempt;
@@ -28,6 +30,7 @@ use Keyring\Models\Authenticator;
 use Keyring\Models\SignInChange;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
+use Keyring\Support\FactorCheck;
 use Keyring\Support\PasswordRules;
 use Keyring\Support\RowLock;
 use Keyring\UserKeyring;
@@ -41,6 +44,7 @@ class AuthenticatorChanges
     public function __construct(
         protected KeyringManager $keyring,
         protected Sessions $sessions,
+        protected FactorCheck $checks,
     ) {}
 
     /**
@@ -51,11 +55,17 @@ class AuthenticatorChanges
      * An emailed code isn't a factor, so it comes with none: there would be
      * nothing for them to recover.
      *
-     * Replacing recovery codes that have some left, or a factor the account
-     * has had for a while, is refused while the account is frozen(), unless
-     * $ignoreFreeze says otherwise, and freezes it in turn. That's for an
-     * app's own support tools, and for a request that proved an established
-     * method for this change (see FreezeSkips), never a user's say-so.
+     * Replacing recovery codes or a factor the account has had for a while
+     * is refused while the account is frozen(), unless $ignoreFreeze says
+     * otherwise, and freezes it in turn. That's for an app's own support
+     * tools, and for a request that proved an established method for this
+     * change (see FreezeSkips), never a user's say-so.
+     *
+     * A factor added to an account that has no established second factor
+     * needs the password, typed for this enrollment: see needsPassword().
+     * $passwordConfirmed says it was, as the enrollment routes check with
+     * confirmPassword() when it begins. Your own code passes it once it has
+     * made sure who it's adding for some other way.
      *
      * With the request it came in, the session that asked has to still be
      * signed in when it's saved: one ended while the request ran (an email
@@ -65,8 +75,9 @@ class AuthenticatorChanges
      *
      * @throws AuthenticationException
      * @throws SignInChangesFrozen
+     * @throws ValidationException
      */
-    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator, ?Request $request = null, bool $ignoreFreeze = false): ?array
+    public function add(Authenticatable&Model $user, Enrollable $factor, Authenticator $authenticator, ?Request $request = null, bool $ignoreFreeze = false, bool $passwordConfirmed = false): ?array
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
@@ -75,8 +86,16 @@ class AuthenticatorChanges
 
         // One change to a user's sign-in methods at a time, so two can't each
         // find the account unfrozen.
-        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $authenticator, $isRecovery, $recovery, $ignoreFreeze) {
+        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $authenticator, $isRecovery, $recovery, $ignoreFreeze, $passwordConfirmed) {
             $keyring = $this->keyring->for($user);
+
+            // Checked again here, where no other change can come between: a
+            // factor that was established when the enrollment began may have
+            // gone since.
+            if (! $passwordConfirmed && $this->isFactor($factor, $authenticator) && $this->needsPasswordFor($user, $keyring)) {
+                throw $this->passwordRequired();
+            }
+
             $replaced = $factor->multiple() ? collect() : $keyring->of($factor->key());
             $lost = $recovery === null ? $replaced : $replaced->merge($keyring->of(RecoveryCodes::KEY));
 
@@ -107,6 +126,11 @@ class AuthenticatorChanges
             // Out here, once the lock's transaction is over: a log entry
             // written inside it would be rolled back with it.
             EnrollmentRefused::dispatch($user, $factor->key(), 'frozen');
+
+            throw $e;
+        } catch (ValidationException $e) {
+            // The only other refusal in there: it needed the password.
+            EnrollmentRefused::dispatch($user, $factor->key(), 'password');
 
             throw $e;
         }
@@ -145,19 +169,101 @@ class AuthenticatorChanges
     }
 
     /**
+     * Whether adding the factor takes the user's password, typed again for
+     * it. A session alone could otherwise give a password-only account a
+     * second factor its owner doesn't have, and then they'd be asked for it
+     * at every sign in, or, for a passkey, have someone else able to sign
+     * in without the password at all. A password reset wouldn't undo it.
+     *
+     * So it's needed when the factor is one (not recovery codes or an
+     * emailed code) and the account has no established second factor:
+     * only a password, or factors that are as new as one a session could
+     * have added first. A recent verification doesn't count, since whoever
+     * copied the session has that too.
+     *
+     * An account without a password, or whose app doesn't register the
+     * password factor, has nothing to type, and adds one on the fresh
+     * verification alone: a passkey it signs in with is a second factor
+     * once it's established, and one that isn't yet can't be told from one
+     * a session added.
+     */
+    public function needsPassword(Authenticatable&Model $user, Enrollable $factor): bool
+    {
+        $authenticator = new ($this->keyring->authenticatorModel())(['factor' => $factor->key()]);
+
+        return $this->isFactor($factor, $authenticator) && $this->needsPasswordFor($user, $this->keyring->for($user));
+    }
+
+    /**
+     * Check the password typed for adding the factor, under the password's
+     * rate limits. A wrong one counts as a failed password, and goes on
+     * record as one would at a step-up.
+     *
+     * @throws ValidationException
+     */
+    public function confirmPassword(Authenticatable&Model $user, Enrollable $factor, Request $request, #[\SensitiveParameter] ?string $password): void
+    {
+        if (! is_string($password) || $password === '') {
+            EnrollmentRefused::dispatch($user, $factor->key(), 'password');
+
+            throw $this->passwordRequired();
+        }
+
+        $passwords = $this->keyring->factor(Password::KEY);
+
+        $checked = $this->checks->check(
+            $request,
+            Attempt::start(Purpose::Confirm, $user),
+            $passwords,
+            new Collection([Authenticator::virtual($passwords, $user, __('Password'))]),
+            ['password' => $password],
+            'password',
+        );
+
+        if ($checked === null) {
+            EnrollmentRefused::dispatch($user, $factor->key(), 'password');
+
+            throw ValidationException::withMessages(['password' => __('validation.current_password')]);
+        }
+    }
+
+    protected function needsPasswordFor(Authenticatable&Model $user, UserKeyring $keyring): bool
+    {
+        return $keyring->of(Password::KEY)->isNotEmpty() && ! $keyring->established()->hasSecondFactor();
+    }
+
+    /**
+     * Whether the authenticator would be a factor of its own: not recovery
+     * codes, or a step like an emailed code.
+     */
+    protected function isFactor(Enrollable $factor, Authenticator $authenticator): bool
+    {
+        return $factor->key() !== RecoveryCodes::KEY
+            && array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
+    }
+
+    protected function passwordRequired(): ValidationException
+    {
+        return ValidationException::withMessages(['password' => __('keyring::keyring.password_to_add_factor')]);
+    }
+
+    /**
      * Why the user's established sign-in methods and recovery codes can't be
-     * removed or replaced just now, and until when, or null when they can.
-     * An account is frozen for "authenticator_changes.established_after"
+     * removed, replaced or renamed just now, and until when, or null when
+     * they can. An account is frozen for "authenticator_changes.established_after"
      * after a factor is added, and after one it counted on is removed or
      * replaced, so whoever got into a session can't add a factor of their
-     * own and then take away the owner's. Factors that aren't established
-     * yet can always be removed.
+     * own and then take away the owner's. Factors and recovery codes that
+     * aren't established yet can always be removed or replaced, and new
+     * recovery codes don't freeze anything on their own.
      */
     public function frozen(Authenticatable&Model $user): ?Freeze
     {
         $for = Duration::seconds(config('keyring.authenticator_changes.established_after'));
         $keyring = $this->keyring->for($user);
-        $added = $keyring->all()->reject($keyring->isEstablished(...))->max(fn (Authenticator $authenticator) => $authenticator->created_at?->getTimestamp());
+        $added = $keyring->all()
+            ->reject(fn (Authenticator $authenticator) => $authenticator->factor === RecoveryCodes::KEY || $keyring->isEstablished($authenticator))
+            ->max(fn (Authenticator $authenticator) => $authenticator->created_at?->getTimestamp());
         $changed = SignInChange::query()->ownedBy($user)->first()?->changed_at;
 
         return collect([
@@ -189,9 +295,9 @@ class AuthenticatorChanges
     }
 
     /**
-     * Whether the account counts on it: a factor it has had for
-     * "authenticator_changes.established_after", or recovery codes with
-     * some left. Not an emailed code, which isn't a factor.
+     * Whether the account counts on it: a factor, or recovery codes with
+     * some left, that it has had for "authenticator_changes.established_after".
+     * Not an emailed code, which isn't a factor.
      */
     protected function countedOn(UserKeyring $keyring, Authenticator $authenticator): bool
     {
@@ -213,13 +319,29 @@ class AuthenticatorChanges
     /**
      * Rename an authenticator, or make it (or stop it being) the default.
      *
+     * Renaming one the account counts on is refused while the account is
+     * frozen(), unless $ignoreFreeze says otherwise (see add()): otherwise
+     * a session could give the owner's key a name that makes it look like
+     * the one to remove, or its own the name of the owner's. Renaming a
+     * newer one, or choosing the default, always works.
+     *
      * @param  array{name?: string, default?: bool}  $changes
+     *
+     * @throws SignInChangesFrozen
      */
-    public function update(Authenticator $authenticator, array $changes): void
+    public function update(Authenticator $authenticator, array $changes, bool $ignoreFreeze = false): void
     {
-        $authenticator->getConnection()->transaction(function () use ($authenticator, $changes) {
+        $user = $authenticator->user();
+
+        RowLock::hold($user, function () use ($user, $authenticator, $changes, $ignoreFreeze) {
+            $keyring = $this->keyring->for($user);
+
+            if (array_key_exists('name', $changes) && $changes['name'] !== $authenticator->name) {
+                $this->ensureMayLose($user, $keyring, [$authenticator], $ignoreFreeze);
+            }
+
             if ($changes['default'] ?? false) {
-                $this->keyring->for($authenticator->user())->all()
+                $keyring->all()
                     ->filter(fn (Authenticator $other) => $other->exists && $other->is_default)
                     ->each(fn (Authenticator $other) => $other->forceFill(['is_default' => false])->save());
             }

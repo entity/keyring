@@ -41,6 +41,9 @@ class AuthenticatorController
     /** On an enrollment begun with a proof that let it past the freeze. */
     protected const string PROVED = 'keyring.freeze_skipped';
 
+    /** On an enrollment begun with the password, where adding it takes one. */
+    protected const string PASSWORD_CONFIRMED = 'keyring.password_confirmed';
+
     // A route keeps its controller once it has made one, and in a worker
     // that serves many requests that can be longer than a request lasts.
     // These hold the session they were made for, or reach something that
@@ -61,22 +64,33 @@ class AuthenticatorController
 
     /**
      * Begin enrolling: returns what the user needs to see (QR code, codes...).
+     *
+     * Everything that could stop the confirm is asked for here, so the user
+     * isn't shown a code or a QR code that can't be saved: the password,
+     * when the account has no established second factor yet ("password"),
+     * and a proof of an established method, when it would replace one
+     * while the account is frozen ("proof"). The enrollment remembers both,
+     * and its one confirm uses them.
      */
     public function store(Request $request, string $factor): StatusResponse
     {
         $factor = $this->enrollable($request, $factor);
+        $user = $this->keyring->user();
 
         // A name given now is kept for the confirm, which may not send one.
         // Anything that isn't text is left out of it, as before.
-        Input::validate($request, ['name' => [Factor::validText()]]);
+        Input::validate($request, ['name' => [Factor::validText()], 'password' => ['nullable', 'string']]);
 
-        // New recovery codes that couldn't be saved yet aren't shown at all,
-        // unless the request proves an established method for replacing
-        // them. Then the enrollment remembers it, for the confirm.
-        $proved = $this->skips->proves($this->keyring->user(), $request, 'replace', $factor->key());
+        $passwordConfirmed = $this->changes->needsPassword($user, $factor);
+
+        if ($passwordConfirmed) {
+            $this->changes->confirmPassword($user, $factor, $request, Input::get($request, 'password'));
+        }
+
+        $proved = $this->skips->proves($user, $request, 'replace', $factor->key());
 
         if (! $proved) {
-            $this->skippable($request, fn () => $this->changes->ensureMayAdd($this->keyring->user(), $factor));
+            $this->skippable($request, fn () => $this->changes->ensureMayAdd($user, $factor));
         }
 
         // Enrolling a code factor sends a code, wherever the user asks for it to go.
@@ -86,13 +100,16 @@ class AuthenticatorController
 
         $enrollment = $factor->beginEnrollment($this->keyring->user(), $request);
 
-        $this->enrollments->put($proved ? $enrollment->with(static::PROVED, true) : $enrollment);
+        $this->enrollments->put($enrollment->with(static::PROVED, $proved)->with(static::PASSWORD_CONFIRMED, $passwordConfirmed));
 
         return $this->status('enrollment-started', ['factor' => $factor->key(), 'enrollment' => $enrollment->props]);
     }
 
     /**
-     * Finish enrolling once the user proves it works.
+     * Finish enrolling once the user proves it works. What let it past the
+     * freeze, or took the password, was given when it began. When it's
+     * refused anyway, because the account changed since, the enrollment is
+     * spent, and the client begins again with what it now needs.
      */
     public function confirm(Request $request, string $factor): StatusResponse
     {
@@ -105,19 +122,24 @@ class AuthenticatorController
 
         $authenticator = $this->confirmed($factor, $enrollment, $request);
 
-        // Proved when it began, or in this request.
-        $proved = $enrollment->state(static::PROVED) === true
-            || $this->skips->proves($this->keyring->user(), $request, 'replace', $factor->key());
-
         // Each enrollment adds its authenticator once, whichever copy of the
         // session it comes back in.
         if (! $this->enrollments->claim($enrollment)) {
             throw ValidationException::withMessages([$factor->errorKey() => __('keyring::keyring.enrollment_expired')]);
         }
 
-        $recoveryCodes = $this->skippable($request, fn () => $this->changes->add($this->keyring->user(), $factor, $authenticator, $request, ignoreFreeze: $proved));
-
-        $this->enrollments->forget($factor->key());
+        try {
+            $recoveryCodes = $this->skippable($request, fn () => $this->changes->add(
+                $this->keyring->user(),
+                $factor,
+                $authenticator,
+                $request,
+                ignoreFreeze: $enrollment->state(static::PROVED) === true,
+                passwordConfirmed: $enrollment->state(static::PASSWORD_CONFIRMED) === true,
+            ));
+        } finally {
+            $this->enrollments->forget($factor->key());
+        }
         $this->signOutOthers($request);
 
         // New recovery codes prove nothing: confirming only says they were
@@ -139,6 +161,11 @@ class AuthenticatorController
         ]));
     }
 
+    /**
+     * Rename an authenticator, or choose the default. While the account is
+     * frozen, renaming an established one takes a proof of an established
+     * method, for renaming this one.
+     */
     public function update(Request $request, string $authenticator): StatusResponse
     {
         $authenticator = $this->changes->find($this->keyring->user(), $authenticator);
@@ -149,10 +176,12 @@ class AuthenticatorController
             'default' => ['sometimes', 'boolean', Rule::prohibitedIf($authenticator->factor === RecoveryCodes::KEY)],
         ]);
 
-        $this->changes->update($authenticator, [
+        $proved = array_key_exists('name', $changes) && $this->skips->proves($this->keyring->user(), $request, 'rename', $authenticator->id);
+
+        $this->skippable($request, fn () => $this->changes->update($authenticator, [
             ...Arr::only($changes, 'name'),
             ...$request->has('default') ? ['default' => $request->boolean('default')] : [],
-        ]);
+        ], ignoreFreeze: $proved));
 
         return $this->status('authenticator-updated', ['authenticator' => $authenticator->factor()->present($authenticator)]);
     }
@@ -173,10 +202,11 @@ class AuthenticatorController
     }
 
     /**
-     * A challenge for one of the user's established keys of this factor to
-     * sign, to make one change while the account is frozen: "remove" an
-     * authenticator (its ID as "target"), or "replace" a factor's (its key).
-     * The change's own request then sends the answer as "proof".
+     * A challenge for one of the user's established authenticators of this
+     * factor to answer, to make one change while the account is frozen:
+     * "remove" or "rename" an authenticator (its ID as "target"), or
+     * "replace" a factor's (its key). The change's own request then sends
+     * the answer as "proof". For a key, it's the options its browser signs.
      */
     public function proofOptions(Request $request, string $factor): JsonResponse
     {
@@ -185,9 +215,7 @@ class AuthenticatorController
             'target' => ['required', 'string', 'max:255'],
         ]);
 
-        return new JsonResponse([
-            'options' => $this->skips->options($this->keyring->user(), $request, $factor, $change['action'], $change['target']),
-        ]);
+        return new JsonResponse($this->skips->options($this->keyring->user(), $request, $factor, $change['action'], $change['target']));
     }
 
     /**

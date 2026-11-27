@@ -37,23 +37,28 @@ export interface FrozenChanges {
 
 /**
  * A change an established sign-in method can make while the account's
- * sign-in methods are frozen: removing an authenticator, by its ID, or
- * replacing a factor's, by its key (`recovery` for new recovery codes).
+ * sign-in methods are frozen: removing or renaming an authenticator, by
+ * its ID, or replacing a factor's, by its key (`recovery` for new recovery
+ * codes).
  */
 export interface ProvableChange {
-  action: 'remove' | 'replace'
+  action: 'remove' | 'replace' | 'rename'
   target: string
 }
 
 /**
  * What the change's own request sends as `proof`: a key's answer to a
  * challenge for that change, or a code from an authenticator app where
- * the server allows it.
+ * the server allows it. `authenticator` names which of the user's
+ * authenticators of the factor to check, such as one of two apps. A
+ * factor of the app's own reads its answer from its own fields.
  */
 export interface FreezeProof {
   factor: string
+  authenticator?: string
   credential?: Record<string, any>
   code?: string
+  [field: string]: unknown
 }
 
 /**

@@ -311,7 +311,7 @@ it('restarts a step-up when its code runs out of guesses', function () {
 
     // A code alone confirms nothing, so the step-up is one that asks for it
     // beside the password: adding a sign-in method.
-    $this->post(route('keyring.authenticators.store', 'totp'))->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertRedirect(route('keyring.confirm.challenge'));
     $this->inertia()->get(route('keyring.confirm.challenge', 'email-code'))->assertOk();
     $this->post(route('keyring.confirm.send', 'email-code'));
 
@@ -324,7 +324,7 @@ it('restarts a step-up when its code runs out of guesses', function () {
         ->assertSessionHasErrors(['password' => __('keyring::keyring.too_many_codes')]);
 
     Notification::fake();
-    $this->post(route('keyring.authenticators.store', 'totp'))->assertRedirect(route('keyring.confirm.challenge'));
+    $this->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertRedirect(route('keyring.confirm.challenge'));
     $this->inertia()->get(route('keyring.confirm.challenge', 'email-code'))->assertOk();
     $this->post(route('keyring.confirm.send', 'email-code'));
     $this->post(route('keyring.confirm.verify', 'email-code'), ['code' => sentCode($this->user)])->assertSessionHasNoErrors();
@@ -378,21 +378,21 @@ it('limits how often starting an enrollment sends a code', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
     foreach (range(1, 3) as $send) {
-        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
     }
 
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])
         ->assertTooManyRequests()
         ->assertJsonValidationErrors('code');
     Notification::assertSentToTimes($this->user, VerificationCode::class, 3);
 
-    $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk();
 });
 
 it('enrolls email codes by confirming a sent code', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk()->assertJsonPath('enrollment.sent', true);
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk()->assertJsonPath('enrollment.sent', true);
 
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => sentCode($this->user)])
         ->assertOk()
@@ -403,7 +403,7 @@ it('enrolls email codes by confirming a sent code', function () {
 
 it('warns that someone may be signed in when a code to add the address was not asked for', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        ->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
 
     $enrolling = renderedMail(Notification::sent($this->user, VerificationCode::class)->sole()->toMail($this->user));
 
@@ -413,7 +413,7 @@ it('warns that someone may be signed in when a code to add the address was not a
 
 it('burns the enrollment code after too many wrong guesses', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
 
     foreach (range(1, 5) as $guess) {
         $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
@@ -426,14 +426,14 @@ it('burns the enrollment code after too many wrong guesses', function () {
 
 it('keeps counting enrollment guesses when the enrollment starts again', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
 
     foreach (range(1, 4) as $guess) {
         $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
     }
 
     Notification::fake();
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
     $newest = sentCode($this->user);
 
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])
@@ -442,7 +442,7 @@ it('keeps counting enrollment guesses when the enrollment starts again', functio
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => $newest])->assertUnprocessable();
 
     Notification::fake();
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])
         ->assertUnprocessable()
         ->assertJsonValidationErrors(['code' => __('keyring::keyring.enrollment_too_many_codes')]);
     Notification::assertNothingSent();
@@ -452,14 +452,14 @@ it('keeps counting enrollment guesses when the enrollment starts again', functio
 
 it('enrolls with a new code while guesses are left', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
 
     foreach (range(1, 4) as $guess) {
         $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
     }
 
     Notification::fake();
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => sentCode($this->user)])->assertOk();
 
     expect($this->user->keyring->refresh()->of('email-code'))->toHaveCount(1);
@@ -467,7 +467,7 @@ it('enrolls with a new code while guesses are left', function () {
 
 it('lets a used up enrollment start afresh once its 15 minutes have passed', function () {
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
 
     foreach (range(1, 5) as $guess) {
         $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => '00000000'])->assertUnprocessable();
@@ -477,7 +477,7 @@ it('lets a used up enrollment start afresh once its 15 minutes have passed', fun
     $this->withAssurance(Assurance::AAL1);
 
     Notification::fake();
-    $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+    $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
     $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => sentCode($this->user)])->assertOk();
 });
 
@@ -536,7 +536,7 @@ describe('a browser that sends back an earlier copy of its session', function ()
 
         // A code alone confirms nothing, so the step-up is one that asks for
         // it beside the password: adding a sign-in method.
-        $this->post(route('keyring.authenticators.store', 'totp'))->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertRedirect(route('keyring.confirm.challenge'));
         $this->post(route('keyring.confirm.send', 'email-code'));
         $code = sentCode($this->user);
         $unspent = session()->all();
@@ -551,7 +551,7 @@ describe('a browser that sends back an earlier copy of its session', function ()
 
     it('cannot enroll with a code a second time', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
         $code = sentCode($this->user);
         $unspent = session()->all();
 
@@ -635,7 +635,7 @@ describe('a browser that sends back an earlier copy of its session', function ()
 
     it('does not get its wrong enrollment guesses back', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
         $code = sentCode($this->user);
         $unguessed = session()->all();
 
@@ -770,14 +770,14 @@ describe('a step, not a factor', function () {
     it('comes with no recovery codes, and can\'t be given any', function () {
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
 
-        $this->postJson(route('keyring.authenticators.store', 'email-code'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password'])->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'email-code'), ['code' => sentCode($this->user)])
             ->assertOk()
             ->assertJsonMissingPath('recoveryCodes');
 
         $email = $this->user->keyring->refresh()->of('email-code')->sole();
 
-        $this->verifiedWith($email)->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->verifiedWith($email)->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
         $this->postJson(route('keyring.authenticators.confirm', 'recovery'))
             ->assertJsonValidationErrors(['authenticator' => __('keyring::keyring.recovery_needs_second_factor')]);
 
@@ -788,7 +788,7 @@ describe('a step, not a factor', function () {
         emailAuthenticator($this->user);
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
 
-        $this->postJson(route('keyring.authenticators.store', 'totp'))->assertStatus(423);
+        $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertStatus(423);
 
         // The password alone isn't what signing in asks of this account.
         $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password'])
@@ -796,7 +796,7 @@ describe('a step, not a factor', function () {
         $this->post(route('keyring.confirm.send', 'email-code'));
         $this->post(route('keyring.confirm.verify', 'email-code'), ['code' => sentCode($this->user)])->assertSessionHasNoErrors();
 
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
         $response = $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
         expect($response->json('recoveryCodes'))->toHaveCount(8)
@@ -808,7 +808,7 @@ describe('a step, not a factor', function () {
         $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
         $this->actingAs($this->user)->withAssurance(Assurance::AAL1)->freshAt(now()->subHour());
 
-        $this->post(route('keyring.authenticators.store', 'totp'))->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertRedirect(route('keyring.confirm.challenge'));
 
         $this->inertia()->get(route('keyring.confirm.challenge'))
             ->assertJsonPath('props.factor', 'totp')
@@ -819,7 +819,7 @@ describe('a step, not a factor', function () {
 
         $this->post(route('keyring.confirm.verify', 'password'), ['password' => 'password']);
         $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertSessionHasNoErrors();
-        $this->post(route('keyring.authenticators.store', 'totp'))->assertSessionHas('status', 'enrollment-started');
+        $this->post(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertSessionHas('status', 'enrollment-started');
     });
 
     it('takes the recovery codes with it when the last real second factor is removed', function () {

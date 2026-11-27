@@ -107,7 +107,7 @@ try {
 
             $user = User::findOrFail($id);
 
-            app(AuthenticatorChanges::class)->add($user, Keyring::factor('totp'), Authenticator::factory()->totp()->for($user, 'authenticatable')->make(), $request);
+            app(AuthenticatorChanges::class)->add($user, Keyring::factor('totp'), Authenticator::factory()->totp()->for($user, 'authenticatable')->make(), $request, passwordConfirmed: true);
 
             return 'added';
         })(),

@@ -71,7 +71,7 @@ it('uses keyring\'s guard for every route, not the app default', function () {
     Keyring::routes();
 
     $this->actingAs($this->user, 'admin')->withAssurance(Assurance::AAL1)
-        ->postJson('/user/authenticators/totp')
+        ->postJson('/user/authenticators/totp', ['password' => 'password'])
         ->assertOk();
 });
 
@@ -204,7 +204,7 @@ it('says so when an email code has no notification to go out in', function () {
     Keyring::notifications(['verification_code' => null]);
 
     $this->withoutExceptionHandling()->actingAs($this->user)->withAssurance(Assurance::AAL1)
-        ->postJson(route('keyring.authenticators.store', 'email-code'));
+        ->postJson(route('keyring.authenticators.store', 'email-code'), ['password' => 'password']);
 })->throws(MissingNotification::class, 'No notification is registered for [verification_code]');
 
 class CustomConfirmEmailChange extends ConfirmEmailChange

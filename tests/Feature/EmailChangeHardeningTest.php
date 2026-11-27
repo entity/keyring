@@ -327,7 +327,7 @@ it('leaves nothing but the password to confirm with once an undo removes a repla
         }
     };
     $enroll = function () {
-        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
 
         return [$secret, $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk()->json('recoveryCodes')];
     };
@@ -459,7 +459,7 @@ it('leaves a reset link for the new address working after the email changes', fu
 it('asks the current address to confirm when the second factor was only just added by this session', function () {
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
 
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
 
     // Now that a second factor exists, the session has to use it to stay fresh.
@@ -499,7 +499,7 @@ it('still asks the current address when the second factor is too new to be the o
 it('does not let a factor planted in one session count as established in the next', function () {
     // Whoever has the password adds an authenticator app of their own...
     $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
-    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'))->assertOk()->json('enrollment.secret');
+    $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->assertOk()->json('enrollment.secret');
     $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
     $this->post('/logout');
 
@@ -526,7 +526,7 @@ it('does not let a factor planted in one session count as established in the nex
 it('removes a passkey planted before the session that asked, so it can not sign back in after a revert', function () {
     $key = new VirtualAuthenticator;
     $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
-    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->assertOk()->json('enrollment.options');
+    $options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->assertOk()->json('enrollment.options');
     $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
     $this->post('/logout');
 

@@ -13,14 +13,16 @@ use Illuminate\Queue\SerializesModels;
  * (a wrong code, a key it won't take), or the account isn't allowed to add
  * one yet because its email address is unproven, or it would have replaced
  * recovery codes or a factor while the account's sign-in methods can't be
- * removed or replaced (see AuthenticatorChanges::frozen()).
+ * removed or replaced (see AuthenticatorChanges::frozen()), or it needed
+ * the password and didn't have the right one (see
+ * AuthenticatorChanges::needsPassword()).
  */
 class EnrollmentRefused
 {
     use Dispatchable, SerializesModels;
 
     /**
-     * @param  'invalid'|'not_allowed'|'frozen'  $reason
+     * @param  'invalid'|'not_allowed'|'frozen'|'password'  $reason
      */
     public function __construct(
         public readonly Authenticatable $user,

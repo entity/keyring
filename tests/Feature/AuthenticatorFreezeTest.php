@@ -20,6 +20,7 @@ use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SignInChange;
 use Keyring\Testing\VirtualAuthenticator;
+use Keyring\Tests\Fixtures\SigningToken;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -44,7 +45,7 @@ function signInWithApp(Authenticator $totp, int $step = 0): TestResponse
 function addPasskeyFromSession(): VirtualAuthenticator
 {
     $key = new VirtualAuthenticator;
-    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+    $options = test()->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
     test()->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 
     return $key;
@@ -52,9 +53,19 @@ function addPasskeyFromSession(): VirtualAuthenticator
 
 function replaceRecoveryCodes(): TestResponse
 {
-    $started = test()->postJson(route('keyring.authenticators.store', 'recovery'));
+    $started = test()->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password']);
 
     return $started->isOk() ? test()->postJson(route('keyring.authenticators.confirm', 'recovery')) : $started;
+}
+
+/**
+ * Replace the user's one token with a new one.
+ */
+function replaceToken(): TestResponse
+{
+    $started = test()->postJson(route('keyring.authenticators.store', 'token'));
+
+    return $started->isOk() ? test()->postJson(route('keyring.authenticators.confirm', 'token')) : $started;
 }
 
 function signOut(): void
@@ -188,7 +199,7 @@ describe('while a new sign-in method is not established', function () {
     });
 
     it('refuses new recovery codes before showing any', function () {
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])
             ->assertUnprocessable()
             ->assertJsonMissingPath('enrollment')
             ->assertJsonPath('frozen.reason', 'new-authenticator');
@@ -196,7 +207,7 @@ describe('while a new sign-in method is not established', function () {
 
     it('refuses new recovery codes from a session that began making them before it froze', function () {
         $this->passkey->delete();
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertOk();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertOk();
 
         Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
 
@@ -218,6 +229,16 @@ describe('while a new sign-in method is not established', function () {
         replaceRecoveryCodes()->assertOk();
     });
 
+    it('replaces recovery codes that aren\'t established yet, and freezes nothing for it', function () {
+        $this->codes->forceFill(['created_at' => now()->subDay()])->save();
+
+        replaceRecoveryCodes()->assertOk();
+        replaceRecoveryCodes()->assertOk();
+
+        expect($this->codes->fresh())->toBeNull()
+            ->and(SignInChange::query()->count())->toBe(0);
+    });
+
     it('removes other methods that are not established either', function () {
         $other = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
@@ -228,7 +249,7 @@ describe('while a new sign-in method is not established', function () {
         Event::fake([AuthenticatorRemovalRefused::class, EnrollmentRefused::class]);
 
         $this->deleteJson(route('keyring.authenticators.destroy', $this->totp->id))->assertUnprocessable();
-        $this->postJson(route('keyring.authenticators.store', 'recovery'))->assertUnprocessable();
+        $this->postJson(route('keyring.authenticators.store', 'recovery'), ['password' => 'password'])->assertUnprocessable();
 
         Event::assertDispatched(AuthenticatorRemovalRefused::class, fn (AuthenticatorRemovalRefused $event) => $event->reason === 'frozen' && $event->authenticator->is($this->totp));
         Event::assertDispatched(EnrollmentRefused::class, fn (EnrollmentRefused $event) => $event->reason === 'frozen' && $event->factor === 'recovery');
@@ -385,4 +406,119 @@ it('says which authenticators are established', function () {
     expect($user->keyring->isEstablished($this->totp))->toBeTrue()
         ->and($user->keyring->isEstablished(Authenticator::factory()->totp()->for($user, 'authenticatable')->create()))->toBeFalse()
         ->and($user->keyring->isEstablished($user->keyring->of('password')->sole()))->toBeTrue();
+});
+
+describe('recovery codes', function () {
+    it('are established once the account has had them a while, by their own date', function () {
+        $keyring = $this->user->keyring;
+        $young = Authenticator::factory()->recoveryCodes()->for($this->user, 'authenticatable')->create();
+
+        expect($keyring->isEstablished($this->codes))->toBeTrue()
+            ->and($keyring->isEstablished($young))->toBeFalse();
+    });
+
+    it('freeze nothing on their own while they\'re new', function () {
+        $this->codes->forceFill(['created_at' => now()])->save();
+
+        expect(app(AuthenticatorChanges::class)->frozen($this->user))->toBeNull();
+    });
+
+    it('can be replaced straight after turning on two factor', function () {
+        $this->totp->delete();
+        $this->codes->delete();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL1);
+
+        $secret = $this->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])->json('enrollment.secret');
+        $this->postJson(route('keyring.authenticators.confirm', 'totp'), ['code' => totpCode($secret)])->assertOk();
+
+        replaceRecoveryCodes()->assertOk();
+    });
+
+    it('stay frozen once established, while a new method isn\'t', function () {
+        Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+
+        replaceRecoveryCodes()->assertUnprocessable()->assertJsonPath('frozen.reason', 'new-authenticator');
+        $this->deleteJson(route('keyring.authenticators.destroy', $this->codes->id))->assertUnprocessable();
+
+        expect($this->codes->fresh())->not->toBeNull();
+    });
+});
+
+describe('a factor a user has one of', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, SigningToken::class]);
+        $this->token = Authenticator::factory()->established()->for($this->user, 'authenticatable')->create(['factor' => 'token', 'name' => 'Token', 'secret' => 'old']);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    });
+
+    it('replaces an established one as a change the account counted on, which freezes it', function () {
+        replaceToken()->assertOk();
+
+        expect($this->token->fresh())->toBeNull()
+            ->and(app(AuthenticatorChanges::class)->frozen($this->user))->not->toBeNull()
+            ->and(SignInChange::query()->count())->toBe(1);
+    });
+
+    it('won\'t replace an established one while frozen, before showing anything', function () {
+        Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+        replaceToken()
+            ->assertUnprocessable()
+            ->assertJsonMissingPath('enrollment')
+            ->assertJsonPath('frozen.reason', 'new-authenticator');
+
+        expect($this->token->fresh())->not->toBeNull();
+    });
+
+    it('replaces one that isn\'t established yet, freezing nothing for it', function () {
+        $this->token->forceFill(['created_at' => now()->subDay()])->save();
+        Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+        replaceToken()->assertOk();
+
+        expect($this->token->fresh())->toBeNull()
+            ->and(SignInChange::query()->count())->toBe(0);
+    });
+});
+
+describe('renaming', function () {
+    beforeEach(function () {
+        $this->passkey = Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create(['name' => 'New key']);
+        $this->actingAs($this->user)->withAssurance(Assurance::AAL2);
+    });
+
+    it('won\'t rename an established method while frozen', function () {
+        $this->patchJson(route('keyring.authenticators.update', $this->totp->id), ['name' => 'Remove me'])
+            ->assertUnprocessable()
+            ->assertJsonPath('frozen.reason', 'new-authenticator');
+
+        expect($this->totp->fresh()->name)->not->toBe('Remove me');
+    });
+
+    it('renames a newer one, keeps a name as it is, and chooses the default', function () {
+        $this->patchJson(route('keyring.authenticators.update', $this->passkey->id), ['name' => 'Phone'])->assertOk();
+        $this->patchJson(route('keyring.authenticators.update', $this->totp->id), ['name' => $this->totp->name])->assertOk();
+        $this->patchJson(route('keyring.authenticators.update', $this->passkey->id), ['default' => true])->assertOk();
+
+        expect($this->passkey->fresh())->name->toBe('Phone')->is_default->toBeTrue()
+            ->and(SignInChange::query()->count())->toBe(0);
+    });
+
+    it('renames an established one once nothing is frozen, freezing nothing for it', function () {
+        $this->passkey->delete();
+
+        $this->patchJson(route('keyring.authenticators.update', $this->totp->id), ['name' => 'Work phone'])->assertOk();
+
+        expect($this->totp->fresh()->name)->toBe('Work phone')
+            ->and(app(AuthenticatorChanges::class)->frozen($this->user))->toBeNull();
+    });
+
+    it('lets the app\'s own code rename one while frozen', function () {
+        expect(fn () => app(AuthenticatorChanges::class)->update($this->totp, ['name' => 'Work phone']))->toThrow(SignInChangesFrozen::class);
+
+        app(AuthenticatorChanges::class)->update($this->totp, ['name' => 'Work phone'], ignoreFreeze: true);
+
+        expect($this->totp->fresh()->name)->toBe('Work phone');
+    });
 });
