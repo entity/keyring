@@ -370,17 +370,29 @@ it('counts wrong passwords at removal toward the cap on failures in a row', func
         ->assertJsonValidationErrors(['password' => __('keyring::keyring.locked')]);
 });
 
-it('asks a user without a password for none when removing the last second factor', function () {
+it('asks a user without a password for none when removing the last second factor', function (array $body) {
     Keyring::factors([Password::class, Totp::class, RecoveryCodes::class, SingleSignOn::class]);
     $this->user->forceFill(['password' => null])->saveQuietly();
     $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
 
     $this->actingAs($this->user->fresh())->withAssurance(Assurance::AAL2)
-        ->deleteJson(route('keyring.authenticators.destroy', $totp->id))
+        ->deleteJson(route('keyring.authenticators.destroy', $totp->id), $body)
         ->assertOk();
 
     expect(Authenticator::find($totp->id))->toBeNull()
         ->and($this->user->keyring->refresh()->all()->pluck('factor')->all())->toBe(['sso']);
+})->with([
+    'none sent' => [[]],
+    'one sent anyway, which isn\'t checked' => [['password' => 'anything']],
+]);
+
+it('asks for no password to remove the last second factor where the app doesn\'t sign in with one', function () {
+    Keyring::factors([Totp::class, RecoveryCodes::class, SingleSignOn::class]);
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+    $this->actingAs($this->user)->withAssurance(Assurance::AAL2)
+        ->deleteJson(route('keyring.authenticators.destroy', $totp->id), ['password' => 'wrong'])
+        ->assertOk();
 });
 
 it('gives a virtual authenticator its user\'s type and ID, so it can look them up again', function () {

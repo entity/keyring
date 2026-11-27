@@ -473,7 +473,8 @@ class AuthenticatorChanges
      * the user can say how long it is, so removing the last second factor
      * takes it, typed again. It's checked under the password's rate limits,
      * and a wrong one counts as a failed password, as one would at a
-     * step-up. True once it's checked, false when the user has none.
+     * step-up. True once it's checked, false when the user has none to
+     * sign in with.
      *
      * @throws ValidationException
      */
@@ -483,7 +484,7 @@ class AuthenticatorChanges
             return false;
         }
 
-        $passwords = $this->keyring->hasFactor(Password::KEY) ? $this->keyring->factor(Password::KEY) : app(Password::class);
+        $passwords = $this->keyring->factor(Password::KEY);
 
         $checked = $this->checks->check(
             app(Request::class),
@@ -507,9 +508,13 @@ class AuthenticatorChanges
         return true;
     }
 
+    /**
+     * Whether the user has a password to sign in with: one is set, and the
+     * app registers the password factor.
+     */
     protected function hasPassword(Authenticatable&Model $user): bool
     {
-        return ! blank($user->getAuthPassword());
+        return $this->keyring->hasFactor(Password::KEY) && filled($user->getAuthPassword());
     }
 
     protected function passwordToRemove(): ValidationException
