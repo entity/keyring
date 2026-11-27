@@ -266,7 +266,7 @@ Keyring's passkey routes are driven by [`@keyringjs/keyring`](frontend.md). `@la
 |---|---|
 | When signing in, it reads `options` from the JSON of `GET /passkeys/login/options`. | The same. `GET /login/passkey/options` answers `{ "options": { ... } }`. |
 | It posts `{ credential, remember }` to `/passkeys/login` and reads `redirect`. | The same. `POST /login/passkey` answers `{ "status": "authenticated", "redirect": "..." }`. |
-| When adding a passkey, it reads `options` from `GET /user/passkeys/options`. | Enrolling begins with a `POST` to `/user/authenticators/passkey`, and the options are under `enrollment.options`. |
+| When adding a passkey, it reads `options` from `GET /user/passkeys/options`. | Enrolling begins with a `POST` to `/user/authenticators/passkey`, with `password` while the account has no [established](authenticators.md#the-password-for-a-first-second-factor) second factor, and the options are under `enrollment.options`. |
 | It posts `{ name, credential }` to `/user/passkeys`. `usePasskeyRegister()` doesn't pass the response on. | `POST /user/authenticators/passkey/confirm` takes those fields, but its response can carry [recovery codes](authenticators.md#recovery-codes) that are only shown once. |
 | When confirming, it reads `options` from `GET /passkeys/confirm/options`. | [Step-up](step-up.md) has no options route. The confirm page gets the options as props, for whichever of the user's authenticators comes next. |
 
@@ -360,7 +360,7 @@ Each of these returns a new instance. A factor key other than `passkey` or `secu
 ```ts
 import { enroll } from '@keyringjs/keyring'
 
-await enroll('backup-key', { name: 'Spare key' })
+await enroll('backup-key', { name: 'Spare key', password })
 ```
 
 To change more than the profile, extend the class. The `passkeys` and `securityKeys` methods return `static`, and the constructor is `final`, so they build your subclass:

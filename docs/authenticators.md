@@ -113,7 +113,7 @@ Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a
 
 So adding a second factor (an authenticator app, a passkey, a security key, or a factor of your own) takes the current password, typed for that enrollment, while the account has no [established](#established-authenticators) second factor. That's an account with only a password, or one whose second factors are all from the last 7 days, since a copy of the session could have added the first of those too. Recovery codes and an emailed code aren't second factors, so they never need it.
 
-Send it as `password` when beginning. A recent sign in or step-up doesn't count in its place, because whoever copied the session has those too. A missing password is a `422` on `password` (`keyring::keyring.password_to_add_factor`). A wrong one is a `422` on `password` too (`validation.current_password`). It counts against the password's rate limits, as a step-up's would, so too many get a `429`. It dispatches `FactorFailed` for the password, and `EnrollmentRefused` with the reason `password`.
+Send it as `password` when beginning. A recent sign in or step-up doesn't count in its place, because whoever copied the session has those too. A missing password is a `422` on `password` (`keyring::keyring.password_to_add_factor`). A wrong one is a `422` on `password` too (`validation.current_password`). It counts against the password's rate limits, as a step-up's would, so too many get a `429`, with `keyring::keyring.locked` once it reaches the cap on failures in a row, which locks password sign in as it would at the login form and dispatches `AccountLocked`. It dispatches `FactorFailed` for the password, and `EnrollmentRefused` with the reason `password`.
 
 The password goes with the beginning only, and counts for that one enrollment. The confirm checks again, under the same lock as the freeze. If the account lost its established second factor in between, the confirm is refused on `password` and the enrollment is spent, so the user begins again with the password.
 
@@ -133,7 +133,7 @@ Your own code passes `passwordConfirmed: true` to `AuthenticatorChanges::add()` 
 | `recovery` | none: confirming means "I've saved these" |
 | `passkey`, `security-key` | `credential` (the browser's response), `name` (optional) |
 
-A wrong proof fails with `keyring::keyring.invalid`. An expired or missing enrollment, or one that has already been confirmed, fails with `keyring::keyring.enrollment_expired`. A confirm refused because the account was frozen, or lost its established second factor, since the enrollment began spends it. Begin again, with a `proof` or the `password`. Both errors appear on the factor's field: `code`, or `credential` for passkeys and security keys. Email enrollment codes keep their guess count between tries, as email codes at sign in do.
+A wrong proof fails with `keyring::keyring.invalid`. An expired or missing enrollment, or one that has already been confirmed, fails with `keyring::keyring.enrollment_expired`. Those two errors appear on the factor's field: `code`, or `credential` for passkeys and security keys. A confirm refused because the account was frozen since the enrollment began fails on `authenticator`, and one refused because it lost its established second factor fails on `password`. Either spends the enrollment, so begin again, with a `proof` or the `password`. Email enrollment codes keep their guess count between tries, as email codes at sign in do.
 
 On success, the response contains the new authenticator, as its factor's `present` method gives it:
 
@@ -350,8 +350,9 @@ import { beginEnrollment, confirmEnrollment, enroll, makeDefault, proveWithKey, 
 // password goes with the beginning, for an account with no established second factor.
 const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop', password })
 
-// Authenticator apps: show the QR code, then ask for a code.
-const { enrollment } = await beginEnrollment('totp')
+// Authenticator apps: show the QR code, then ask for a code. The passkey
+// above isn't established yet, so this still takes the password.
+const { enrollment } = await beginEnrollment('totp', { password })
 // ...render enrollment.qr...
 await confirmEnrollment('totp', enrollment, { code })
 

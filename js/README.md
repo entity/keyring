@@ -13,7 +13,8 @@ For example, you may enroll a passkey like this:
 ```ts
 import { enroll } from '@keyringjs/keyring'
 
-const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop' })
+// The password is needed while the account has no established second factor.
+const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop', password })
 ```
 
 The package has four entry points:

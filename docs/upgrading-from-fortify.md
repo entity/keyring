@@ -175,7 +175,7 @@ Pass a component name or a closure to `Keyring::page()`. See [Pages](sign-in-flo
 | Fortify | Keyring |
 |---|---|
 | `POST /two-factor-challenge` | `POST /login/challenge/{factor}` |
-| `POST /user/two-factor-authentication` | `POST /user/authenticators/totp` |
+| `POST /user/two-factor-authentication` | `POST /user/authenticators/totp`, with `password` while the account has no [established](authenticators.md#the-password-for-a-first-second-factor) second factor. |
 | `POST /user/confirmed-two-factor-authentication` | `POST /user/authenticators/totp/confirm` |
 | `DELETE /user/two-factor-authentication` | `DELETE /user/authenticators/{id}` |
 | `GET /user/two-factor-qr-code`, `GET /user/two-factor-secret-key` | Returned by `POST /user/authenticators/totp` (`qr`, `secret`, `url`). |

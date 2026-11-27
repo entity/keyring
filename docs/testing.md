@@ -49,11 +49,11 @@ Here, `/billing` and `/account` stand for routes of your own, behind `keyring:aa
 
 You may chain both methods, in either order. The level defaults to AAL1, so calling `freshAt` on its own gives the user a password verification at that time.
 
-A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, ask for step-up. A JSON request gets a `423` status, and any other request is redirected to the confirm page. For those routes, add `withAssurance`:
+A plain `actingAs($user)` proves nothing, so routes behind `keyring.fresh`, including Keyring's own routes for managing sign-in methods, ask for step-up. A JSON request gets a `423` status, and any other request is redirected to the confirm page. For those routes, add `withAssurance`. A user with only a password also sends it to add their first second factor (see [Factories](#factories)):
 
 ```php
 $this->actingAs($user)->withAssurance(Assurance::AAL1)
-    ->postJson(route('keyring.authenticators.store', 'totp'))
+    ->postJson(route('keyring.authenticators.store', 'totp'), ['password' => 'password'])
     ->assertOk();
 ```
 
@@ -193,9 +193,9 @@ use Keyring\Testing\VirtualAuthenticator;
 
 $key = new VirtualAuthenticator;
 
-// Register it.
+// Register it, with the password, as the user's first second factor.
 $this->actingAs($user)->withAssurance(Assurance::AAL1);
-$options = $this->postJson(route('keyring.authenticators.store', 'passkey'))->json('enrollment.options');
+$options = $this->postJson(route('keyring.authenticators.store', 'passkey'), ['password' => 'password'])->json('enrollment.options');
 $this->postJson(route('keyring.authenticators.confirm', 'passkey'), ['credential' => $key->register($options)])->assertOk();
 $this->post('/logout');
 
@@ -246,7 +246,7 @@ config(['keyring.webauthn.attestation_roots' => [$maker->root]]);
 
 $key = $maker->key('2fc0579f-8113-47ea-b116-bb5a8db9202a');
 
-$options = $this->postJson(route('keyring.authenticators.store', 'security-key'))->json('enrollment.options');
+$options = $this->postJson(route('keyring.authenticators.store', 'security-key'), ['password' => 'password'])->json('enrollment.options');
 $this->postJson(route('keyring.authenticators.confirm', 'security-key'), ['credential' => $key->register($options)])->assertOk();
 ```
 

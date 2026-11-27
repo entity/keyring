@@ -360,7 +360,7 @@ import { router } from '@inertiajs/vue3'
 
 async function addPasskey() {
   try {
-    await enroll('passkey')
+    await enroll('passkey', { password })
   } catch (error) {
     if (error instanceof KeyringRequestError && error.status === 423) {
       router.visit(error.data.redirect)
