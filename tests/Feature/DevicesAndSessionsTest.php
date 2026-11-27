@@ -2038,6 +2038,8 @@ describe('the records the registry says it revoked', function () {
     // As it always has: the database driver matches a record by whether it
     // was revoked, not whether it has expired.
     it('revokes and returns an expired record that was never revoked, on the database driver', function (Closure $revoke) {
+        $this->freezeSecond();
+
         $registry = app(SessionRegistry::class);
         ($this->session)('expired', ['expiresAt' => now()->subMinute()->getTimestamp()]);
 

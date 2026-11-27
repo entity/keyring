@@ -582,6 +582,8 @@ describe('keyring:import fortify', function () {
     });
 
     it('keeps when fortify\'s two factor and a laravel passkey were added, so they\'re established', function () {
+        $this->freezeSecond();
+
         $confirmed = now()->subMonths(3)->startOfSecond();
         DB::table('users')->update([
             'two_factor_secret' => encrypt(app(Google2FA::class)->generateSecretKey()),
