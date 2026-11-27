@@ -141,7 +141,8 @@ class Sessions
 
     /**
      * Store a new session, and keep the account to "sessions.max" of them:
-     * past that, whichever has gone unused longest ends. Refusing the sign
+     * past that, whichever has gone unused longest ends. Sessions someone
+     * is impersonating the user in neither count nor end. Refusing the sign
      * in instead would let whoever holds an account's sessions keep its
      * owner out. Two sign ins at once take turns (holding), so neither
      * counts the sessions without the other's.
@@ -168,7 +169,7 @@ class Sessions
                 $now = now()->getTimestamp();
 
                 $this->registry->forUser($user)
-                    ->reject(fn (RegisteredSession $other) => $other->id === $session->id)
+                    ->reject(fn (RegisteredSession $other) => $other->id === $session->id || $other->isImpersonated())
                     ->sortBy([
                         // One that has idled out is over already, so it goes first.
                         fn (RegisteredSession $a, RegisteredSession $b) => $this->idledOut($a, $now) <=> $this->idledOut($b, $now),
@@ -775,7 +776,7 @@ class Sessions
         // "remember me" cookies is still open then, and logoutCurrentDevice()
         // leaves the token as it was, so it's cycled here instead.
         // Signing out while impersonating leaves nobody to come back to.
-        app(Impersonation::class)->signedOut($request, $event->user);
+        app(Impersonation::class)->signedOut($request);
 
         rescue(fn () => $this->unlessGiven(SessionEndReason::LoggedOut, fn () => $this->end($request)), function () use ($event) {
             if ($event instanceof CurrentDeviceLogout && $event->user !== null) {

@@ -508,7 +508,8 @@ class KeyringManager
      * Sign the browser in as $user, on behalf of whoever is signed in, for a
      * controller of your own: Keyring's keyring.impersonation.store route
      * calls this. Check the request is a POST that proved enough first, as
-     * that route's middleware does. Nothing the impersonator proved carries
+     * that route's middleware does, and block() the route as it is, so two
+     * starts sent at once take turns. Nothing the impersonator proved carries
      * over, and the session can't prove anything as the user.
      *
      * @throws ImpersonationRefused

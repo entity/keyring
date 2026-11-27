@@ -49,6 +49,11 @@ class SignIn
             throw ValidationException::withMessages([$this->keyring->username() => __('auth.failed')]);
         }
 
+        // Signing in on a session that still holds an impersonation, one
+        // whose user was deleted say, leaves nothing parked for the next
+        // request to go back to.
+        app(Impersonation::class)->signedOut($request);
+
         $this->keyring->guard()->login($user, $attempt->remember);
 
         // All of it or none: the guard is signed in from here, and a sign
@@ -202,7 +207,7 @@ class SignIn
         if (app(Impersonation::class)->active($request)) {
             $onlyThisBrowser = true;
 
-            app(Impersonation::class)->signedOut($request, $user);
+            app(Impersonation::class)->signedOut($request);
         }
 
         // Signed out whatever happens to the registry: a revocation that

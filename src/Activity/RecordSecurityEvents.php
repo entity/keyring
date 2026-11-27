@@ -291,8 +291,8 @@ class RecordSecurityEvents
     }
 
     /**
-     * On both accounts, as it started, unless the impersonator has since
-     * been deleted: then on the user's alone.
+     * On both accounts, as it started, but for one that can no longer be
+     * loaded, deleted say: then on the other's alone.
      */
     public function impersonationEnded(Events\ImpersonationEnded $event): void
     {
@@ -302,17 +302,19 @@ class RecordSecurityEvents
             $this->log->record('impersonation_ended', $event->impersonator, meta: [...$meta, 'role' => 'impersonator']);
         }
 
-        $this->log->record('impersonation_ended', $event->user, meta: [...$meta, 'role' => 'impersonated']);
+        if ($event->user !== null) {
+            $this->log->record('impersonation_ended', $event->user, meta: [...$meta, 'role' => 'impersonated']);
+        }
     }
 
     /**
-     * @return array{impersonator: ?string, user: string}
+     * @return array{impersonator: ?string, user: ?string}
      */
-    protected function impersonation(?Authenticatable $impersonator, Authenticatable $user): array
+    protected function impersonation(?Authenticatable $impersonator, ?Authenticatable $user): array
     {
         return [
             'impersonator' => $impersonator === null ? null : (string) $impersonator->getAuthIdentifier(),
-            'user' => (string) $user->getAuthIdentifier(),
+            'user' => $user === null ? null : (string) $user->getAuthIdentifier(),
         ];
     }
 }
