@@ -169,13 +169,14 @@ class AuthenticateSession
      * impersonator's own session, the page they were on was the user's, so
      * they're sent to impersonation.return_to with the
      * "impersonation-ended" status, and a JSON client gets a 409 saying so.
-     * With nobody to go back to, the browser is signed out, as for any
-     * session that ended, for the reason it ended for in the end.
+     * With nobody to go back to, the browser is signed out, and answered
+     * as for any session that ended, for the reason it ended for in the
+     * end: a page that also serves guests is asked for again as a guest.
      */
     protected function endImpersonation(Request $request, ImpersonationEndReason $reason): Response
     {
         if (! ($reason = $this->impersonation->end($request, $reason))->returns()) {
-            return $this->keyring->response(SignedOutResponse::class, reason: $reason->value)->toResponse($request);
+            return $this->signedOut($request, $reason->value);
         }
 
         $url = $this->impersonation->returnTo();
@@ -452,6 +453,14 @@ class AuthenticateSession
             SessionEnded::dispatch($user, $reason);
         }
 
+        return $this->signedOut($request, $reason);
+    }
+
+    /**
+     * The answer to a request whose session has just been signed out.
+     */
+    protected function signedOut(Request $request, string $reason): Response
+    {
         // A page that also serves guests (sessions.continue_as_guest) is
         // asked for again, now as a guest, rather than sent to log in. A
         // redirect and not the rest of this request: that would run on the
