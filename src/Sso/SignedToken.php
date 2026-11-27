@@ -34,10 +34,11 @@ final readonly class SignedToken
     public const array ALGORITHMS = ['RS256', 'PS256', 'ES256', 'EdDSA', 'Ed25519'];
 
     /**
-     * Far longer than any ID token, short enough that a hostile one can't
-     * cost much to look at.
+     * Far longer than any ID token, even one carrying a large groups claim,
+     * and short enough that a hostile one can't cost much to look at. It
+     * comes back from the configured token endpoint, not the browser.
      */
-    protected const int LONGEST = 16 * 1024;
+    protected const int LONGEST = 64 * 1024;
 
     /**
      * The shortest RSA key a signature is checked with. It's its own floor,
@@ -63,7 +64,11 @@ final readonly class SignedToken
      */
     public static function parse(string $token): self
     {
-        if (strlen($token) > self::LONGEST || preg_match('/^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]*)$/D', $token, $parts) !== 1) {
+        if (strlen($token) > self::LONGEST) {
+            throw new InvalidArgumentException('It is longer than '.(self::LONGEST / 1024).' KiB.');
+        }
+
+        if (preg_match('/^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]*)$/D', $token, $parts) !== 1) {
             throw new InvalidArgumentException('It is not a signed JWT in compact form.');
         }
 

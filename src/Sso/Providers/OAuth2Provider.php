@@ -53,6 +53,32 @@ abstract class OAuth2Provider implements IdentityProvider
             throw new InvalidArgumentException("Identity provider [{$name}] needs a client_id.");
         }
 
+        // A typo here would otherwise be dropped without a word, and the
+        // provider asked for something other than the config says. A null
+        // or empty string is a scope left out on purpose, such as one an
+        // env var turns on, so those go.
+        $scopes = $config['scopes'] ?? null;
+
+        if ($scopes !== null) {
+            $scopes = is_array($scopes) ? array_filter($scopes, fn (mixed $scope) => $scope !== null && $scope !== '') : null;
+
+            if ($scopes === null || ! array_all($scopes, fn (mixed $scope) => is_string($scope))) {
+                throw new InvalidArgumentException("Identity provider [{$name}] has \"scopes\" that aren't an array of strings.");
+            }
+
+            $this->config['scopes'] = array_values($scopes);
+        }
+
+        if (! is_array($config['parameters'] ?? [])) {
+            throw new InvalidArgumentException("Identity provider [{$name}] has \"parameters\" that aren't an array.");
+        }
+
+        $method = $config['token_endpoint_auth_method'] ?? null;
+
+        if ($method !== null && ! in_array($method, $this->allowedAuthMethods(), true)) {
+            throw new InvalidArgumentException("Identity provider [{$name}] has a \"token_endpoint_auth_method\" that isn't one of ".implode(', ', $this->allowedAuthMethods()).'.');
+        }
+
         foreach (array_keys($this->parameters()) as $parameter) {
             if (in_array($parameter, static::RESERVED, true)) {
                 throw new InvalidArgumentException("Identity provider [{$name}] can't set the [{$parameter}] parameter: Keyring sends it.");
@@ -151,9 +177,8 @@ abstract class OAuth2Provider implements IdentityProvider
      */
     protected function scopes(): array
     {
-        $scopes = $this->config['scopes'] ?? null;
-
-        return is_array($scopes) ? array_values(array_filter($scopes, is_string(...))) : $this->defaultScopes();
+        // A list of strings once the constructor has checked it.
+        return $this->config['scopes'] ?? $this->defaultScopes();
     }
 
     /**
@@ -208,7 +233,8 @@ abstract class OAuth2Provider implements IdentityProvider
     /**
      * Swap the code for tokens, proving with the code verifier that this is
      * who asked for it. A client with a secret proves that too, in the way
-     * authMethod() picks. One without (a public client) sends only its ID.
+     * authMethod() picks. One without (a public client), or whose method is
+     * "none", sends only its ID.
      *
      * @return array<string, mixed>
      *
@@ -226,7 +252,7 @@ abstract class OAuth2Provider implements IdentityProvider
         $http = Metadata::http()->asForm();
         $secret = $this->config['client_secret'] ?? null;
 
-        if (! is_string($secret) || $secret === '') {
+        if (! is_string($secret) || $secret === '' || $this->authMethod() === 'none') {
             $form['client_id'] = $this->clientId();
         } elseif ($this->authMethod() === 'client_secret_post') {
             $form['client_id'] = $this->clientId();
@@ -274,11 +300,25 @@ abstract class OAuth2Provider implements IdentityProvider
     }
 
     /**
-     * client_secret_basic, unless the config says client_secret_post.
+     * How exchange() proves the client is who it says: the config's
+     * "token_endpoint_auth_method", or client_secret_basic without one.
      */
     protected function authMethod(): string
     {
-        return ($this->config['token_endpoint_auth_method'] ?? null) === 'client_secret_post' ? 'client_secret_post' : 'client_secret_basic';
+        $method = $this->config['token_endpoint_auth_method'] ?? null;
+
+        return is_string($method) ? $method : 'client_secret_basic';
+    }
+
+    /**
+     * The "token_endpoint_auth_method" values the config may name. A driver
+     * whose authMethod() and exchange() handle others adds them here.
+     *
+     * @return list<string>
+     */
+    protected function allowedAuthMethods(): array
+    {
+        return ['client_secret_basic', 'client_secret_post', 'none'];
     }
 
     protected function clientId(): string

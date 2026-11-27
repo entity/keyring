@@ -69,6 +69,11 @@ class Sso
             throw UnknownSsoProvider::named($name);
         }
 
+        // The name goes in the routes' URLs, which take no other.
+        if (preg_match('/^[A-Za-z0-9_-]+$/D', $name) !== 1) {
+            throw new InvalidArgumentException("Identity provider [{$name}] has a name with more than letters, digits, - and _.");
+        }
+
         $driver = $config['driver'] ?? null;
 
         $provider = match (true) {

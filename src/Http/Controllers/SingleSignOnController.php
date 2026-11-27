@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pipeline\Pipeline;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Enrollment\EnrollmentStore;
@@ -156,19 +157,46 @@ class SingleSignOnController
             abort(404);
         }
 
-        // A state that isn't this browser's has nothing to say what it's
-        // for, and fails either way: as a link for someone signed in.
-        $purpose = $pending->purpose ?? ($this->keyring->guard()->check() ? SingleSignOn::LINK : SingleSignOn::LOGIN);
         $guard = config('keyring.guard');
+
+        // A state that isn't this browser's, or has expired, can never
+        // finish. For someone signed in it fails straight away:
+        // taken as a link, a fresh verification it needs would send them to
+        // confirm and back to a callback that can never finish.
+        if ($pending === null && $this->keyring->guard()->check()) {
+            return $this->through($request, ['auth:'.$guard, 'throttle:keyring'], fn () => $this->unknown($request, $factor, $provider, is_string($state) ? $state : ''));
+        }
 
         // A guest's callback can fail as often as it's sent, and each
         // failure is logged and dispatched, so it draws on the same limit
         // as the redirect that started it. A confirm needs no recent
         // verification: it's how the user gets one.
-        return match ($purpose) {
-            SingleSignOn::LINK => $this->through($request, ['auth:'.$guard, ...config('keyring.changes_middleware'), 'throttle:keyring'], fn () => $this->link($request, $factor, $provider, $pending)),
+        return match ($pending->purpose ?? SingleSignOn::LOGIN) {
+            SingleSignOn::LINK => $this->through($request, ['auth:'.$guard, ...Arr::wrap(config('keyring.changes_middleware')), 'throttle:keyring'], fn () => $this->link($request, $factor, $provider, $pending ?? throw new LogicException('Only a request started to link is for one.'))),
             SingleSignOn::CONFIRM => $this->through($request, ['auth:'.$guard, 'throttle:keyring'], fn () => $this->confirm($request, $factor, $provider, $pending ?? throw new LogicException('Only a request started to confirm is for one.'))),
-            default => $this->through($request, ['guest:'.$guard, 'throttle:keyring-login-options'], fn () => $this->login($request, $factor, $provider)),
+            default => $this->through($request, ['guest:'.$guard, 'throttle:keyring-login-options'], fn () => $this->login($request, $factor, $provider, $pending)),
+        };
+    }
+
+    /**
+     * A callback this browser has no live request for, while someone is
+     * signed in. One that expired says what it was for, and goes back to
+     * where it would have: a confirm to the confirm page, which starts
+     * one again, and a link to the page it was started from. Nothing is
+     * known of one used already, or someone else's. With a confirm in
+     * progress it was most likely that, so it goes back to the confirm
+     * page, and otherwise home.
+     */
+    protected function unknown(Request $request, SingleSignOn $factor, string $provider, string $state): Response
+    {
+        $expired = $state === '' ? null : $this->pending->pullExpired($state);
+        $confirm = route('keyring.confirm.challenge');
+
+        return match (true) {
+            $expired?->purpose === SingleSignOn::CONFIRM => $this->failed($request, $confirm, [$factor->errorKey() => __('keyring::keyring.expired')]),
+            $expired?->purpose === SingleSignOn::LINK => $this->failed($request, $this->returnTo($expired), ['provider' => __('keyring::keyring.enrollment_expired')]),
+            $expired === null && $this->attempts->current(Purpose::Confirm) !== null => $this->failed($request, $confirm, [$factor->errorKey() => __('keyring::keyring.expired')]),
+            default => $this->failed($request, $this->returnTo(null), ['provider' => $factor->failure($provider)]),
         };
     }
 
@@ -177,8 +205,12 @@ class SingleSignOnController
      * login form would, and answer as it does. Failures go to the login
      * page, which the user came from.
      */
-    protected function login(Request $request, SingleSignOn $factor, string $provider): Response
+    protected function login(Request $request, SingleSignOn $factor, string $provider, ?AuthorizationRequest $pending): Response
     {
+        // Only a sign in signs anyone in. A state this browser doesn't have
+        // fails at complete(), as it always would.
+        abort_unless($pending === null || $pending->purpose === SingleSignOn::LOGIN, 404);
+
         try {
             $identity = $this->keyring->sso()->complete($request, $provider);
         } catch (SsoFailed $e) {
@@ -281,7 +313,7 @@ class SingleSignOnController
      * saying who, and one already linked to them is only brought up to
      * date.
      */
-    protected function link(Request $request, SingleSignOn $factor, string $provider, ?AuthorizationRequest $pending): Response
+    protected function link(Request $request, SingleSignOn $factor, string $provider, AuthorizationRequest $pending): Response
     {
         $user = $this->keyring->user();
         $return = $this->returnTo($pending);
@@ -299,7 +331,7 @@ class SingleSignOnController
         };
 
         // Someone else signed in on this browser since it was started.
-        if ($pending !== null && ! $factor->startedBy($pending, $user)) {
+        if (! $factor->startedBy($pending, $user)) {
             $this->pending->pull($pending->state);
 
             return $refuse();
@@ -330,7 +362,7 @@ class SingleSignOnController
         }
 
         if ($linked !== null) {
-            $linked->withMeta('email', $identity->email)->withMeta('provider', $identity->provider)->save();
+            $factor->bringUpToDate($linked, $identity)->save();
             $this->enrollments->forget($factor->key());
 
             return $this->status('authenticator-updated', ['authenticator' => $factor->present($linked)], $return)->toResponse($request);

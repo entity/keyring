@@ -39,6 +39,13 @@ class OidcProvider extends OAuth2Provider
     protected const array REQUIRED_ENDPOINTS = ['authorization_endpoint', 'token_endpoint', 'jwks_uri'];
 
     /**
+     * The endpoints Keyring sends requests to itself, which have to stay
+     * out of the server's own network (see mayFetch()). The authorization
+     * endpoint is only where the user's browser goes.
+     */
+    protected const array FETCHED_ENDPOINTS = ['token_endpoint', 'jwks_uri', 'userinfo_endpoint'];
+
+    /**
      * Read once for each provider built, which is once per request.
      *
      * @var array<string, mixed>|null
@@ -54,6 +61,10 @@ class OidcProvider extends OAuth2Provider
 
         if (! Metadata::isSecure($this->issuer())) {
             throw new InvalidArgumentException("Identity provider [{$name}] needs an HTTPS issuer.");
+        }
+
+        if (! is_bool($config['private_endpoints'] ?? false)) {
+            throw new InvalidArgumentException("Identity provider [{$name}] has a \"private_endpoints\" that isn't true or false.");
         }
     }
 
@@ -128,10 +139,9 @@ class OidcProvider extends OAuth2Provider
     }
 
     /**
-     * An endpoint the document names, which has to be HTTPS. Only an issuer
-     * on this machine may name endpoints on it, or plain HTTP ones there:
-     * a provider elsewhere can't have Keyring send requests to the
-     * server's own services.
+     * An endpoint the document names, which has to be HTTPS, or for an
+     * issuer on this machine, may be plain HTTP there. One Keyring sends
+     * its own requests to also has to be somewhere mayFetch() allows.
      *
      * @param  array<string, mixed>  $document
      *
@@ -145,7 +155,30 @@ class OidcProvider extends OAuth2Provider
             throw SsoFailed::because(SsoFailure::Unavailable, "[{$this->name}]'s discovery document has no HTTPS {$key}.");
         }
 
+        if (in_array($key, static::FETCHED_ENDPOINTS, true) && ! $this->mayFetch($url)) {
+            throw SsoFailed::because(SsoFailure::Unavailable, "[{$this->name}]'s discovery document names {$key} on a private or local address. Set \"private_endpoints\" if that's where it is.");
+        }
+
         return $url;
+    }
+
+    /**
+     * Whether Keyring may send its own requests to the URL, so that a
+     * provider can't have it call the server's own services (the token
+     * endpoint's request carries the client secret): when it's on the
+     * public internet (Metadata::isInward()), or on the issuer's own host
+     * and port, which the app chose and Keyring already read discovery
+     * from. An issuer on this machine may name anywhere, as may one whose
+     * config says "private_endpoints", for a provider whose endpoints are
+     * on another host inside the network, or DNS that answers with
+     * addresses that look private (a service mesh, a proxy's fake IPs).
+     */
+    protected function mayFetch(string $url): bool
+    {
+        return ($this->config['private_endpoints'] ?? false) === true
+            || Metadata::isLocal($this->issuer())
+            || Metadata::sameHost($url, $this->issuer())
+            || ! Metadata::isInward($url);
     }
 
     protected function authorizationEndpoint(): string

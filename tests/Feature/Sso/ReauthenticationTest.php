@@ -16,6 +16,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Enums\SsoFailure;
 use Keyring\Enums\SsoFreshness;
 use Keyring\Events\Confirmed;
+use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\FactorVerified;
 use Keyring\Exceptions\SsoFailed;
@@ -548,6 +549,43 @@ describe('confirming', function () {
         $this->get(route('keyring.sso.confirm'))
             ->assertRedirect(route('keyring.confirm.challenge'))
             ->assertSessionHasErrors(['email' => __('keyring::keyring.sso_failed', ['provider' => 'Google'])]);
+    });
+
+    it('goes back to the confirm page when the provider sends the user back after the request expired', function () {
+        Event::fake([EnrollmentRefused::class]);
+        $url = confirmAtProvider();
+        $this->travel(11)->minutes();
+
+        $this->get($this->google->approve($url))
+            ->assertRedirect(route('keyring.confirm.challenge'))
+            ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+        expect(session('url.intended'))->toBe('http://localhost/settings/danger')
+            ->and(session()->get('keyring.sso'))->toBeNull()
+            ->and(loggedTypes())->not->toContain('enrollment_refused');
+        Event::assertNotDispatched(EnrollmentRefused::class);
+
+        // Where a confirm starts again, for the page it was for.
+        $this->getJson(route('keyring.confirm.challenge', 'sso'))->assertOk()->assertJsonPath('props.factor', 'sso');
+        $this->get('/settings/danger')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('answers a frontend whose confirm expired with a 422', function () {
+        $url = confirmAtProvider();
+        $this->travel(11)->minutes();
+
+        $this->getJson($this->google->approve($url))->assertUnprocessable()->assertJsonValidationErrors(['email' => __('keyring::keyring.expired')]);
+    });
+
+    it('guesses a callback it has no request for is the confirm in progress, and sends it back there', function () {
+        confirmAtProvider();
+
+        $this->get(route('keyring.sso.callback', ['google', 'code' => 'abc', 'state' => 'nope']))
+            ->assertRedirect(route('keyring.confirm.challenge'))
+            ->assertSessionHasErrors(['email' => __('keyring::keyring.expired')]);
+
+        $this->get(route('keyring.sso.callback', ['google', 'code' => 'abc']))
+            ->assertRedirect(route('keyring.confirm.challenge'));
     });
 
     it('sends a guest who comes back to sign in', function () {

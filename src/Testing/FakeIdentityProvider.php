@@ -9,6 +9,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Keyring\Sso\HostResolver;
 use Keyring\Sso\Providers\GitHubProvider;
 use Keyring\Sso\Providers\GoogleProvider;
 use Keyring\Sso\Providers\MicrosoftProvider;
@@ -138,6 +139,11 @@ class FakeIdentityProvider
     /** @var list<string> */
     protected array $authMethods = ['client_secret_basic', 'client_secret_post'];
 
+    /**
+     * The "issuer" its keys name, as Microsoft's do, or null for none.
+     */
+    protected ?string $keyIssuer = null;
+
     /** @var array{int, string}|null */
     protected ?array $exchangeFailure = null;
 
@@ -160,7 +166,17 @@ class FakeIdentityProvider
 
         $this->rotateKeys();
 
+        if ($driver === 'microsoft') {
+            $this->keyIssuer = MicrosoftProvider::AUTHORITY.'/{tenantid}/v2.0';
+        }
+
         Http::fake(fn (Request $request) => $this->answer($request));
+
+        // Its endpoints are on hosts that don't resolve, or are real
+        // providers' it stands in for: none is looked up while it does.
+        if (! app()->bound(HostResolver::class)) {
+            HostResolver::fake();
+        }
     }
 
     public static function google(string $algorithm = 'RS256'): self
@@ -410,6 +426,18 @@ class FakeIdentityProvider
         $kid = Str::random(16);
         $this->keys[$kid] = $this->makeKey();
         $this->published = $retireOld ? [$kid] : [...$this->published, $kid];
+
+        return $this;
+    }
+
+    /**
+     * Have its keys name this "issuer", as Microsoft's say which tenant's
+     * tokens each one signs: its own, https://login.microsoftonline.com/{tenantid}/v2.0
+     * by default, or another tenant's. Null names none.
+     */
+    public function withKeyIssuer(?string $issuer): static
+    {
+        $this->keyIssuer = $issuer;
 
         return $this;
     }
@@ -781,7 +809,7 @@ class FakeIdentityProvider
     protected function jwk(string $kid, OpenSSLAsymmetricKey|string $key): array
     {
         $encode = Base64UrlSafe::encodeUnpadded(...);
-        $base = ['kid' => $kid, 'use' => 'sig', 'alg' => $this->algorithm];
+        $base = ['kid' => $kid, 'use' => 'sig', 'alg' => $this->algorithm, ...($this->keyIssuer === null ? [] : ['issuer' => $this->keyIssuer])];
 
         if (is_string($key)) {
             return [...$base, 'kty' => 'OKP', 'crv' => 'Ed25519', 'x' => $encode(sodium_crypto_sign_publickey($key))];

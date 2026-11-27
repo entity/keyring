@@ -79,6 +79,28 @@ class PendingAuthorizations
     }
 
     /**
+     * Take the request a callback's state names once it has expired, to
+     * say where the callback should go now: it's gone, and doesn't count.
+     * Null when there's none, or it hasn't expired. An expired one is kept
+     * until the next put(), so a callback that comes back late still finds
+     * it.
+     */
+    public function pullExpired(string $state): ?AuthorizationRequest
+    {
+        $pending = $this->all();
+        $request = $pending[$state] ?? null;
+
+        if ($request === null || ! $request->expired) {
+            return null;
+        }
+
+        unset($pending[$state]);
+        $this->save($pending);
+
+        return $request;
+    }
+
+    /**
      * @return array<string, AuthorizationRequest>
      */
     protected function all(): array

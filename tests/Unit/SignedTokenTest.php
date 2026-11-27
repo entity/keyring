@@ -28,6 +28,14 @@ it('checks a signature against the key that made it', function (string $algorith
         ->and($token->signedBy(new FakeIdentityProvider(algorithm: $algorithm)->jwks()[0]))->toBeFalse();
 })->with(['ES256', 'RS256', 'PS256', 'EdDSA']);
 
+it('takes a token with a large groups claim, up to 64 KiB', function () {
+    $idp = new FakeIdentityProvider;
+    $token = $idp->idToken(['sub' => '1', 'groups' => array_map(fn (int $i) => sprintf('%08x-0000-0000-0000-000000000000', $i), range(1, 1000))]);
+
+    expect(strlen($token))->toBeGreaterThan(32 * 1024)->toBeLessThan(64 * 1024)
+        ->and(SignedToken::parse($token)->signedBy($idp->jwks()[0]))->toBeTrue();
+});
+
 it('takes Ed25519 as RFC 9864 names EdDSA', function () {
     $idp = new FakeIdentityProvider(algorithm: 'EdDSA');
     $token = SignedToken::parse($idp->withHeader(['alg' => 'Ed25519'])->idToken(['sub' => '1']));
@@ -106,7 +114,7 @@ it('refuses tokens that aren\'t signed JWTs', function (string $token, string $w
     'two parts' => ['eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0', 'compact form'],
     'four parts' => ['a.b.c.d', 'compact form'],
     'padding' => ['eyJhbGciOiJSUzI1NiJ9=.eyJzdWIiOiIxIn0.', 'compact form'],
-    'too long' => [str_repeat('a', 16 * 1024).'.b.c', 'compact form'],
+    'too long' => [str_repeat('a', 64 * 1024).'.b.c', 'longer than 64 KiB'],
     'a trailing newline' => ["eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.\n", 'compact form'],
     'not base64url' => ['a.eyJzdWIiOiIxIn0.', 'not base64url'],
     'not JSON' => [Base64UrlSafe::encodeUnpadded('nope').'.eyJzdWIiOiIxIn0.', 'not hold JSON'],

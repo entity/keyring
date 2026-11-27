@@ -9,6 +9,7 @@ use Keyring\Enums\SsoFailure;
 use Keyring\Exceptions\SsoFailed;
 use Keyring\Sso\AuthorizationRequest;
 use Keyring\Sso\Identity;
+use Keyring\Sso\SignedToken;
 
 /**
  * Sign in with Microsoft: OpenID Connect on the Microsoft identity platform
@@ -131,6 +132,30 @@ class MicrosoftProvider extends OidcProvider
         $issuer = str_replace('{tenantid}', $tenant, self::TEMPLATE);
 
         return ($claims['iss'] ?? null) === $issuer ? $issuer : null;
+    }
+
+    /**
+     * With the template, every tenant's tokens are signed with keys from the
+     * one key set, and a key Microsoft only signs one tenant's tokens with
+     * says so in its "issuer". So, as Microsoft asks of multi-tenant apps,
+     * a key with an "issuer" only vouches for a token whose "iss" it is,
+     * with the token's own "tid" in place of {tenantid}.
+     *
+     * @param  list<array<array-key, mixed>>  $keys
+     *
+     * @throws SsoFailed
+     */
+    protected function signedByOneOf(SignedToken $token, array $keys): bool
+    {
+        if ($this->discoveredIssuer() !== self::TEMPLATE) {
+            return parent::signedByOneOf($token, $keys);
+        }
+
+        $tenant = $token->claims['tid'] ?? null;
+        $issuer = $token->claims['iss'] ?? null;
+
+        return parent::signedByOneOf($token, array_values(array_filter($keys, fn (array $key) => ! array_key_exists('issuer', $key)
+            || (is_string($key['issuer']) && is_string($tenant) && is_string($issuer) && str_replace('{tenantid}', $tenant, $key['issuer']) === $issuer))));
     }
 
     /**

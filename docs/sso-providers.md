@@ -644,7 +644,7 @@ LinkedIn's `sub` is pairwise: the same member has a different one in each app, s
 Any other OAuth 2.0 provider follows the same shape. Extend `Keyring\Sso\Providers\OAuth2Provider`, and:
 
 1. Return the provider's endpoints from `authorizationEndpoint()` and `tokenEndpoint()`, and its scopes from `defaultScopes()`. Override `defaultLabel()` with the name for the button.
-2. Override `authMethod()` to return `client_secret_post` when the provider only takes the secret in the form. The default is a `Basic` header.
+2. Override `authMethod()` to return `client_secret_post` when the provider only takes the secret in the form. The default is a `Basic` header, or the config's `token_endpoint_auth_method`. For that option to take a value Keyring's drivers don't, such as `private_key_jwt`, add it to `allowedAuthMethods()` and send it in your own `exchange()`.
 3. In `identityFrom()`, read the user with `Metadata::http()->withToken($tokens['access_token'])`. It has short timeouts and follows no redirects, so a provider can't hand the token somewhere else. Turn any failure into `SsoFailed::because(SsoFailure::Unavailable, ...)`, without the token in the message.
 4. Use the account's permanent ID as the `subject`: one that never changes and is never reused. Never a username, a handle, or an address, which can change and be taken by someone else. Check the provider's docs for which field that is. Spotify's, for example, says to link on `account_id`, not `id`.
 5. Pick one `ISSUER` for the provider, such as its website, and never change it.

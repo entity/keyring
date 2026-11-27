@@ -248,13 +248,28 @@ class SingleSignOn extends Factor implements Enrollable, PrimaryFactor
             default => Verification::of($authenticator),
         };
 
+        $this->bringUpToDate($authenticator, $identity);
+
+        return $proved;
+    }
+
+    /**
+     * The link with what the provider just said about it, not yet saved:
+     * the address it has now, and the provider the identity came through
+     * when the one the link was made with is no longer configured. A link
+     * keeps its own provider otherwise, so a stricter one goes on counting
+     * however many sign ins or links come through another on the same
+     * issuer.
+     */
+    public function bringUpToDate(Authenticator $authenticator, Identity $identity): Authenticator
+    {
         $authenticator->withMeta('email', $identity->email);
 
         if (! Keyring::sso()->has((string) $authenticator->meta('provider'))) {
             $authenticator->withMeta('provider', $identity->provider);
         }
 
-        return $proved;
+        return $authenticator;
     }
 
     /**

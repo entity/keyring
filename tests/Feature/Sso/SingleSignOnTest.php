@@ -22,6 +22,7 @@ use Keyring\Enums\Purpose;
 use Keyring\Enums\SsoFailure;
 use Keyring\Events\AuthenticatorAdded;
 use Keyring\Events\AuthenticatorRemoved;
+use Keyring\Events\EnrollmentRefused;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Exceptions\SsoFailed;
@@ -31,6 +32,7 @@ use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\SingleSignOn;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Http\Controllers\SingleSignOnController;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
@@ -43,6 +45,7 @@ use Keyring\Sso\Identity;
 use Keyring\Sso\PendingAuthorizations;
 use Keyring\Testing\FakeIdentityProvider;
 use Keyring\Tests\Fixtures\User;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 const SSO_SUBJECT = '248289761001';
 
@@ -352,6 +355,25 @@ describe('signing in', function () {
         $this->get(route('keyring.sso.redirect', 'broken'))->assertInternalServerError();
     });
 
+    it('leaves a provider whose name its routes can\'t take off the login page, and reports it', function () {
+        Exceptions::fake();
+        config(['keyring.sso.providers.my google' => ['driver' => 'oidc', 'issuer' => 'https://idp.test', 'client_id' => 'x']]);
+
+        $this->getJson('/login')->assertOk()->assertJsonPath('props.providers', [
+            ['name' => 'fake', 'label' => 'Fake', 'url' => route('keyring.sso.redirect', 'fake')],
+        ]);
+
+        Exceptions::assertReported(fn (InvalidArgumentException $e) => $e->getMessage() === 'Identity provider [my google] has a name with more than letters, digits, - and _.');
+    });
+
+    it('only signs anyone in for a request started to sign in', function (string $purpose) {
+        $controller = app(SingleSignOnController::class);
+        $pending = AuthorizationRequest::make('fake', $purpose, SSO_CALLBACK, ['user' => (string) $this->user->id]);
+
+        expect(fn () => (fn () => $this->login(request(), Keyring::factor('sso'), 'fake', $pending))->call($controller))
+            ->toThrow(NotFoundHttpException::class);
+    })->with([SingleSignOn::LINK, SingleSignOn::CONFIRM]);
+
     it('reports a failure that says something is wrong, and none that users cause every day', function () {
         Exceptions::fake();
         linkFor($this->user);
@@ -580,7 +602,7 @@ describe('linking', function () {
         expect($this->user->keyring->refresh()->of('sso')->sole()->name)->toBe('Fake');
     });
 
-    it('only brings an account already linked to the user up to date', function () {
+    it('only brings an account already linked to the user up to date, moving it to the key it came through once its own is gone', function () {
         Event::fake([AuthenticatorAdded::class]);
         $link = linkFor($this->user);
         $link->withMeta('provider', 'renamed')->save();
@@ -592,6 +614,17 @@ describe('linking', function () {
             ->and($link->fresh()->meta('email'))->toBe('taylor@new.example.com')
             ->and($link->fresh()->meta('provider'))->toBe('fake');
         Event::assertNotDispatched(AuthenticatorAdded::class);
+    });
+
+    it('keeps a link on its own key when it is linked again through another on the same issuer', function () {
+        $this->idp->register('fake-quick', ['freshness' => 'round_trip']);
+        $link = linkFor($this->user);
+
+        $this->get($this->idp->signIn(['email' => 'taylor@new.example.com'])->approve(beginLink('fake-quick')))
+            ->assertSessionHas('status', 'authenticator-updated');
+
+        expect($link->fresh()->meta('provider'))->toBe('fake')
+            ->and($link->fresh()->meta('email'))->toBe('taylor@new.example.com');
     });
 
     it('refuses an account linked to someone else, without saying whose', function () {
@@ -689,17 +722,95 @@ describe('linking', function () {
         $this->get($callback);
         $this->user->authenticators()->where('factor', 'sso')->delete();
 
-        $this->get($callback)->assertSessionHasErrors(['provider' => __('keyring::keyring.sso_link_failed', ['provider' => 'Fake'])]);
+        $this->get($callback)->assertRedirect('http://localhost/dashboard')->assertSessionHasErrors(['provider' => __('keyring::keyring.sso_failed', ['provider' => 'Fake'])]);
 
         expect($this->user->keyring->refresh()->of('sso'))->toBeEmpty();
     });
 
-    it('refuses a state this browser was never given', function () {
+    it('refuses a state this browser was never given, as nothing it started', function () {
+        Event::fake([EnrollmentRefused::class]);
         beginLink();
 
-        $this->get(route('keyring.sso.callback', ['fake', 'code' => 'abc', 'state' => 'nope']))->assertSessionHasErrors('provider');
+        $this->get(route('keyring.sso.callback', ['fake', 'code' => 'abc', 'state' => 'nope']))
+            ->assertRedirect('http://localhost/dashboard')
+            ->assertSessionHasErrors(['provider' => __('keyring::keyring.sso_failed', ['provider' => 'Fake'])]);
 
-        expect(logEntry('enrollment_refused')->meta)->toBe(['reason' => 'invalid']);
+        Event::assertNotDispatched(EnrollmentRefused::class);
+        expect(loggedTypes())->toBe([]);
+    });
+
+    it('fails a link that comes back after its request expired straight away, back on the page it was started from, without asking for a verification first', function () {
+        Event::fake([EnrollmentRefused::class]);
+        config(['keyring.changes_middleware' => ['keyring.fresh:5m']]);
+        $callback = $this->idp->approve(beginLink(headers: ['Referer' => 'http://localhost/settings/security']));
+        $this->travel(11)->minutes();
+
+        $this->get($callback)
+            ->assertRedirect('http://localhost/settings/security')
+            ->assertSessionHasErrors(['provider' => __('keyring::keyring.enrollment_expired')]);
+
+        expect($this->user->keyring->refresh()->of('sso'))->toBeEmpty()
+            ->and(session()->has('url.intended'))->toBeFalse()
+            ->and(session()->get('keyring.sso'))->toBeNull()
+            ->and(loggedTypes())->toBe([]);
+        Event::assertNotDispatched(EnrollmentRefused::class);
+
+        // Taken, it's gone: sent again, nothing says what it was for.
+        $this->get($callback)
+            ->assertRedirect('http://localhost/dashboard')
+            ->assertSessionHasErrors(['provider' => __('keyring::keyring.sso_failed', ['provider' => 'Fake'])]);
+    });
+
+    it('answers a frontend whose link expired with a 422, not a 423', function () {
+        config(['keyring.changes_middleware' => ['keyring.fresh:5m']]);
+        $callback = $this->idp->approve(beginLink());
+        $this->travel(11)->minutes();
+
+        $this->getJson($callback)->assertUnprocessable()->assertJsonValidationErrors(['provider' => __('keyring::keyring.enrollment_expired')]);
+    });
+
+    it('sends an expired callback of something else Keyring::sso() started home', function () {
+        $callback = $this->idp->approve(Keyring::sso()->start('fake', 'sign-up', route('keyring.sso.callback', 'fake')));
+        $this->travel(11)->minutes();
+
+        $this->get($callback)
+            ->assertRedirect('http://localhost/dashboard')
+            ->assertSessionHasErrors(['provider' => __('keyring::keyring.sso_failed', ['provider' => 'Fake'])]);
+    });
+
+    it('still draws a signed-in user\'s unknown callbacks on the limit', function () {
+        $callback = route('keyring.sso.callback', ['fake', 'code' => 'abc', 'state' => 'nope']);
+
+        foreach (range(1, 6) as $ignored) {
+            $this->get($callback)->assertRedirect('http://localhost/dashboard');
+        }
+
+        $this->get($callback)->assertTooManyRequests();
+    });
+
+    it('takes changes_middleware given as one string', function () {
+        config(['keyring.changes_middleware' => 'keyring.fresh:5m']);
+        $callback = $this->idp->approve(beginLink());
+
+        $this->get($callback)->assertSessionHas('status', 'authenticator-added');
+
+        $callback = $this->idp->signIn(['sub' => 'work'])->approve(beginLink());
+        $this->travel(6)->minutes();
+
+        $this->get($callback)->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('refuses a link whose callback fails a check, and reports it', function () {
+        Exceptions::fake();
+        $url = beginLink();
+
+        $this->get($this->idp->withClaims(['aud' => 'someone-else'])->approve($url))
+            ->assertRedirect('http://localhost')
+            ->assertSessionHasErrors(['provider' => __('keyring::keyring.sso_link_failed', ['provider' => 'Fake'])]);
+
+        expect($this->user->keyring->refresh()->of('sso'))->toBeEmpty()
+            ->and(logEntry('enrollment_refused')->meta)->toBe(['reason' => 'invalid']);
+        Exceptions::assertReported(fn (SsoFailed $e) => $e->reason === SsoFailure::InvalidToken);
     });
 
     it('goes back quietly when the user said no at the provider', function () {

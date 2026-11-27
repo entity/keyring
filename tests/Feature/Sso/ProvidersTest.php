@@ -59,7 +59,8 @@ it('signs in with Microsoft on a multi-tenant endpoint, as the user\'s own tenan
 })->with(['common', 'organizations', 'COMMON']);
 
 it('refuses a Microsoft token whose issuer isn\'t its own tenant\'s', function (array $claims) {
-    $idp = FakeIdentityProvider::microsoft('common', CONTOSO)->register('microsoft');
+    // Keys that name no issuer, so the token's own check is what refuses it.
+    $idp = FakeIdentityProvider::microsoft('common', CONTOSO)->withKeyIssuer(null)->register('microsoft');
 
     expect(ssoFailure(fn () => ssoComplete($idp->withClaims($claims)->approve(ssoStart('microsoft')), 'microsoft')))
         ->toBe([SsoFailure::InvalidToken, 'Single sign-on failed (invalid_token): [microsoft]: The ID token is from another issuer.']);
@@ -70,6 +71,31 @@ it('refuses a Microsoft token whose issuer isn\'t its own tenant\'s', function (
     'a tid that isn\'t an ID' => [['tid' => '../evil', 'iss' => 'https://login.microsoftonline.com/../evil/v2.0']],
     'no tid' => [['tid' => null]],
 ]);
+
+it('holds a Microsoft token on a multi-tenant endpoint to the issuer its signing key names', function (string $tenant, ?string $keyIssuer, bool $signsIn) {
+    $idp = FakeIdentityProvider::microsoft($tenant, CONTOSO)->withKeyIssuer($keyIssuer)->register('microsoft');
+    $complete = fn () => ssoComplete($idp->approve(ssoStart('microsoft')), 'microsoft');
+
+    if ($signsIn) {
+        expect($complete()->issuer)->toBe('https://login.microsoftonline.com/'.CONTOSO.'/v2.0');
+    } else {
+        expect(ssoFailure($complete))->toBe([SsoFailure::InvalidToken, 'Single sign-on failed (invalid_token): [microsoft]: The ID token is not signed by any of the provider\'s keys.']);
+    }
+})->with([
+    'any tenant\'s, as Microsoft\'s keys say' => ['common', 'https://login.microsoftonline.com/{tenantid}/v2.0', true],
+    'the user\'s tenant' => ['common', 'https://login.microsoftonline.com/'.CONTOSO.'/v2.0', true],
+    'no issuer' => ['common', null, true],
+    'another tenant\'s' => ['common', 'https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0', false],
+    'another tenant\'s, on organizations' => ['organizations', 'https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0', false],
+    'another authority' => ['common', 'https://sts.windows.net/{tenantid}/', false],
+]);
+
+it('takes a token whose key names the tenant, for a single tenant', function () {
+    // Its own issuer is all it takes, so there's nothing to hold it to.
+    $idp = FakeIdentityProvider::microsoft(CONTOSO)->withKeyIssuer('https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0')->register('microsoft');
+
+    expect(ssoComplete($idp->approve(ssoStart('microsoft')), 'microsoft')->issuer)->toBe('https://login.microsoftonline.com/'.CONTOSO.'/v2.0');
+});
 
 it('keeps personal Microsoft accounts out of "organizations", and lets them into "common"', function () {
     $idp = FakeIdentityProvider::microsoft('organizations', MicrosoftProvider::CONSUMERS)->register('microsoft', ['tenant' => 'organizations']);
@@ -269,20 +295,58 @@ it('refuses a provider it can\'t build', function (array $config, string $messag
     'a plain HTTP issuer' => [['driver' => 'oidc', 'client_id' => 'x', 'issuer' => 'http://idp.test'], 'needs an HTTPS issuer'],
     'a parameter Keyring sends' => [['driver' => 'github', 'client_id' => 'x', 'parameters' => ['state' => 'fixed']], 'can\'t set the [state] parameter'],
     'max_age' => [['driver' => 'google', 'client_id' => 'x', 'parameters' => ['max_age' => 0]], 'can\'t set the [max_age] parameter'],
+    'parameters that aren\'t an array' => [['driver' => 'google', 'client_id' => 'x', 'parameters' => 'prompt=none'], '"parameters" that aren\'t an array'],
+    'scopes as a string' => [['driver' => 'github', 'client_id' => 'x', 'scopes' => 'read:user user:email'], '"scopes" that aren\'t an array of strings'],
+    'scopes that aren\'t strings' => [['driver' => 'oidc', 'client_id' => 'x', 'issuer' => 'https://idp.test', 'scopes' => ['email', 42]], '"scopes" that aren\'t an array of strings'],
+    'scopes with false in them' => [['driver' => 'google', 'client_id' => 'x', 'scopes' => ['email', false]], '"scopes" that aren\'t an array of strings'],
+    'an auth method it doesn\'t know' => [['driver' => 'google', 'client_id' => 'x', 'token_endpoint_auth_method' => 'private_key_jwt'], 'has a "token_endpoint_auth_method" that isn\'t one of client_secret_basic, client_secret_post, none.'],
+    'an auth method that isn\'t a string' => [['driver' => 'github', 'client_id' => 'x', 'token_endpoint_auth_method' => true], '"token_endpoint_auth_method" that isn\'t'],
 ]);
+
+it('refuses a provider whose name its routes can\'t take', function (string $name) {
+    config(['keyring.sso.providers' => [$name => ['driver' => 'google', 'client_id' => 'x']]]);
+
+    expect(fn () => Keyring::sso()->provider($name))->toThrow(InvalidArgumentException::class, "Identity provider [{$name}] has a name with more than letters, digits, - and _.");
+})->with(['a space' => 'my google', 'a slash' => 'google/work', 'a dot' => 'google.work', 'a newline' => "google\n", 'an empty one' => '']);
+
+it('takes the auth methods it knows by name', function (string $method) {
+    config(['keyring.sso.providers.google' => ['driver' => 'google', 'client_id' => 'x', 'token_endpoint_auth_method' => $method]]);
+
+    expect(Keyring::sso()->provider('google'))->toBeInstanceOf(GoogleProvider::class);
+})->with(['client_secret_basic', 'client_secret_post', 'none']);
+
+it('takes an auth method a driver says it handles', function () {
+    $provider = new class('corp', ['client_id' => 'x', 'issuer' => 'https://idp.test', 'token_endpoint_auth_method' => 'private_key_jwt']) extends OidcProvider
+    {
+        protected function allowedAuthMethods(): array
+        {
+            return [...parent::allowedAuthMethods(), 'private_key_jwt'];
+        }
+
+        public function method(): string
+        {
+            return $this->authMethod();
+        }
+    };
+
+    expect($provider->method())->toBe('private_key_jwt');
+});
+
+it('leaves out the scopes the config left empty, and takes them keyed or with gaps', function () {
+    $idp = FakeIdentityProvider::github()->register('github', ['scopes' => [3 => 'read:user', 'email' => null, 'extra' => '', 7 => 'user:email']]);
+
+    expect(authorizationQuery(ssoStart('github'))['scope'])->toBe('read:user user:email');
+
+    $idp->register('github', ['scopes' => [null, '']]);
+
+    expect(authorizationQuery(ssoStart('github')))->toHaveKey('scope', '');
+});
 
 it('takes a provider run on this machine over plain HTTP', function () {
     config(['keyring.sso.providers.keycloak' => ['driver' => 'oidc', 'client_id' => 'x', 'issuer' => 'http://localhost:8080/realms/app']]);
 
     expect(Keyring::sso()->provider('keycloak'))->toBeInstanceOf(OidcProvider::class)
         ->and(Keyring::sso()->provider('keycloak')->issuer())->toBe('http://localhost:8080/realms/app');
-});
-
-it('ignores parameters and scopes that aren\'t lists of what they should be', function () {
-    $idp = new FakeIdentityProvider()->register(config: ['parameters' => 'prompt=none', 'scopes' => ['email', 42]]);
-
-    expect(authorizationQuery(ssoStart())['scope'])->toBe('openid email')
-        ->and(authorizationQuery(ssoStart()))->not->toHaveKey('prompt');
 });
 
 it('builds providers with a driver the app registered', function () {
