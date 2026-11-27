@@ -10,6 +10,7 @@ use Illuminate\Support\Collection;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
+use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
@@ -198,18 +199,36 @@ class UserKeyring
      * Recovery codes aren't counted on, or a user with nothing else beyond
      * one factor would spend a code every time.
      *
-     * A key that isn't established yet counts as a factor, but not as a
-     * phishing-resistant, device-bound or attested one: otherwise a key
-     * added from a stolen session would be all an ifEnrolled() policy that
-     * asks for one took, and the owner, who doesn't have it, would be shut
-     * out. It still proves all that when it's used.
+     * Only established authenticators decide how much that is: otherwise a
+     * key added from a stolen session would raise what an ifEnrolled()
+     * policy asks, as a factor of a new kind or as a phishing-resistant,
+     * device-bound or attested key, and the owner, who doesn't have it,
+     * would be shut out. A new one still counts toward meeting it when it's
+     * used, and is offered beside the rest.
+     *
+     * The exception is an account whose new factors all took its password
+     * to add (see AuthenticatorChanges::needsPassword()): one with a
+     * password and no established second factor. A copy of a session can't
+     * add one there, so the owner's own new factor is asked for, as a
+     * factor and nothing more until it's established.
      */
     public function reachable(Requirement $requirement): Requirement
     {
         $keyring = $this->withoutFallbacks();
-        $provable = array_values($keyring->all()->map($keyring->provableNow(...))->all());
+        $counted = $keyring->addsFactorsWithPassword() ? $keyring : $keyring->established();
+        $provable = array_values($counted->all()->map($keyring->provableNow(...))->all());
 
         return $requirement->isMetBy($provable) ? $requirement : $requirement->limitedTo($provable);
+    }
+
+    /**
+     * Whether adding a factor takes the password, typed for it: the account
+     * has one and no established second factor. AuthenticatorChanges asks
+     * the same.
+     */
+    protected function addsFactorsWithPassword(): bool
+    {
+        return $this->of(Password::KEY)->isNotEmpty() && ! $this->established()->hasSecondFactor();
     }
 
     /**

@@ -7,6 +7,7 @@ use Illuminate\Testing\TestResponse;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\FreezeReason;
+use Keyring\Enums\Purpose;
 use Keyring\Events\AuthenticatorRemovalRefused;
 use Keyring\Events\EnrollmentRefused;
 use Keyring\Exceptions\SignInChangesFrozen;
@@ -16,6 +17,7 @@ use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
+use Keyring\Login\Attempt;
 use Keyring\Login\Requirement;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SignInChange;
@@ -425,6 +427,66 @@ describe('which keys raise the bar', function () {
     ])->with([
         'a new key' => [false],
         'an established key' => [true],
+    ]);
+
+    it('doesn\'t let a key of a new kind added from a session raise how many factors an ifEnrolled policy asks for', function () {
+        Keyring::require(Requirement::factors(3)->ifEnrolled());
+        signInWithApp($this->totp)->assertRedirect('/dashboard');
+        $key = addPasskeyFromSession();
+        signOut();
+
+        // The password and app are still enough, with no recovery code spent.
+        signInWithApp($this->totp, 1)->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+        signOut();
+
+        // The new passkey is offered, and counts when it's used.
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $challenge = $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.factor', 'totp');
+        $this->flushHeaders();
+        expect(collect($challenge->json('props.alternatives'))->pluck('factor'))->toContain('passkey');
+
+        $options = $this->inertia()->get(route('keyring.login.challenge', ['factor' => 'passkey']))->json('props.challenge.options');
+        $this->flushHeaders();
+        $this->post(route('keyring.login.verify', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+        signOut();
+
+        // Once it's established, it's asked for as the third.
+        $this->travel(7)->days();
+        $this->travel(1)->minute();
+
+        signInWithApp($this->totp);
+        $this->assertGuest();
+
+        $options = $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.factor', 'passkey')->json('props.challenge.options');
+        $this->flushHeaders();
+        $this->post(route('keyring.login.verify', 'passkey'), ['credential' => $key->assert($options)])->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+    });
+
+    it('asks a fresh verification for no more than the established factors give', function () {
+        Keyring::require(Requirement::factors(3)->ifEnrolled());
+        $passkey = Authenticator::factory()->passkey()->for($this->user, 'authenticatable')->create();
+
+        $this->actingAs($this->user)->verifiedWith($this->totp);
+
+        $this->deleteJson(route('keyring.authenticators.destroy', $passkey->id))->assertOk();
+    });
+
+    it('asks for the owner\'s own new factor where adding it took the password, and only there', function (bool $password, int $factors) {
+        Keyring::require(Requirement::aal2()->ifEnrolled());
+        $this->totp->delete();
+        if (! $password) {
+            Keyring::withoutProtection(fn () => $this->user->forceFill(['password' => null])->save());
+        }
+        Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+
+        $requirement = Keyring::requirementFor($this->user, Attempt::start(Purpose::Login, $this->user));
+
+        expect($requirement->factors)->toBe($factors);
+    })->with([
+        'a password, which a copy of the session can\'t add a factor without' => [true, 2],
+        'no password, so anyone with the session could have added it' => [false, 1],
     ]);
 
     it('only counts established keys for noDowngrade', function (bool $established, string $factor) {
