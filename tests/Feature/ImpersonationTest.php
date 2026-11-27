@@ -18,6 +18,7 @@ use Illuminate\Testing\TestResponse;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Contracts\SessionRegistry;
+use Keyring\Enums\Assurance;
 use Keyring\Enums\ImpersonationEndReason;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\Authenticated;
@@ -36,6 +37,7 @@ use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
+use Keyring\Tests\Fixtures\PlainFormRequest;
 use Keyring\Tests\Fixtures\User;
 
 beforeEach(function () {
@@ -471,6 +473,32 @@ describe('while impersonating', function () {
 
         expect($this->get('/whoami')->getContent())->toBe((string) $this->user->getKey());
     });
+
+    it('isn\'t the session that ends to make room under sessions.max, even having gone unused longest', function () {
+        config(['keyring.sessions.max' => 2]);
+        impersonating();
+        $impersonated = session(Sessions::KEY);
+        $admin = session()->all();
+
+        $own = array_map(function () {
+            $this->flushSession();
+            Auth::forgetGuards();
+            $this->travel(1)->minutes();
+            $this->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
+
+            return session(Sessions::KEY);
+        }, range(1, 3));
+
+        // The third sign in takes them past two: their own oldest ends.
+        expect(record($own[0])->revokedAt)->not->toBeNull()
+            ->and(record($own[1])->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(record($own[2])->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(record($impersonated)->isActive(now()->getTimestamp()))->toBeTrue();
+
+        sendBackSession($admin);
+
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->user->getKey());
+    });
 });
 
 describe('stopping', function () {
@@ -482,11 +510,11 @@ describe('stopping', function () {
         stopImpersonating()->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
 
         expect(session()->getId())->not->toBe($before)
-            ->and(session(Sessions::KEY))->toBe($own)
+            ->and(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
             ->and(Keyring::impersonating())->toBeFalse()
             ->and(record($impersonated)->revokedAt)->not->toBeNull()
-            ->and(record($own)->revokedAt)->toBeNull();
+            ->and(record(session(Sessions::KEY))->revokedAt)->toBeNull();
 
         // AAL2 from the admin's own sign in, without a confirm.
         $this->get('/billing')->assertOk()->assertSee('billing');
@@ -553,7 +581,7 @@ describe('stopping', function () {
         expect(Auth::guard('web')->check())->toBeFalse();
     });
 
-    it('leaves the admin\'s "remember me" cookies as they are, and remembered', function () {
+    it('leaves the admin\'s "remember me" cookies as they are, and remembered, moving keyring\'s with their record', function () {
         adminSignsIn(remember: true);
         $own = session(Sessions::KEY);
         $recaller = Auth::guard('web')->getRecallerName();
@@ -566,10 +594,28 @@ describe('stopping', function () {
         expect($started->getCookie($recaller))->toBeNull()
             ->and($started->getCookie('remembered_session'))->toBeNull()
             ->and($stopped->getCookie($recaller))->toBeNull()
-            ->and($stopped->getCookie('remembered_session'))->toBeNull()
-            ->and(session(Sessions::KEY))->toBe($own)
+            ->and($stopped->getCookie('remembered_session')->getValue())->toBe(session(Sessions::KEY))
+            ->and(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and(session(Sessions::REMEMBERED))->toBeTrue()
-            ->and(record($own)->remembered)->toBeTrue();
+            ->and(record(session(Sessions::KEY))->remembered)->toBeTrue();
+    });
+
+    // A request sent while impersonating that saves its copy of the session
+    // after the stop would put back what was parked, on any session driver.
+    it('leaves a request that overlapped the stop nothing to go back to', function () {
+        $own = impersonating();
+        $during = session()->all();
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($own)->replacedBy)->toBe(session(Sessions::KEY));
+
+        sendBackSession($during);
+        $this->getJson('/whoami')->assertUnauthorized();
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record(record($own)->replacedBy)->revokedAt)->toBeNull();
     });
 
     it('works on either registry', function (string $driver) {
@@ -581,7 +627,7 @@ describe('stopping', function () {
 
         expect(record($impersonated)->impersonatorSession)->toBe($own)
             ->and(record($impersonated)->revokedAt)->not->toBeNull()
-            ->and(session(Sessions::KEY))->toBe($own);
+            ->and(session(Sessions::KEY))->toBe(record($own)->replacedBy);
     })->with(['database', 'cache']);
 
     // A page of the user's could have sent the stop, a stored script say,
@@ -598,6 +644,79 @@ describe('stopping', function () {
 
         expect(app(SessionAssurance::class)->level()->name)->toBe('AAL2')
             ->and(app(SessionAssurance::class)->provedSince(now()->subMinutes(15)->getTimestamp()))->toBe([]);
+    });
+
+    // The admin's own session would lapse a level after a gap past its idle
+    // limit. Impersonating meanwhile doesn't wipe the gap out.
+    it('lapses a level whose idle limit passed between two requests, as the admin\'s own session would', function () {
+        config(['keyring.sessions.levels.aal2.idle' => '30m']);
+        impersonating();
+
+        $this->travel(20)->minutes();
+        $this->get('/whoami')->assertOk();
+        $this->travel(40)->minutes();
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    it('lapses each level on its own clock: aal3 after 15 minutes, aal2 after an hour', function (int $gap, Assurance $level) {
+        $this->actingAs($this->admin)->withAssurance(Assurance::AAL3);
+        $this->get('/whoami')->assertOk();
+        impersonate($this->user)->assertRedirect('/dashboard');
+
+        $this->travel($gap)->minutes();
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect(app(SessionAssurance::class)->level())->toBe($level);
+    })->with([
+        'a 10 minute gap' => [10, Assurance::AAL3],
+        'a 20 minute gap' => [20, Assurance::AAL2],
+    ]);
+
+    it('ends the admin\'s session where sessions end with their level, when a gap lapses it', function () {
+        config(['keyring.sessions.end_on_lapse' => true, 'keyring.sessions.levels.aal2.idle' => '30m']);
+        $own = impersonating();
+
+        $this->travel(40)->minutes();
+
+        $this->get('/whoami')->assertRedirect('/login')->assertSessionHas('status', 'signed-out');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['impersonator_session_ended']);
+    });
+
+    // Without the session middleware getting there first, the stop itself
+    // finds the level gone.
+    it('ends it on a stop of the app\'s own too', function () {
+        config(['keyring.sessions.end_on_lapse' => true, 'keyring.sessions.levels.aal2.idle' => '30m']);
+        $own = impersonating();
+        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
+
+        $this->travel(40)->minutes();
+
+        stopImpersonating(json: true)->assertUnauthorized();
+
+        expect(record($own)->revokedAt)->not->toBeNull();
+    });
+
+    // A form request is a copy of request(), which the Logout listener reads.
+    it('announces a stop that signs out once, given a form request', function () {
+        $own = impersonating();
+        Route::middleware(['web', 'auth'])->delete('/admin/impersonation', function (PlainFormRequest $request) use ($own) {
+            app(SessionRegistry::class)->revoke($own);
+
+            return Keyring::stopImpersonating($request) === null ? 'signed out' : 'back';
+        });
+        Event::fake([ImpersonationEnded::class]);
+
+        expect($this->delete('/admin/impersonation')->getContent())->toBe('signed out')
+            ->and(Auth::guard('web')->check())->toBeFalse();
+        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::ImpersonatorSessionEnded);
     });
 
     it('still signs the admin out after, with laravel\'s auth.session middleware, when their password changed meanwhile', function () {
@@ -668,7 +787,7 @@ describe('ending by itself', function () {
 
         $this->get('/whoami')->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended')->assertHeader('Clear-Site-Data');
 
-        expect(session(Sessions::KEY))->toBe($own)
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and(record($impersonated)->revokedAt)->not->toBeNull()
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
     });
@@ -717,7 +836,7 @@ describe('ending by itself', function () {
         sendBackSession($admin);
         $this->get('/whoami')->assertRedirect('/dashboard');
 
-        expect(session(Sessions::KEY))->toBe($own)
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['ended']);
     });
 
@@ -743,11 +862,18 @@ describe('ending by itself', function () {
             ->and(record($own)->revokedAt)->not->toBeNull();
     });
 
-    it('signs out when the session no longer says who is impersonating', function () {
-        impersonating();
+    // The impersonated record still says who, and which of their sessions
+    // was parked: nobody can go back to it now, so it ends.
+    it('signs out when the session no longer says who is impersonating, ending the admin\'s parked session', function () {
+        Event::fake([ImpersonationEnded::class]);
+        $own = impersonating();
         session()->forget(Impersonation::KEY);
 
         $this->get('/whoami')->assertRedirect('/login');
+
+        expect(record($own)->revokedAt)->not->toBeNull();
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->impersonator?->is($this->admin) && $event->user->is($this->user)
+            && $event->reason === ImpersonationEndReason::Lost && ! $event->returned);
     });
 
     it('goes back when the impersonated session has no record', function () {
@@ -756,7 +882,7 @@ describe('ending by itself', function () {
 
         $this->get('/whoami')->assertRedirect('/dashboard');
 
-        expect(session(Sessions::KEY))->toBe($own);
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy);
     });
 
     it('ends, back to the admin, once they may no longer impersonate the user', function () {
@@ -765,7 +891,7 @@ describe('ending by itself', function () {
 
         $this->get('/whoami')->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
 
-        expect(session(Sessions::KEY))->toBe($own)
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
             ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['ended']);
     });
@@ -819,6 +945,41 @@ describe('ending by itself', function () {
         expect(Auth::guard('web')->check())->toBeFalse()
             ->and(record($own)->revokedAt)->not->toBeNull()
             ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['lost']);
+    });
+
+    // The app's own Auth::login() on the session, once the impersonated
+    // record is gone (pruned, or dropped by the cache), leaves no record to
+    // say whose session it is: the guard's user does.
+    it('signs out, rather than going back, when someone else is signed in on a session with no record', function () {
+        $own = impersonating();
+        $other = User::create(['name' => 'Other', 'email' => 'other@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        session()->forget(Sessions::KEY);
+        session()->put(Auth::guard('web')->getName(), $other->getKey());
+        Auth::forgetGuards();
+
+        $this->get('/whoami')->assertRedirect('/login');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['lost']);
+    });
+
+    // As any session that ends there is.
+    it('asks for a page that also serves guests again, as a guest, when it signs out', function () {
+        config(['keyring.sessions.continue_as_guest' => ['welcome']]);
+        Route::middleware('web')->get('/welcome', fn () => Auth::check() ? (string) Auth::id() : 'guest')->name('welcome');
+        app('router')->getRoutes()->refreshNameLookups();
+        $own = impersonating();
+
+        app(Sessions::class)->signOutEverywhere($this->admin);
+
+        $this->get('/welcome?tab=news')->assertRedirect('/welcome?tab=news')->assertSessionHas('status', 'signed-out')->assertHeader('Clear-Site-Data');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(session()->has(Impersonation::KEY))->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and($this->get('/welcome?tab=news')->getContent())->toBe('guest');
+        $this->getJson('/welcome')->assertOk();
     });
 
     it('signs out for the reason it ended for in the end', function (Closure $meanwhile, string $reason) {

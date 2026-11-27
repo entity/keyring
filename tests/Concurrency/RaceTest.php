@@ -354,10 +354,9 @@ it('signs out a session that moved to a new record while everyone was being sign
         ->and($registry->forUser($user))->toBeEmpty();
 });
 
-// On the cookie driver, stopping moves the admin's record as they come
-// back, holding their row, so a sign-out everywhere that overlaps it either
-// ends the record it moved to, or ends the one it moves from first, which
-// it then can't move.
+// Stopping moves the admin's record as they come back, holding their
+// row, so a sign-out everywhere that overlaps it either ends the record it
+// moved to, or ends the one it moves from first, which it then can't move.
 it('leaves nothing of the admin signed in when they stop impersonating as they\'re signed out everywhere', function () {
     $admin = taylor();
     $user = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);

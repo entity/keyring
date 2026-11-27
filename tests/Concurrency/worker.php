@@ -146,13 +146,9 @@ try {
         })(),
         'sign-out' => app(Sessions::class)->signOutEverywhere(User::findOrFail($id)),
         'stop-impersonating' => (function () use ($id, $value) {
-            // A stop on the cookie session driver, which moves the
-            // impersonator's record as it goes back, holding their row. The
-            // browser's session is what the race hands over.
-            config(['session.driver' => 'cookie']);
-            app('session')->forgetDrivers();
-            app()->forgetInstance('session.store');
-
+            // A stop, which moves the impersonator's record as it goes
+            // back, holding their row. The browser's session is what the
+            // race hands over.
             $request = Request::create('/impersonate', 'DELETE');
             $request->setLaravelSession($session = app('session.store'));
             $session->replace(json_decode($value, true));
