@@ -24,6 +24,7 @@ use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\ImpersonationEndReason;
+use Keyring\Enums\ImpersonationRefusal;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\Authenticated;
 use Keyring\Events\ImpersonationEnded;
@@ -103,6 +104,20 @@ function impersonating(): string
 function record(string $id): ?RegisteredSession
 {
     return app(SessionRegistry::class)->find($id);
+}
+
+/**
+ * Why starting was refused, or null when it wasn't.
+ */
+function refusal(Closure $callback): ?ImpersonationRefusal
+{
+    try {
+        $callback();
+    } catch (ImpersonationRefused $e) {
+        return $e->reason;
+    }
+
+    return null;
 }
 
 /**
@@ -196,14 +211,17 @@ describe('who may impersonate', function () {
             ->and(Keyring::impersonator()->is($this->admin))->toBeTrue();
     });
 
-    it('refuses everyone until the app says who may', function () {
+    it('refuses everyone until the app says who may, as no_callback rather than not_allowed', function () {
         (fn () => $this->impersonationGate = null)->call(app(KeyringManager::class));
         adminSignsIn();
 
-        impersonate($this->user)->assertForbidden();
+        impersonate($this->user, json: true)->assertForbidden()->assertExactJson(['message' => __('keyring::keyring.impersonation_refused')]);
 
         expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
-            ->and(Keyring::allowsImpersonation($this->admin, $this->user))->toBeFalse();
+            ->and(Keyring::allowsImpersonation($this->admin, $this->user))->toBeFalse()
+            ->and(Keyring::impersonationRefusal($this->admin, $this->user))->toBe(ImpersonationRefusal::NoCallback)
+            ->and(refusal(fn () => Keyring::impersonate(request(), $this->user)))->toBe(ImpersonationRefusal::NoCallback)
+            ->and(SecurityEvent::query()->where('type', 'impersonation_refused')->pluck('meta')->pluck('reason')->all())->toBe(['no_callback', 'no_callback']);
     });
 
     it('refuses whoever the callback turns down, and asks it with the impersonator and the user', function () {
@@ -217,13 +235,21 @@ describe('who may impersonate', function () {
 
         impersonate($this->user, json: true)->assertForbidden()->assertJson(['message' => __('keyring::keyring.impersonation_refused')]);
 
-        expect($asked)->toBe([$this->admin->getKey(), $this->user->getKey()]);
+        expect($asked)->toBe([$this->admin->getKey(), $this->user->getKey()])
+            ->and(Keyring::impersonationRefusal($this->admin, $this->user))->toBe(ImpersonationRefusal::NotAllowed)
+            ->and(refusal(fn () => Keyring::impersonate(request(), $this->user)))->toBe(ImpersonationRefusal::NotAllowed);
     });
 
     it('only counts a callback that answers true', function () {
         Keyring::allowImpersonationWhen(fn () => 1);
 
-        expect(Keyring::allowsImpersonation($this->admin, $this->user))->toBeFalse();
+        expect(Keyring::allowsImpersonation($this->admin, $this->user))->toBeFalse()
+            ->and(Keyring::impersonationRefusal($this->admin, $this->user))->toBe(ImpersonationRefusal::NotAllowed);
+
+        Keyring::allowImpersonationWhen(fn () => true);
+
+        expect(Keyring::allowsImpersonation($this->admin, $this->user))->toBeTrue()
+            ->and(Keyring::impersonationRefusal($this->admin, $this->user))->toBeNull();
     });
 
     it('has no routes, and refuses in code, with the feature off', function () {
@@ -235,7 +261,8 @@ describe('who may impersonate', function () {
         expect(Route::has('keyring.impersonation.store'))->toBeFalse()
             ->and(Route::has('keyring.impersonation.destroy'))->toBeFalse()
             ->and(Keyring::allowsImpersonation($this->admin, $this->user))->toBeFalse()
-            ->and(fn () => Keyring::impersonate(request(), $this->user))->toThrow(ImpersonationRefused::class);
+            ->and(Keyring::impersonationRefusal($this->admin, $this->user))->toBe(ImpersonationRefusal::Disabled)
+            ->and(refusal(fn () => Keyring::impersonate(request(), $this->user)))->toBe(ImpersonationRefusal::Disabled);
     });
 
     it('refuses impersonating yourself', function () {
@@ -244,12 +271,8 @@ describe('who may impersonate', function () {
 
         impersonate($this->admin)->assertForbidden();
 
-        try {
-            Keyring::impersonate(request(), $this->admin);
-        } catch (ImpersonationRefused $e) {
-        }
-
-        expect($e->reason)->toBe('self');
+        expect(refusal(fn () => Keyring::impersonate(request(), $this->admin)))->toBe(ImpersonationRefusal::Self)
+            ->and(Keyring::impersonationRefusal($this->admin, $this->admin))->toBe(ImpersonationRefusal::Self);
     });
 
     it('refuses a user the app does not let sign in', function () {
@@ -257,6 +280,8 @@ describe('who may impersonate', function () {
         adminSignsIn();
 
         impersonate($this->user)->assertForbidden();
+
+        expect(Keyring::impersonationRefusal($this->admin, $this->user))->toBe(ImpersonationRefusal::NotAllowed);
     });
 
     it('refuses an ID nobody has as it refuses one it may not impersonate', function () {
@@ -268,7 +293,11 @@ describe('who may impersonate', function () {
     it('refuses an account of another model, which the guard would not load', function () {
         Keyring::allowImpersonationWhen(fn () => true);
 
-        expect(Keyring::allowsImpersonation($this->admin, staff()))->toBeFalse();
+        $staff = staff();
+
+        expect(Keyring::allowsImpersonation($this->admin, $staff))->toBeFalse()
+            ->and(Keyring::impersonationRefusal($this->admin, $staff))->toBe(ImpersonationRefusal::NotAllowed)
+            ->and(Keyring::impersonationRefusal($staff, $this->user))->toBe(ImpersonationRefusal::NotAllowed);
     });
 
     it('refuses a session keyring has no record of, which there would be no coming back to', function () {
@@ -278,7 +307,7 @@ describe('who may impersonate', function () {
             try {
                 Keyring::impersonate($request, User::findOrFail($id));
             } catch (ImpersonationRefused $e) {
-                return $e->reason;
+                return $e->reason->value;
             }
         });
         adminSignsIn();
@@ -320,12 +349,7 @@ describe('starting', function () {
 
         impersonate($other, json: true)->assertForbidden()->assertJson(['status' => 'impersonating']);
 
-        try {
-            Keyring::impersonate(request(), $other);
-        } catch (ImpersonationRefused $e) {
-        }
-
-        expect($e->reason)->toBe('impersonating')
+        expect(refusal(fn () => Keyring::impersonate(request(), $other)))->toBe(ImpersonationRefusal::Impersonating)
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->user->getKey());
     });
 
@@ -1568,7 +1592,7 @@ describe('the security log and events', function () {
         Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => $event->reason === SessionEndReason::ImpersonationEnded && $event->userId === (string) $this->user->getKey());
     });
 
-    it('logs a refused start on the impersonator\'s account, with why and the ID asked for', function (Closure $refuse, string $reason) {
+    it('logs a refused start on the impersonator\'s account, with why and the ID asked for', function (Closure $refuse, ImpersonationRefusal $reason) {
         adminSignsIn();
 
         $id = $refuse($this);
@@ -1576,25 +1600,25 @@ describe('the security log and events', function () {
         expect(logEntry('impersonation_refused'))
             ->authenticatable_id->toBe($this->admin->getKey())
             ->severity->value->toBe('warning')
-            ->meta->toEqual(['reason' => $reason, 'user' => $id]);
+            ->meta->toEqual(['reason' => $reason->value, 'user' => $id]);
     })->with([
         'not allowed' => [function ($test) {
             Keyring::allowImpersonationWhen(fn () => false);
             impersonate($test->user)->assertForbidden();
 
             return (string) $test->user->getKey();
-        }, 'not_allowed'],
+        }, ImpersonationRefusal::NotAllowed],
         'themselves' => [function ($test) {
             Keyring::allowImpersonationWhen(fn () => true);
             impersonate($test->admin)->assertForbidden();
 
             return (string) $test->admin->getKey();
-        }, 'self'],
+        }, ImpersonationRefusal::Self],
         'an ID nobody has' => [function ($test) {
             impersonate(new User(['id' => 999]))->assertForbidden();
 
             return '999';
-        }, 'not_found'],
+        }, ImpersonationRefusal::NotFound],
         'a session with no record' => [function ($test) {
             Route::middleware(['web', 'auth'])->post('/become/{id}', function (Request $request, string $id) {
                 $request->session()->forget(Sessions::KEY);
@@ -1603,7 +1627,7 @@ describe('the security log and events', function () {
             $test->post('/become/'.$test->user->getKey())->assertForbidden();
 
             return (string) $test->user->getKey();
-        }, 'unregistered'],
+        }, ImpersonationRefusal::Unregistered],
         // Logged on the admin, not the user the browser is signed in as.
         'an ID nobody has, while impersonating' => [function ($test) {
             Route::middleware(['web', 'auth'])->post('/become-unknown', fn (Request $request) => app(Impersonation::class)->refuseUnknown($request, '999'));
@@ -1611,7 +1635,7 @@ describe('the security log and events', function () {
             $test->post('/become-unknown')->assertForbidden();
 
             return '999';
-        }, 'not_found'],
+        }, ImpersonationRefusal::NotFound],
         'one already going' => [function ($test) {
             Route::middleware(['web', 'auth'])->post('/become/{id}', fn (Request $request, string $id) => Keyring::impersonate($request, User::findOrFail($id)));
             $other = User::create(['name' => 'Other', 'email' => 'other@example.com', 'password' => 'password', 'email_verified_at' => now()]);
@@ -1619,7 +1643,7 @@ describe('the security log and events', function () {
             $test->post('/become/'.$other->getKey())->assertForbidden();
 
             return (string) $other->getKey();
-        }, 'impersonating'],
+        }, ImpersonationRefusal::Impersonating],
     ]);
 
     it('answers an ID nobody has as it answers one that may not be impersonated, logging which it was', function () {

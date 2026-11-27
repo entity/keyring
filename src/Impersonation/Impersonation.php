@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Keyring\Activity\SecurityLog;
 use Keyring\Enums\ImpersonationEndReason;
+use Keyring\Enums\ImpersonationRefusal;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\ImpersonationEnded;
 use Keyring\Events\ImpersonationStarted;
@@ -94,12 +95,7 @@ class Impersonation
         $impersonator = $this->keyring->user();
         $now = now()->getTimestamp();
 
-        $refusal = match (true) {
-            $this->active($request) => 'impersonating',
-            $impersonator->is($user) => 'self',
-            ! $this->keyring->allowsImpersonation($impersonator, $user) => 'not_allowed',
-            default => null,
-        };
+        $refusal = $this->active($request) ? ImpersonationRefusal::Impersonating : $this->keyring->impersonationRefusal($impersonator, $user);
 
         // Logged on whoever is impersonating, when someone is, rather than
         // the user they're signed in as.
@@ -111,7 +107,7 @@ class Impersonation
         $own = $this->sessions->current($request);
 
         if ($own === null || ! $own->isActive($now) || ! $own->belongsTo($impersonator)) {
-            $this->refused($impersonator, (string) $user->getAuthIdentifier(), 'unregistered');
+            $this->refused($impersonator, (string) $user->getAuthIdentifier(), ImpersonationRefusal::Unregistered);
         }
 
         $until = $now + Duration::seconds(config('keyring.impersonation.lifetime') ?? '1h');
@@ -163,7 +159,7 @@ class Impersonation
      */
     public function refuseUnknown(Request $request, string $id): never
     {
-        $this->refused($this->impersonator($request) ?? $this->keyring->user(), $id, 'not_found', as: 'not_allowed');
+        $this->refused($this->impersonator($request) ?? $this->keyring->user(), $id, ImpersonationRefusal::NotFound, as: ImpersonationRefusal::NotAllowed);
     }
 
     /**
@@ -492,9 +488,9 @@ class Impersonation
      *
      * @throws ImpersonationRefused
      */
-    protected function refused(Authenticatable $impersonator, string $id, string $reason, ?string $as = null): never
+    protected function refused(Authenticatable $impersonator, string $id, ImpersonationRefusal $reason, ?ImpersonationRefusal $as = null): never
     {
-        $this->log->recordRefusal('impersonation_refused', $impersonator, meta: ['reason' => $reason, 'user' => Str::limit($id, 64, '')]);
+        $this->log->recordRefusal('impersonation_refused', $impersonator, meta: ['reason' => $reason->value, 'user' => Str::limit($id, 64, '')]);
 
         throw new ImpersonationRefused($as ?? $reason);
     }

@@ -91,6 +91,8 @@ Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => Gate::for
 @endif
 ```
 
+`Keyring::impersonationRefusal($impersonator, $user)` asks the same, and says why not as an [`ImpersonationRefusal`](#from-your-own-code), or `null` when they may.
+
 ## Routes
 
 | Method | URI | Name | Middleware | Does |
@@ -153,7 +155,21 @@ Route::delete('/admin/impersonation', function (Request $request) {
 })->middleware('auth')->block();
 ```
 
-`Keyring::impersonate()` checks who may, but not how the request got there: keep it to a `POST` with the middleware above, as Keyring's route does. Keep `->block()` too, as Keyring's routes have it. Without it, two starts sent at once from the same browser, a double click say, both find nobody being impersonated yet, and each starts one. Laravel's [session blocking](https://laravel.com/docs/session#session-blocking) makes them take turns, so the second is refused as `impersonating`. It needs a cache store that supports locks. `ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`. Its `reason` says why: `not_allowed` (the feature is off, the callback said no or was never registered, the user may not sign in, or the guard wouldn't load them), `self`, `impersonating`, or `unregistered` (the impersonator's session has no record in the registry to come back to). Each refusal is logged as `impersonation_refused` on the impersonator's account, and so is one that never gets this far because Keyring's route found no user with that ID. A start that can't be logged throws whatever the security log threw, and leaves the browser as it was. The user's session record it had saved is ended without a `RegisteredSessionEnded`, as nobody used it, and the [sweep](devices-and-sessions.md#sweeping-ended-sessions) doesn't announce it later either. `Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated.
+`Keyring::impersonate()` checks who may, but not how the request got there: keep it to a `POST` with the middleware above, as Keyring's route does. Keep `->block()` too, as Keyring's routes have it. Without it, two starts sent at once from the same browser, a double click say, both find nobody being impersonated yet, and each starts one. Laravel's [session blocking](https://laravel.com/docs/session#session-blocking) makes them take turns, so the second is refused as `impersonating`. It needs a cache store that supports locks.
+
+`ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`, whatever the reason. Its `reason` says why, as a `Keyring\Enums\ImpersonationRefusal`:
+
+| Case | Value | Why |
+|---|---|---|
+| `Disabled` | `disabled` | `Features::impersonation()` is off. |
+| `NoCallback` | `no_callback` | The feature is on, but [`Keyring::allowImpersonationWhen()`](#who-may-impersonate-whom) was never called, so nobody may impersonate anyone yet. |
+| `Self` | `self` | The impersonator asked to sign in as themselves. |
+| `NotAllowed` | `not_allowed` | The callback didn't answer `true`, the user may not sign in, or one of the two isn't an account Keyring's guard loads. |
+| `Impersonating` | `impersonating` | The session is impersonating someone already. |
+| `Unregistered` | `unregistered` | The impersonator's session has no record in the registry to come back to. |
+| `NotFound` | `not_found` | Keyring's route found nobody with that ID. It's only [logged](#security-log-and-events): what's thrown is `NotAllowed`, so the answer doesn't say which IDs have an account. |
+
+`disabled` and `no_callback` mean impersonation isn't set up yet, so a forgotten callback doesn't look like the callback saying no. Each refusal is logged as `impersonation_refused` on the impersonator's account, with that value, and so is one that never gets this far because Keyring's route found no user with that ID. A start that can't be logged throws whatever the security log threw, and leaves the browser as it was. The user's session record it had saved is ended without a `RegisteredSessionEnded`, as nobody used it, and the [sweep](devices-and-sessions.md#sweeping-ended-sessions) doesn't announce it later either. `Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated.
 
 These answer questions about the current request:
 
@@ -328,7 +344,7 @@ With `show_in_sessions` off, it's left out of the user's list. It's still one of
 
 Each start and end is logged on both accounts, as `impersonation_started` and `impersonation_ended`. The start is written before the browser changes hands, and before `ImpersonationStarted` fires, so a listener of yours that throws can't leave it unlogged. If it can't be written, the start is refused and the browser stays as it was. An end is logged once its sessions have been ended, even if signing the browser out or moving the impersonator's session to a new record fails after that. If handing the browser back to the impersonator fails, the impersonator's session ends too and the browser is signed out, so the next request is a guest's and the end isn't logged twice. Both entries carry `impersonator` and `user`, the two accounts' IDs, and `role`, which is `impersonator` or `impersonated` for the account the entry is on. An end also has `reason` and `returned`, which says whether the browser went back to the impersonator's session. Once the impersonator has been deleted, the end is only logged on the user's account, with a `null` `impersonator`, and once the user has, only on the impersonator's, with a `null` `user`. See [Entry Types](security-log-and-emails.md#entry-types).
 
-A refused start is logged as `impersonation_refused` on the impersonator's account, with `reason` and `user`, the ID asked for. The reason is one of `ImpersonationRefused`'s, or `not_found` for an ID nobody has, which gets the same `403` as `not_allowed`. Like Keyring's other refusals, it's written at most `security_log.refusals` times every `refusals_per` period. A browser that's already impersonating is turned away from Keyring's route by `keyring.not-impersonating` before it gets that far, and that isn't logged.
+A refused start is logged as `impersonation_refused` on the impersonator's account, with `reason` and `user`, the ID asked for. The reason is an [`ImpersonationRefusal`](#from-your-own-code) value: `not_found` for an ID nobody has, which gets the same `403` as `not_allowed`, or the one `ImpersonationRefused` was thrown with. Like Keyring's other refusals, it's written at most `security_log.refusals` times every `refusals_per` period. A browser that's already impersonating is turned away from Keyring's route by `keyring.not-impersonating` before it gets that far, and that isn't logged.
 
 The reasons are the `Keyring\Enums\ImpersonationEndReason` enum:
 

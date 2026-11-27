@@ -50,6 +50,7 @@ use Keyring\KeyringManager;
  * @method static \Keyring\KeyringManager allowEnrollmentWhen(\Closure $callback)
  * @method static \Keyring\KeyringManager allowImpersonationWhen(\Closure $callback)
  * @method static bool allowsImpersonation(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $impersonator, \Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
+ * @method static \Keyring\Enums\ImpersonationRefusal|null impersonationRefusal(\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $impersonator, \Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static void impersonate(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model $user)
  * @method static (\Illuminate\Contracts\Auth\Authenticatable&\Illuminate\Database\Eloquent\Model)|null stopImpersonating(\Illuminate\Http\Request $request)
  * @method static bool impersonating(\Illuminate\Http\Request|null $request = null)

@@ -555,6 +555,6 @@ The facade also answers questions about your setup. These are useful in your own
 | `Keyring::recordedIp($request)` | The request's IP address as Keyring stores it. |
 | `Keyring::allowsSignIn($user)` | Whether the application lets this user be signed in. See [Who May Sign In](sign-in-flow.md#who-may-sign-in). |
 | `Keyring::allowsEnrollment($user)` | Whether the user may add a sign-in method. See [Who May Enroll](authenticators.md#who-may-enroll). |
-| `Keyring::allowsImpersonation($impersonator, $user)` | Whether one user may impersonate another. See [Who May Impersonate Whom](impersonation.md#who-may-impersonate-whom). |
+| `Keyring::allowsImpersonation($impersonator, $user)` | Whether one user may impersonate another, and `Keyring::impersonationRefusal()` why not. See [Who May Impersonate Whom](impersonation.md#who-may-impersonate-whom). |
 | `Keyring::impersonating()` | Whether the session is impersonating someone. `Keyring::impersonator()` is who, and `Keyring::impersonation()` what a [banner](impersonation.md#showing-a-banner) needs. |
 | `Keyring::authenticatorModel()` | The authenticator model's class. `deviceModel()`, `pendingChangeModel()`, `securityEventModel()`, and `failureCountModel()` do the same for theirs. |

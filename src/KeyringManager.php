@@ -29,6 +29,7 @@ use Keyring\Concerns\SwapsModels;
 use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Devices\UserAgent;
+use Keyring\Enums\ImpersonationRefusal;
 use Keyring\Enums\Purpose;
 use Keyring\Exceptions\EmailVerificationRequired;
 use Keyring\Exceptions\ImpersonationRefused;
@@ -505,13 +506,27 @@ class KeyringManager
      */
     public function allowsImpersonation(Authenticatable&Model $impersonator, Authenticatable&Model $user): bool
     {
-        return Features::enabled(Features::impersonation())
-            && $this->impersonationGate !== null
-            && ! $impersonator->is($user)
-            && $this->belongsToGuard($impersonator)
-            && $this->belongsToGuard($user)
-            && $this->allowsSignIn($user)
-            && ($this->impersonationGate)($impersonator, $user) === true;
+        return $this->impersonationRefusal($impersonator, $user) === null;
+    }
+
+    /**
+     * Why $impersonator may not sign in as $user, or null when they may:
+     * Disabled, NoCallback, Self or NotAllowed, in that order. Like
+     * allowsImpersonation(), it doesn't ask what starting asks of the
+     * session too.
+     */
+    public function impersonationRefusal(Authenticatable&Model $impersonator, Authenticatable&Model $user): ?ImpersonationRefusal
+    {
+        return match (true) {
+            ! Features::enabled(Features::impersonation()) => ImpersonationRefusal::Disabled,
+            $this->impersonationGate === null => ImpersonationRefusal::NoCallback,
+            $impersonator->is($user) => ImpersonationRefusal::Self,
+            ! $this->belongsToGuard($impersonator),
+            ! $this->belongsToGuard($user),
+            ! $this->allowsSignIn($user),
+            ($this->impersonationGate)($impersonator, $user) !== true => ImpersonationRefusal::NotAllowed,
+            default => null,
+        };
     }
 
     /**
