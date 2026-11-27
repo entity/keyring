@@ -254,6 +254,7 @@ class KeyringServiceProvider extends ServiceProvider
             // The login page asks for these on every load, for passkey autofill,
             // and an office shares one address, so six a minute would be too few.
             // One a second still limits how many challenges a script can make.
+            // Sending a user to an identity provider to sign in draws on it too.
             $limiter->for('keyring-login-options', fn (Request $request) => Limit::perMinute(60)
                 ->by($request->ip())
                 ->response(new TooManyAttempts('keyring-login-options')));

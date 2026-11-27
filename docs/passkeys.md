@@ -120,7 +120,7 @@ If those users matter more to you than ASVS conformance, you may add RS256. Put 
 
 If you assess against ASVS, record this as a deviation from ASVS 11.6.1 and 11.2.3.
 
-When RS256 is enabled, Keyring refuses an RSA key shorter than `minimum_rsa_bits`. It checks when a key is added, and again at every sign in. It never accepts a key under 2048 bits, however low you set the option, because RFC 8812, Section 2, requires 2048 bits for RS256.
+When RS256 is enabled, Keyring refuses an RSA key shorter than `minimum_rsa_bits`. It checks when a key is added, and again at every sign in. It never accepts a key under 2048 bits, however low you set the option, because RFC 8812, Section 2, requires 2048 bits for RS256. The option is only for passkeys and security keys: [identity providers'](sso.md#security-notes) RSA keys have a 2048-bit floor of their own, so raising it doesn't refuse Google's or Microsoft's ID tokens.
 
 > [!WARNING]
 > Raising `minimum_rsa_bits` to 3072 would give RSA the 128 bits ASVS asks for. But Windows Hello's RSA keys are 2048 bits. In practice, that refuses the keys RS256 was turned on for, after the browser has already made them. If you want 128 bits throughout, leave RS256 off.

@@ -10,6 +10,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Contracts\Enrollable;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Contracts\Responses\StatusResponse;
 use Keyring\Contracts\SendsCodes;
 use Keyring\Enrollment\Enrollment;
@@ -121,11 +122,14 @@ class AuthenticatorController
     public function update(Request $request, string $authenticator): StatusResponse
     {
         $authenticator = $this->changes->find($this->keyring->user(), $authenticator);
+        $factor = $authenticator->factor();
 
         $changes = $request->validate([
             'name' => ['sometimes', ...Factor::nameRules()],
-            // Recovery codes are a fallback, never the way to sign in first.
-            'default' => ['sometimes', 'boolean', Rule::prohibitedIf($authenticator->factor === RecoveryCodes::KEY)],
+            // The default is what the challenge page asks for first. Recovery
+            // codes are a fallback, never that, and a factor that never
+            // answers a challenge, like an identity provider, can't be.
+            'default' => ['sometimes', 'boolean', Rule::prohibitedIf($factor->key() === RecoveryCodes::KEY || ($factor instanceof PrimaryFactor && ! $factor->answersChallenges()))],
         ]);
 
         $this->changes->update($authenticator, [
@@ -133,7 +137,7 @@ class AuthenticatorController
             ...$request->has('default') ? ['default' => $request->boolean('default')] : [],
         ]);
 
-        return $this->status('authenticator-updated', ['authenticator' => $authenticator->factor()->present($authenticator)]);
+        return $this->status('authenticator-updated', ['authenticator' => $factor->present($authenticator)]);
     }
 
     public function destroy(Request $request, string $authenticator): StatusResponse

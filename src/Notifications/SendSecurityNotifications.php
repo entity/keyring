@@ -6,6 +6,7 @@ namespace Keyring\Notifications;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Keyring\Events;
 use Keyring\KeyringManager;
+use Keyring\Login\Verification;
 use Keyring\Support\Throttle;
 use Keyring\Support\Url;
 
@@ -77,11 +79,23 @@ class SendSecurityNotifications
         $this->send($event->user, 'authenticator_removed', ['name' => $event->authenticator->name]);
     }
 
+    /**
+     * A later step of a login failed once the first had passed. After the
+     * password, the notice says the password was used. After another first
+     * step, such as an identity provider, it names that sign-in method
+     * instead, and says nothing about the password.
+     */
     public function factorFailed(Events\FactorFailed $event): void
     {
-        if ($event->attempt !== null && $event->afterPassword()) {
-            $this->send($event->attempt->user(), 'second_factor_failed');
+        $first = $event->firstFactor();
+
+        if ($event->attempt === null || $first === null) {
+            return;
         }
+
+        $user = $event->attempt->user();
+
+        $this->send($user, 'second_factor_failed', $event->afterPassword() ? [] : ['name' => $this->nameOf($user, $first)]);
     }
 
     public function recoveryCodeUsed(Events\RecoveryCodeUsed $event): void
@@ -182,6 +196,18 @@ class SendSecurityNotifications
         if ($notification !== null) {
             Notification::send($user, $notification);
         }
+    }
+
+    /**
+     * What the user calls the sign-in method a verification was of, such as
+     * "Google (taylor@example.com)": the authenticator's name, the one a
+     * factor that stores none gives the user, or else the factor's key.
+     */
+    protected function nameOf(Authenticatable&Model $user, Verification $verification): string
+    {
+        $keyring = $this->keyring->for($user);
+
+        return ($keyring->find($verification->authenticator) ?? $keyring->of($verification->factor)->first())->name ?? $verification->factor;
     }
 
     /**

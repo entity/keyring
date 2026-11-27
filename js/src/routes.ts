@@ -24,6 +24,9 @@ export const routes = {
   authenticator: (id: string) => `${prefix}/user/authenticators/${segment(id)}`,
   sessions: () => `${prefix}/user/sessions`,
   session: (id: string) => `${prefix}/user/sessions/${segment(id)}`,
+  ssoRedirect: (provider: string) => `${prefix}/auth/${segment(provider)}/redirect`,
+  ssoCallback: (provider: string) => `${prefix}/auth/${segment(provider)}/callback`,
+  ssoConfirm: (authenticator?: string) => `${prefix}/confirm/sso/redirect${authenticator ? `?authenticator=${encodeURIComponent(authenticator)}` : ''}`,
 }
 
 /**

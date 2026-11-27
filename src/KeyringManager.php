@@ -44,6 +44,7 @@ use Keyring\Pipeline\Steps\VerifyFactor;
 use Keyring\Pipeline\Verifier;
 use Keyring\Risk\RiskEngine;
 use Keyring\Risk\RiskLocks;
+use Keyring\Sso\Sso;
 use Keyring\Support\Throttle;
 use Keyring\Testing\FakeVerifyFactor;
 use Keyring\Testing\KeyringFake;
@@ -200,6 +201,14 @@ class KeyringManager
     public function risk(): RiskEngine
     {
         return app(RiskEngine::class);
+    }
+
+    /**
+     * The identity providers users can sign in with, from keyring.sso.
+     */
+    public function sso(): Sso
+    {
+        return app(Sso::class);
     }
 
     /**

@@ -12,6 +12,7 @@ use Keyring\Contracts\Responses\LogoutResponse;
 use Keyring\Enums\SessionEndReason;
 use Keyring\Events\LoggedOut;
 use Keyring\Factors\Password;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Http\Controllers\Concerns\RespondsWithStatus;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
@@ -31,7 +32,22 @@ class AuthenticatedSessionController
             'canResetPassword' => Route::has('password.request'),
             'canRegister' => Route::has('register'),
             'status' => $this->statusMessage($request),
+            'providers' => $this->providers(),
         ]);
+    }
+
+    /**
+     * The identity providers to offer buttons for, once the SingleSignOn
+     * factor is registered: each one's name, label and where it sends the
+     * user to sign in.
+     *
+     * @return list<array{name: string, label: string, url: string}>
+     */
+    protected function providers(): array
+    {
+        $factor = $this->keyring->hasFactor(SingleSignOn::KEY) ? $this->keyring->factor(SingleSignOn::KEY) : null;
+
+        return $factor instanceof SingleSignOn ? $factor->providers() : [];
     }
 
     /**

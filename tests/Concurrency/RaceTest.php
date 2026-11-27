@@ -9,11 +9,13 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Sleep;
+use Keyring\Changes\EmailChanges;
 use Keyring\Changes\PasswordChanges;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Models\Authenticator;
 use Keyring\Models\FailureCount;
 use Keyring\Models\PendingChange;
@@ -549,3 +551,93 @@ it('announces a session a sign-out ends on the cache driver while it moves', fun
 
     expect($successor?->isActive(now()->getTimestamp()) === true ? 0 : 1)->toBe($ended->count());
 });
+
+/**
+ * Sign the user in on a registered session, for a worker to link an account
+ * at a provider on.
+ */
+function registeredSessionFor(User $user, string $id): void
+{
+    $now = now()->getTimestamp();
+
+    app(SessionRegistry::class)->save(new RegisteredSession($id, (string) $user->id, RegisteredSession::typeOf($user), 'web', null, Assurance::AAL1, null, null, $now, $now, $now + 3600));
+}
+
+/**
+ * An email change the user hasn't confirmed, with "this wasn't me" still
+ * to click: undoing it removes what was added since it was asked for.
+ */
+function revertableChange(User $user): PendingChange
+{
+    return tap(new PendingChange([
+        'attribute' => 'email',
+        'value' => 'new@example.com',
+        'previous_value' => 'taylor@example.com',
+        'confirm_token' => PendingChange::hashToken('confirm'),
+        'revert_token' => PendingChange::hashToken('revert'),
+        'expires_at' => now()->addDay(),
+    ]), fn (PendingChange $change) => $change->authenticatable()->associate($user)->save());
+}
+
+// Each link waits for its own user's row, by when both have looked for the
+// account and found nobody has it. The account's unique credential ID turns
+// the second away, as linked to someone else: never an error, nor two links.
+it('links an account at a provider to one of two users linking it at once', function () {
+    useRaceFactors(SingleSignOn::class);
+    $taylor = taylor();
+    $abigail = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+    registeredSessionFor($taylor, 'taylor');
+    registeredSessionFor($abigail, 'abigail');
+
+    $results = contend([$taylor, $abigail], [
+        ['link-sso', $taylor->id, 'taylor'],
+        ['link-sso', $abigail->id, 'abigail'],
+    ]);
+
+    expect(outcomes($results, 'added'))->toBe(1)
+        ->and(outcomes($results, 'linked elsewhere'))->toBe(1)
+        ->and(Authenticator::query()->where('factor', 'sso')->count())->toBe(1);
+});
+
+// A reset and "this wasn't me" each remove the links that could be an
+// intruder's, sign out everywhere, and look again. A link whose callback
+// waits for the user's row while the sign-out holds it is refused once it
+// gets there; one that got there first is the second look's to find.
+it('leaves no link from a session a reset or "this wasn\'t me" signs out while the link waits', function (string $meanwhile, string $expected) {
+    useRaceFactors(SingleSignOn::class);
+    $user = taylor();
+    registeredSessionFor($user, 'intruder');
+    $change = revertableChange($user);
+
+    [$linked] = contend($user, [['link-sso', $user->id, 'intruder']], fn () => match ($meanwhile) {
+        'reset' => app(PasswordChanges::class)->reset($owner = $user->fresh(), fn () => $owner->forceFill(['password' => 'the reset password'])->save()),
+        'undo' => expect(app(EmailChanges::class)->revert($change, 'revert'))->toBeTrue(),
+        default => null,
+    });
+
+    expect($linked)->toBe($expected)
+        ->and(Authenticator::query()->where('factor', 'sso')->count())->toBe($meanwhile === '' ? 1 : 0);
+})->with([
+    'reset meanwhile' => ['reset', 'signed out'],
+    'undone meanwhile' => ['undo', 'signed out'],
+    'nothing meanwhile' => ['', 'added'],
+]);
+
+// The other way round: the first look has found an older link and waits to
+// remove it, while the session that's about to be signed out links another.
+// That one was saved before the sign-out, so the second look finds it.
+it('removes a link saved between a reset\'s or "this wasn\'t me"\'s first look and its sign-out', function (string $undo) {
+    useRaceFactors(SingleSignOn::class);
+    $user = taylor();
+    registeredSessionFor($user, 'intruder');
+    $older = Authenticator::factory()->sso(subject: 'linked a moment earlier')->for($user, 'authenticatable')->create();
+
+    [$undone] = contend($older, [match ($undo) {
+        'reset' => ['reset-password', $user->id],
+        'undo' => ['revert-email-change', revertableChange($user)->id, 'revert'],
+    }], fn () => expect(work(['link-sso', $user->id, 'intruder']))->toBe('added'));
+
+    expect($undone)->toBe($undo === 'reset' ? 'reset' : true)
+        ->and(Authenticator::query()->where('factor', 'sso')->exists())->toBeFalse()
+        ->and(app(SessionRegistry::class)->forUser($user))->toBeEmpty();
+})->with(['reset', 'undo']);

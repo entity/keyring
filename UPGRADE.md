@@ -8,7 +8,33 @@ What counts as a change you'd need to act on is in the README's [What's Stable](
 
 ### Published Config
 
-If you published `config/keyring.php`, you may add `'pages' => true`. Leaving it out is the same.
+If you published `config/keyring.php`, you may add `'pages' => true` and the `sso` section. Leaving them out is the same.
+
+### Single Sign-On Routes
+
+Two new routes, `keyring.sso.redirect` (`GET /auth/{provider}/redirect`) and `keyring.sso.callback` (`GET /auth/{provider}/callback`), sign users in with the identity providers in `sso.providers`. Keyring only registers them when `sso.providers` lists at least one provider as the app boots, so an app that doesn't configure one keeps any `/auth/...` routes of its own, and nothing changes for it. Once you add a provider, they answer `404` until you register the new `Keyring\Factors\SingleSignOn` factor. If your app also has routes of its own at those paths, such as the Socialite recipe's `/auth/github/callback`, move them before adding a provider, or replace the recipe with the factor as [Migrating From the Socialite Recipe](docs/sso.md#migrating-from-the-socialite-recipe) describes. The `login` page has a new `providers` prop, an empty list until the factor is registered.
+
+The `sso` factor key is now Keyring's. A completed password reset removes every authenticator stored with it, whether or not the `SingleSignOn` factor is registered, so if a factor of your own uses the key `sso`, give it another one, and move its rows to the new key, before you upgrade.
+
+A third route, `keyring.sso.confirm` (`GET /confirm/sso/redirect`), is registered with them for signed-in users. It sends a user back to the provider of a link the confirm page offers, to confirm a step-up by signing in there. How much that proves is the provider's [`freshness`](docs/sso.md#freshness). By default Google and GitHub are `never`: their sign ins don't count toward `keyring.fresh`, and nor do their confirms, so the confirm page only offers their links toward a level such as AAL2, and `keyring.fresh` leaves them out of what it asks. A user with a `never` link and a second factor, and no password, confirms `keyring.fresh` with the second factor alone. The `freshness` in the config wins over any driver's own `freshness()`, so `Keyring::sso()->freshness($name)` is what counts. Microsoft is `reauthenticate`, which needs the `auth_time` optional claim in its app registration. See [Step-Up](docs/sso.md#step-up).
+
+The new `sso_failed` and `sso_link_failed` messages are in `lang/en/keyring.php`, and the `sso-cancelled` status in `lang/en/status.php`. If you published Keyring's translations, Keyring's English lines are used until you add them to yours.
+
+A factor of your own that can only start a sign in (`answersChallenges()` returns `false`) and stores its authenticators no longer gets recovery codes with the first one added, isn't made the default, and no longer counts as a second factor that recovery codes are kept for. `PATCH /user/authenticators/{authenticator}` now refuses `default` for one of its authenticators, as it does for recovery codes. A completed password reset now unlinks every identity provider linked to the account.
+
+`FactorFailed::afterPassword()` is now only `true` when the login's first step was the password. After another first step of the knowledge kind, such as an identity provider, use the new `afterFirstFactor()`, or `firstFactor()` for the verification itself. Keyring still logs `second_factor_failed` and sends its email after either, but after an identity provider the `second_factor_failed` notification is passed the `name` of the link that was used, and Keyring's own email names it rather than saying the password was entered. A notification class of your own for `second_factor_failed` gets `name` too, and should word itself the same way when it's set.
+
+A new event, `ProviderIdentityAccepted`, fires when an identity provider's account is accepted for a sign in, a confirm, or a link, with the provider's `Identity`. Nothing listens to it unless you do. See [Hearing About Accepted Identities](docs/sso.md#hearing-about-accepted-identities).
+
+`keyring.fresh` and `StepUp`'s freshness checks now go by when each verification was really proved (`Verification::provedAt()`), which is earlier than when it was checked only for a sign in, or a new link, with an identity provider that says, with `auth_time`, that the user signed in there earlier. Nothing else changes for other factors. `Verification` has a new `authenticatedAt` argument and property, which is `Verification::UNKNOWN` when the provider should have said when and didn't, and `SessionAssurance::provedSince()` returns what freshness counts. If you report `auth_time` from the session's verifications, as in [Reading What Was Proved](docs/step-up.md#reading-what-was-proved), take it from the new `provedAtIfKnown()` rather than `at`, and leave it out when that's `null`. `provedAt()` gives `Verification::UNKNOWN`, which is `0`, for an unknown time, so a `min()` over it, or a date made from it, reports a sign in from 1970.
+
+`UserKeyring::usefulFor()` takes the attempt's purpose, so a step-up can offer a single sign-on link, and the new `answers()` says whether a challenge or a step-up can ask for an authenticator. `StepUp` now checks a confirm can be finished with what the confirm page can offer (the new `UserKeyring::canConfirm()`), building on what the session already proved, before it starts one. A user who'd otherwise prove what they could and then be told to enroll, such as one whose only other way in is a factor of your own that can only start a sign in, now gets the `enroll-first` answer straight away. `keyring.fresh`'s requirement only counts what can be proved recently (`UserKeyring::freshlyProvable()`). A page saved for after enrolling, with what the account couldn't meet, is handed back once a confirm could meet it (`canConfirm()`), not once the account's authenticators could, so a factor of your own that can only start a sign in no longer counts toward it. A recovery code is only offered on the confirm page when what the page can still ask for could finish the confirm beside it.
+
+Confirming through Keyring now sets Laravel's `auth.password_confirmed_at` to the latest moment the user proved one of the factors the confirm added (`Verification::provedAt()`), rather than to when it finished, and never moves it back. For the built-in factors that's when the last one was proved, so `password.confirm` routes behave as before. A confirm that added only a round trip to a `never` identity provider leaves it alone, and a visit to `/confirm` of the user's own, where `password.confirm` sends them, no longer offers such a link. See [Laravel's Password Confirmation](docs/step-up.md#laravels-password-confirmation).
+
+`StepUp::unlessMet()` and `meets()` with both a level and a moment ask for the two in turn, the level first, when the account can't freshly prove the level, rather than sending the user to enroll.
+
+Laravel's `Failed` event now only takes the username from the request for a factor whose `identificationRules()` ask for it, such as the password. For another, such as a passkey nobody has, its credentials hold `null` for the username unless the user was found.
 
 ### Pages Asked For With JSON or an XHR
 
@@ -30,7 +56,25 @@ Only apps that extend these classes need to change anything:
 
 - `StepUp::enrollFirst()` takes an optional `?Requirement $requirement` as its third argument, and `Detours::remember()` one as its fourth. A subclass that overrides either needs that argument too.
 - `Detours::put()` keeps its arguments. It saves the requirement from `$this->requiring` beside the page, so an override that calls the parent needs no change. One that writes to the session itself saves pages without a requirement, which come back with the next sign-in method added, as before. So does a subclass that overrides `remember()` and calls `put()` itself rather than the parent's `remember()`, since only the parent's `remember()` sets `$this->requiring`.
-- `Detours::pull()` leaves a page saved, and returns `null`, while the signed-in account can't meet the requirement saved with it.
+- `Detours::pull()` leaves a page saved, and returns `null`, while a confirm couldn't meet the requirement saved with it.
+
+### Extending Sign In and Step-Up
+
+Single sign-on changes some classes that apps don't usually touch, and that an integration built on Keyring, such as an identity provider of its own, may extend or call. Only code that does needs to change. What isn't listed here is in [Single Sign-On Routes](#single-sign-on-routes) and [Detours Keep the Requirement](#detours-keep-the-requirement).
+
+- `SignIn::enrolled()` takes an optional `?Verification $verification` as its third argument, and records it in place of `Verification::of($authenticator)` when it's given. Keyring passes one for a new link at an identity provider. An override needs the argument too.
+- `SignIn::confirm()` passes `SessionAssurance::confirm()` what the confirm proved itself, `$attempt->added()`, as well as every verification.
+- `SessionAssurance::confirm()` takes an optional `?array $added` as its second argument. It sets `auth.password_confirmed_at` to the latest `provedAt()` among `$added` (all of `$verifications` when it's `null`), never moves it back, and leaves it alone when nothing was proved later. An override needs the argument too.
+- `SessionAssurance::provedSince()` is new. Freshness goes by it, through `StepUp::verifiedSince()`, rather than by `since()`, so an override of `since()` no longer changes what counts as recent.
+- `StepUp::require()` checks `UserKeyring::canConfirm($requirement, $proved)`, what the confirm page can offer on top of what was proved, rather than `canMeet($requirement)`, before it starts a confirm, and answers `enroll-first` otherwise.
+- `StepUp::meets()` and `unlessFresh()` with a level ask for the level and the fresh verification in turn when a confirm can't give both at once, which the new protected `inTurn()` decides.
+- `StepUp::freshRequirement()` works from `UserKeyring::freshlyProvable()` and returns a requirement marked with `Requirement::freshlyProved()`.
+- `Detours::pull()` hands a page back once `canConfirm()` can meet its requirement, rather than `canMeet()`.
+- `Requirement` has a new last constructor argument, `requiresFreshness`, set with the new `freshlyProved()`. With it, `isMetBy()`, `wouldProgress()` and `limitedTo()` leave out verifications whose `provedAtIfKnown()` is `null`, `atLeast()` keeps it from either side, and `toArray()` has a `fresh` key, which `fromArray()` reads as `false` when it's missing.
+- `Verification` has new constructor arguments after `attested`: `authenticatedAt`, `providerAmr` and `providerAcr`, which `of()` takes too, and the new `provedAt()` and `provedAtIfKnown()`. `toArray()` adds `authenticated_at`, `provider_amr` and `provider_acr` only when they're set, and `fromArray()` loads arrays without them, so sessions from before the upgrade keep working. `providerAmr` and `providerAcr` are an identity provider's claim, and count toward nothing.
+- `Attempt` has a new `carried` property, how many of its verifications a step-up started with, and `added()`, the ones proved during it. `toArray()` has a `carried` key, read as `0` when it's missing.
+- `UserKeyring::usefulFor()` takes an optional `?Purpose $purpose`, and its protected `codeCouldFinish()` takes one as a new last argument. The new protected `askable()` and `wouldProve()` say what each authenticator would prove, `wouldProve()` asking the `SingleSignOn` factor for its links, and `canMeet()` and `reachable()` go by it. With no authenticator marked as the default, `default()` no longer falls back to one that can't answer a challenge.
+- `VerifyFactor::check()` asks `UserKeyring::answers($authenticator, $purpose)` rather than the factor's `answersChallenges()`, so a single sign-on link can confirm a step-up.
 
 ### The XSRF Token Stays on Your Origins
 

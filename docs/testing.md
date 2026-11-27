@@ -7,6 +7,7 @@
 - [Faking Factors](#faking-factors)
 - [Factories](#factories)
 - [Virtual Authenticators](#virtual-authenticators)
+- [Identity Providers](#identity-providers)
 - [The Conformance Suite](#the-conformance-suite)
 
 ## Introduction
@@ -101,6 +102,7 @@ Keyring::fake()->pass('passkey', 'totp')->fail('email-code');
 - Passed factors verify with whatever is posted, even nothing at all. Their validation rules are skipped.
 - Failed factors always fail.
 - Any factor you don't name is checked for real.
+- Passing `sso` skips the provider, so no `ProviderIdentityAccepted` is dispatched and the verification has no `providerAmr` or `providerAcr`. Use `FakeIdentityProvider` to test those.
 
 Identifying the user still happens for real. For example, posting an unknown email to `/login` fails even when `password` passes. Rate limiting, devices, risk, and your policy all run as normal.
 
@@ -155,6 +157,7 @@ Authenticator::factory()->securityKey()->default()->for($user, 'authenticatable'
 | `passkey($synced = true)` | A user-verified passkey, which is synced unless you pass `false`. One that isn't synced is device bound, and it reaches AAL3 when it's `attested()` and its factor requires attestation. |
 | `securityKey($userVerified = false)` | A security key. |
 | `attested($aaguid, $type = 'basic')` | Chain it onto either of those, for a key whose model was checked by attestation. |
+| `sso($provider = 'fake', $subject = '248289761001', $issuer = 'https://idp.test', $email = 'taylor@example.com')` | An account at an identity provider, linked for [single sign-on](sso.md). The defaults are the account a plain `FakeIdentityProvider` signs in. |
 | `default()` | Marks it as the default. |
 | `unconfirmed()` | Not yet confirmed, so it doesn't count. |
 
@@ -240,6 +243,21 @@ The `key` method takes the model's AAGUID, the format (`packed` by default, or `
 
 To check that your application turns keys away, use a key from a second `VirtualManufacturer` that you don't trust, or `new VirtualAuthenticator()->selfAttested()`, which attests with its own key pair.
 
+## Identity Providers
+
+`Keyring\Testing\FakeIdentityProvider` stands in for Google, Microsoft, GitHub, or any OpenID Connect provider, through `Http::fake()`, with really signed ID tokens. `register()` adds it to `sso.providers`, `signIn()` says who signs in, and `approve()` turns the URL Keyring sent the browser to into the callback the provider would send it back to:
+
+```php
+$google = FakeIdentityProvider::google()->register('google');
+Authenticator::factory()->sso('google', subject: '42', issuer: GoogleProvider::ISSUER)->for($user, 'authenticatable')->create();
+
+$url = $this->get(route('keyring.sso.redirect', 'google'))->headers->get('Location');
+
+$this->get($google->signIn(['sub' => '42'])->approve($url))->assertRedirect('/dashboard');
+```
+
+Keyring only registers the `/auth` routes when `sso.providers` lists a provider as the app boots, so keep the provider in `config/keyring.php` too. `register()` only changes the config afterwards. Its ID tokens carry an `auth_time` (the fake Google's only when the request asks for it, as Google's do, and the fake Microsoft's only after `withAuthTimeClaim()`, as Microsoft's only do with the optional claim): `signedInAt()` gives the user an older session at the provider, which a sign in counts from when the provider's [`freshness`](sso.md#freshness) is `reauthenticate`, and a confirm with such a provider asks it to sign them in again. Google's and GitHub's sign ins are never fresh by default: register them with `['freshness' => 'reauthenticate']` or `['freshness' => 'round_trip']` to test a confirm with them. See [Testing](sso.md#testing) in Single Sign-On for linking, confirming, and for what it can be told to get wrong.
+
 ## The Conformance Suite
 
 The `Keyring\Testing\KeyringConformance` trait provides a set of tests that check your setup still keeps Keyring's guarantees. The tests cover your policy, your factors, swapped responses, and pipeline changes. Checks for features that are turned off are skipped, along with the reason, so a skipped check means your setup doesn't use that feature. It doesn't count as a pass. To get started, add the trait to a test class and tell it how to make a user:
@@ -280,7 +298,7 @@ The suite checks that:
 - registering with an address that has an account is answered the same way as one that hasn't, and signs nobody in (skipped with `registration.reveal_taken`),
 - protected attributes can't change outside Keyring's flows,
 - changing sign-in methods needs a fresh verification,
-- every enrollable factor can begin enrolling,
+- every enrollable factor can begin enrolling, apart from single sign-on, which needs a provider to send the user to,
 - signing out revokes the registered session,
 - the registry's `revoke()`, `revokeDevice()` and `revokeAll()` return exactly the records they revoked, each as it now stands, and nothing they didn't revoke. It fails when a [driver of your own](devices-and-sessions.md#writing-a-driver) gets that wrong,
 - signing out announces the session that ended, once, with a [`RegisteredSessionEnded`](devices-and-sessions.md#hearing-about-ended-sessions). It fails when a `SessionRegistry` is bound in the container in place of the one Keyring's manager gives, which nothing announces,

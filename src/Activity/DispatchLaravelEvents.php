@@ -8,6 +8,7 @@ use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout as LaravelLockout;
 use Illuminate\Auth\Events\PasswordReset as LaravelPasswordReset;
 use Illuminate\Events\Dispatcher;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Events\FactorFailed;
 use Keyring\Events\Lockout;
 use Keyring\Events\PasswordReset;
@@ -43,8 +44,22 @@ class DispatchLaravelEvents
 
         // Only who it was for, never the password or code that was tried.
         event(new Failed(config('keyring.guard'), $user, [
-            $username => $user?->getAttribute($username) ?? $event->request->input($username),
+            $username => $user?->getAttribute($username) ?? $this->typedUsername($event, $username),
         ]));
+    }
+
+    /**
+     * The username that was typed, when nobody has it, for a factor that
+     * asks for one. Another, like an identity provider's callback, has no
+     * username field, and whatever its URL says isn't who it was for.
+     */
+    protected function typedUsername(FactorFailed $event, string $username): mixed
+    {
+        $factor = $this->keyring->hasFactor($event->factor) ? $this->keyring->factor($event->factor) : null;
+
+        return $factor instanceof PrimaryFactor && array_key_exists($username, $factor->identificationRules())
+            ? $event->request->input($username)
+            : null;
     }
 
     public function lockout(Lockout $event): void

@@ -23,6 +23,7 @@ use Keyring\KeyringManager;
  * @method static list<class-string> steps()
  * @method static list<class-string> dangerouslyChangedSteps()
  * @method static \Keyring\Risk\RiskEngine risk()
+ * @method static \Keyring\Sso\Sso sso()
  * @method static \Keyring\KeyringManager notifications(array<string, class-string<\Illuminate\Notifications\Notification>|null> $notifications)
  * @method static bool hasNotification(string $type)
  * @method static \Illuminate\Notifications\Notification|null notification(string $type, array<string, mixed> $arguments = [])

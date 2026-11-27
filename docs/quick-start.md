@@ -128,7 +128,7 @@ class SecurityController
 | Prop | Contents |
 |---|---|
 | `authenticators` | The sign-in methods the user has set up. The `present` method gives each one's `factor`, `id`, `name`, `createdAt`, and `lastUsedAt` (as ISO 8601 dates), along with a masked `hint` for email codes, and `remaining` and `replace` for recovery codes. The password is a virtual authenticator with no database row of its own, so it's left out. |
-| `enrollable` | The keys of the factors a user may add, such as `totp` and `passkey`, for your "add" buttons. This includes `recovery`, which only works once the user has another second factor, so you should present it as "generate recovery codes" next to those rather than as a way to sign in. |
+| `enrollable` | The keys of the factors a user may add, such as `totp` and `passkey`, for your "add" buttons. This includes `recovery`, which only works once the user has another second factor, so you should present it as "generate recovery codes" next to those rather than as a way to sign in. It includes `sso` when [single sign-on](sso.md#linking-and-unlinking) is registered, which you offer as a "link" button for each provider. |
 | `devices` | Where the user is signed in, when `Features::devices()` is enabled. This is the same list returned by [`GET /user/devices`](devices-and-sessions.md#listing-and-revoking-devices). |
 | `activity` | Recent [security log](security-log-and-emails.md#showing-recent-activity) entries, when `Features::securityLog()` is enabled. |
 
@@ -229,6 +229,8 @@ Next:
 1. Enable `Features::manageAuthenticators()` in your `config/keyring.php` file so users can set them up.
 2. Build the `challenge` and `confirm` pages, and the part of [your settings page](#your-settings-page) that adds and removes sign-in methods.
 3. If everyone should set one up, uncomment the `keyring.enrolled` line below them and set `enrollment_url` to that page. See [Requiring a Second Factor](policies.md#requiring-a-second-factor).
+
+To let users sign in with Google, Microsoft, GitHub, or another identity provider, add `Factors\SingleSignOn::class` to the list and configure the providers. See [Single Sign-On](sso.md).
 
 The `Requirement::aal2()->ifEnrolled()` policy asks for a second factor once a user has set one up. Adding `noDowngrade()` ensures a user with a passkey can't be talked into using something weaker. To learn more, see the [Factors](factors.md) and [Policies](policies.md) documentation.
 

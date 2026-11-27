@@ -46,6 +46,9 @@ The pending attempt is encrypted JSON in the session. It lasts `pending_logins.k
 | `POST` | `/login` | `login.store` | Sign in with a password. |
 | `GET` | `/login/{factor}/options` | `keyring.login.options` | Options for signing in without a username (passkeys). |
 | `POST` | `/login/{factor}` | `keyring.login.factor` | Sign in with another primary factor (passkeys). |
+| `GET` | `/auth/{provider}/redirect` | `keyring.sso.redirect` | Send the user to an identity provider to sign in. Uses the `keyring-login-options` rate limiter. Only registered when `sso.providers` lists a provider, and only answers once the `SingleSignOn` factor is registered. See [Single Sign-On](sso.md). |
+| `GET` | `/auth/{provider}/callback` | `keyring.sso.callback` | Where the identity provider sends the user back, to sign in, to link an account, or to confirm a step-up. For anyone: it takes the guest or signed-in middleware its purpose needs, and a guest's uses the `keyring-login-options` rate limiter. Registered with the redirect. |
+| `GET` | `/confirm/sso/redirect` | `keyring.sso.confirm` | Send a signed-in user back to the provider of a link the confirm page offers, to confirm a [step-up](sso.md#step-up). Takes the link's ID as `authenticator`. Uses the `keyring-login-options` rate limiter. Registered with the redirect. |
 | `GET` | `/login/challenge/{factor?}` | `keyring.login.challenge` | The challenge page. |
 | `POST` | `/login/challenge/{factor}` | `keyring.login.verify` | Verify the next factor. |
 | `POST` | `/login/challenge/{factor}/send` | `keyring.login.send` | Send a code (email codes). |
@@ -55,7 +58,7 @@ The pending attempt is encrypted JSON in the session. It lasts `pending_logins.k
 
 The login and registration routes are for guests only, and the `/logout` route requires `auth:{guard}`. The registration routes exist only when the `registration` feature is on. By default, the `keyring` rate limiter allows six a minute. See [Rate Limits](configuration.md#pending-logins-timebox-and-rate-limits).
 
-The routes that spend session state (`POST /login`, `POST /login/{factor}`, the challenge page, and its verify and send routes) take Laravel's session lock with `->block()`, so parallel requests in one session wait their turn instead of spending the same state twice.
+The routes that spend session state (`POST /login`, `POST /login/{factor}`, the challenge page, its verify and send routes, and the three single sign-on routes) take Laravel's session lock with `->block()`, so parallel requests in one session wait their turn instead of spending the same state twice.
 
 > [!NOTE]
 > Your cache store must support locks.
@@ -163,20 +166,20 @@ Only factors that implement `PrimaryFactor` and return `true` from `startsLogin`
 
 ## Starting a Sign In Yourself
 
-`POST /login/{factor}` starts a sign in with any factor that supports it. When the proof arrives somewhere else, such as the callback of a social login, you may start the sign in from your own route with `Keyring::attempt`:
+`POST /login/{factor}` starts a sign in with any factor that supports it. When the proof arrives somewhere else, such as a callback from a service of your own, you may start the sign in from your own route with `Keyring::attempt`:
 
 ```php
 use Illuminate\Http\Request;
 use Keyring\Facades\Keyring;
 
-Route::get('/auth/github/callback', fn (Request $request) => Keyring::attempt($request, 'github'))
+Route::get('/partner/callback', fn (Request $request) => Keyring::attempt($request, 'partner'))
     ->middleware('guest')
     ->block();
 ```
 
 It runs the same [pipeline](#the-verification-pipeline) as the login form, so rate limits, the policy, and risk checks all apply. A user with a second factor is sent to the challenge page. It answers with the same [responses](#responses). For a failure, that's a `ValidationException`, which you may want to catch and turn into a redirect to your login page. A factor that can't start a login answers with `404`.
 
-The [Social Login With Socialite](recipes.md#social-login-with-socialite) recipe has a complete example.
+Keyring's own [single sign-on](sso.md) callback signs in this way, and [Signing Up With a Provider](sso.md#signing-up-with-a-provider) has a complete example of a route that does. Keep your own routes away from `/auth/{provider}/redirect` and `/auth/{provider}/callback`, which are Keyring's.
 
 ## The Challenge Page
 
@@ -218,6 +221,7 @@ The `challenge` prop holds these values for the built-in factors:
 | `password`, `totp`, `recovery` | `[]` |
 | `email-code` | `length` (the number of digits), `sent` (whether a code has been sent), and `expiresAt` (the code's expiry, or `null`). |
 | `passkey`, `security-key` | `options`, the WebAuthn request options for the browser. |
+| `sso` (confirm page only) | `provider`, its `label`, and `url`, which sends the user to the provider to sign in again. See [Single Sign-On](sso.md#step-up). |
 
 Alternatives only include authenticators that bring the user closer to the requirement. For example, after a password, another password isn't offered. With [no downgrade](policies.md#no-downgrade) turned on, a user who has a passkey or security key is only offered their other keys, plus recovery codes unless the policy refuses those too.
 
@@ -567,7 +571,7 @@ Two statuses can say where the user was going when Keyring sent them away. That 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password`, and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out`, `sso-cancelled` and `verification-link-sent`.
 
 You can swap it the same way as the others. Your class receives the same named arguments:
 
@@ -583,7 +587,7 @@ Keyring renders these pages:
 
 | Name | Props |
 |---|---|
-| `login` | `canResetPassword`, `canRegister`, `status` (a translated message) |
+| `login` | `canResetPassword`, `canRegister`, `status` (a translated message), `providers` (the identity providers to offer, each with `name`, `label` and `url`, once the `SingleSignOn` factor is registered; otherwise empty) |
 | `challenge` | See [Page Props](#page-props). Used for sign ins. |
 | `confirm` | The same props, with `purpose: "confirm"`. Used for step-up. |
 | `register` | None. The published action expects `name`, `email`, `password`, and `password_confirmation`. Afterwards, the user lands on the login page with the `registration-received` status, unless [registration signs them in](#saying-when-an-address-is-taken). |
@@ -636,6 +640,7 @@ Every event here lives in the `Keyring\Events` namespace:
 | `Attempting` | A verification starts. | `request`, `factor` (key), `purpose` |
 | `FactorChallenged` | The challenge page shows a factor. | `attempt`, `authenticator` |
 | `FactorVerified` | A factor's proof was right. | `attempt`, `authenticator`, `verification` |
+| `ProviderIdentityAccepted` | An [identity provider](sso.md#hearing-about-accepted-identities)'s account was accepted as the user's link, for a sign in, a confirm, or a link. For a sign in or a confirm it fires before the rest of the pipeline, so a second factor may still be asked for. | `user`, `authenticator`, `identity` (`Keyring\Sso\Identity`), `purpose` (`login`, `confirm`, or `link`) |
 | `FactorFailed` | A factor's proof was wrong, or the user wasn't found. | `attempt` (nullable), `authenticator` (nullable), `factor`, `request` |
 | `Lockout` | A rate limit was hit. It's dispatched for each request the limit refuses. | `request`, `factor`, `retryAfter` (`null` when waiting won't help) |
 | `VerificationRefused` | The final gate refused because a [mandatory step](#mandatory-steps) hadn't run. | `attempt`, `factor`, `skipped` |
@@ -649,6 +654,6 @@ Laravel's own `Login`, `Logout`, and `Registered` events still fire, because Key
 
 | Laravel Event | Dispatched With |
 |---|---|
-| `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. |
+| `Illuminate\Auth\Events\Failed` | `FactorFailed`. Its credentials hold only the username field, never the password or code. That's the user's own when one was found. Otherwise it's what was typed, for a factor that asks for a username, such as the password, and `null` for one that doesn't, such as an identity provider's callback. |
 | `Illuminate\Auth\Events\Lockout` | `Lockout`, so once for every refused request. |
 | `Illuminate\Auth\Events\PasswordReset` | Keyring's `PasswordReset`. |

@@ -16,8 +16,8 @@ use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 
 /**
- * A sign in someone else vouches for, like a social login, written the way
- * the recipes suggest. The test says who the provider vouched for.
+ * A sign in someone else vouches for, as a factor of an app's own that
+ * keeps no authenticators. The test says who the provider vouched for.
  */
 class SingleSignOn extends Factor implements PrimaryFactor
 {

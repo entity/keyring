@@ -20,6 +20,7 @@ use Keyring\Models\PendingChange;
 use Keyring\Notifications\ConfirmEmailChange;
 use Keyring\Notifications\EmailChangeNotice;
 use Keyring\Notifications\NewDevice;
+use Keyring\Testing\FakeIdentityProvider;
 use Keyring\Tests\Fixtures\User;
 
 // An emailed link has to carry its token in its URL. The page it opens posts
@@ -350,13 +351,21 @@ it('checks the signature on both the link and the form it posts', function (stri
 })->with(['keyring.devices.report', 'verification.verify']);
 
 it('changes nothing on a GET, on any of its routes', function () {
+    new FakeIdentityProvider()->register();
+    reloadRoutes();
+
     $acting = collect(Route::getRoutes()->getRoutes())
         ->filter(fn ($route) => in_array('GET', $route->methods(), true) && str_starts_with((string) $route->getActionName(), 'Keyring\\'))
         ->map(fn ($route) => class_basename($route->getActionName()))
         ->values()
         ->all();
 
-    // Every one of these renders a page or answers with what's there.
+    // Every one of these renders a page or answers with what's there, but
+    // single sign-on's three: OpenID Connect sends the user to a provider and
+    // back with GETs. The first two only start a sign in or a confirm in this
+    // session, and the third only finishes one this session started, which
+    // its state has to name, so a link from anywhere else can't act through
+    // any of them.
     expect($acting)->toEqualCanonicalizing([
         'RegisteredUserController@create', 'PasswordResetController@create', 'PasswordResetController@edit',
         'AuthenticatedSessionController@create', 'AuthenticatedSessionController@options',
@@ -364,6 +373,7 @@ it('changes nothing on a GET, on any of its routes', function () {
         'DeviceController@index', 'DeviceController@page', 'SessionController@index',
         'EmailChangeController@show', 'EmailChangeController@page', 'EmailChangeController@page',
         'EmailVerificationController@notice', 'EmailVerificationController@page',
+        'SingleSignOnController@redirect', 'SingleSignOnController@reauthenticate', 'SingleSignOnController@callback',
     ]);
 });
 

@@ -346,7 +346,8 @@ it('serialises an attempt as the same plain data it keeps in the session', funct
  */
 function serialisedByOldVersion(Attempt $attempt): string
 {
-    $properties = (array) $attempt;
+    // 0.2 didn't know how many verifications an attempt started with.
+    $properties = array_diff_key((array) $attempt, ['carried' => true]);
     $private = fn (string $name) => "\0".Attempt::class."\0".$name;
 
     expect(array_keys($properties))->toEqualCanonicalizing([
@@ -409,7 +410,8 @@ it('restores a job queued by 0.2 for an event with an attempt, and looks the use
 
     $event = queuedEvent(Authenticated::class);
 
-    expect($event->attempt->toArray())->toBe($attempt->toArray())
+    // It didn't keep how many verifications the attempt started with.
+    expect($event->attempt->toArray())->toBe([...$attempt->toArray(), 'carried' => 0])
         ->and($event->user->is($user))->toBeTrue()
         ->and($event->attempt->user()->is($user))->toBeTrue()
         ->and($event->attempt->user()->name)->toBe('Taylor Otwell');
@@ -426,12 +428,25 @@ it('restores an attempt serialised by 0.2 with its keyring looked up, and looks 
     $user->update(['name' => 'Taylor Otwell']);
     $copy = unserialize($old);
 
-    expect($copy->toArray())->toBe($attempt->toArray())
+    expect($copy->toArray())->toBe([...$attempt->toArray(), 'carried' => 0])
         ->and($copy->complete)->toBeTrue()
         ->and($copy->user()->is($user))->toBeTrue()
         ->and($copy->user()->name)->toBe('Taylor Otwell')
         ->and($copy->keyring()->user->name)->toBe('Taylor Otwell')
         ->and($copy->keyring()->all()->pluck('factor')->all())->toContain('totp');
+});
+
+it('restores a verification serialised by 0.2 with the provider\'s claims at their defaults', function () {
+    // 0.2 had no authenticatedAt, providerAmr or providerAcr.
+    $properties = array_diff_key((array) new Verification(factor: 'password', authenticator: null, categories: [Category::Knowledge], at: 1700000000), ['authenticatedAt' => true, 'providerAmr' => true, 'providerAcr' => true]);
+    $old = preg_replace('/^a:(\d+):/', 'O:'.strlen(Verification::class).':"'.Verification::class.'":$1:', serialize($properties));
+
+    $copy = unserialize($old);
+
+    expect($copy->authenticatedAt)->toBeNull()
+        ->and($copy->providerAmr)->toBe([])
+        ->and($copy->providerAcr)->toBeNull()
+        ->and($copy->toArray())->toBe(['factor' => 'password', 'authenticator' => null, 'categories' => ['knowledge'], 'phishing_resistant' => false, 'at' => 1700000000, 'device_bound' => false, 'attested' => false]);
 });
 
 it('queues a removed authenticator without its secret or the user\'s password hash', function () {
