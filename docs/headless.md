@@ -10,6 +10,7 @@
     - [CSRF](#csrf)
     - [Passkeys](#passkeys)
     - [Emailed Links](#emailed-links)
+    - [Single Sign-On](#single-sign-on)
     - [Local Development](#local-development)
 - [One Origin](#one-origin)
 - [Pages as JSON](#pages-as-json)
@@ -179,6 +180,10 @@ Some emails also link to `/auth/login` and `/auth/forgot-password`, such as the 
 Signed links are signed over their path and query only, so their signatures hold under the frontend's root. The frontend's page sends the same path, and the query, to Laravel, and Laravel checks the signature as if the link had opened there. A root with a path of its own works too: `https://app.example.com/account` starts the reset link at `https://app.example.com/account/auth/reset-password/...`, and the frontend leaves `/account` off the path it sends to Laravel.
 
 Mirroring the paths is all it takes, so Keyring has no hook for building one link differently. Laravel's own `ResetPassword::createUrlUsing` and `VerifyEmail::createUrlUsing` still work for those two, and Keyring leaves a callback of yours alone. See [Emailed Links](security.md#emailed-links).
+
+### Single Sign-On
+
+With `Keyring::linkRootUsing()` set as above, the callback URL that Keyring gives [identity providers](sso.md) starts at the frontend too, such as `https://app.example.com/auth/auth/google/callback` with the `auth` prefix. Register that URL with the provider, and serve a page at that path that passes its path and query on to Laravel as JSON. See [Frontends Laravel Doesn't Serve](sso.md#frontends-laravel-doesnt-serve). A JSON request to `GET /auth/auth/{provider}/redirect` answers with the provider's URL as `url`, for the frontend to send the browser to, and the browser package's `signInWithProvider()` and `linkProvider()` do that for you. A confirm page that offers a link at a provider does the same with `GET /auth/confirm/sso/redirect?authenticator={id}`, which `confirmWithProvider(id)` calls. The provider sends the user back to the same callback page, which gets `authenticated` with the `redirect` to carry on to.
 
 ### Local Development
 
@@ -525,4 +530,4 @@ Even with all of that, a request from the Nuxt server comes from the server's IP
 - **Coming back after signing in, confirming or enrolling.** On another origin, Laravel doesn't learn the frontend's pages, so JSON answers give `home` as the `redirect` after signing in or confirming. On one origin, the `Referer` can make it the page the request came from. `authenticator-added` carries no `continue` either way. Keep the page the user was going to [in the frontend](#where-each-answer-goes).
 - **Laravel's `guest` middleware.** Keyring's sign-in and registration routes are only for guests. Laravel redirects a signed-in request to them, a JSON one too, rather than answering it. Check whether the user is signed in, with `GET /api/user` say, before showing those pages. `$middleware->redirectUsersTo()` in `bootstrap/app.php` changes where the redirect goes, but don't point it at the frontend. `fetch()` follows the redirect to the frontend's origin, which sends no CORS headers, so the request fails with a network error.
 - **Clearing the browser's data on sign out.** Keyring's `Clear-Site-Data` header only clears what the browser keeps for Laravel's origin. Clear what the frontend kept itself when signing out answers `204`.
-- **The Inertia helpers.** `useChallenge` and the browser package's other Inertia helpers need Inertia. Its WebAuthn, enrollment, session and passkey sign in helpers work in any frontend, once [`configureRequests()`](#calling-laravel) tells them where Laravel is. See [Frontends on Another Origin](frontend.md#frontends-on-another-origin).
+- **The Inertia helpers.** `useChallenge` and the browser package's other Inertia helpers need Inertia. Its WebAuthn, enrollment, session, passkey sign in and single sign-on helpers work in any frontend, once [`configureRequests()`](#calling-laravel) tells them where Laravel is. See [Frontends on Another Origin](frontend.md#frontends-on-another-origin).

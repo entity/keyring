@@ -28,6 +28,7 @@ use Keyring\Exceptions\ReservedAddressException;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password as PasswordFactor;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Features;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
@@ -191,7 +192,22 @@ it('removes sign-in methods added since the change when it is reverted', functio
     Event::assertDispatched(AuthenticatorRemoved::class, fn (AuthenticatorRemoved $event) => $event->authenticator->is($planted));
 });
 
-// The removals are announced on the account as it is once the address is
+it('unlinks identity providers linked since the change when it is reverted', function () {
+    Keyring::factors([PasswordFactor::class, SingleSignOn::class]);
+    $kept = Authenticator::factory()->sso(subject: 'owner')->for($this->user, 'authenticatable')->create(['created_at' => now()->subMonth()]);
+    $change = requestChange($this->user, 'attacker@example.com', Assurance::AAL2);
+    $tokens = tokensFor('attacker@example.com', 'taylor@example.com');
+
+    $this->travel(1)->minutes();
+    $planted = Authenticator::factory()->sso(subject: 'attacker')->for($this->user, 'authenticatable')->create();
+
+    confirmBoth($change, $tokens);
+    app(EmailChanges::class)->revert($change->fresh(), $tokens['revert']);
+
+    expect(Authenticator::find($planted->id))->toBeNull()
+        ->and(Authenticator::find($kept->id))->not->toBeNull();
+});
+
 // back, whatever sends the notice: an event carrying the copy loaded before
 // that would have a notice that isn't queued go to the address taken off.
 it('announces what an undo removed to the address it put back', function () {

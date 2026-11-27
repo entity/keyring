@@ -11,7 +11,9 @@ use Keyring\Contracts\Factor;
 use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Factors\Password;
+use Keyring\Enums\Purpose;
 use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Login\Requirement;
 use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
@@ -77,7 +79,22 @@ class UserKeyring
     public function default(): ?Authenticator
     {
         return $this->all()->firstWhere('is_default', true)
-            ?? $this->all()->first(fn (Authenticator $authenticator) => ! $authenticator->isVirtual());
+            ?? $this->all()->first(fn (Authenticator $authenticator) => ! $authenticator->isVirtual() && $this->answers($authenticator));
+    }
+
+    /**
+     * Whether a challenge or a step-up could ask for it: anything but a
+     * factor whose proof is who it identified, like an identity provider.
+     * A step-up ($purpose Confirm) can still send the user back to the
+     * provider of a single sign-on link (SingleSignOn::confirms()).
+     */
+    public function answers(Authenticator $authenticator, ?Purpose $purpose = null): bool
+    {
+        $factor = $authenticator->factor();
+
+        return ! $factor instanceof PrimaryFactor
+            || $factor->answersChallenges()
+            || ($purpose === Purpose::Confirm && $factor instanceof SingleSignOn && $factor->confirms($authenticator));
     }
 
     /**
@@ -114,10 +131,12 @@ class UserKeyring
      * Whether the user has a factor recovery codes can stand in for: anything
      * stored that is one, besides the codes themselves. An emailed code
      * isn't: the inbox it goes to is how the account is recovered anyway.
+     * Nor is a linked identity provider, which is never asked for as a
+     * second step.
      */
     public function hasFactorToRecover(): bool
     {
-        return $this->all()->contains($this->isFactor(...));
+        return $this->all()->contains(fn (Authenticator $authenticator) => $this->isFactor($authenticator) && $this->answers($authenticator));
     }
 
     /**
@@ -233,15 +252,57 @@ class UserKeyring
 
     /**
      * What the authenticator would prove, as far as the account can count
-     * on it yet: a key that isn't established is a factor and nothing more.
+     * on it yet (wouldProve()): a key that isn't established is a factor
+     * and nothing more.
      */
     protected function provableNow(Authenticator $authenticator): Verification
     {
-        $verification = Verification::of($authenticator);
+        $verification = $this->wouldProve($authenticator);
 
         return $this->isEstablished($authenticator)
             ? $verification
-            : new Verification($verification->factor, $verification->authenticator, $verification->categories, at: $verification->at);
+            : new Verification($verification->factor, $verification->authenticator, $verification->categories, at: $verification->at, authenticatedAt: $verification->authenticatedAt);
+    }
+
+    /**
+     * Whether a confirm could meet the requirement: what the session
+     * already proved, built on as the confirm does, with everything the
+     * confirm page can ask for (answers()). Without that, the user would
+     * prove what they can and still be stuck.
+     *
+     * @param  list<Verification>  $proved
+     */
+    public function canConfirm(Requirement $requirement, array $proved = []): bool
+    {
+        return $requirement->isMetBy([...$proved, ...$this->askable(Purpose::Confirm)]);
+    }
+
+    /**
+     * What the page for $purpose could add: what each authenticator it
+     * can ask for (answers()) would prove (wouldProve()). canConfirm() and
+     * codeCouldFinish() both go by it, and Detours through canConfirm(),
+     * so what they say a confirm can give is what the page offers.
+     *
+     * @return list<Verification>
+     */
+    protected function askable(?Purpose $purpose): array
+    {
+        return array_values($this->all()
+            ->filter(fn (Authenticator $authenticator) => $this->answers($authenticator, $purpose))
+            ->map($this->wouldProve(...))
+            ->all());
+    }
+
+    /**
+     * The keyring without what can never count toward a fresh verification
+     * (Requirement::freshlyProved()): a single sign-on link whose sign ins
+     * are never fresh, like GitHub's by default.
+     */
+    public function freshlyProvable(): static
+    {
+        return $this->without(...$this->all()
+            ->filter(fn (Authenticator $authenticator) => $this->wouldProve($authenticator)->provedAtIfKnown() === null)
+            ->all());
     }
 
     /**
@@ -251,43 +312,58 @@ class UserKeyring
      */
     protected function provable(): array
     {
-        return array_values($this->all()->map(fn (Authenticator $authenticator) => Verification::of($authenticator))->all());
+        return array_values($this->all()->map($this->wouldProve(...))->all());
+    }
+
+    /**
+     * What verifying the authenticator would prove: as its factor says
+     * now, except that a single sign-on link knows whether it can ever
+     * count as recent (SingleSignOn::wouldProve()).
+     */
+    protected function wouldProve(Authenticator $authenticator): Verification
+    {
+        $factor = $authenticator->factor();
+
+        return $factor instanceof SingleSignOn ? $factor->wouldProve($authenticator) : Verification::of($authenticator);
     }
 
     /**
      * Authenticators that would bring the verifications closer to the
      * requirement. These are what a challenge or a step-up offers, so a
-     * factor that can only start a login isn't among them.
+     * factor that can only start a login isn't among them, except a single
+     * sign-on link on a step-up ($purpose Confirm), as answers() says, and
+     * only where what it proves counts: never toward a fresh verification
+     * when its sign ins are never fresh.
      *
      * @param  list<Verification>  $verifications
      * @return Collection<int, Authenticator>
      */
-    public function usefulFor(Requirement $requirement, array $verifications): Collection
+    public function usefulFor(Requirement $requirement, array $verifications, ?Purpose $purpose = null): Collection
     {
         $used = array_filter(array_map(fn (Verification $verification) => $verification->authenticator ?? $verification->factor, $verifications));
 
         return $this->all()
             ->reject(fn (Authenticator $authenticator) => in_array($authenticator->id, $used, true))
-            ->reject(fn (Authenticator $authenticator) => ($factor = $authenticator->factor()) instanceof PrimaryFactor && ! $factor->answersChallenges())
-            ->filter(fn (Authenticator $authenticator) => $requirement->wouldProgress($verifications, Verification::of($authenticator)))
-            ->reject(fn (Authenticator $authenticator) => $authenticator->factor === RecoveryCodes::KEY && ! $this->codeCouldFinish($requirement, $verifications, $authenticator))
+            ->filter(fn (Authenticator $authenticator) => $this->answers($authenticator, $purpose))
+            ->filter(fn (Authenticator $authenticator) => $requirement->wouldProgress($verifications, $this->wouldProve($authenticator)))
+            ->reject(fn (Authenticator $authenticator) => $authenticator->factor === RecoveryCodes::KEY && ! $this->codeCouldFinish($requirement, $verifications, $authenticator, $purpose))
             ->values();
     }
 
     /**
      * Whether spending a recovery code could finish the attempt. A code
      * stands in for a lost possession factor, so what's left must not need
-     * another one, or it would be spent and the user still stuck. A
-     * requirement that refuses codes can't be finished by one at all.
+     * another one, or it would be spent and the user still stuck. What's
+     * left is what the page could still ask for (askable()), as it would
+     * prove it: a link whose sign ins are never fresh finishes nothing
+     * fresh. A requirement that refuses codes can't be finished by one at
+     * all.
      *
      * @param  list<Verification>  $verifications
      */
-    protected function codeCouldFinish(Requirement $requirement, array $verifications, Authenticator $set): bool
+    protected function codeCouldFinish(Requirement $requirement, array $verifications, Authenticator $set, ?Purpose $purpose): bool
     {
-        $rest = $this->all()
-            ->reject(fn (Authenticator $other) => in_array(Category::Possession, $other->factor()->categories($other), true))
-            ->map(fn (Authenticator $other) => Verification::of($other))
-            ->all();
+        $rest = array_filter($this->askable($purpose), fn (Verification $other) => ! in_array(Category::Possession, $other->categories, true));
 
         return $requirement->acceptsRecoveryCodes && $requirement->isMetBy([...$verifications, Verification::of($set), ...$rest]);
     }

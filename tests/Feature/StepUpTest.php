@@ -203,6 +203,26 @@ it('also satisfies laravel password confirmation', function () {
     $this->get('/legacy')->assertOk();
 });
 
+it('satisfies laravel password confirmation from when the user proved what the confirm added', function () {
+    Route::middleware(['web', 'auth', 'password.confirm:keyring.confirm.challenge'])->get('/legacy', fn () => 'legacy');
+    config(['keyring.sessions.idle' => null]);
+    $this->freezeSecond();
+    $totp = Authenticator::factory()->totp()->for($this->user, 'authenticatable')->create();
+    signIn();
+    $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($totp->secret)]);
+
+    // Signing in confirms nothing.
+    $this->get('/legacy')->assertRedirect(route('keyring.confirm.challenge'));
+
+    $this->travel(4)->hours();
+    $this->get('/legacy')->assertRedirect(route('keyring.confirm.challenge'));
+    $this->getJson(route('keyring.confirm.challenge', 'totp'))->assertOk();
+    $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($totp->secret)])->assertRedirect('http://localhost/legacy');
+
+    expect(session('auth.password_confirmed_at'))->toBe(now()->getTimestamp());
+    $this->get('/legacy')->assertOk();
+});
+
 it('answers json step-up with a 423', function () {
     signIn();
     $this->travel(16)->minutes();
@@ -1422,13 +1442,16 @@ describe('asking from a controller', function () {
                 $proved = [array_find($proved, fn (Verification $verification) => Requirement::for(Assurance::AAL1)->isMetBy([$verification]))];
             }
 
+            // Null for a verification proved at an unknown time.
+            $times = array_map(fn (Verification $verification) => $verification->provedAtIfKnown(), $proved);
+
             return [
                 'acr' => $level === Assurance::None ? null : strtolower($level->name),
                 'amr' => [
                     ...array_values(array_unique(array_column($proved, 'factor'))),
                     ...($level->atLeast(Assurance::AAL2) ? ['mfa'] : []),
                 ],
-                'auth_time' => $proved === [] ? null : min(array_column($proved, 'at')),
+                'auth_time' => $times === [] || in_array(null, $times, true) ? null : min($times),
             ];
         }
 
@@ -1469,6 +1492,19 @@ describe('asking from a controller', function () {
             expect(documentedClaims($since))->toBe(['acr' => 'aal1', 'amr' => ['password'], 'auth_time' => $since->getTimestamp()])
                 ->and(documentedClaims(null))->toBe(['acr' => 'aal2', 'amr' => ['password', 'totp', 'mfa'], 'auth_time' => $this->signedInAt])
                 ->and(documentedClaims(now()->addSecond()))->toBe(['acr' => null, 'amr' => [], 'auth_time' => null]);
+        });
+
+        it('reports auth_time as when the user really proved it, and leaves it out when that\'s unknown', function () {
+            $password = app(SessionAssurance::class)->all()[0];
+            $record = fn (int $authenticatedAt) => app(SessionAssurance::class)->record([
+                new Verification($password->factor, $password->authenticator, $password->categories, at: $password->at, authenticatedAt: $authenticatedAt),
+            ]);
+
+            $record(now()->subHour()->getTimestamp());
+            expect(documentedClaims(null))->toBe(['acr' => 'aal2', 'amr' => ['password', 'totp', 'mfa'], 'auth_time' => now()->subHour()->getTimestamp()]);
+
+            $record(Verification::UNKNOWN);
+            expect(documentedClaims(null))->toBe(['acr' => 'aal2', 'amr' => ['password', 'totp', 'mfa'], 'auth_time' => null]);
         });
     });
 

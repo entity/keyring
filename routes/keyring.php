@@ -14,9 +14,14 @@ use Keyring\Http\Controllers\PasswordController;
 use Keyring\Http\Controllers\PasswordResetController;
 use Keyring\Http\Controllers\RegisteredUserController;
 use Keyring\Http\Controllers\SessionController;
+use Keyring\Http\Controllers\SingleSignOnController;
 use Keyring\Http\Middleware\ValidatePostedSignature;
 
 $guard = config('keyring.guard');
+
+// Single sign-on's routes are only there once a provider is configured, so
+// an app without one keeps any /auth/... routes of its own.
+$sso = is_array(config('keyring.sso.providers')) && config('keyring.sso.providers') !== [];
 
 // Routes that read and then write Keyring's session state (pending logins,
 // code guesses, WebAuthn challenges, and the challenge pages that save them)
@@ -30,7 +35,7 @@ $challenge = function () {
     Route::post('/{factor}/send', [ChallengeController::class, 'send'])->block()->name('send');
 };
 
-Route::middleware('guest:'.$guard)->group(function () use ($challenge) {
+Route::middleware('guest:'.$guard)->group(function () use ($challenge, $sso) {
     if (Features::enabled(Features::registration())) {
         Route::get('/register', [RegisteredUserController::class, 'create'])->name('register');
         Route::post('/register', [RegisteredUserController::class, 'store'])->middleware('throttle:keyring')->name('register.store');
@@ -57,10 +62,29 @@ Route::middleware('guest:'.$guard)->group(function () use ($challenge) {
         ->where('factor', '(?!challenge$)[a-z0-9-]+')
         ->block()
         ->name('keyring.login.factor');
+
+    // Sign in with an identity provider from keyring.sso.providers. These
+    // answer 404 until the SingleSignOn factor is registered.
+    if ($sso) {
+        Route::get('/auth/{provider}/redirect', [SingleSignOnController::class, 'redirect'])
+            ->where('provider', '[A-Za-z0-9_-]+')
+            ->middleware('throttle:keyring-login-options')
+            ->block()
+            ->name('keyring.sso.redirect');
+    }
 });
 
-Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
+Route::middleware('auth:'.$guard)->group(function () use ($challenge, $sso) {
     Route::prefix('/confirm')->name('keyring.confirm.')->group($challenge);
+
+    // Confirm a step-up by signing in again at the provider of a link the
+    // confirm page offers. Its callback is the one signing in uses.
+    if ($sso) {
+        Route::get('/confirm/sso/redirect', [SingleSignOnController::class, 'reauthenticate'])
+            ->middleware('throttle:keyring-login-options')
+            ->block()
+            ->name('keyring.sso.confirm');
+    }
 
     // Changing how someone signs in needs a recent verification.
     Route::middleware(config('keyring.changes_middleware'))->group(function () {
@@ -116,6 +140,18 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge) {
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });
+
+// Where an identity provider sends the user back to, to sign in, to link an
+// account and to confirm a step-up, so each provider has one redirect URI to
+// register. What it's for decides who may finish it, so the controller gives
+// it the guest or signed-in middleware (and the changes_middleware for a
+// link) itself.
+if ($sso) {
+    Route::get('/auth/{provider}/callback', [SingleSignOnController::class, 'callback'])
+        ->where('provider', '[A-Za-z0-9_-]+')
+        ->block()
+        ->name('keyring.sso.callback');
+}
 
 // The link in a verification email, for whoever opens it. A browser that
 // isn't signed in is sent to sign in by the controller, which remembers the

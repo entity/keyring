@@ -33,5 +33,7 @@ return [
     'invalid_name' => 'The :attribute has characters that aren\'t valid text.',
     'password_null_byte' => 'The :attribute can\'t contain a null character.',
     'password_too_long' => 'The :attribute is too long. It can take up 72 bytes: that\'s 72 plain letters, digits and symbols, and fewer with accented letters, other alphabets or emoji.',
+    'sso_failed' => 'We couldn\'t sign you in with :provider. Please try again.',
+    'sso_link_failed' => 'That :provider account couldn\'t be linked. Please try again, or use another account.',
     'unavailable' => 'Your account needs a sign-in method that isn\'t set up. Please contact support.',
 ];

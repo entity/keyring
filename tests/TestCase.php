@@ -21,6 +21,7 @@ use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Features;
 use Keyring\KeyringServiceProvider;
+use Keyring\Sso\HostResolver;
 use Keyring\Testing\InteractsWithKeyring;
 use Keyring\Tests\Fixtures\User;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -71,6 +72,9 @@ abstract class TestCase extends Orchestra
         if (! getenv('KEYRING_TEST_LOWEST')) {
             $this->withoutDeprecationHandling();
         }
+
+        // No test asks the network's DNS about a provider's hosts.
+        HostResolver::fake();
 
         // A full install: the usual sign-in methods, and the actions
         // registered like the published provider does.

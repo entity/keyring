@@ -21,6 +21,7 @@ use Keyring\Facades\Keyring;
 use Keyring\Factors\EmailCode;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Features;
@@ -64,7 +65,7 @@ class ConformanceTest extends TestCase
         parent::setUp();
 
         Notification::fake();
-        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys(), Totp::class, EmailCode::asExtraStep(), RecoveryCodes::class]);
+        Keyring::factors([Password::class, WebAuthn::passkeys(), WebAuthn::securityKeys(), Totp::class, EmailCode::asExtraStep(), RecoveryCodes::class, SingleSignOn::class]);
     }
 
     protected function keyringUser(): Authenticatable&Model

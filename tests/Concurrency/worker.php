@@ -24,6 +24,7 @@ use Keyring\Enums\Assurance;
 use Keyring\Enums\Purpose;
 use Keyring\Events\RegisteredSessionEnded;
 use Keyring\Facades\Keyring;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Login\Attempt;
 use Keyring\Models\Authenticator;
 use Keyring\Models\PendingChange;
@@ -31,12 +32,43 @@ use Keyring\Sessions\CacheSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\Sessions;
 use Keyring\Support\Throttle;
+use Keyring\Testing\FakeIdentityProvider;
 use Keyring\Tests\Fixtures\User;
 use Keyring\Tests\TestCase;
 
 require __DIR__.'/../../vendor/autoload.php';
 
-new class('worker') extends TestCase {}->createApplication();
+// Kept, with the app it boots, to make requests as a test would.
+$worker = new class('worker') extends TestCase
+{
+    public function boot(): static
+    {
+        $this->app = $this->createApplication();
+
+        return $this;
+    }
+
+    /**
+     * Link an account at the provider as the user, signed in on the
+     * registered session: begin linking, sign in at the provider, and come
+     * back to the callback, where the link waits for the user's row. What
+     * the callback answered, as the race sees it.
+     */
+    public function linkAccount(User $user, string $session, FakeIdentityProvider $idp): string
+    {
+        $this->actingAs($user)->withAssurance(Assurance::AAL1)->withSession([Sessions::KEY => $session]);
+
+        $url = $this->postJson(route('keyring.authenticators.store', 'sso'), ['provider' => 'fake'])->assertOk()->json('enrollment.url');
+        $response = $this->getJson($idp->approve($url));
+
+        return match (true) {
+            $response->status() === 200 && $response->json('status') === 'authenticator-added' => 'added',
+            $response->status() === 422 && $response->json('errors.provider.0') === __('keyring::keyring.sso_link_failed', ['provider' => 'Fake']) => 'linked elsewhere',
+            $response->status() === 401 => 'signed out',
+            default => "{$response->status()}: {$response->content()}",
+        };
+    }
+}->boot();
 useRaceFactors();
 
 [, $operation, $id, $value] = $argv + [3 => null];
@@ -191,6 +223,22 @@ try {
             app(PasswordChanges::class)->change($user, fn () => $user->forceFill(['password' => 'a passphrase sent a moment later'])->save(), currentSession: $value, request: $request);
 
             return 'changed';
+        })(),
+        'link-sso' => (function () use ($worker, $id, $value) {
+            // Every worker's provider vouches for the same account, at the
+            // same issuer, signed with keys of its own.
+            useRaceFactors(SingleSignOn::class);
+            $idp = new FakeIdentityProvider()->register('fake')->signIn(['sub' => 'the same account', 'email' => 'shared@example.com']);
+            reloadRoutes();
+
+            return $worker->linkAccount(User::findOrFail($id), $value, $idp);
+        })(),
+        'reset-password' => (function () use ($id) {
+            $user = User::findOrFail($id);
+
+            app(PasswordChanges::class)->reset($user, fn () => $user->forceFill(['password' => 'the reset password'])->save());
+
+            return 'reset';
         })(),
         'request-email-change' => (function () use ($id, $value) {
             // A request its middleware let through as this session.

@@ -36,6 +36,12 @@
             ],
             "minimum_rsa_bits": 2048
         },
+        "sso": {
+            "providers": [],
+            "request_for": "10m",
+            "cache_for": "1h",
+            "store": null
+        },
         "changes_middleware": [
             "keyring.fresh:15m"
         ],
@@ -178,6 +184,9 @@
         "keyring.sessions.destroy": "DELETE /user/sessions/{session}",
         "keyring.sessions.destroy-others": "DELETE /user/sessions",
         "keyring.sessions.index": "GET /user/sessions",
+        "keyring.sso.callback": "GET /auth/{provider}/callback",
+        "keyring.sso.confirm": "GET /confirm/sso/redirect",
+        "keyring.sso.redirect": "GET /auth/{provider}/redirect",
         "login": "GET /login",
         "login.store": "POST /login",
         "logout": "POST /logout",
@@ -288,6 +297,7 @@
         "securityEventModel(): string",
         "signInAfterRegistering(Closure|bool $when): static",
         "signsInAfterRegistering(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Illuminate\\Http\\Request $request): bool",
+        "sso(): Keyring\\Sso\\Sso",
         "statusMessage(mixed $status): ?string",
         "steps(): array",
         "unlistedActivityTypes(): array",
@@ -305,11 +315,14 @@
     ],
     "user": [
         "all(): Illuminate\\Support\\Collection",
+        "answers(Keyring\\Models\\Authenticator $authenticator, ?Keyring\\Enums\\Purpose $purpose = null): bool",
+        "canConfirm(Keyring\\Login\\Requirement $requirement, array $proved = []): bool",
         "canMeet(Keyring\\Login\\Requirement $requirement): bool",
         "canSignIn(): bool",
         "default(): ?Keyring\\Models\\Authenticator",
         "established(): static",
         "find(?string $id): ?Keyring\\Models\\Authenticator",
+        "freshlyProvable(): static",
         "has(Keyring\\Enums\\Category $category): bool",
         "hasFactorToRecover(): bool",
         "hasRecoveryCodes(): bool",
@@ -320,7 +333,7 @@
         "refresh(): static",
         "shouldReplaceRecoveryCodes(): bool",
         "unregistered(): array",
-        "usefulFor(Keyring\\Login\\Requirement $requirement, array $verifications): Illuminate\\Support\\Collection",
+        "usefulFor(Keyring\\Login\\Requirement $requirement, array $verifications, ?Keyring\\Enums\\Purpose $purpose = null): Illuminate\\Support\\Collection",
         "without(Keyring\\Models\\Authenticator ...$authenticators): static",
         "withoutFallbacks(): static"
     ],
@@ -393,6 +406,14 @@
             "priority(): int",
             "rules(): array",
             "verify(Keyring\\Login\\Attempt $attempt, Keyring\\Models\\Authenticator $authenticator, Illuminate\\Http\\Request $request): ?Keyring\\Login\\Verification"
+        ],
+        "Keyring\\Contracts\\IdentityProvider": [
+            "authorizationUrl(Keyring\\Sso\\AuthorizationRequest $request): string",
+            "freshness(): Keyring\\Enums\\SsoFreshness",
+            "identify(Keyring\\Sso\\AuthorizationRequest $request, Illuminate\\Http\\Request $callback): Keyring\\Sso\\Identity",
+            "label(): string",
+            "name(): string",
+            "supportsReauthentication(): bool"
         ],
         "Keyring\\Contracts\\LocatesIps": [
             "locate(Illuminate\\Http\\Request $request): ?array"
@@ -607,6 +628,12 @@
         ],
         "Keyring\\Events\\ProtectionBypassed": [
             "reason"
+        ],
+        "Keyring\\Events\\ProviderIdentityAccepted": [
+            "authenticator",
+            "identity",
+            "purpose",
+            "user"
         ],
         "Keyring\\Events\\RateLimited": [
             "limiter",

@@ -8,6 +8,7 @@
     - [React](#react)
     - [Factor Components](#factor-components)
 - [Signing In With a Passkey](#signing-in-with-a-passkey)
+- [Signing In With an Identity Provider](#signing-in-with-an-identity-provider)
 - [Challenge Helpers Without Vue or React](#challenge-helpers-without-vue-or-react)
 - [Managing Authenticators](#managing-authenticators)
 - [Sessions](#sessions)
@@ -34,7 +35,7 @@ The package is plain ES modules, so it works with any bundler. Its main entry po
 
 | Import | Contains |
 |---|---|
-| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `passkeyCredential()`, `json()` and `configureRequests()`, routes, and types. No framework code. |
+| `@keyringjs/keyring` | WebAuthn helpers, enrollment and session helpers, `passkeyCredential()`, the single sign-on helpers, `json()` and `configureRequests()`, routes, and types. No framework code. |
 | `@keyringjs/keyring/inertia` | The [challenge helpers](#challenge-helpers-without-vue-or-react), for Inertia with any framework. |
 | `@keyringjs/keyring/vue` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for Vue. |
 | `@keyringjs/keyring/react` | Everything above, plus `useChallenge()` and `usePasskeyLogin()` for React. |
@@ -44,7 +45,7 @@ The package is plain ES modules, so it works with any bundler. Its main entry po
 Keyring renders components named `auth/login`, `auth/challenge`, and so on. The [Pages](sign-in-flow.md#pages) documentation lists each one and its props. Most are plain forms that post to Keyring's routes, but two need a little more work:
 
 - **The challenge page** (and `confirm`, for step-up) shows whichever factor comes next. [`useChallenge`](#the-challenge-page) does the work.
-- **The login page** can offer passkeys, with [`usePasskeyLogin`](#signing-in-with-a-passkey).
+- **The login page** can offer passkeys, with [`usePasskeyLogin`](#signing-in-with-a-passkey), and [identity providers](#signing-in-with-an-identity-provider) from its `providers` prop.
 
 Settings pages for authenticators, sessions, devices, and the email address are yours to build too, using the [helpers below](#managing-authenticators) and the JSON routes. If you'd like a reference, the [example application](https://github.com/keyringphp/example) has every page, written in React with the components from the Laravel starter kit.
 
@@ -234,6 +235,39 @@ const { supported, processing, error, signIn } = usePasskeyLogin({ autofill: tru
 
 If your starter kit's passkey button uses `@laravel/passkeys`, you can keep it. It [signs in through the same two routes](passkeys.md#laravels-passkeys-client) once you give it their paths. Adding a passkey and the challenge page still need the helpers here.
 
+## Signing In With an Identity Provider
+
+When the [`SingleSignOn`](sso.md) factor is registered, the login page's `providers` prop lists the identity providers to offer, each with a `name`, a `label`, and the `url` that starts a sign in. Link to the `url`, adding `?remember=1` for "remember me". The `LoginProps` and `IdentityProvider` types describe them:
+
+```tsx
+import type { LoginProps } from '@keyringjs/keyring'
+
+export default function Login({ providers, status }: LoginProps) {
+  return (
+    <>
+      {status && <p>{status}</p>}
+      {providers.map(provider => (
+        <a key={provider.name} href={provider.url}>Sign in with {provider.label}</a>
+      ))}
+    </>
+  )
+}
+```
+
+The browser leaves your site for the provider, so use a plain link. When the sign in doesn't work, the user comes back to the login page with the error on the username field, in the page's `errors`.
+
+To link an account at a provider from a settings page, `linkProvider(name)` begins the `sso` enrollment and sends the browser to the provider. It throws a `KeyringRequestError` before going anywhere when the request fails, such as with the `423` of [step-up](#handling-step-up-in-javascript). When the provider sends the user back, Keyring finishes the link and returns them to the page they started from, with the `authenticator-added` status. A linked account is presented as an `SsoAuthenticator`, with its `provider` and `email` added.
+
+| Function | Does |
+|---|---|
+| `linkProvider(provider)` | `POST /user/authenticators/sso` with `provider`, then `location.assign()` to the provider's URL in the answer. |
+| `signInWithProvider(provider, { remember? })` | Asks `GET /auth/{provider}/redirect` for the provider's URL as JSON, then `location.assign()` to it. A link does the same on a page Laravel serves, so this is for a [frontend on another origin](#frontends-on-another-origin). |
+| `confirmWithProvider(authenticator)` | Asks `GET /confirm/sso/redirect` for the provider's URL for that link as JSON, then `location.assign()` to it, to [confirm a step-up](sso.md#step-up) by signing in there. |
+
+On the confirm page, a link at an identity provider is offered like any other method. When its provider's [`freshness`](sso.md#freshness) is `never`, the default for Google and GitHub, it's only offered toward a level, such as getting a lapsed AAL2 back, and never for `keyring.fresh`, so your confirm page still needs an `sso` component for those providers. Its `challenge` is an `SsoChallenge`, with the `provider`, its `label`, and the `url` that sends the user there. Link to the `url`, or call `confirmWithProvider(authenticator.id)` from a frontend on another origin. The provider sends the user back to Keyring, which goes on to the page that asked them to confirm. A provider whose `freshness` is `reauthenticate` has the user sign in again there, and one you opted into a `round_trip` may let them straight through, as signing in with it again would.
+
+`routes.ssoRedirect(provider)`, `routes.ssoCallback(provider)` and `routes.ssoConfirm(authenticator?)` are the paths. See [Single Sign-On](sso.md) for setting up the providers, and for the callback page a frontend Laravel doesn't serve needs.
+
 ## Challenge Helpers Without Vue or React
 
 The Vue and React bindings are thin layers over these helpers, which are exported from `@keyringjs/keyring/inertia` and re-exported by the Vue and React entry points. Use them to build the challenge page or passkey sign in with another framework. They post with Inertia's router (`@inertiajs/core`).
@@ -270,12 +304,15 @@ try {
 The enrollment helpers call the [authenticator routes](authenticators.md) with JSON requests:
 
 ```ts
-import { beginEnrollment, confirmEnrollment, enroll, makeDefault, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
+import { beginEnrollment, confirmEnrollment, enroll, linkProvider, makeDefault, removeAuthenticator, renameAuthenticator } from '@keyringjs/keyring'
 
 // One step for factors that need no input in between. An account with no
 // established second factor sends its password with the first one.
 const { authenticator, recoveryCodes } = await enroll('passkey', { name: 'Laptop', password })
 const { enrollment } = await enroll('recovery')   // enrollment.codes holds the new codes
+
+// An identity provider: the browser goes there, and comes back linked.
+await linkProvider('google')
 
 // Two steps for authenticator apps and email codes.
 const started = await beginEnrollment('totp', { name: 'Work phone', password })
@@ -293,8 +330,9 @@ await removeAuthenticator(added.authenticator.id)
 | `confirmEnrollment(factor, enrollment, data?)` | `POST /user/authenticators/{factor}/confirm`. For `passkey` and `security-key`, runs the browser ceremony first. If the server rejects the response, or refuses it as frozen, the enrollment is spent, so start again with `beginEnrollment()`. Resolves to `{ authenticator, recoveryCodes?, continue? }`, where `authenticator` is typed `Authenticator`: `factor`, `id`, `name`, `createdAt`, and `lastUsedAt`, along with any extras specific to the factor. |
 | `enroll(factor, data?)` | Both, one after the other. `data` goes to both requests, apart from `password` and `proof`, which only go with the first. |
 | `renameAuthenticator(id, name, { proof }?)` | `PATCH` with `name`. Resolves to `{ authenticator }`. Renaming an established authenticator while frozen needs `proof` from `proveWithKey()`. |
-| `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. |
+| `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. Recovery codes and identity provider links can't be the default, and throw a `KeyringRequestError` with a `422` on `default`. |
 | `removeAuthenticator(id, password?, { signOutOthers, proof }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. `proof` comes from `proveWithKey()`. |
+| `linkProvider(provider)` | Begins linking an account at an [identity provider](#signing-in-with-an-identity-provider), and sends the browser there. |
 | `proveWithKey(factor, { action, target, name? })` | `POST /user/authenticators/{factor}/proof-options`, then the browser's ceremony. Resolves to a `FreezeProof`, `{ factor, credential }`, for the one change it was asked for. See below. |
 | `frozenChanges(error)` | The `FrozenChanges` a request was refused for, or `null` when it wasn't refused as frozen. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
@@ -434,7 +472,7 @@ configureRoutes({
 })
 ```
 
-The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `proofOptions`, `sessions`, and `session`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
+The keys are `prefix`, `login`, `loginOptions`, `loginWith`, `challenge`, `verify`, `send`, `challengeBase`, `enroll`, `confirmEnrollment`, `authenticator`, `proofOptions`, `sessions`, `session`, `ssoRedirect`, `ssoCallback`, and `ssoConfirm`. `challengeBase(purpose)` is the prefix the challenge routes share (`/login/challenge` for `login`, `/confirm` for `confirm`), so changing it moves all three:
 
 ```ts
 configureRoutes({
@@ -554,4 +592,4 @@ After a user was sent to enroll, `Keyring::result('continue')` holds the page th
 
 ## Without Inertia
 
-Without Inertia, Keyring renders Blade views named `auth.login`, `auth.challenge`, and so on, with the props passed as view data. You may write those views yourself, or point pages anywhere you like with [`Keyring::page`](sign-in-flow.md#pages). The browser package's WebAuthn, enrollment, session, and passkey sign in helpers work without Inertia. The challenge helpers and the `vue` and `react` entry points do need it. A frontend that Laravel doesn't serve at all is covered in [Frontends on Another Origin](#frontends-on-another-origin).
+Without Inertia, Keyring renders Blade views named `auth.login`, `auth.challenge`, and so on, with the props passed as view data. You may write those views yourself, or point pages anywhere you like with [`Keyring::page`](sign-in-flow.md#pages). The browser package's WebAuthn, enrollment, session, passkey sign in, and single sign-on helpers work without Inertia. The challenge helpers and the `vue` and `react` entry points do need it. A frontend that Laravel doesn't serve at all is covered in [Frontends on Another Origin](#frontends-on-another-origin).

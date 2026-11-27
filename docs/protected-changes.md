@@ -149,7 +149,7 @@ The current address can revert the change while it's pending, and for `email_cha
 
 - puts the old address back, even when a later change is what moved it away,
 - cancels any later email changes, so links from them can't move the address away again,
-- deletes every authenticator that wasn't established when the change was requested. That means anything added within `email_changes.established_after` before the change, or since the session that asked for it signed in. Keyring deletes them one at a time, dispatching `AuthenticatorRemoved` for each. This can include one the owner added that week, which they're free to add again. When none of what's left is a factor that recovery codes can recover, the codes go too, the same as when a user removes their last second factor. That dispatches an `AuthenticatorRemoved` of its own,
+- deletes every authenticator that wasn't established when the change was requested. That means anything added within `email_changes.established_after` before the change, or since the session that asked for it signed in. Keyring deletes them one at a time, dispatching `AuthenticatorRemoved` for each. Accounts at [identity providers](sso.md) linked in that time are unlinked the same way. This can include one the owner added that week, which they're free to add again. When none of what's left is a factor that recovery codes can recover, the codes go too, the same as when a user removes their last second factor. That dispatches an `AuthenticatorRemoved` of its own,
 - signs out every session, and changes the "remember me" token.
 
 These removals aren't held back by [frozen sign-in methods](authenticators.md#frozen-sign-in-methods), and don't start the freeze over. The undo comes from the old mailbox's link, never from a session, so a copy of a session can't set it off, and what it removes is what a session could have added.
@@ -341,6 +341,7 @@ The email is Laravel's own `Illuminate\Auth\Notifications\ResetPassword` notific
 - Revokes every session and changes the "remember me" token.
 - Cancels any pending email change.
 - Lifts any [risk lock](risk.md#actions) on the account.
+- Unlinks every [identity provider](sso.md#password-resets-and-email-changes) linked to the account, dispatching `AuthenticatorRemoved` for each, since each one stands in for the password. Second factors stay.
 - Clears the account's sign-in lockouts and failure counts, including the ones in a row, on the factors that can start a sign in. It logs that it did. A password or passkey that was refused [at the cap](security.md#at-the-cap) works again. Second factors keep theirs. Per-IP limits stay.
 - Dispatches `Keyring\Events\PasswordReset`, and Laravel's `Illuminate\Auth\Events\PasswordReset`.
 - Redirects to the login page with the `password-reset` status. It never signs the user in, so the policy still applies at their next login.

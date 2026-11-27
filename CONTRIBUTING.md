@@ -24,4 +24,6 @@ The race tests run operations in separate processes against a real database. Tha
 DB_CONNECTION=pgsql DB_DATABASE=keyring_test vendor/bin/pest --testsuite=Concurrency
 ```
 
+The single sign-on tests use a fake identity provider. The Integration suite signs in with a real one instead: Keycloak, run in Docker on port 8180 and bound to this machine only. It's skipped unless `KEYRING_KEYCLOAK_URL` is set, so `composer check` and CI don't run it. `bin/keycloak test` starts Keycloak, sets up a realm, runs the suite against it, and removes the container. To keep Keycloak running between runs, use `bin/keycloak start`, then `KEYRING_KEYCLOAK_URL=http://127.0.0.1:8180 vendor/bin/pest --testsuite=Integration`, and `bin/keycloak stop` when you're done.
+
 Please don't open a public issue for a security problem. The [security policy](SECURITY.md) explains how to report one.

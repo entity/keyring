@@ -137,9 +137,10 @@ class VerifyFactor
     protected function check(Context $context): ?Verification
     {
         // On a challenge or a step-up nobody was identified, so a factor
-        // whose proof is who identify() found has nothing to check. The
-        // challenge never offers one, so this is only a backstop.
-        if (! $context->identifying && $context->factor instanceof PrimaryFactor && ! $context->factor->answersChallenges()) {
+        // whose proof is who identify() found has nothing to check, unless
+        // it's a single sign-on link confirming a step-up. The challenge
+        // never offers any other, so this is only a backstop.
+        if (! $context->identifying && ! $context->attempt()->keyring()->answers($context->authenticator(), $context->purpose)) {
             return null; // @codeCoverageIgnore
         }
 

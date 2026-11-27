@@ -93,8 +93,9 @@ class Detours
 
     /**
      * The saved page, if it's still one to go to for the signed-in user.
-     * One whose requirement the account can't meet yet stays saved, for
-     * the sign-in method that does. Anything else is forgotten either way.
+     * One whose requirement a confirm can't meet yet (canConfirm()) stays
+     * saved, for the sign-in method that lets it. Anything else is
+     * forgotten either way.
      * A page saved without a requirement, as before there was one, is
      * handed back as it always was.
      */
@@ -134,7 +135,10 @@ class Detours
             return null;
         }
 
-        if ($this->keyring->for($model)->withoutFallbacks()->canMeet($requirement)) {
+        // As StepUp::require() asks, so a page handed back sends the user to
+        // confirm, not back to enroll. Recovery codes aren't counted on: a
+        // way back in isn't what enrolling was for.
+        if ($this->keyring->for($model)->withoutFallbacks()->canConfirm($requirement)) {
             return $url;
         }
 

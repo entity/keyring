@@ -7,6 +7,7 @@ namespace Keyring\Database\Factories;
 use Illuminate\Database\Eloquent\Factories\Attributes\UseModel;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Models\Authenticator;
 use PragmaRX\Google2FA\Google2FA;
 
@@ -76,6 +77,21 @@ class AuthenticatorFactory extends Factory
     public function emailCode(): static
     {
         return $this->state(['factor' => 'email-code', 'name' => 'Email', 'secret' => null]);
+    }
+
+    /**
+     * An account at an identity provider, linked for SingleSignOn: the one
+     * with this issuer and subject, as FakeIdentityProvider signs it in.
+     */
+    public function sso(string $provider = 'fake', string $subject = '248289761001', string $issuer = 'https://idp.test', ?string $email = 'taylor@example.com'): static
+    {
+        return $this->state(fn () => [
+            'factor' => SingleSignOn::KEY,
+            'name' => $email === null ? 'Single sign-on' : "Single sign-on ({$email})",
+            'secret' => null,
+            'credential_id' => SingleSignOn::credentialId($issuer, $subject),
+            'meta' => ['provider' => $provider, 'issuer' => $issuer, 'subject' => $subject, 'email' => $email],
+        ]);
     }
 
     protected function webauthn(string $factor, string $name, bool $userVerified, bool $synced): static

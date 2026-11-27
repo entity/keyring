@@ -1993,6 +1993,7 @@ describe('the records the registry says it revoked', function () {
     })->with('registries');
 
     it('returns the records revokeAll() ended, and only those', function (string $driver) {
+        $this->freezeSecond();
         config(['keyring.sessions.driver' => $driver]);
         $registry = app(SessionRegistry::class);
         foreach (['here', 'phone', 'tablet', 'revoked'] as $id) {
@@ -2017,6 +2018,7 @@ describe('the records the registry says it revoked', function () {
     })->with('registries');
 
     it('returns the records revokeDevice() ended, and only those', function (string $driver) {
+        $this->freezeSecond();
         config(['keyring.sessions.driver' => $driver]);
         $registry = app(SessionRegistry::class);
         ($this->session)('phone');

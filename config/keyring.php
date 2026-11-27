@@ -152,6 +152,57 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Single Sign-On
+    |--------------------------------------------------------------------------
+    |
+    | Identity providers users can sign in with, by name. "driver" is
+    | "oidc" for any OpenID Connect provider (give its "issuer"), "google",
+    | "microsoft" (with a "tenant": an ID or domain, "organizations",
+    | "consumers" or "common") or "github", or one registered with
+    | Keyring::sso()->extend(). Each takes a "client_id" and, unless it's a
+    | public client, a "client_secret". "scopes" replaces the driver's,
+    | "name" is what its button says, "parameters" are sent with the user
+    | (a "prompt", say), and "token_endpoint_auth_method" can be
+    | "client_secret_post" where the provider wants the secret in the form,
+    | or "none" for a public client.
+    | "freshness" is how much a sign in or a confirm through a provider
+    | counts toward keyring.fresh: "reauthenticate" counts a sign in from
+    | the "auth_time" the provider sends and has a confirm sign in again
+    | there, "never" (or false) never counts its sign ins and only offers
+    | it on the confirm page toward a level, never for keyring.fresh, and
+    | "round_trip" counts both as proved when the user comes back, so
+    | anyone at a browser still signed in there gets a fresh verification.
+    | It's "reauthenticate" for "oidc" and "microsoft" (add the auth_time
+    | optional claim to the app registration), and "never" for "google"
+    | and "github": see docs/sso.md.
+    |
+    | Every endpoint has to be HTTPS, except on localhost, and the token
+    | endpoint and key set can't be on a private address other than the
+    | issuer's own host, unless "private_endpoints" is true. Microsoft's
+    | "email" is never taken as verified: see MicrosoftProvider.
+    |
+    | A user sent to a provider has "request_for" to come back, and a
+    | browser keeps a few such requests at once. Providers' discovery
+    | documents and signing keys are cached in "store" (null for your
+    | default one) for "cache_for".
+    |
+    */
+
+    'sso' => [
+        'providers' => [
+            // 'google' => [
+            //     'driver' => 'google',
+            //     'client_id' => env('GOOGLE_CLIENT_ID'),
+            //     'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+            // ],
+        ],
+        'request_for' => '10m',
+        'cache_for' => '1h',
+        'store' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Account Changes
     |--------------------------------------------------------------------------
     |

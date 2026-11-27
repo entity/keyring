@@ -62,6 +62,38 @@ export interface FreezeProof {
 }
 
 /**
+ * A linked account at an identity provider, as the `sso` factor presents
+ * it: the provider's name in `keyring.sso.providers`, and the address the
+ * provider had for the account when it last signed in, if it gave one.
+ */
+export interface SsoAuthenticator extends Authenticator {
+  factor: 'sso'
+  provider: string
+  email: string | null
+}
+
+/**
+ * An identity provider the login page offers. `url` starts a sign in with
+ * it: link to it, adding `?remember=1` for "remember me".
+ */
+export interface IdentityProvider {
+  name: string
+  label: string
+  url: string
+}
+
+/**
+ * Props Keyring sends to the login page. `providers` is empty until the
+ * SingleSignOn factor is registered.
+ */
+export interface LoginProps {
+  canResetPassword: boolean
+  canRegister: boolean
+  status: string | null
+  providers: IdentityProvider[]
+}
+
+/**
  * Props Keyring sends to the challenge and confirm pages.
  */
 export interface ChallengeProps {
@@ -75,11 +107,32 @@ export interface ChallengeProps {
 }
 
 /**
+ * The `challenge` of a link at an identity provider on the confirm page:
+ * the provider, what it's called, and the URL that sends the user there to
+ * sign in. confirmWithProvider() goes there for a frontend on another
+ * origin.
+ */
+export interface SsoChallenge {
+  provider: string
+  label: string
+  url: string
+}
+
+/**
  * What beginEnrollment() resolves with.
  */
 export interface Enrollment {
   factor: string
   enrollment: Record<string, any>
+}
+
+/**
+ * The `enrollment` of a link to an identity provider: where to send the
+ * browser to finish it.
+ */
+export interface SsoEnrollment {
+  provider: string
+  url: string
 }
 
 /**

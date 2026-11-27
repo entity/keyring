@@ -157,7 +157,7 @@ class SignIn
         // A copy of the session from before must not carry on signed in
         // beside the one that just proved more.
         $this->sessions->rotate($request);
-        $this->assurance->confirm($attempt->verifications);
+        $this->assurance->confirm($attempt->verifications, $attempt->added());
         $this->sessions->elevate($request, $this->assurance->level());
 
         Confirmed::dispatch($attempt->user(), $attempt);
@@ -169,12 +169,14 @@ class SignIn
      * codes that come with a first second factor are then handed to a
      * session that has proved two, as NIST SP 800-63B-4 asks of codes
      * delivered online (Sec. 3.1.2.1). Like any proof, it changes the
-     * session ID.
+     * session ID. $verification is what adding it proved, for a factor
+     * that knows better than "now": a link at an identity provider that
+     * let the user straight through on an old session there.
      */
-    public function enrolled(Request $request, Authenticator $authenticator): void
+    public function enrolled(Request $request, Authenticator $authenticator, ?Verification $verification = null): void
     {
         $request->session()->regenerate(true);
-        $this->assurance->record([Verification::of($authenticator)]);
+        $this->assurance->record([$verification ?? Verification::of($authenticator)]);
         $this->sessions->elevate($request, $this->assurance->level());
     }
 

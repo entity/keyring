@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+#
+# A Keycloak in Docker for the tests that sign in with a real OpenID Connect
+# provider (tests/Integration/KeycloakTest.php), bound to this machine only.
+#
+#   bin/keycloak start   start it and set up the "keyring" realm
+#   bin/keycloak test    start it, run the tests against it, and stop it
+#   bin/keycloak stop    stop and remove it
+#
+# The realm has a confidential client, "keyring", whose secret is
+# "keyring-secret", that enforces PKCE with S256 and sends users back to the
+# test app's callback, and a user, "taylor" ("password"), whose address
+# taylor@example.com is verified. Keycloak keeps it all in its development
+# database inside the container, so stopping it throws everything away.
+#
+# KEYCLOAK_PORT (8180) and KEYCLOAK_IMAGE change where and what runs.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+name=keyring-sso-keycloak
+port=${KEYCLOAK_PORT:-8180}
+image=${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.8.2}
+url="http://127.0.0.1:${port}"
+
+kcadm() {
+    docker exec "$name" /opt/keycloak/bin/kcadm.sh "$@"
+}
+
+# Refuse to go on when the container is there already: it may be one
+# someone started with "bin/keycloak start", which only "stop" removes.
+absent() {
+    if [ -n "$(docker ps -aq --filter "name=^${name}$")" ]; then
+        echo "${name} is already there. Run bin/keycloak stop first." >&2
+        exit 1
+    fi
+}
+
+# Run the container, wait for it, and set up the realm. Call absent() and
+# have stop() trapped first, so a failure on the way removes it.
+start() {
+    docker run -d --name "$name" -p "127.0.0.1:${port}:8080" \
+        -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+        "$image" start-dev >/dev/null
+
+    printf 'Waiting for Keycloak'
+    for _ in $(seq 1 120); do
+        if curl -fs "${url}/realms/master/.well-known/openid-configuration" >/dev/null; then
+            break
+        fi
+        printf '.'
+        sleep 1
+    done
+    echo
+    curl -fs "${url}/realms/master/.well-known/openid-configuration" >/dev/null
+
+    kcadm config credentials --server http://localhost:8080 --realm master --user admin --password admin
+    kcadm create realms -s realm=keyring -s enabled=true
+    kcadm create clients -r keyring \
+        -s clientId=keyring -s enabled=true -s protocol=openid-connect \
+        -s publicClient=false -s secret=keyring-secret \
+        -s standardFlowEnabled=true -s directAccessGrantsEnabled=false -s implicitFlowEnabled=false \
+        -s 'redirectUris=["http://localhost/auth/keycloak/callback"]' \
+        -s 'attributes={"pkce.code.challenge.method":"S256"}'
+    kcadm create users -r keyring \
+        -s username=taylor -s email=taylor@example.com -s emailVerified=true \
+        -s firstName=Taylor -s lastName=Otwell -s enabled=true
+    kcadm set-password -r keyring --username taylor --new-password password
+}
+
+stop() {
+    docker rm -f "$name" >/dev/null 2>&1 || true
+}
+
+case "${1:-}" in
+    start)
+        absent
+        # Kept running once it's set up, and removed if that fails.
+        trap stop EXIT
+        start
+        trap - EXIT
+        echo "Keycloak is at ${url}. Run the tests with:"
+        echo "  KEYRING_KEYCLOAK_URL=${url} vendor/bin/pest --testsuite=Integration"
+        ;;
+    stop) stop ;;
+    test)
+        absent
+        trap stop EXIT
+        start
+        KEYRING_KEYCLOAK_URL="$url" vendor/bin/pest --testsuite=Integration
+        ;;
+    *)
+        echo "Usage: bin/keycloak start|test|stop" >&2
+        exit 1
+        ;;
+esac

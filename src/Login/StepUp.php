@@ -48,9 +48,10 @@ class StepUp
      *
      * Freshness asks what keyring.fresh does, the strongest combination the
      * account can give, verified at or after $since. With a level as well,
-     * both are asked for in one confirm. Give $since as a fixed moment: once
-     * the user confirms, any moment before the confirm is met, so the check
-     * can't send them round again. Each factor is stamped when it's proved,
+     * both are asked for in one confirm, or in turn when the account can't
+     * freshly prove the level (unlessFresh()). Give $since as a fixed
+     * moment: once the user confirms, any moment before the confirm is
+     * met, so the check can't send them round again. Each factor is stamped when it's proved,
      * so a confirm in two steps only meets moments up to its first step. A
      * moment that moves on with every request can send them round forever.
      *
@@ -84,9 +85,14 @@ class StepUp
         // Throws for a guest, as unlessReached() does.
         $this->keyring->user();
 
-        return $asked instanceof Assurance
-            ? $this->reached($asked, Requirement::for($asked))
-            : $this->verifiedSince($asked, $this->freshRequirement($request, $level), $level);
+        if ($asked instanceof Assurance) {
+            return $this->reached($asked, Requirement::for($asked));
+        }
+
+        $requirement = $this->freshRequirement($request, $level);
+
+        return $this->verifiedSince($asked, $requirement, $level)
+            || ($level !== null && $this->inTurn($requirement) && $this->reached($level, Requirement::for($level)) && $this->verifiedSince($asked, $this->freshRequirement($request), null));
     }
 
     /**
@@ -116,6 +122,13 @@ class StepUp
      * have reached it too, and a confirm asks for both at once. It asks
      * afresh rather than building on what was proved before.
      *
+     * When a confirm can't give both at once, the two are asked in turn
+     * (inTurn()): the level first, building on what still counts toward
+     * it, then the fresh verification alone. A user with a link whose sign
+     * ins are never fresh and an authenticator app, and no password, can't
+     * freshly prove AAL2, but reaches it with a round trip and the app, and
+     * the app is then fresh.
+     *
      * @internal
      */
     public function unlessFresh(Request $request, int $since, ?Assurance $level = null): ?Response
@@ -124,6 +137,11 @@ class StepUp
 
         if ($this->verifiedSince($since, $requirement, $level)) {
             return null;
+        }
+
+        if ($level !== null && $this->inTurn($requirement)) {
+            return $this->unlessReached($request, $level, Requirement::for($level))
+                ?? $this->unlessFresh($request, $since);
         }
 
         return $this->require($request, $requirement);
@@ -135,9 +153,10 @@ class StepUp
      */
     public function require(Request $request, Requirement $requirement, array $proved = []): Response
     {
-        // Without the sign-in methods to meet it, confirming can't help, and
-        // would only send the user round in a loop.
-        if (! $this->keyring->for($this->keyring->user())->canMeet($requirement)) {
+        // Without the sign-in methods to meet it on the confirm page,
+        // building on what's proved, confirming can't help: the user would
+        // prove what they can and be stuck, or go round in a loop.
+        if (! $this->keyring->for($this->keyring->user())->canConfirm($requirement, $proved)) {
             return $this->enrollFirst($request, requirement: $requirement);
         }
 
@@ -192,7 +211,9 @@ class StepUp
     /**
      * What a fresh verification asks of the signed-in user: the strongest
      * combination their account can give, at least what signing in would
-     * ask of them, and a possession factor whenever they have one.
+     * ask of them, and a possession factor whenever they have one. Only
+     * what can be proved recently counts (Requirement::freshlyProved()):
+     * not a link at an identity provider whose sign ins are never fresh.
      * Otherwise a stolen session plus one phished factor could add new ones
      * without ever touching the rest.
      *
@@ -207,7 +228,10 @@ class StepUp
     public function freshRequirement(Request $request, ?Assurance $level = null): Requirement
     {
         $user = $this->keyring->user();
-        $keyring = $this->keyring->for($user)->withoutFallbacks();
+        // Only what a confirm can prove recently. A link at a provider whose
+        // sign ins are never fresh can't, so a user with one and a second
+        // factor, and no password, gives the second factor alone.
+        $keyring = $this->keyring->for($user)->withoutFallbacks()->freshlyProvable();
 
         $here = Attempt::start(Purpose::Login, $user);
         $here->resolveDevice($this->devices->find($request, $user)?->id);
@@ -230,6 +254,8 @@ class StepUp
         // A recovery code stands in for a lost factor beside another one. It
         // is never the whole of a verification: with one factor to prove,
         // that factor is what's asked for.
+        $requirement = $requirement->freshlyProved();
+
         return $requirement->factors < 2 ? $requirement->withoutRecoveryCodes() : $requirement;
     }
 
@@ -263,6 +289,16 @@ class StepUp
     }
 
     /**
+     * Whether a level and a fresh verification are asked in turn: a confirm
+     * can't give their requirement together (freshRequirement() with the
+     * level), since the account can't freshly prove the level.
+     */
+    protected function inTurn(Requirement $requirement): bool
+    {
+        return ! $this->keyring->for($this->keyring->user())->canConfirm($requirement);
+    }
+
+    /**
      * Whether the session has reached the level, and what still counts
      * toward it meets the requirement.
      */
@@ -273,7 +309,8 @@ class StepUp
 
     /**
      * Whether the user proved what the requirement asks at or after the
-     * timestamp, with a recovery code counting only where it takes one.
+     * timestamp, by when they really proved it, with a recovery code
+     * counting only where it takes one.
      * With a level, the session must have reached it too.
      */
     protected function verifiedSince(int $since, Requirement $requirement, ?Assurance $level): bool
@@ -282,7 +319,7 @@ class StepUp
             return false;
         }
 
-        $proved = $this->assurance->since($since);
+        $proved = $this->assurance->provedSince($since);
 
         if (! $requirement->acceptsRecoveryCodes) {
             $proved = array_values(array_filter($proved, fn (Verification $verification) => $verification->factor !== RecoveryCodes::KEY));

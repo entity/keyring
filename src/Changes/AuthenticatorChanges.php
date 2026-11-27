@@ -13,6 +13,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Enrollable;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Category;
 use Keyring\Enums\FreezeReason;
 use Keyring\Enums\Purpose;
@@ -54,7 +55,8 @@ class AuthenticatorChanges
      * the first extra factor comes with recovery codes (as does one added
      * once they've run out), whose plain codes are returned to show once.
      * An emailed code isn't a factor, so it comes with none: there would be
-     * nothing for them to recover.
+     * nothing for them to recover. Nor does a factor that only starts a sign
+     * in, like an identity provider, which is never the default either.
      *
      * Replacing recovery codes or a factor the account has had for a while
      * is refused while the account is frozen(), unless $ignoreFreeze says
@@ -82,12 +84,16 @@ class AuthenticatorChanges
     {
         $keyring = $this->keyring->for($user);
         $isRecovery = $factor->key() === RecoveryCodes::KEY;
-        $recoverable = array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
+        // One that can only start a sign in, like an identity provider, is
+        // never asked for as a second step: no code would stand in for it,
+        // and it's never the one a challenge offers first.
+        $challengeable = ! $factor instanceof PrimaryFactor || $factor->answersChallenges();
+        $recoverable = $challengeable && array_any($factor->categories($authenticator), fn (Category $category) => $category->authenticates());
         $recovery = ! $isRecovery && $recoverable && ! $keyring->hasRecoveryCodes() ? $this->recoveryCodes() : null;
 
         // One change to a user's sign-in methods at a time, so two can't each
         // find the account unfrozen.
-        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $authenticator, $isRecovery, $recovery, $ignoreFreeze, $passwordConfirmed) {
+        $save = fn () => $authenticator->getConnection()->transaction(function () use ($factor, $user, $authenticator, $isRecovery, $challengeable, $recovery, $ignoreFreeze, $passwordConfirmed) {
             $keyring = $this->keyring->for($user);
 
             // Checked again here, where no other change can come between: a
@@ -109,7 +115,7 @@ class AuthenticatorChanges
                 $this->sessions->distrustDevices($user);
             }
 
-            $this->save($user, $authenticator, default: ! $isRecovery && $keyring->default() === null);
+            $this->save($user, $authenticator, default: ! $isRecovery && $challengeable && $keyring->default() === null);
 
             if ($recovery !== null) {
                 $keyring->of(RecoveryCodes::KEY)->each->delete();

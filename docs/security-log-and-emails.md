@@ -72,7 +72,7 @@ How long those lines are kept, and who can read them, is up to that channel. The
 | `signed_in` | info | A login completed. | `factors` |
 | `confirmed` | info | A step-up completed. | `factors` |
 | `factor_failed` | warning | A factor failed. | |
-| `second_factor_failed` | warning | A factor failed during a login, after a correct password. | |
+| `second_factor_failed` | warning | A factor failed during a login, after a correct password or another first step of the same kind, such as a sign in with an [identity provider](sso.md). | |
 | `locked_out` | warning | A rate limit started refusing an IP address for a factor. This happens whether the answer said so or was that of a wrong password. The entry is [logged once](#refusals-that-repeat), not for each request that's refused. It isn't linked to a user. | `retry_after` |
 | `rate_limited` | warning | The [form limiter](configuration.md#pending-logins-timebox-and-rate-limits) started refusing requests to one of Keyring's other routes: registration, a reset, a change, an emailed link or the page it opens, or passkey options. It's [logged once](#refusals-that-repeat) for each wait, per route. It's linked to the signed-in user when there is one. | `limiter` (`keyring`, `keyring-pages` or `keyring-login-options`), `route` (its name), `retry_after` |
 | `account_locked` | warning | Failed attempts got the password or a passkey refused until a password reset. This happens when the cap on failures in a row is reached, or when `limits.lock_after` is reached. | |
@@ -254,7 +254,7 @@ After a successful sign in, Keyring flashes `keyring.alerts` to the session. Thi
 ]
 ```
 
-The types that become alerts are listed in `security_log.alerts`. By default, they are `second_factor_failed`, `device_reported`, `email_change_reverted`, `clone_suspected`, and `remember_me_reused`. Any [entry type](#entry-types) can be added to that list. A `second_factor_failed` alert is the classic sign that someone else knows the password.
+The types that become alerts are listed in `security_log.alerts`. By default, they are `second_factor_failed`, `device_reported`, `email_change_reverted`, `clone_suspected`, and `remember_me_reused`. Any [entry type](#entry-types) can be added to that list. A `second_factor_failed` alert is the classic sign that someone else knows the password, or, after a sign in with an identity provider, that someone else can sign in to the account linked there.
 
 To read the alerts yourself, call `Keyring\Activity\SecurityLog::pullAlerts` with the user. It returns the unseen alert entries, newest first, and marks them as seen, so each one comes back only once. Pass a time as `since:` to receive only the entries logged after that time.
 
@@ -311,7 +311,7 @@ The security notices, each sent to the user:
 | `password_changed` | The password was changed or reset. | |
 | `authenticator_added` | A sign-in method was added. | `name`, and `url`, your page for sign-in methods ([`authenticators_url`](configuration.md#account-changes-and-enrollment)), when you set one |
 | `authenticator_removed` | A sign-in method was removed. | `name` |
-| `second_factor_failed` | Someone got the password right but failed the next factor. | |
+| `second_factor_failed` | Someone got the password right, or signed in with a linked [identity provider](sso.md), but failed the next factor. | `name`, the sign-in method the first step used, such as "Google (taylor@example.com)", when it wasn't the password. Keyring's email then says that method was used rather than the password, so a class of your own should check it too. |
 | `recovery_code_used` | A recovery code was used. | `remaining`, how many are left |
 | `recovery_codes_generated` | A new set of recovery codes was made, and any earlier set stopped working. This is also sent for the set that comes with a user's first extra sign-in method. | `url`, your page for sign-in methods, when you set one |
 | `account_locked` | Failed attempts got the password or a passkey refused until the password is reset. This happens when the account reaches [the cap on failures in a row](security.md#at-the-cap), or when [`limits.lock_after`](security.md#locking-until-a-reset) holds it. Browsers the account has signed in from may still get in. | `url`, the password reset form (the `password.request` route), when the application has one. `device` and `ip` are those of the attempt that locked the account. |

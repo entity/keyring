@@ -59,6 +59,11 @@ export function renameAuthenticator(id: string, name: string, { proof }: { proof
   return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { name, ...(proof !== undefined && { proof }) })
 }
 
+/**
+ * Make an authenticator the one a challenge asks for first. Recovery codes
+ * and identity provider links are never asked for there, so for those it's
+ * refused with a 422 on `default`.
+ */
 export function makeDefault(id: string) {
   return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { default: true })
 }

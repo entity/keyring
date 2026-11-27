@@ -185,7 +185,7 @@ Pass a component name or a closure to `Keyring::page()`. See [Pages](sign-in-flo
 | `PUT /user/password` | `PUT /user/password` (same name, `user-password.update`) |
 | `PUT /user/profile-information` | Not included. |
 
-Fortify's `password.confirm` middleware keeps working, because confirming through Keyring satisfies it. Keyring's own [`keyring.fresh`](step-up.md#fresh-verification) middleware is stricter. A user who has a second factor has to confirm with it, not with the password alone.
+Fortify's `password.confirm` middleware keeps working, because confirming through Keyring satisfies it, as long as the confirm proved something recently: a round trip to an identity provider whose sign ins are [never fresh](sso.md#freshness) doesn't. See [Laravel's Password Confirmation](step-up.md#laravels-password-confirmation). Keyring's own [`keyring.fresh`](step-up.md#fresh-verification) middleware is stricter. A user who has a second factor has to confirm with it, not with the password alone.
 
 ### Responses
 

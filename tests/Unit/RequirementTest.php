@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Arr;
 use Keyring\Enums\Assurance;
 use Keyring\Enums\Category;
 use Keyring\Login\Requirement;
@@ -279,4 +280,21 @@ it('reads assurance levels from middleware parameters in any case', function () 
     expect(Assurance::fromName('none'))->toBe(Assurance::None)
         ->and(Assurance::fromName('aal3'))->toBe(Assurance::AAL3)
         ->and(fn () => Assurance::fromName('aal4'))->toThrow(InvalidArgumentException::class, 'Unknown assurance level [aal4].');
+});
+
+it('leaves out what can never be recent when it asks for freshness', function () {
+    $sso = new Verification('sso', 'link', [Category::Knowledge], at: time(), authenticatedAt: Verification::UNKNOWN);
+    $earlier = new Verification('sso', 'other', [Category::Knowledge], at: time(), authenticatedAt: time() - 60);
+    $totp = verified('totp', [Category::Possession]);
+    $fresh = Requirement::aal2()->freshlyProved();
+
+    expect(Requirement::aal2()->isMetBy([$sso, $totp]))->toBeTrue()
+        ->and($fresh->isMetBy([$sso, $totp]))->toBeFalse()
+        ->and($fresh->isMetBy([$earlier, $totp]))->toBeTrue()
+        ->and($fresh->wouldProgress([$totp], $sso))->toBeFalse()
+        ->and(Requirement::aal2()->wouldProgress([$totp], $sso))->toBeTrue()
+        ->and($fresh->limitedTo([$sso, $totp])->factors)->toBe(1)
+        ->and(Requirement::aal1()->atLeast($fresh)->requiresFreshness)->toBeTrue()
+        ->and(Requirement::fromArray($fresh->toArray()))->toEqual($fresh)
+        ->and(Requirement::fromArray(Arr::except($fresh->toArray(), 'fresh'))->requiresFreshness)->toBeFalse();
 });

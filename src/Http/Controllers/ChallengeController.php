@@ -294,10 +294,13 @@ class ChallengeController
 
     /**
      * The confirm attempt in progress, or a new one for visiting the confirm
-     * page without being sent there.
+     * page without being sent there. That visit is how Laravel's
+     * password.confirm sends users, which asks for a recent proof, so only
+     * what can be proved recently counts (Requirement::freshlyProved()): not
+     * a link at an identity provider whose sign ins are never fresh.
      */
     protected function confirming(Request $request): Attempt
     {
-        return $this->stepUp->begin($request, Requirement::aal1()->withoutRecoveryCodes());
+        return $this->stepUp->begin($request, Requirement::aal1()->withoutRecoveryCodes()->freshlyProved());
     }
 }

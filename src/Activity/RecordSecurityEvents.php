@@ -95,7 +95,7 @@ class RecordSecurityEvents
 
         $this->log->record('factor_failed', $user, $event->factor);
 
-        if ($event->afterPassword()) {
+        if ($event->afterFirstFactor()) {
             $this->log->record('second_factor_failed', $user, $event->factor);
         }
     }
