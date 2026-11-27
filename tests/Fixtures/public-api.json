@@ -324,6 +324,16 @@
         "without(Keyring\\Models\\Authenticator ...$authenticators): static",
         "withoutFallbacks(): static"
     ],
+    "authenticator_changes": [
+        "add(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor, Keyring\\Models\\Authenticator $authenticator, ?Illuminate\\Http\\Request $request = null, bool $ignoreFreeze = false, bool $passwordConfirmed = false): ?array",
+        "confirmPassword(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor, Illuminate\\Http\\Request $request, ?string $password): void",
+        "ensureMayAdd(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor): void",
+        "find(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, string $id): Keyring\\Models\\Authenticator",
+        "frozen(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user): ?Keyring\\Changes\\Freeze",
+        "needsPassword(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, Keyring\\Contracts\\Enrollable $factor): bool",
+        "remove(Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model $user, string $id, ?string $password = null, bool $ignoreFreeze = false): Keyring\\Models\\Authenticator",
+        "update(Keyring\\Models\\Authenticator $authenticator, array $changes, bool $ignoreFreeze = false): void"
+    ],
     "contracts": {
         "Keyring\\Contracts\\CreatesNewUsers": [
             "create(array $input): Illuminate\\Contracts\\Auth\\Authenticatable&Illuminate\\Database\\Eloquent\\Model",

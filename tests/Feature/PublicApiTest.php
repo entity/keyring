@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Keyring\Changes\AuthenticatorChanges;
 use Keyring\Features;
 use Keyring\KeyringManager;
 use Keyring\UserKeyring;
@@ -11,7 +12,7 @@ use Keyring\UserKeyring;
 // What apps build on, as the README's "What's Stable" lists it: the config
 // options and what each is until an app sets it, the route names, the
 // middleware aliases, the methods of the Keyring facade, of
-// Keyring::for($user) and of the contracts, each with its parameters and
+// Keyring::for($user), of AuthenticatorChanges and of the contracts, each with its parameters and
 // return type, the events and the email types. A rename, a new type or a
 // new default here changes every app that uses it, and nothing else would
 // notice when the tests are changed with it.
@@ -68,6 +69,7 @@ it('keeps the names and defaults apps build on, or says which changed', function
         'emails' => KeyringManager::NOTIFICATIONS,
         'facade' => $methods(KeyringManager::class),
         'user' => $methods(UserKeyring::class),
+        'authenticator_changes' => $methods(AuthenticatorChanges::class),
         'contracts' => $classes('Contracts', 'Keyring\\Contracts')->mapWithKeys(fn (string $contract) => [$contract => $methods($contract)])->all(),
         'events' => $classes('Events', 'Keyring\\Events')->mapWithKeys(fn (string $event) => [
             $event => collect(new ReflectionClass($event)->getProperties(ReflectionProperty::IS_PUBLIC))->map->getName()->sort()->values()->all(),
