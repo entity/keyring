@@ -1169,7 +1169,7 @@ describe('ending by itself', function () {
             ->and(record($impersonated)->revokedAt)->not->toBeNull()
             ->and(logEntry('impersonation_ended'))
             ->authenticatable_id->toBe($this->admin->getKey())
-            ->meta->toBe(['impersonator' => (string) $this->admin->getKey(), 'user' => null, 'reason' => 'lost', 'returned' => false, 'role' => 'impersonator']);
+            ->meta->toEqual(['impersonator' => (string) $this->admin->getKey(), 'user' => null, 'reason' => 'lost', 'returned' => false, 'role' => 'impersonator']);
         expect($this->get('/welcome')->getContent())->toBe('guest');
     });
 
@@ -1529,7 +1529,7 @@ describe('the security log and events', function () {
         $entries = SecurityEvent::query()->whereIn('type', ['impersonation_started', 'impersonation_ended'])->oldest('id')->get();
         $both = ['impersonator' => (string) $this->admin->getKey(), 'user' => (string) $this->user->getKey()];
 
-        expect($entries->map(fn (SecurityEvent $entry) => [$entry->type, $entry->authenticatable_id, $entry->meta])->all())->toBe([
+        expect($entries->map(fn (SecurityEvent $entry) => [$entry->type, $entry->authenticatable_id, $entry->meta])->all())->toEqual([
             ['impersonation_started', $this->admin->getKey(), [...$both, 'role' => 'impersonator']],
             ['impersonation_started', $this->user->getKey(), [...$both, 'role' => 'impersonated']],
             ['impersonation_ended', $this->admin->getKey(), [...$both, 'reason' => 'stopped', 'returned' => true, 'role' => 'impersonator']],
@@ -1545,7 +1545,7 @@ describe('the security log and events', function () {
 
         expect(logEntry('impersonation_ended'))
             ->authenticatable_id->toBe($this->user->getKey())
-            ->meta->toBe(['impersonator' => null, 'user' => (string) $this->user->getKey(), 'reason' => 'impersonator_session_ended', 'returned' => false, 'role' => 'impersonated']);
+            ->meta->toEqual(['impersonator' => null, 'user' => (string) $this->user->getKey(), 'reason' => 'impersonator_session_ended', 'returned' => false, 'role' => 'impersonated']);
     });
 
     it('logs why it ended', function () {
@@ -1576,7 +1576,7 @@ describe('the security log and events', function () {
         expect(logEntry('impersonation_refused'))
             ->authenticatable_id->toBe($this->admin->getKey())
             ->severity->value->toBe('warning')
-            ->meta->toBe(['reason' => $reason, 'user' => $id]);
+            ->meta->toEqual(['reason' => $reason, 'user' => $id]);
     })->with([
         'not allowed' => [function ($test) {
             Keyring::allowImpersonationWhen(fn () => false);
