@@ -1236,6 +1236,37 @@ describe('the user\'s sessions list', function () {
 });
 
 describe('the security log and events', function () {
+    it('shows the start and end in both accounts\' activity', function () {
+        impersonating();
+        stopImpersonating();
+
+        expect(Keyring::activity($this->user)->pluck('type')->all())->toEqualCanonicalizing(['impersonation_started', 'impersonation_ended'])
+            ->and(Keyring::activity($this->admin)->pluck('type')->all())->toContain('impersonation_started', 'impersonation_ended')
+            ->and(Keyring::unlistedActivityTypes())->toBe([]);
+    });
+
+    it('leaves them out of activity with impersonation.show_in_activity off, still logging them', function () {
+        config(['keyring.impersonation.show_in_activity' => false, 'keyring.security_log.unlisted' => ['acme.token_issued']]);
+        impersonating();
+        stopImpersonating();
+
+        expect(Keyring::activity($this->user)->all())->toBe([])
+            ->and(Keyring::activity($this->admin)->pluck('type')->all())->not->toContain('impersonation_started', 'impersonation_ended')
+            ->and(Keyring::unlistedActivityTypes())->toBe(['acme.token_issued', 'impersonation_started', 'impersonation_ended'])
+            ->and(SecurityEvent::query()->whereIn('type', ['impersonation_started', 'impersonation_ended'])->count())->toBe(4);
+    });
+
+    // A package could list them without the app knowing, and hide an
+    // impersonation from the user it was of.
+    it('still shows them when only security_log.unlisted lists them', function () {
+        config(['keyring.security_log.unlisted' => ['impersonation_started', 'impersonation_ended']]);
+        impersonating();
+        stopImpersonating();
+
+        expect(Keyring::activity($this->user)->pluck('type')->all())->toEqualCanonicalizing(['impersonation_started', 'impersonation_ended'])
+            ->and(Keyring::unlistedActivityTypes())->toBe([]);
+    });
+
     it('logs the start and end on both accounts', function () {
         impersonating();
         stopImpersonating();

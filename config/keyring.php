@@ -366,14 +366,16 @@ return [
     | signs in until it ends.
     |
     | With "show_in_sessions" the user sees it in their sessions list, with
-    | who is in it, and can end it. Starting goes to "redirect_to" and
-    | stopping to "return_to": null for "home".
+    | who is in it, and can end it. With "show_in_activity" its start and end
+    | are in Keyring::activity(); they're logged either way. Starting goes to
+    | "redirect_to" and stopping to "return_to": null for "home".
     |
     */
 
     'impersonation' => [
         'lifetime' => '1h',
         'show_in_sessions' => true,
+        'show_in_activity' => true,
         'middleware' => ['keyring:aal2', 'keyring.fresh:15m'],
         'redirect_to' => null,
         'return_to' => null,

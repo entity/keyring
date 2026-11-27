@@ -243,7 +243,8 @@ class KeyringManager
     /**
      * The entry types activity() leaves out, for an activity query of the
      * app's own: the strings in "security_log.unlisted", without Keyring's
-     * own types.
+     * own types, and the impersonation types when
+     * "impersonation.show_in_activity" is false.
      *
      * @return list<string>
      */

@@ -89,6 +89,7 @@
         "impersonation": {
             "lifetime": "1h",
             "show_in_sessions": true,
+            "show_in_activity": true,
             "middleware": [
                 "keyring:aal2",
                 "keyring.fresh:15m"

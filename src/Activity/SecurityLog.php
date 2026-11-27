@@ -152,7 +152,10 @@ class SecurityLog
 
     /**
      * The types activity() leaves out, from "security_log.unlisted", for an
-     * app's own activity query too. It's read while a page is built, so
+     * app's own activity query too. Plus the impersonation types when
+     * "impersonation.show_in_activity" is false: the one way to leave out
+     * any of Keyring's, and the app's alone to take, since a package that
+     * could would hide an impersonation from the user it was of. It's read while a page is built, so
      * anything but an array, from a config cached before the option existed
      * say, leaves out nothing rather than breaking the page. An entry that
      * isn't a string is passed over, since a null would leave out every
@@ -169,14 +172,15 @@ class SecurityLog
     public function unlistedActivityTypes(): array
     {
         $types = config('keyring.security_log.unlisted');
+        $impersonation = config('keyring.impersonation.show_in_activity') === false ? ['impersonation_started', 'impersonation_ended'] : [];
 
         if (! is_array($types)) {
-            return [];
+            return $impersonation;
         }
 
         $keyrings = array_map(Collation::fold(...), self::TYPES);
 
-        return array_values(array_filter($types, fn (mixed $type) => is_string($type) && ! in_array(Collation::fold($type), $keyrings, true)));
+        return [...array_values(array_filter($types, fn (mixed $type) => is_string($type) && ! in_array(Collation::fold($type), $keyrings, true))), ...$impersonation];
     }
 
     /**

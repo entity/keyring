@@ -279,6 +279,7 @@ See [Devices & Sessions](devices-and-sessions.md#the-session-registry).
 'impersonation' => [
     'lifetime' => '1h',
     'show_in_sessions' => true,
+    'show_in_activity' => true,
     'middleware' => ['keyring:aal2', 'keyring.fresh:15m'],
     'redirect_to' => null,
     'return_to' => null,
@@ -291,6 +292,7 @@ These only matter with `Features::impersonation()` on, and once [`Keyring::allow
 |---|---|
 | `lifetime` | How long an impersonation lasts before it ends by itself and goes back to the impersonator. It's never longer than `sessions.absolute`. See [The Time Limit](impersonation.md#the-time-limit). |
 | `show_in_sessions` | Whether the impersonated session is in the user's own [sessions list](impersonation.md#the-sessions-list), marked with who is in it, for the user to end. With `false` it's left out, but still ends with the rest of their sessions, and still counts in how many "sign out everywhere else" says it ended. |
+| `show_in_activity` | Whether `impersonation_started` and `impersonation_ended` are in [`Keyring::activity`](security-log-and-emails.md#showing-recent-activity), on both accounts. With `false` they're in `Keyring::unlistedActivityTypes()`, so it leaves them out, but they're still written. This is the only way to leave out any of Keyring's own types: listed in `security_log.unlisted`, they're still shown. See [The Security Log and Events](impersonation.md#security-log-and-events). |
 | `middleware` | What starting one takes, on top of being signed in and not impersonating already. By default, two factors proved in the last 15 minutes. |
 | `redirect_to` | Where starting goes. `null` is `home`. |
 | `return_to` | Where stopping, or running out, goes. `null` is `home`. |
@@ -381,7 +383,7 @@ The `levels` option sets the score thresholds. The `recent_change` option sets h
 'prune_at' => '03:00',
 ```
 
-The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in. The `unlisted` option lists the entry types that `Keyring::activity` leaves out, for entries about a user that aren't something the user did. An entry that isn't a string is ignored, and so is one of Keyring's own entry types. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity).
+The `keep_for` option sets how long entries are kept before the [`keyring:prune`](devices-and-sessions.md#pruning) command deletes them. The `alerts` option lists the entry types that are shown once, as ["was this you?" alerts](security-log-and-emails.md#was-this-you-alerts), at the next sign in. The `unlisted` option lists the entry types that `Keyring::activity` leaves out, for entries about a user that aren't something the user did. An entry that isn't a string is ignored, and so is one of Keyring's own entry types: to leave out the impersonation entries, set [`impersonation.show_in_activity`](#impersonation) to `false` instead. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity).
 
 The table is turned on by `Features::securityLog()`, which is on by default. Without it, the same events are written to the log `channel` instead. `null` means your default channel. Without the table, "was this you?" alerts and the `RepeatedFactorFailures`, `SuccessAfterFailures`, and `CredentialStuffing` risk signals don't work, since they read from the table. See [Without the Table](security-log-and-emails.md#without-the-table).
 
@@ -504,7 +506,7 @@ The `Keyring\Facades\Keyring` facade is the entry point for everything you set i
 | `Keyring::signsInAfterRegistering($user, $request)` | Whether registering signs this user in, for a registration flow of your own. |
 | `Keyring::hidesRegisteredAddresses()` | Whether registration answers the same for a taken address, which it does unless `registration.reveal_taken` is on. |
 | `Keyring::withoutProtection($callback, reason: ...)` | Changes protected attributes outside Keyring's flows. See [Protected Changes](protected-changes.md#bypassing-protection). |
-| `Keyring::activity($user, $limit = 25)` | Recent security log entries, leaving out the types in `security_log.unlisted`. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
+| `Keyring::activity($user, $limit = 25)` | Recent security log entries, leaving out the types in `security_log.unlisted`, and the impersonation entries with `impersonation.show_in_activity` off. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
 | `Keyring::unlistedActivityTypes()` | The entry types `Keyring::activity` leaves out, for an activity query of your own. See [Showing Recent Activity](security-log-and-emails.md#showing-recent-activity). |
 | `Keyring::for($user)` | The user's keyring, the same as `$user->keyring`. |
 | `Keyring::user()` | The user signed in to Keyring's guard. Throws an `AuthenticationException` when there isn't one. |
