@@ -145,6 +145,17 @@ function registryThatGoesAway(int $works, string $method = 'revoke', int $fails 
 }
 
 /**
+ * Run Laravel's auth.session middleware on the web group, ahead of
+ * Keyring's session middleware, as an app that uses it would.
+ */
+function withLaravelsAuthSession(): void
+{
+    app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
+    app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
+    app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+}
+
+/**
  * Keep the session on Laravel's cookie driver, which lives in the browser.
  */
 function onTheCookieDriver(): void
@@ -814,10 +825,36 @@ describe('stopping', function () {
         $this->get('/checked')->assertRedirect('/login');
     });
 
-    it('signs the admin out on a stop that laravel\'s auth.session middleware wraps, when their password changed meanwhile', function (Closure $change) {
-        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
-        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
-        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+    // Laravel's guard keeps the hash it signed in with in the session, and
+    // nothing brings it up to date without auth.session: the change is
+    // from before the impersonation, so it isn't one.
+    it('goes back when the admin changed their password in this session before starting', function (bool $authSession) {
+        if ($authSession) {
+            withLaravelsAuthSession();
+        }
+
+        adminSignsIn();
+        $this->put('/user/password', ['current_password' => 'password', 'password' => 'a-brand-new-long-password-1', 'password_confirmation' => 'a-brand-new-long-password-1'])->assertRedirect();
+        $own = session(Sessions::KEY);
+        $this->get('/whoami')->assertOk();
+
+        impersonate($this->user)->assertRedirect('/dashboard');
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->user->getKey());
+        Auth::forgetGuards();
+
+        stopImpersonating()->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
+
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['stopped']);
+        Auth::forgetGuards();
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+    })->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
+
+    it('signs the admin out on a stop, when their password changed meanwhile', function (Closure $change, bool $authSession) {
+        if ($authSession) {
+            withLaravelsAuthSession();
+        }
+
         $own = impersonating();
         $this->get('/whoami')->assertOk();
 
@@ -834,7 +871,7 @@ describe('stopping', function () {
     })->with([
         'with the query builder' => [fn (User $admin) => User::query()->whereKey($admin->getKey())->update(['password' => Hash::make('changed somewhere else')])],
         'without keyring\'s protection' => [fn (User $admin) => Keyring::withoutProtection(fn () => $admin->fresh()->forceFill(['password' => Hash::make('changed somewhere else')])->save())],
-    ]);
+    ])->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
 
     it('goes back as before when laravel\'s auth.session middleware wraps the stop and the password is the same', function () {
         app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
@@ -860,6 +897,22 @@ describe('stopping', function () {
 
         expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
     });
+
+    it('goes back when the admin had no password when it started', function (bool $authSession) {
+        if ($authSession) {
+            withLaravelsAuthSession();
+        }
+
+        adminSignsIn();
+        User::query()->whereKey($this->admin->getKey())->update(['password' => null]);
+        impersonate($this->user)->assertRedirect('/dashboard');
+        Auth::forgetGuards();
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        Auth::forgetGuards();
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
+    })->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
 
     // A session from before Laravel kept a keyed hash holds the raw one,
     // which its auth.session middleware still takes.
@@ -931,11 +984,12 @@ describe('ending by itself', function () {
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
     });
 
-    it('signs out on the next request once the admin\'s password changed', function () {
+    it('signs out on the next request once the admin\'s password changed', function (bool $authSession) {
         $own = impersonating();
-        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
-        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
-        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+
+        if ($authSession) {
+            withLaravelsAuthSession();
+        }
 
         User::query()->whereKey($this->admin->getKey())->update(['password' => Hash::make('changed somewhere else')]);
         Auth::forgetGuards();
@@ -944,12 +998,13 @@ describe('ending by itself', function () {
 
         expect(Auth::guard('web')->check())->toBeFalse()
             ->and(record($own)->revokedAt)->not->toBeNull();
-    });
+    })->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
 
-    it('signs out after impersonation.lifetime rather than going back, with laravel\'s auth.session middleware, once the admin\'s password changed', function () {
-        app('router')->pushMiddlewareToGroup('web', LaravelAuthenticateSession::class);
-        app('router')->removeMiddlewareFromGroup('web', AuthenticateSession::class);
-        app('router')->pushMiddlewareToGroup('web', AuthenticateSession::class);
+    it('signs out after impersonation.lifetime rather than going back, once the admin\'s password changed', function (bool $authSession) {
+        if ($authSession) {
+            withLaravelsAuthSession();
+        }
+
         $own = impersonating();
         $this->get('/whoami')->assertOk();
 
@@ -963,7 +1018,7 @@ describe('ending by itself', function () {
             ->and(record($own)->revokedAt)->not->toBeNull();
         Auth::forgetGuards();
         $this->get('/whoami')->assertRedirect('/login');
-    });
+    })->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
 
     it('tells a json client with a 409', function () {
         impersonating();

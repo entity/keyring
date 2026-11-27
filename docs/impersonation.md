@@ -188,7 +188,7 @@ The impersonator's own session isn't ended. Its record stays good, and while the
 Stopping, or the [time limit](#the-time-limit), ends the impersonated session's record and goes back to the impersonator's, on a new session ID, as long as:
 
 - the impersonator still exists, may still sign in, and isn't [held for a new password](protected-changes.md#requiring-a-password-change),
-- their password is still the one their session had, however it was changed: Keyring compares the password hash Laravel's `auth.session` middleware keeps, as that middleware does, whether or not it runs,
+- their password hasn't changed since the impersonation started: Keyring keeps its hash from the start, in the form Laravel's `auth.session` middleware compares, and compares it with theirs now, whether or not that middleware runs,
 - their session's record is still good: not revoked, not expired, and not idled out,
 - the browser's session is still the impersonation it started: on the impersonated session, signed in as its user.
 
@@ -196,7 +196,7 @@ They come back at the level their own session had, under its own limits. Their r
 
 Going back also moves the impersonator's session to a new record, as a [step-up](step-up.md) does, on every session driver. A copy of the session from while they were impersonating then has nothing to go back to, and is signed out. On Laravel's `cookie` driver that's a copy of the cookie, which lives in the browser where nothing can destroy it. On the others it's a request that overlapped the stop and saved the old session after it. If their session ticked "remember me", Keyring's cookie that ties it to the record moves to the new one. Laravel's own cookie is left as it is.
 
-If any of that no longer holds, the browser is signed out, and the impersonator's session ends with it. That includes the impersonator's own session being ended from somewhere else while they were impersonating, such as by "sign out everywhere" on another browser, and their password being changed somewhere that doesn't end their sessions, such as your own code saving it with the query builder or inside `Keyring::withoutProtection()`. The next request notices and signs out. So does a session whose user can no longer be loaded, deleted say, and one someone else has signed in on, such as with your own `Auth::login()`: the reason is `lost`. Signing in on a session that still holds an impersonation, however it got there, ends it first.
+If any of that no longer holds, the browser is signed out, and the impersonator's session ends with it. That includes the impersonator's own session being ended from somewhere else while they were impersonating, such as by "sign out everywhere" on another browser. It also includes any change to their password hash while the impersonation runs, even one that doesn't end their sessions: Keyring's own password change on another browser with `sign_out_others` off, your own code saving it with the query builder or inside `Keyring::withoutProtection()`, and Laravel rehashing it when they sign in somewhere else after you raised the hashing cost. A password they changed before starting, in the same session, doesn't count. The next request notices and signs out. So does a session whose user can no longer be loaded, deleted say, and one someone else has signed in on, such as with your own `Auth::login()`: the reason is `lost`. Signing in on a session that still holds an impersonation, however it got there, ends it first.
 
 ### Signing Out While Impersonating
 

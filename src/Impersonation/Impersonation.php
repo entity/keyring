@@ -46,8 +46,9 @@ use Throwable;
  *   on their own clocks as they would in that session: a request after a
  *   level's idle limit lapses it.
  * - Coming back takes that record still being good, the impersonator still
- *   being someone who may sign in, on the password their session had, and
- *   the browser's session still being the impersonation it started. Otherwise the browser is signed out, and
+ *   being someone who may sign in, on the password they had when it
+ *   started, and the browser's session still being the impersonation it
+ *   started. Otherwise the browser is signed out, and
  *   the parked record ends with it. An impersonator who may no longer
  *   impersonate the user ends it too, and goes back. They come back at the
  *   level they had, but nothing counts as fresh: a page of the user's could
@@ -56,7 +57,7 @@ use Throwable;
  * The user's own sign-in events don't fire, so nothing that listens for a
  * sign in (new device emails, risk, "last signed in") takes it for one.
  *
- * @phpstan-type Parked array{impersonator: string, type: string, name: ?string, session: string, user: string, user_type: string, remembered: bool, started_at: int, expires_at: int, parked: array<string, mixed>}
+ * @phpstan-type Parked array{impersonator: string, type: string, name: ?string, session: string, user: string, user_type: string, remembered: bool, started_at: int, expires_at: int, password: ?string, parked: array<string, mixed>}
  */
 class Impersonation
 {
@@ -126,6 +127,7 @@ class Impersonation
             'remembered' => $session->get(Sessions::REMEMBERED) === true,
             'started_at' => $now,
             'expires_at' => $until,
+            'password' => $this->passwordHash($impersonator),
             'parked' => $this->pick($session),
         ];
 
@@ -504,9 +506,9 @@ class Impersonation
     /**
      * The impersonator and their session, when the browser can go back to
      * it: the record is still good and theirs, they may still sign in, with
-     * no password change they're held for, their password is the one the
-     * session parked, and, under sessions.end_on_lapse, the level it signed
-     * in at hasn't lapsed.
+     * no password change they're held for, their password is the one they
+     * had when it started, and, under sessions.end_on_lapse, the level it
+     * signed in at hasn't lapsed.
      *
      * @param  Parked  $parked
      * @return array{0: Authenticatable&Model, 1: RegisteredSession}|null
@@ -518,7 +520,7 @@ class Impersonation
 
         if ($impersonator === null || $own === null || ! $own->isActive($now) || $this->sessions->idledOut($own, $now)
             || ! $own->belongsTo($impersonator) || ! $this->keyring->allowsSignIn($impersonator) || $this->keyring->requiresPasswordChange($impersonator)
-            || $this->passwordChanged($parked['parked'], $impersonator) || $this->catchUp($parked['parked'])[1] !== null) {
+            || $this->passwordChanged($parked, $impersonator) || $this->catchUp($parked['parked'])[1] !== null) {
             return null;
         }
 
@@ -526,26 +528,38 @@ class Impersonation
     }
 
     /**
-     * Whether the impersonator's password changed since their session
-     * parked its hash, compared as Laravel's auth.session middleware
-     * compares it: the guard's keyed hash, or the raw hash an older session
-     * kept. Decided here rather than left to that middleware, whose step
-     * after the response stores the current hash over the one put back, so
-     * a stop it wraps would come back signed in. Nothing to compare for an
-     * impersonator without a password, which it skips too.
+     * Whether the impersonator's password changed since the impersonation
+     * started: their password hash then, in the guard's keyed form that
+     * Laravel's auth.session middleware compares, against theirs now. Any
+     * change counts, a rehash too. Not the hash their session parked for
+     * that middleware, which is from when they signed in, and which nothing
+     * brings up to date when they change their password in that session
+     * unless the middleware runs. Decided here rather than left to it,
+     * whose step after the response stores the current hash over the one
+     * put back, so a stop it wraps would come back signed in. Nothing to
+     * compare for an impersonator without a password, which it skips too.
      *
-     * @param  array<string, mixed>  $parked
+     * @param  Parked  $parked
      */
     protected function passwordChanged(array $parked, Authenticatable $impersonator): bool
     {
-        $stored = $parked[$this->passwordHashKey()] ?? null;
+        $now = $this->passwordHash($impersonator);
+
+        return $parked['password'] !== null && $now !== null && ! hash_equals($parked['password'], $now);
+    }
+
+    /**
+     * The impersonator's password hash in the guard's keyed form, as
+     * Laravel's auth.session middleware compares it. Null without one.
+     */
+    protected function passwordHash(Authenticatable $impersonator): ?string
+    {
         $password = $impersonator->getAuthPassword();
         $guard = $this->keyring->guard();
 
         assert($guard instanceof SessionGuard);
 
-        return is_string($stored) && filled($password)
-            && ! hash_equals($guard->hashPasswordForCookie($password), $stored) && ! hash_equals($password, $stored);
+        return filled($password) ? $guard->hashPasswordForCookie($password) : null;
     }
 
     /**
@@ -688,9 +702,9 @@ class Impersonation
 
     /**
      * What the impersonator's session keeps aside: what it proved, and the
-     * password hash Laravel's auth.session middleware compares, so a
-     * password changed elsewhere meanwhile ends the impersonation and signs
-     * them out rather than going back (passwordChanged()).
+     * password hash Laravel's auth.session middleware compares, put back as
+     * it was for that middleware. What the impersonation compares is the
+     * hash taken when it started (passwordChanged()).
      *
      * @return list<string>
      */
