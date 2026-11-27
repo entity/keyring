@@ -36,6 +36,7 @@ use Keyring\Features;
 use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
+use Keyring\Login\SignIn;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\DatabaseSessionRegistry;
@@ -43,6 +44,7 @@ use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\SessionRegistryManager;
 use Keyring\Sessions\Sessions;
+use Keyring\Sessions\Sweep;
 use Keyring\Tests\Fixtures\PlainFormRequest;
 use Keyring\Tests\Fixtures\User;
 use Monolog\Handler\AbstractProcessingHandler;
@@ -893,23 +895,41 @@ describe('stopping', function () {
         expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
     });
 
-    // Laravel's auth.session middleware has nothing to compare either.
-    it('goes back when the admin no longer has a password', function () {
-        impersonating();
+    it('signs the admin out on a stop, when their password was removed meanwhile', function () {
+        $own = impersonating();
         User::query()->whereKey($this->admin->getKey())->update(['password' => null]);
 
-        stopImpersonating()->assertRedirect('/dashboard');
+        stopImpersonating()->assertRedirect('/login');
 
-        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['impersonator_session_ended']);
     });
 
-    it('goes back when the admin had no password when it started', function (bool $authSession) {
+    it('signs the admin out on a stop, when they had no password when it started and have one now', function () {
+        adminSignsIn();
+        $own = session(Sessions::KEY);
+        User::query()->whereKey($this->admin->getKey())->update(['password' => null]);
+        Auth::forgetGuards();
+        impersonate($this->user)->assertRedirect('/dashboard');
+        User::query()->whereKey($this->admin->getKey())->update(['password' => Hash::make('set somewhere else')]);
+        Auth::forgetGuards();
+
+        stopImpersonating()->assertRedirect('/login');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['impersonator_session_ended']);
+    });
+
+    it('goes back when the admin had no password when it started, and still has none', function (bool $authSession) {
         if ($authSession) {
             withLaravelsAuthSession();
         }
 
         adminSignsIn();
         User::query()->whereKey($this->admin->getKey())->update(['password' => null]);
+        Auth::forgetGuards();
         impersonate($this->user)->assertRedirect('/dashboard');
         Auth::forgetGuards();
 
@@ -918,17 +938,6 @@ describe('stopping', function () {
         Auth::forgetGuards();
         expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
     })->with(['without laravel\'s auth.session' => [false], 'with laravel\'s auth.session' => [true]]);
-
-    // A session from before Laravel kept a keyed hash holds the raw one,
-    // which its auth.session middleware still takes.
-    it('goes back with the raw password hash parked, as laravel\'s auth.session middleware takes it', function () {
-        impersonating();
-        session()->put(Impersonation::KEY.'.parked.password_hash_web', $this->admin->fresh()->getAuthPassword());
-
-        stopImpersonating()->assertRedirect('/dashboard');
-
-        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
-    });
 
     it('has an inertia visit load the next page in full, starting and stopping', function () {
         config(['keyring.impersonation.return_to' => '/admin/users']);
@@ -1348,9 +1357,9 @@ describe('signing out while impersonating', function () {
 
     // A sign in on a session that still holds an impersonation, with the
     // session middleware out of the way, ends it first. When that fails, the
-    // next go, on the next request, ends the parked session, having
-    // announced it already.
-    it('doesn\'t log the end again when a later request ends the parked session', function () {
+    // browser is signed out, and the guard's sign-out ends the parked
+    // session, having announced it already.
+    it('doesn\'t log the end again when the guard\'s sign-out ends the parked session after a sign in failed to', function () {
         Exceptions::fake();
         $own = impersonating();
         User::create(['name' => 'Third', 'email' => 'third@example.com', 'password' => 'password', 'email_verified_at' => now()]);
@@ -1361,16 +1370,44 @@ describe('signing out while impersonating', function () {
 
         $this->post('/login', ['email' => 'third@example.com', 'password' => 'password'])->assertServerError();
 
-        expect(record($own)->revokedAt)->toBeNull()
-            ->and(session()->has(Impersonation::KEY))->toBeTrue()
+        expect(record($own)->revokedAt)->not->toBeNull()
+            ->and(session()->has(Impersonation::KEY))->toBeFalse()
             ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->all())->toBe(['signed_out']);
 
         Auth::forgetGuards();
         $this->post('/login', ['email' => 'third@example.com', 'password' => 'password'])->assertRedirect('/dashboard');
 
-        expect(record($own)->revokedAt)->not->toBeNull()
+        expect(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(1);
+    });
+
+    // Signing in as someone else from the app's own route, while
+    // impersonating, ends the impersonation first. When the registry can't,
+    // the browser is signed out rather than carrying on as the user on an
+    // impersonation that was announced as ended. The guard's sign-out ends
+    // the parked session on its second go.
+    it('signs the browser out when a sign in from the app can\'t end the impersonation first', function () {
+        $third = User::create(['name' => 'Third', 'email' => 'third@example.com', 'password' => 'password', 'email_verified_at' => now()]);
+        Route::middleware(['web', 'auth'])->post('/sign-in-as', function (Request $request) use ($third) {
+            app(SignIn::class)->as($request, $third, []);
+
+            return 'signed in';
+        });
+        Exceptions::fake();
+        Event::fake([ImpersonationEnded::class]);
+        $own = impersonating();
+        $impersonated = session(Sessions::KEY);
+        registryThatGoesAway(works: 0, fails: 1);
+
+        $this->post('/sign-in-as')->assertServerError();
+
+        expect(Auth::guard('web')->check())->toBeFalse()
             ->and(session()->has(Impersonation::KEY))->toBeFalse()
-            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(1);
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($impersonated)->revokedAt)->not->toBeNull();
+        Auth::forgetGuards();
+        $this->get('/whoami')->assertRedirect('/login');
+        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::SignedOut && ! $event->returned);
     });
 
     it('signs out with the registry down, changing the admin\'s "remember me" token rather than the user\'s', function (string $url) {
@@ -1614,6 +1651,21 @@ describe('the security log and events', function () {
         Event::assertNotDispatched(RegisteredSessionEnded::class);
     });
 
+    it('leaves the user\'s record it took back for the sweep not to announce either, when the start can\'t be logged', function () {
+        Exceptions::fake();
+        $announced = new ArrayObject;
+        Event::listen(fn (RegisteredSessionEnded $event) => $announced->append($event));
+        adminSignsIn();
+        Schema::drop('keyring_events');
+
+        impersonate($this->user)->assertServerError();
+
+        $this->travel(Sweep::GRACE + 1)->seconds();
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        expect($announced)->toBeEmpty();
+    });
+
     it('writes neither start entry when the second can\'t be written', function () {
         Exceptions::fake();
         adminSignsIn();
@@ -1706,9 +1758,10 @@ describe('the security log and events', function () {
         Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::Stopped && $event->returned);
     });
 
-    // The session can't be handed back, so the browser is still the user's,
-    // on a record that has ended, and the next request signs it out.
-    it('says it didn\'t go back when handing the browser back throws', function () {
+    // The session can't be handed back, and nothing is parked to go back
+    // with any more, so it ends as if it couldn't go back: the admin's
+    // session too, and the browser is signed out, once.
+    it('says it didn\'t go back, and signs the browser out, when handing it back throws', function () {
         $fail = new ArrayObject;
         app('session')->extend('failing', fn () => new class($fail) extends ArraySessionHandler
         {
@@ -1729,17 +1782,20 @@ describe('the security log and events', function () {
         app()->forgetInstance('session.store');
         Exceptions::fake();
         Event::fake([ImpersonationEnded::class]);
-        impersonating();
+        $own = impersonating();
         $fail->append(true);
 
         stopImpersonating()->assertServerError();
 
-        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
-        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::Stopped && ! $event->returned);
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull();
 
         $fail->exchangeArray([]);
         Auth::forgetGuards();
         $this->get('/whoami')->assertRedirect('/login');
+
+        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::Stopped && ! $event->returned);
     });
 
     it('names the user who was impersonated, whoever the app has signed in since', function () {

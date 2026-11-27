@@ -51,8 +51,18 @@ class SignIn
 
         // Signing in on a session that still holds an impersonation, one
         // whose user was deleted say, leaves nothing parked for the next
-        // request to go back to.
-        app(Impersonation::class)->signedOut($request);
+        // request to go back to. When the registry fails at that, the
+        // browser is signed out before it's thrown on, rather than carrying
+        // on as whoever it was impersonating, on an impersonation that has
+        // been announced as ended. The guard's sign-out tries the parked
+        // session again.
+        try {
+            app(Impersonation::class)->signedOut($request);
+        } catch (Throwable $e) {
+            $this->signOutGuard($request);
+
+            throw $e;
+        }
 
         $this->keyring->guard()->login($user, $attempt->remember);
 
@@ -84,10 +94,7 @@ class SignIn
             try {
                 $this->out($request, onlyThisBrowser: true);
             } catch (Throwable) {
-                $guard = $this->keyring->guard();
-
-                $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
-                $request->session()->invalidate();
+                $this->signOutGuard($request);
             }
 
             throw $e;
@@ -125,6 +132,19 @@ class SignIn
         if ($new) {
             NewDeviceSignedIn::dispatch($user, $device);
         }
+    }
+
+    /**
+     * Sign the guard out of this browser, and empty its session, without
+     * the registry: for when that is what failed. The "remember me" token
+     * is left as it is.
+     */
+    protected function signOutGuard(Request $request): void
+    {
+        $guard = $this->keyring->guard();
+
+        $guard instanceof SessionGuard ? $guard->logoutCurrentDevice() : $guard->logout();
+        $request->session()->invalidate();
     }
 
     /**

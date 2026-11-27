@@ -24,7 +24,6 @@ use Keyring\Http\Responses\ChoosesFormat;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
 use Keyring\Login\Verification;
-use Keyring\Sessions\AnnouncingSessionRegistry;
 use Keyring\Sessions\RegisteredSession;
 use Keyring\Sessions\SessionAssurance;
 use Keyring\Sessions\Sessions;
@@ -137,13 +136,11 @@ class Impersonation
         // Logged here rather than by a listener, ahead of the app's: one of
         // those that throws, sending an email say, can't leave it unlogged.
         // A start that can't be logged takes its record back unannounced,
-        // on the driver underneath, as nobody used the session.
+        // now and by the sweep, as nobody used the session.
         try {
             $this->logStart($impersonator, $user);
         } catch (Throwable $e) {
-            $registry = $this->sessions->registry();
-
-            rescue(fn () => ($registry instanceof AnnouncingSessionRegistry ? $registry->inner() : $registry)->revoke($record->id));
+            $this->sessions->withdraw($record->id);
 
             throw $e;
         }
@@ -203,7 +200,8 @@ class Impersonation
      * then ImpersonatorSessionEnded or Lost. It went back when the reason
      * returns(). ImpersonationEnded says whether the browser did, which it
      * hasn't when handing it back throws before the session is on the
-     * impersonator's record.
+     * impersonator's record. Then the impersonator's session ends, and the
+     * browser is signed out, before it's thrown on.
      */
     public function end(Request $request, ImpersonationEndReason $reason): ImpersonationEndReason
     {
@@ -249,9 +247,22 @@ class Impersonation
             if ($back === null) {
                 app(SignIn::class)->out($request, onlyThisBrowser: true);
             } else {
-                $this->switchTo($request, $back[0]);
-                $this->restore($request, $this->catchUp($parked['parked'])[0]);
-                $this->sessions->rebind($request, $back[1], $parked['remembered']);
+                try {
+                    $this->switchTo($request, $back[0]);
+                    $this->restore($request, $this->catchUp($parked['parked'])[0]);
+                    $this->sessions->rebind($request, $back[1], $parked['remembered']);
+                } catch (Throwable $e) {
+                    // Nothing is parked to go back with now, so it ends as
+                    // if it couldn't go back: the impersonator's session
+                    // too, and the browser is signed out, rather than left
+                    // as the user on a record that has ended, for the next
+                    // request to end again.
+                    rescue(fn () => $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($back[1]->id)));
+                    rescue(fn () => app(SignIn::class)->out($request, onlyThisBrowser: true));
+
+                    throw $e;
+                }
+
                 $returned = true;
 
                 // A copy of the session from while impersonating would lead
@@ -557,16 +568,18 @@ class Impersonation
      * brings up to date when they change their password in that session
      * unless the middleware runs. Decided here rather than left to it,
      * whose step after the response stores the current hash over the one
-     * put back, so a stop it wraps would come back signed in. Nothing to
-     * compare for an impersonator without a password, which it skips too.
+     * put back, so a stop it wraps would come back signed in. A password
+     * set or removed meanwhile is a change too. An impersonator who had
+     * none then and has none now hasn't changed it.
      *
      * @param  Parked  $parked
      */
     protected function passwordChanged(array $parked, Authenticatable $impersonator): bool
     {
+        $then = $parked['password'];
         $now = $this->passwordHash($impersonator);
 
-        return $parked['password'] !== null && $now !== null && ! hash_equals($parked['password'], $now);
+        return ($then === null) !== ($now === null) || ($then !== null && $now !== null && ! hash_equals($then, $now));
     }
 
     /**

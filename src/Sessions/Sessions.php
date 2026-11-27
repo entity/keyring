@@ -151,8 +151,9 @@ class Sessions
      * database driver sharing the user's connection, the row lock's
      * transaction is rolled back, the new record included. On a driver
      * that announces straight away, the new record is revoked again,
-     * unannounced, before the lock is let go, so it doesn't count toward
-     * the limit, and the sessions ended before the failure stay ended.
+     * unannounced (withdraw), before the lock is let go, so it doesn't count
+     * toward the limit, and the sessions ended before the failure stay
+     * ended.
      */
     protected function register(Authenticatable $user, RegisteredSession $session): void
     {
@@ -192,7 +193,7 @@ class Sessions
                 // still held, so no other sign in counts it, and on the
                 // driver underneath, unannounced, as nobody used the session.
                 if ($this->registry instanceof AnnouncingSessionRegistry && $this->registry->announcesStraightAway()) {
-                    rescue(fn () => $this->registry->inner()->revoke($session->id));
+                    $this->withdraw($session->id);
                 }
 
                 throw $e;
@@ -1018,6 +1019,22 @@ class Sessions
     public function unlessGiven(SessionEndReason $reason, Closure $callback): mixed
     {
         return AnnouncingSessionRegistry::unlessGiven($reason, $callback);
+    }
+
+    /**
+     * Take back a record nobody used: revoked on the driver underneath, so
+     * no RegisteredSessionEnded goes out, and noted as announced, so
+     * keyring:sweep doesn't announce it later either. A failure is
+     * reported, not thrown: it's for a failure that's being thrown already.
+     */
+    public function withdraw(#[\SensitiveParameter] string $id): void
+    {
+        rescue(function () use ($id) {
+            $announcing = $this->registry instanceof AnnouncingSessionRegistry ? $this->registry : null;
+
+            ($announcing?->inner() ?? $this->registry)->revoke($id);
+            $announcing?->sweeper()?->announced([$id], [], now()->getTimestamp());
+        });
     }
 
     public function registry(): SessionRegistry
