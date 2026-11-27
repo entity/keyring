@@ -731,7 +731,7 @@ The events are in `Keyring\Events`:
 | `RegisteredSessionEnded` | `handle`, `handles`, `userId`, `userType`, `guard`, `deviceId`, `endedAt`, `reason`. One for every registered session that ends. See [Hearing About Ended Sessions](#hearing-about-ended-sessions). |
 | `EveryoneSignedOut` | `at`. Every user's sessions ended at once. |
 | `RememberMeReused` | `user`, `session` (the `RegisteredSession` that was ended), `handle` |
-| `ImpersonationStarted`, `ImpersonationEnded` | See [Impersonation](impersonation.md#security-log-and-events). |
+| `ImpersonationStarted`, `ImpersonationEnded` | `handle` (the impersonated session's), among others. See [Impersonation](impersonation.md#security-log-and-events). |
 | `SessionResumed` | `user`, `session` (the `RegisteredSession` a remembered browser carries on as), `handle` |
 | `AccessRefused` | `user`, `resource` (`device`, `session`, `authenticator`, or `email_verification`), `id`. A request for a device, session or authenticator that isn't the user's, answered with a 404, or a verification link made for another account. |
 | `LinkRefused` | `link` (the route's name), `reason` (`signature` or `expired`). A "this wasn't me" link that was refused. |

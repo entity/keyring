@@ -1133,13 +1133,14 @@ describe('ending by itself', function () {
     it('signs out when the session no longer says who is impersonating, ending the admin\'s parked session', function () {
         Event::fake([ImpersonationEnded::class]);
         $own = impersonating();
+        $handle = app(Sessions::class)->handle(record(session(Sessions::KEY)));
         session()->forget(Impersonation::KEY);
 
         $this->get('/whoami')->assertRedirect('/login');
 
         expect(record($own)->revokedAt)->not->toBeNull();
         Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->impersonator?->is($this->admin) && $event->user->is($this->user)
-            && $event->reason === ImpersonationEndReason::Lost && ! $event->returned);
+            && $event->reason === ImpersonationEndReason::Lost && ! $event->returned && $event->handle === $handle);
     });
 
     it('goes back when the impersonated session has no record', function () {
@@ -1581,15 +1582,31 @@ describe('the security log and events', function () {
         expect(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['expired']);
     });
 
-    it('fires events with who and why', function () {
+    it('fires events with who, why, and the impersonated session\'s handle', function () {
         Event::fake([ImpersonationStarted::class, ImpersonationEnded::class, RegisteredSessionEnded::class]);
         impersonating();
+        $handle = app(Sessions::class)->handle(record(session(Sessions::KEY)));
         stopImpersonating();
 
-        Event::assertDispatched(ImpersonationStarted::class, fn (ImpersonationStarted $event) => $event->impersonator->is($this->admin) && $event->user->is($this->user));
+        Event::assertDispatched(ImpersonationStarted::class, fn (ImpersonationStarted $event) => $event->impersonator->is($this->admin) && $event->user->is($this->user)
+            && $event->handle === $handle);
         Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->impersonator->is($this->admin) && $event->user->is($this->user)
-            && $event->reason === ImpersonationEndReason::Stopped && $event->returned);
-        Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => $event->reason === SessionEndReason::ImpersonationEnded && $event->userId === (string) $this->user->getKey());
+            && $event->reason === ImpersonationEndReason::Stopped && $event->returned && $event->handle === $handle);
+        Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => $event->reason === SessionEndReason::ImpersonationEnded && $event->userId === (string) $this->user->getKey()
+            && $event->handle === $handle);
+    });
+
+    // A browser that never comes back is announced by its record's
+    // RegisteredSessionEnded alone, with the handle ImpersonationStarted gave.
+    it('names the impersonated session in RegisteredSessionEnded by the handle ImpersonationStarted gave, when the sweep ends it', function () {
+        Event::fake([ImpersonationStarted::class, RegisteredSessionEnded::class]);
+        impersonating();
+        $this->travel(2)->hours();
+
+        $this->artisan('keyring:sweep')->assertSuccessful();
+
+        $started = Event::dispatched(ImpersonationStarted::class)->sole()[0];
+        Event::assertDispatched(RegisteredSessionEnded::class, fn (RegisteredSessionEnded $event) => $event->handle === $started->handle && $event->reason === SessionEndReason::Expired);
     });
 
     it('logs a refused start on the impersonator\'s account, with why and the ID asked for', function (Closure $refuse, ImpersonationRefusal $reason) {

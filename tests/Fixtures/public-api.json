@@ -623,12 +623,14 @@
             "verification"
         ],
         "Keyring\\Events\\ImpersonationEnded": [
+            "handle",
             "impersonator",
             "reason",
             "returned",
             "user"
         ],
         "Keyring\\Events\\ImpersonationStarted": [
+            "handle",
             "impersonator",
             "user"
         ],

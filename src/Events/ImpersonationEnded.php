@@ -17,6 +17,10 @@ use Keyring\Enums\ImpersonationEndReason;
  * A session that lost what it had parked still names them, from its
  * record. $user is null when the user can no longer be loaded, deleted
  * say. One of the two is always there.
+ *
+ * $handle is the impersonated session's handle, as ImpersonationStarted
+ * gave it: the same one Sessions::handle() gives and RegisteredSessionEnded
+ * carries.
  */
 class ImpersonationEnded
 {
@@ -27,5 +31,6 @@ class ImpersonationEnded
         public readonly ?Authenticatable $user,
         public readonly ImpersonationEndReason $reason,
         public readonly bool $returned,
+        public readonly string $handle,
     ) {}
 }
