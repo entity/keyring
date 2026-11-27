@@ -52,7 +52,8 @@ export async function enroll(factor: string, data: Record<string, unknown> = {})
 /**
  * Rename an authenticator. While the account's sign-in methods are frozen,
  * renaming an established one fails with a `422` holding `frozen`, unless
- * it comes with `proof` from `proveWithKey()` for `{ action: 'rename' }`.
+ * it comes with `proof` from `proveWithKey()` for
+ * `{ action: 'rename', target: id, name }`, with the same name.
  */
 export function renameAuthenticator(id: string, name: string, { proof }: { proof?: FreezeProof } = {}) {
   return json<{ authenticator: Authenticator }>('PATCH', routes.authenticator(id), { name, ...(proof !== undefined && { proof }) })

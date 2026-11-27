@@ -325,7 +325,7 @@ The contract's methods are:
 | `key` | none | The factor's key. |
 | `categories($authenticator)` | none | The categories it's expected to prove. Use `[Category::Address]` for a factor that NIST doesn't accept as an authenticator. |
 | `verify($attempt, $authenticator, $request)` | none | Checks the proof. Returns a `Verification`, or `null` when the proof is wrong. |
-| `phishingResistant($authenticator)` | `false` | Whether the proof is bound to your origin. Only WebAuthn should return `true`. An established authenticator that returns `true` can also [make a change while sign-in methods are frozen](authenticators.md#making-a-change-with-an-established-key), answering a `challenge()` kept for that change, so its `verify()` has to check the answer against that challenge and refuse one it has seen before. |
+| `phishingResistant($authenticator)` | `false` | Whether the proof is bound to your origin. Only WebAuthn should return `true`. An established authenticator that returns `true` can also [make a change while sign-in methods are frozen](authenticators.md#making-a-change-with-an-established-key), answering a `challenge()` kept for that change, so its `verify()` has to check the answer against that challenge. Keyring takes each challenge's answer once, so `verify()` doesn't have to refuse one it has seen before, though it may. |
 | `deviceBound($authenticator)` | `false` | Whether the secret can't leave its device, according to the authenticator itself. |
 | `attested($authenticator)` | `false` | Whether something else vouches for what the authenticator is, as a WebAuthn attestation checked when it was added does. AAL3 accepts a device-bound key only when this is also `true`. |
 | `priority` | `50` | Higher numbers are offered first. |

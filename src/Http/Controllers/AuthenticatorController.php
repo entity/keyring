@@ -164,7 +164,7 @@ class AuthenticatorController
     /**
      * Rename an authenticator, or choose the default. While the account is
      * frozen, renaming an established one takes a proof of an established
-     * method, for renaming this one.
+     * method, for giving this one this name.
      */
     public function update(Request $request, string $authenticator): StatusResponse
     {
@@ -176,7 +176,7 @@ class AuthenticatorController
             'default' => ['sometimes', 'boolean', Rule::prohibitedIf($authenticator->factor === RecoveryCodes::KEY)],
         ]);
 
-        $proved = array_key_exists('name', $changes) && $this->skips->proves($this->keyring->user(), $request, 'rename', $authenticator->id);
+        $proved = array_key_exists('name', $changes) && $this->skips->proves($this->keyring->user(), $request, 'rename', $authenticator->id, $changes['name']);
 
         $this->skippable($request, fn () => $this->changes->update($authenticator, [
             ...Arr::only($changes, 'name'),
@@ -204,18 +204,20 @@ class AuthenticatorController
     /**
      * A challenge for one of the user's established authenticators of this
      * factor to answer, to make one change while the account is frozen:
-     * "remove" or "rename" an authenticator (its ID as "target"), or
-     * "replace" a factor's (its key). The change's own request then sends
-     * the answer as "proof". For a key, it's the options its browser signs.
+     * "remove" an authenticator (its ID as "target"), "rename" one to
+     * "name", or "replace" a factor's (its key). The change's own request
+     * then sends the answer as "proof". For a key, it's the options its
+     * browser signs.
      */
     public function proofOptions(Request $request, string $factor): JsonResponse
     {
         $change = Input::validate($request, [
             'action' => ['required', 'string', Rule::in(FreezeSkips::ACTIONS)],
             'target' => ['required', 'string', 'max:255'],
+            'name' => ['required_if:action,rename', 'prohibited_unless:action,rename', ...Factor::nameRules()],
         ]);
 
-        return new JsonResponse($this->skips->options($this->keyring->user(), $request, $factor, $change['action'], $change['target']));
+        return new JsonResponse($this->skips->options($this->keyring->user(), $request, $factor, $change['action'], $change['target'], $change['name'] ?? null));
     }
 
     /**

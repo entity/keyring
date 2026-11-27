@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Changes;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -22,7 +23,6 @@ use Keyring\Sessions\Sessions;
 use Keyring\Support\Duration;
 use Keyring\Support\FactorCheck;
 use Keyring\Support\Input;
-use Keyring\WebAuthn\SpentChallenges;
 
 /**
  * Making one change while the account is frozen, for an owner who proves
@@ -34,11 +34,16 @@ use Keyring\WebAuthn\SpentChallenges;
  *
  * The proof comes in the request that makes the change, as "proof", and
  * only counts for that change. A key answers a challenge issued for that
- * change alone ("remove" or "rename" an authenticator, or "replace" a
- * factor's), kept in this session with the account it's for. Nothing about
- * it is remembered for the session afterwards, so a copy of the session,
- * however recently it was verified, can't make a change the owner didn't
- * sign.
+ * change alone ("remove" an authenticator, "rename" one to a given name,
+ * or "replace" a factor's), kept in this session with the account it's
+ * for. Nothing about it is remembered for the session afterwards, so a
+ * copy of the session, however recently it was verified, can't make a
+ * change the owner didn't sign.
+ *
+ * A challenge is answered once, whichever copy of the session it comes
+ * back in, and however many requests bring it at once: its first answer
+ * claims it on the server, in the rate limiter's store, for every kind of
+ * key, a factor of your own's included.
  */
 class FreezeSkips
 {
@@ -52,6 +57,7 @@ class FreezeSkips
         protected KeyringManager $keyring,
         protected Sessions $sessions,
         protected FactorCheck $checks,
+        protected CacheFactory $cache,
     ) {}
 
     /**
@@ -69,13 +75,14 @@ class FreezeSkips
      * A challenge for one of the user's established authenticators of this
      * factor to answer, good for this one change: for a key, the options
      * its browser signs. It's kept in the session until it's answered, for
-     * as long as a usernameless sign in's would be.
+     * as long as a usernameless sign in's would be. A rename is to $name,
+     * and only that name.
      *
      * @return array<string, mixed>
      *
      * @throws ValidationException
      */
-    public function options(Authenticatable&Model $user, Request $request, string $factor, string $action, string $target): array
+    public function options(Authenticatable&Model $user, Request $request, string $factor, string $action, string $target, ?string $name = null): array
     {
         abort_unless($this->keyring->hasFactor($factor), 404);
 
@@ -86,7 +93,10 @@ class FreezeSkips
             throw ValidationException::withMessages(['proof' => __('keyring::keyring.freeze_proof_not_established')]);
         }
 
-        $attempt = Attempt::start(Purpose::Confirm, $user);
+        // Its ID is the challenge's, so a factor that remembers what it has
+        // answered sees the same one when it comes back.
+        $nonce = Str::random(40);
+        $attempt = $this->attemptFor($user, $nonce, now()->getTimestamp() + $this->lifetime());
 
         // A key's browser may answer with any of these, never a newer key.
         if ($proving instanceof WebAuthn) {
@@ -98,10 +108,11 @@ class FreezeSkips
         }
 
         $request->session()->put(static::OPTIONS.'.'.$factor, [
+            'nonce' => $nonce,
             'state' => $attempt->state($factor),
-            'change' => $this->change($action, $target),
+            'change' => $this->change($action, $target, $name),
             'user' => $this->owner($user),
-            'expires_at' => now()->getTimestamp() + $this->lifetime(),
+            'expires_at' => $attempt->expiresAt,
         ]);
 
         return $props;
@@ -118,13 +129,14 @@ class FreezeSkips
      * code is checked against the first, and a key's answer may come from
      * any of them.
      *
-     * A challenge is used up by the first answer, right or wrong, and a
-     * code works once, as they do everywhere else. Each try counts against
-     * the factor's rate limits, as a step-up's would.
+     * A challenge is used up by the first answer, right or wrong, in any
+     * copy of the session, and a code works once, as they do everywhere
+     * else. Each try counts against the factor's rate limits, as a
+     * step-up's would. A rename is proved for $name, the name it gives.
      *
      * @throws ValidationException
      */
-    public function proves(Authenticatable&Model $user, Request $request, string $action, string $target): bool
+    public function proves(Authenticatable&Model $user, Request $request, string $action, string $target, ?string $name = null): bool
     {
         if (Input::get($request, 'proof') === null) {
             return false;
@@ -156,7 +168,7 @@ class FreezeSkips
             throw ValidationException::withMessages(['proof' => __('keyring::keyring.freeze_proof_not_established')]);
         }
 
-        $attempt = $this->attempt($user, $factor, $keys->firstOrFail(), $issued, $this->change($action, $target));
+        $attempt = $this->attempt($user, $factor, $keys->firstOrFail(), $issued, $this->change($action, $target, $name));
 
         if ($attempt === null) {
             throw $this->invalid();
@@ -179,7 +191,7 @@ class FreezeSkips
      * none: it's missing, has expired, or was issued for another account or
      * another change. A code from an app needs none.
      *
-     * @param  array{state: array<string, mixed>, change: string, user: string, expires_at: int}|null  $issued
+     * @param  array{nonce: string, state: array<string, mixed>, change: string, user: string, expires_at: int}|null  $issued
      */
     protected function attempt(Authenticatable&Model $user, Factor $factor, Authenticator $authenticator, ?array $issued, string $change): ?Attempt
     {
@@ -187,22 +199,11 @@ class FreezeSkips
             return Attempt::start(Purpose::Confirm, $user);
         }
 
-        if ($issued === null) {
+        if ($issued === null || $issued['change'] !== $change || $issued['user'] !== $this->owner($user)) {
             return null;
         }
 
-        // Used up here, so an answer to a challenge for another change can't
-        // be sent again with the change it was for, from another copy of
-        // the session.
-        if ($issued['change'] !== $change || $issued['user'] !== $this->owner($user)) {
-            if (is_string($options = $issued['state']['options'] ?? null)) {
-                app(SpentChallenges::class)->spend($options, $issued['expires_at']);
-            }
-
-            return null;
-        }
-
-        $attempt = new Attempt(Str::random(40), Purpose::Confirm, config('keyring.guard'), $user->getAuthIdentifier(), $issued['expires_at']);
+        $attempt = $this->attemptFor($user, $issued['nonce'], $issued['expires_at']);
 
         foreach ($issued['state'] as $key => $value) {
             $attempt->put($factor->key(), (string) $key, $value);
@@ -211,20 +212,43 @@ class FreezeSkips
         return $attempt;
     }
 
+    protected function attemptFor(Authenticatable&Model $user, string $nonce, int $expiresAt): Attempt
+    {
+        return new Attempt($nonce, Purpose::Confirm, config('keyring.guard'), $user->getAuthIdentifier(), $expiresAt);
+    }
+
     /**
-     * Take the factor's challenge out of the session, if it's still good.
+     * Take the factor's challenge out of the session, and claim it, if it's
+     * still good. Null when there's none, it has expired, or it was claimed
+     * before: answered from another copy of the session, or by another
+     * request at the same time. The claim is kept in the rate limiter's
+     * store until the challenge would have expired, and add() writes only
+     * when nothing is there, so of two requests that bring one challenge,
+     * one finds it claimed.
      *
-     * @return array{state: array<string, mixed>, change: string, user: string, expires_at: int}|null
+     * @return array{nonce: string, state: array<string, mixed>, change: string, user: string, expires_at: int}|null
      */
     protected function pullOptions(Request $request, string $factor): ?array
     {
         $issued = $request->session()->pull(static::OPTIONS.'.'.$factor);
 
-        if (! is_array($issued) || ! is_array($issued['state'] ?? null) || ! is_int($issued['expires_at'] ?? null) || $issued['expires_at'] < now()->getTimestamp()) {
+        if (! is_array($issued) || ! is_string($issued['nonce'] ?? null) || ! is_array($issued['state'] ?? null)
+            || ! is_int($issued['expires_at'] ?? null) || $issued['expires_at'] < now()->getTimestamp()) {
+            return null;
+        }
+
+        $claimed = $this->cache->store(config('cache.limiter'))->add(
+            'keyring:freeze-proof:'.sha1($issued['nonce']),
+            true,
+            max(1, $issued['expires_at'] - now()->getTimestamp()) + 1,
+        );
+
+        if (! $claimed) {
             return null;
         }
 
         return [
+            'nonce' => $issued['nonce'],
             'state' => $issued['state'],
             'change' => (string) ($issued['change'] ?? ''),
             'user' => (string) ($issued['user'] ?? ''),
@@ -285,9 +309,13 @@ class FreezeSkips
         );
     }
 
-    protected function change(string $action, string $target): string
+    /**
+     * The change a challenge is for. A rename is bound to the name it
+     * gives, so its proof can't give the key another.
+     */
+    protected function change(string $action, string $target, ?string $name = null): string
     {
-        return $action.':'.$target;
+        return $action.':'.$target.($name === null ? '' : ':'.hash('sha256', $name));
     }
 
     protected function owner(Authenticatable&Model $user): string

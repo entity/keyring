@@ -73,9 +73,9 @@ function plantPasskey(User $user): Authenticator
 /**
  * @return array<string, mixed>
  */
-function skipOptions(string $action, string $target, string $factor = 'passkey'): array
+function skipOptions(string $action, string $target, string $factor = 'passkey', ?string $name = null): array
 {
-    return test()->postJson(route('keyring.authenticators.proof-options', $factor), ['action' => $action, 'target' => $target])
+    return test()->postJson(route('keyring.authenticators.proof-options', $factor), ['action' => $action, 'target' => $target, ...($name === null ? [] : ['name' => $name])])
         ->assertOk()
         ->json('options');
 }
@@ -354,6 +354,12 @@ describe('a frozen account', function () {
         $this->postJson(route('keyring.authenticators.proof-options', 'passkey'), ['action' => 'nope', 'target' => ['x']])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['action', 'target']);
+
+        // A rename is for the name it gives, and only a rename has one.
+        $this->postJson(route('keyring.authenticators.proof-options', 'passkey'), ['action' => 'rename', 'target' => $this->spare->id])
+            ->assertJsonValidationErrors('name');
+        $this->postJson(route('keyring.authenticators.proof-options', 'passkey'), ['action' => 'remove', 'target' => $this->spare->id, 'name' => 'Laptop'])
+            ->assertJsonValidationErrors('name');
     });
 
     it('renames an established method with a proof signed for renaming it', function () {
@@ -365,7 +371,12 @@ describe('a frozen account', function () {
         $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['name' => 'Laptop', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertJsonValidationErrors('proof');
 
-        $credential = $this->key->assert(skipOptions('rename', $this->spare->id));
+        // Signed for another name.
+        $credential = $this->key->assert(skipOptions('rename', $this->spare->id, name: 'Passkey to remove'));
+        $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['name' => 'Laptop', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+
+        $credential = $this->key->assert(skipOptions('rename', $this->spare->id, name: 'Laptop'));
         $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['name' => 'Laptop', 'proof' => ['factor' => 'passkey', 'credential' => $credential]])
             ->assertOk();
 
@@ -374,7 +385,7 @@ describe('a frozen account', function () {
     });
 
     it('doesn\'t spend a proof on choosing the default', function () {
-        $options = skipOptions('rename', $this->spare->id);
+        $options = skipOptions('rename', $this->spare->id, name: 'Laptop');
 
         $this->patchJson(route('keyring.authenticators.update', $this->spare->id), ['default' => true, 'proof' => ['factor' => 'passkey', 'credential' => []]])->assertOk();
 
@@ -560,6 +571,34 @@ describe('with a phishing resistant factor of the app\'s own', function () {
             ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
 
         expect($this->codes->fresh())->not->toBeNull();
+    });
+
+    it('takes its answer once, though the factor would take it again', function () {
+        $nonce = $this->postJson(route('keyring.authenticators.proof-options', 'token'), ['action' => 'rename', 'target' => $this->token->id, 'name' => 'Spare'])->json('nonce');
+        $earlier = session()->all();
+        $proof = ['factor' => 'token', 'signature' => SigningToken::sign('token-secret', $nonce)];
+
+        $this->patchJson(route('keyring.authenticators.update', $this->token->id), ['name' => 'Spare', 'proof' => $proof])->assertOk();
+        $this->patchJson(route('keyring.authenticators.update', $this->token->id), ['name' => 'Token'])->assertJsonPath('frozen.skip', ['token']);
+
+        // From a copy of the session that still holds the challenge, as a
+        // request sent alongside the first would be.
+        sendBackSession($earlier);
+        $this->patchJson(route('keyring.authenticators.update', $this->token->id), ['name' => 'Spare', 'proof' => $proof])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_invalid')]);
+    });
+
+    it('gives the factor the same attempt it issued the challenge in', function () {
+        $this->postJson(route('keyring.authenticators.proof-options', 'token'), ['action' => 'remove', 'target' => $this->codes->id]);
+        $id = session(FreezeSkips::OPTIONS.'.token')['nonce'];
+        $seen = null;
+        Event::listen(FactorFailed::class, function (FactorFailed $event) use (&$seen) {
+            $seen = $event->attempt->id;
+        });
+
+        removeWithProof($this->codes, ['factor' => 'token', 'signature' => 'nope'])->assertJsonValidationErrors('proof');
+
+        expect($seen)->toBe($id);
     });
 
     it('refuses a wrong answer as a failure', function () {

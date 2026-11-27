@@ -295,7 +295,7 @@ await removeAuthenticator(added.authenticator.id)
 | `renameAuthenticator(id, name, { proof }?)` | `PATCH` with `name`. Resolves to `{ authenticator }`. Renaming an established authenticator while frozen needs `proof` from `proveWithKey()`. |
 | `makeDefault(id)` | `PATCH` with `default: true`. Resolves to `{ authenticator }`. |
 | `removeAuthenticator(id, password?, { signOutOthers, proof }?)` | `DELETE`. Removing the user's last second factor also needs their password. `signOutOthers: true` [ends the user's other sessions](authenticators.md#signing-out-other-sessions) too. When adding, pass `sign_out_others: true` in `data` to `confirmEnrollment()` or `enroll()`. `proof` comes from `proveWithKey()`. |
-| `proveWithKey(factor, { action, target })` | `POST /user/authenticators/{factor}/proof-options`, then the browser's ceremony. Resolves to a `FreezeProof`, `{ factor, credential }`, for the one change it was asked for. See below. |
+| `proveWithKey(factor, { action, target, name? })` | `POST /user/authenticators/{factor}/proof-options`, then the browser's ceremony. Resolves to a `FreezeProof`, `{ factor, credential }`, for the one change it was asked for. See below. |
 | `frozenChanges(error)` | The `FrozenChanges` a request was refused for, or `null` when it wasn't refused as frozen. |
 | `isWebAuthn(enrollment)` | Whether `confirmEnrollment()` runs the browser ceremony: true when the server sent WebAuthn creation options, whatever the factor's key. |
 
@@ -325,7 +325,7 @@ const proof = await proveWithKey('passkey', { action: 'remove', target: id })
 await removeAuthenticator(id, undefined, { proof })
 ```
 
-For a rename, prove `{ action: 'rename', target: id }` and pass the proof to `renameAuthenticator(id, name, { proof })`. For new recovery codes, prove `{ action: 'replace', target: 'recovery' }` and pass the proof to `beginEnrollment('recovery', { proof })`, or to `enroll()`. The confirm needs nothing more, and never takes a proof: if it's refused as frozen, begin again with one. Where the server allows an authenticator app (`skip_with_totp`), `skip` lists `totp`. Send `{ factor: 'totp', code }` as the proof instead, with no ceremony, and `authenticator`, the app's ID, when the user has more than one.
+For a rename, prove `{ action: 'rename', target: id, name }` and pass the proof to `renameAuthenticator(id, name, { proof })` with the same name. For new recovery codes, prove `{ action: 'replace', target: 'recovery' }` and pass the proof to `beginEnrollment('recovery', { proof })`, or to `enroll()`. The confirm needs nothing more, and never takes a proof: if it's refused as frozen, begin again with one. Where the server allows an authenticator app (`skip_with_totp`), `skip` lists `totp`. Send `{ factor: 'totp', code }` as the proof instead, with no ceremony, and `authenticator`, the app's ID, when the user has more than one.
 
 If `recoveryCodes` comes back, show the codes and ask the user to save them. If `continue` comes back too, it's the page the user was going to when Keyring sent them to enroll, and the account can now meet what sent them. Offer it as a "Continue" link once the codes are saved. See [Carrying On Afterwards](policies.md#carrying-on-afterwards).
 

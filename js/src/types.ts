@@ -39,12 +39,12 @@ export interface FrozenChanges {
  * A change an established sign-in method can make while the account's
  * sign-in methods are frozen: removing or renaming an authenticator, by
  * its ID, or replacing a factor's, by its key (`recovery` for new recovery
- * codes).
+ * codes). A rename gives the `name` it renames to, and its proof only
+ * works for that name.
  */
-export interface ProvableChange {
-  action: 'remove' | 'replace' | 'rename'
-  target: string
-}
+export type ProvableChange =
+  | { action: 'remove' | 'replace', target: string }
+  | { action: 'rename', target: string, name: string }
 
 /**
  * What the change's own request sends as `proof`: a key's answer to a

@@ -248,6 +248,20 @@ describe('enrolling', () => {
     expect(requests[1].body).toEqual({ name: 'Codes' })
   })
 
+  test('asks for a rename\'s challenge with the name it gives', async () => {
+    answers.push(
+      { status: 200, body: { options: { challenge: 'AQID', rpId: 'localhost', allowCredentials: [{ id: 'BAU', type: 'public-key' }] } } },
+      { status: 200, body: { authenticator: { id: 'a1', name: 'Laptop' } } },
+    )
+
+    const proof = await proveWithKey('passkey', { action: 'rename', target: 'a1', name: 'Laptop' })
+    await renameAuthenticator('a1', 'Laptop', { proof })
+
+    expect(requests[0].body).toEqual({ action: 'rename', target: 'a1', name: 'Laptop' })
+    expect(requests[1].body.name).toBe('Laptop')
+    expect(requests[1].body.proof.credential.id).toBe('key-1')
+  })
+
   test('renames a frozen authenticator with a proof', async () => {
     answers.push({ status: 200, body: { authenticator: { id: 'a1', name: 'Laptop' } } })
 
