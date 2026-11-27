@@ -217,7 +217,7 @@ $request->validate(['current_password' => ['required', 'string', new CurrentPass
 
 Your action doesn't need to check `current_password` again. An action that still does, such as one carried over from another package, keeps working, because it's given the same input.
 
-A user without a password, for example one who only uses passkeys, can set one with only the fresh verification.
+A user without a password, for example one who only uses passkeys, can set one with only the fresh verification. So can whoever holds a copy of their session, so that first password counts as a new sign-in method. It isn't [established](authenticators.md#established-authenticators) for 7 days, changed in the meantime or not: it [freezes](authenticators.md#frozen-sign-in-methods) the account's sign-in methods, an `ifEnrolled()` policy doesn't ask for it, and [adding a second factor](authenticators.md#the-password-for-a-first-second-factor) doesn't take it. A password reset makes it established at once. Only a first password set through `PasswordChanges::change()` is dated this way. One your own code sets some other way, such as at registration, is established from the start.
 
 Keyring runs your action as one of its own flows, so the action may change the protected `password` attribute, and only that. Changing `email` there still throws. The action must either save a new password or throw a `ValidationException`. If it returns without saving, Keyring throws a `LogicException`, because everything that follows assumes the password changed.
 

@@ -114,6 +114,8 @@ Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a
 
 So adding a second factor (an authenticator app, a passkey, a security key, or a factor of your own) takes the current password, typed for that enrollment, while the account has no [established](#established-authenticators) second factor. That's an account with only a password, or one whose second factors are all from the last 7 days, since a copy of the session could have added the first of those too. Recovery codes and an emailed code aren't second factors, so they never need it.
 
+A first password set from a session (with no current one to type, see [Changing the Password](protected-changes.md#changing-the-password)) doesn't count for this until it's [established](#established-authenticators), 7 days later. A copy of the session could have chosen it, so typing it proves nothing. Until then the account adds factors as one without a password does, and a factor added that way isn't asked for at sign in until it's established.
+
 Linking an account at an [identity provider](sso.md#linking-and-unlinking) takes it on the same terms. A link is never a second factor, but it signs in without the password, so a copy of the session could otherwise link an account of its own and keep signing in after the session ends. Beside an established second factor, a sign in with the link is still asked for that factor, so a copy of the session gains nothing it didn't have and the password isn't needed. A link never counts as the established second factor itself.
 
 Send it as `password` when beginning. A recent sign in or step-up doesn't count in its place, because whoever copied the session has those too. A missing password is a `422` on `password` (`keyring::keyring.password_to_add_factor`). A wrong one is a `422` on `password` too (`validation.current_password`). It counts against the password's rate limits, as a step-up's would, so too many get a `429`, with `keyring::keyring.locked` once it reaches the cap on failures in a row, which locks password sign in as it would at the login form and dispatches `AccountLocked`. It dispatches `FactorFailed` for the password, and `EnrollmentRefused` with the reason `password`.
@@ -216,7 +218,7 @@ Signing in counts as a [fresh verification](step-up.md#fresh-verification), so a
 
 So Keyring freezes an account's sign-in methods for a while, as some large providers do. The account is frozen while either of these is true:
 
-- It has an authenticator that isn't [established](#established-authenticators) yet. That means one added in the last 7 days, a newly linked [identity provider](sso.md#linking-and-unlinking) included.
+- It has an authenticator that isn't [established](#established-authenticators) yet. That means one added in the last 7 days, a newly linked [identity provider](sso.md#linking-and-unlinking) included, or a first password set from a session in the last 7 days.
 - In the last 7 days, it removed an established authenticator, replaced one, or replaced recovery codes that had codes left.
 
 While it's frozen, these are refused:
@@ -262,18 +264,19 @@ $freeze?->message();  // what the user is told
 
 The `authenticator_changes.established_after` option sets the 7 days. See [Configuration](configuration.md#account-changes-and-enrollment). Setting it to `0` turns the freeze off, and with it the protection it gives.
 
-When each account last lost something established is kept in `keyring_sign_in_changes`, one row per user. `keyring:prune` deletes a row once it no longer holds anything back.
+When each account last lost something established, and when it got a first password from a session, is kept in `keyring_sign_in_changes`, one row per user. `keyring:prune` deletes a row once it no longer holds anything back.
 
 ### Established Authenticators
 
-An authenticator is established once the account has had it for `authenticator_changes.established_after`. That's 7 days by default, from when it was added (`created_at`). A set of recovery codes goes by when that set was made. An emailed code and the password aren't factors in this sense, so they always count as established. New recovery codes don't freeze the account on their own.
+An authenticator is established once the account has had it for `authenticator_changes.established_after`. That's 7 days by default, from when it was added (`created_at`). A set of recovery codes goes by when that set was made. An emailed code always counts as established, and so does the password, except a first one set from a session, with no current password to type. That one is established 7 days after it was set, changed since or not, or once a password reset proves the address. New recovery codes don't freeze the account on their own.
 
 An authenticator that isn't established works like any other. It signs in, and it can confirm a [fresh verification](step-up.md#fresh-verification). It just doesn't raise the bar yet:
 
 - [`noDowngrade()`](policies.md#no-downgrade) only asks for a passkey or security key once the account has an established one.
 - A fresh verification only asks for a key that can't leave its device when that key is established.
 - Under a policy with [`ifEnrolled()`](policies.md#only-when-enrolled), only established authenticators decide what the policy asks for. A newer one is offered, and counts when it's used, but doesn't add a kind of factor to what's asked, and never counts as phishing resistant, device bound or attested. So `factors(3)->ifEnrolled()` asks a user with a password and an established authenticator app for those two, even after a passkey is added, and `aal2()->phishingResistant()->ifEnrolled()`, `aal2()->deviceBound()->ifEnrolled()` and `aal3()->ifEnrolled()` only ask for a key once the account has an established one that qualifies.
-- The exception is an account with a password and no established second factor, where adding one takes [the password](#the-password-for-a-first-second-factor). A copy of a session can't add one there, so a new factor is asked for as a factor straight away: a user with only a password who adds an authenticator app needs it at their next sign in under `aal2()->ifEnrolled()`.
+- The exception is an account with an established password and no established second factor, where adding one takes [the password](#the-password-for-a-first-second-factor). A copy of a session can't add one there, so a new factor is asked for as a factor straight away: a user with only a password who adds an authenticator app needs it at their next sign in under `aal2()->ifEnrolled()`. A factor `add()` saved without the password checked, such as one added before the account had a password, keeps that in its `meta` (`AuthenticatorChanges::ADDED_WITHOUT_PASSWORD`), and is never asked for until it's established, whatever password the account has since. A factor your own code saves some other way, as `keyring:import` does, isn't marked.
+- A first password set from a session isn't asked for at all until it's established.
 - A requirement your app asks for outright, such as a policy without `ifEnrolled()` or the `keyring:aal3` and `keyring:aal2,device-bound` middleware, is met by any key that qualifies, new or not. It isn't worked out from the user's keyring, so a new key can't make it stricter.
 
 That goes for the owner's own new key too. For its first 7 days, a security key or passkey the owner just added isn't asked for at sign in under `noDowngrade()` or an `ifEnrolled()` policy, or at a fresh verification, so their password and authenticator app still work. Nor is any other factor they add beside an established second factor. It's accepted when they use it. Keyring can't tell the owner's new key from one a copy of their session added.
@@ -313,7 +316,7 @@ app(AuthenticatorChanges::class)->add($user, $factor, $authenticator, ignoreFree
 app(AuthenticatorChanges::class)->update($authenticator, ['name' => 'Work phone'], ignoreFreeze: true);
 ```
 
-Only do this from code the user can't reach on their own. Keyring's own routes only pass it for a request that proved an established key for that change. `add()` also needs `passwordConfirmed: true` while the account has no established second factor (see [The Password for a First Second Factor](#the-password-for-a-first-second-factor)). The change still freezes the account afterwards, and every other check, such as keeping a way to sign in, still applies.
+Only do this from code the user can't reach on their own. Keyring's own routes only pass it for a request that proved an established key for that change. `add()` also needs `passwordConfirmed: true` while the account has no established second factor (see [The Password for a First Second Factor](#the-password-for-a-first-second-factor)). A factor added without it is marked as one a copy of a session could have added, so an `ifEnrolled()` policy doesn't ask for it until it's [established](#established-authenticators). Pass it when your code has made sure who it's adding for. The change still freezes the account afterwards, and every other check, such as keeping a way to sign in, still applies.
 
 ## Signing Out Other Sessions
 
