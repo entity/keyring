@@ -290,7 +290,7 @@ These only matter with `Features::impersonation()` on, and once [`Keyring::allow
 | Key | Meaning |
 |---|---|
 | `lifetime` | How long an impersonation lasts before it ends by itself and goes back to the impersonator. It's never longer than `sessions.absolute`. See [The Time Limit](impersonation.md#the-time-limit). |
-| `show_in_sessions` | Whether the impersonated session is in the user's own [sessions list](impersonation.md#the-sessions-list), marked with who is in it, for the user to end. With `false` it's left out, but still ends with the rest of their sessions. |
+| `show_in_sessions` | Whether the impersonated session is in the user's own [sessions list](impersonation.md#the-sessions-list), marked with who is in it, for the user to end. With `false` it's left out, but still ends with the rest of their sessions, and still counts in how many "sign out everywhere else" says it ended. |
 | `middleware` | What starting one takes, on top of being signed in and not impersonating already. By default, two factors proved in the last 15 minutes. |
 | `redirect_to` | Where starting goes. `null` is `home`. |
 | `return_to` | Where stopping, or running out, goes. `null` is `home`. |

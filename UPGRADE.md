@@ -44,6 +44,8 @@ Before you turn it on with the `database` session driver, run `keyring:install` 
 
 With the feature on, Keyring registers `POST /impersonate/{user}` and `POST|DELETE /impersonate`. A route of your own at either path, such as an impersonation package's, needs to move or go first.
 
+With the feature on, a [`SignedOutResponse`](docs/sign-in-flow.md#responses) of your own can also be built with `impersonator_session_ended` or `lost` as its `reason`, for a browser signed out because an impersonation had nothing to go back to. One that matches on the reason needs to handle them, or a default.
+
 A few things change whether or not you turn it on:
 
 - Each session in `GET /user/sessions`, and in `Sessions::list()`, has two new keys, `impersonated` and `impersonator`. Code that compares whole entries, such as a test with `assertExactJson`, needs them.

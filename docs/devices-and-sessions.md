@@ -468,7 +468,7 @@ Keyring calls `replace`, `revokeAll`, and `revokeDevice`, and it stores a new se
 
 ### How Many Sessions
 
-An account can be signed in 100 times at once (`sessions.max`). A sign in beyond that still succeeds. It ends whichever of the account's sessions has gone unused longest. That record is revoked, so the browser is signed out on its next request, with `revoked` as the reason. A session that has already [idled out](#timeouts) goes before one that can still be carried on.
+An account can be signed in 100 times at once (`sessions.max`). A sign in beyond that still succeeds. It ends whichever of the account's sessions has gone unused longest. That record is revoked, so the browser is signed out on its next request, with `revoked` as the reason. A session that has already [idled out](#timeouts) goes before one that can still be carried on. A session someone is [impersonating](impersonation.md#what-happens-to-the-sessions) the user in isn't one of theirs here: it doesn't count, and isn't ended to make room.
 
 ```php
 'sessions' => [
