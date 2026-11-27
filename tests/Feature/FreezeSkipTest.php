@@ -14,6 +14,7 @@ use Keyring\Events\FactorFailed;
 use Keyring\Facades\Keyring;
 use Keyring\Factors\Password;
 use Keyring\Factors\RecoveryCodes;
+use Keyring\Factors\SingleSignOn;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
 use Keyring\Login\Attempt;
@@ -537,6 +538,50 @@ describe('with an authenticator app', function () {
 
         expect(fn () => removeWithProof($this->other, ['factor' => 'totp', 'code' => '000000']))->toThrow(RuntimeException::class, 'Down')
             ->and(fn () => removeWithProof($this->other, ['factor' => 'totp', 'code' => '000000']))->toThrow(RuntimeException::class, 'Down');
+    });
+});
+
+// A link at an identity provider is a sign-in method like any other: one
+// the account has had a while is frozen, and a newer one can always go.
+// It never proves a change itself, since it never answers a challenge.
+describe('with a link at an identity provider', function () {
+    beforeEach(function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, SingleSignOn::class]);
+        $this->link = Authenticator::factory()->sso()->established()->for($this->user, 'authenticatable')->create();
+        signInForSkip($this->totp);
+        plantPasskey($this->user);
+    });
+
+    it('unlinks an established one only with a proof from an established key', function () {
+        $this->deleteJson(route('keyring.authenticators.destroy', $this->link->id))
+            ->assertUnprocessable()
+            ->assertJsonPath('frozen.reason', 'new-authenticator')
+            ->assertJsonPath('frozen.skip', ['passkey']);
+        expect($this->link->fresh())->not->toBeNull();
+
+        removeWithProof($this->link, ['factor' => 'passkey', 'credential' => $this->key->assert(skipOptions('remove', $this->link->id))])->assertOk();
+
+        expect($this->link->fresh())->toBeNull();
+    });
+
+    it('unlinks a newer one, frozen or not', function () {
+        $newer = Authenticator::factory()->sso(subject: 'someone else')->for($this->user, 'authenticatable')->create();
+
+        $this->deleteJson(route('keyring.authenticators.destroy', $newer->id))->assertOk();
+    });
+
+    it('never lets a link prove a change, even one that says it\'s phishing resistant', function () {
+        Keyring::factors([Password::class, WebAuthn::passkeys(), Totp::class, RecoveryCodes::class, new class extends SingleSignOn
+        {
+            public function phishingResistant(Authenticator $authenticator): bool
+            {
+                return true;
+            }
+        }]);
+
+        $this->deleteJson(route('keyring.authenticators.destroy', $this->codes->id))->assertJsonPath('frozen.skip', ['passkey']);
+        $this->postJson(route('keyring.authenticators.proof-options', 'sso'), ['action' => 'remove', 'target' => $this->codes->id])
+            ->assertJsonValidationErrors(['proof' => __('keyring::keyring.freeze_proof_not_established')]);
     });
 });
 

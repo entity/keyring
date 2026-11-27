@@ -13,6 +13,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Keyring\Contracts\Factor;
+use Keyring\Contracts\PrimaryFactor;
 use Keyring\Enums\Purpose;
 use Keyring\Factors\Totp;
 use Keyring\Factors\WebAuthn;
@@ -287,11 +288,17 @@ class FreezeSkips
      * factor of your own that says it's phishing resistant. The challenge
      * kept for this change alone is what binds its answer to it. A code
      * from an authenticator app can be phished as it's typed, so that's off
-     * unless "skip_with_totp" says. No other code ever can.
+     * unless "skip_with_totp" says. No other code ever can, and nor can a
+     * factor that never answers a challenge, like an identity provider:
+     * its proof only comes back with a callback.
      */
     protected function mayProve(Authenticator $authenticator): bool
     {
         $factor = $authenticator->factor();
+
+        if ($factor instanceof PrimaryFactor && ! $factor->answersChallenges()) {
+            return false;
+        }
 
         return $factor->phishingResistant($authenticator)
             || ($factor instanceof Totp && (bool) config('keyring.authenticator_changes.skip_with_totp'));
