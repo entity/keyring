@@ -393,6 +393,7 @@ it('leaves nothing of the admin signed in when they stop impersonating as they\'
             'remembered' => false,
             'started_at' => $now,
             'expires_at' => $now + 3600,
+            'password' => Keyring::guard()->hashPasswordForCookie($admin->getAuthPassword()),
             'parked' => [SessionAssurance::ACTIVE => $now],
         ],
     ];
