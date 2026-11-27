@@ -197,12 +197,32 @@ class UserKeyring
      * of it when they can, else the strongest version they can give.
      * Recovery codes aren't counted on, or a user with nothing else beyond
      * one factor would spend a code every time.
+     *
+     * A key that isn't established yet counts as a factor, but not as a
+     * phishing-resistant, device-bound or attested one: otherwise a key
+     * added from a stolen session would be all an ifEnrolled() policy that
+     * asks for one took, and the owner, who doesn't have it, would be shut
+     * out. It still proves all that when it's used.
      */
     public function reachable(Requirement $requirement): Requirement
     {
-        $provable = $this->withoutFallbacks()->provable();
+        $keyring = $this->withoutFallbacks();
+        $provable = array_values($keyring->all()->map($keyring->provableNow(...))->all());
 
         return $requirement->isMetBy($provable) ? $requirement : $requirement->limitedTo($provable);
+    }
+
+    /**
+     * What the authenticator would prove, as far as the account can count
+     * on it yet: a key that isn't established is a factor and nothing more.
+     */
+    protected function provableNow(Authenticator $authenticator): Verification
+    {
+        $verification = Verification::of($authenticator);
+
+        return $this->isEstablished($authenticator)
+            ? $verification
+            : new Verification($verification->factor, $verification->authenticator, $verification->categories, at: $verification->at);
     }
 
     /**

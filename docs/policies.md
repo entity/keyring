@@ -86,7 +86,7 @@ The [step-up middleware](step-up.md#raising-assurance) asks for these levels by 
 
 With `Requirement::aal2()->ifEnrolled()`, a user with only a password signs in with the password. Once they add an authenticator app, they need both.
 
-With `Requirement::aal2()->phishingResistant()->ifEnrolled()`, a user with a password and an authenticator app has no key to meet it, so they still need both. Recovery codes don't count as that second factor. A user with nothing beyond a password signs in with the password, rather than spending a code every time.
+With `Requirement::aal2()->phishingResistant()->ifEnrolled()`, a user with a password and an authenticator app has no key to meet it, so they still need both. Recovery codes don't count as that second factor. A user with nothing beyond a password signs in with the password, rather than spending a code every time. Only a key the account has had for 7 days counts here (an [established](authenticators.md#established-authenticators) one). A newer key is a second factor like any other, but doesn't make the user need a key, so one added from a stolen session can't shut out the owner's password and app. The same goes for `deviceBound()` and `aal3()` with `ifEnrolled()`.
 
 A user whose only other sign-in method is an [email code](factors.md#email-codes) can't give a second factor either, so they're asked for the step they do have: the password and the emailed code. That session is AAL1. Once they add a real second factor, the emailed code stops being asked for or offered.
 
@@ -153,7 +153,7 @@ To keep other pages out, such as a `prompt=none` authorize request that your app
 
 `noDowngrade()` stops users with a phishing-resistant authenticator from being talked into a weaker one. When a user has an [established](authenticators.md#established-authenticators) passkey or security key, the requirement gains `phishingResistant()`. "Try another way" then offers only their passkeys and security keys, plus recovery codes.
 
-A key is established once the account has had it for `authenticator_changes.established_after`, 7 days by default. A newer key signs in like any other, but doesn't raise the bar yet. Otherwise, whoever got into a session could add a key of their own, and the owner's password and authenticator app would stop working at once. While the account has a key that isn't established, its other sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods), and the owner can remove the new key.
+A key is established once the account has had it for `authenticator_changes.established_after`, 7 days by default. A newer key signs in like any other, but doesn't raise the bar yet, under `noDowngrade()` or an [`ifEnrolled()`](#only-when-enrolled) policy. Otherwise, whoever got into a session could add a key of their own, and the owner's password and authenticator app would stop working at once. While the account has a key that isn't established, its other sign-in methods are [frozen](authenticators.md#frozen-sign-in-methods), and the owner can remove the new key.
 
 Recovery codes stay on offer, because they're the way back in when the only key is lost. Each one works once, and using one sends a [security email](security-log-and-emails.md) when those emails are turned on. A used-up set isn't offered. If you want to refuse codes too, and accept only keys, use:
 

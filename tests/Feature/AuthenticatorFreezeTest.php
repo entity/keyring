@@ -385,6 +385,48 @@ describe('which keys raise the bar', function () {
         $this->assertAuthenticatedAs($this->user);
     });
 
+    it('doesn\'t let a passkey added from a session raise what an ifEnrolled policy asks for', function () {
+        Keyring::require(Requirement::aal2()->phishingResistant()->ifEnrolled());
+        signInWithApp($this->totp)->assertRedirect('/dashboard');
+        addPasskeyFromSession();
+        signOut();
+
+        // Without the passkey, and with no recovery code spent.
+        signInWithApp($this->totp, 1)->assertRedirect('/dashboard');
+        $this->assertAuthenticatedAs($this->user);
+        signOut();
+
+        $passkey = $this->user->keyring->refresh()->of('passkey')->sole();
+        $this->actingAs($this->user)->verifiedWith($this->totp);
+        $this->deleteJson(route('keyring.authenticators.destroy', $passkey->id))->assertOk();
+    });
+
+    it('only lets an established key raise what an ifEnrolled policy asks for', function (Closure $policy, Closure $key, string $factor, bool $established) {
+        Keyring::require($policy());
+        $added = $key()->for($this->user, 'authenticatable')
+            ->when($established, fn ($factory) => $factory->established())
+            ->create();
+
+        $this->post('/login', ['email' => 'taylor@example.com', 'password' => 'password']);
+        $this->inertia()->get(route('keyring.login.challenge'))->assertJsonPath('props.factor', $established ? $factor : 'totp');
+        $this->flushHeaders();
+
+        $this->post(route('keyring.login.verify', 'totp'), ['code' => totpCode($this->totp->secret)]);
+        $established ? $this->assertGuest() : $this->assertAuthenticatedAs($this->user);
+        signOut();
+
+        // A fresh verification with the app removes a new key, never an established one.
+        $this->actingAs($this->user)->verifiedWith($this->totp);
+        $this->deleteJson(route('keyring.authenticators.destroy', $added->id))->assertStatus($established ? 423 : 200);
+    })->with([
+        'phishing resistant' => [fn () => Requirement::aal2()->phishingResistant()->ifEnrolled(), fn () => Authenticator::factory()->passkey(), 'passkey'],
+        'device bound' => [fn () => Requirement::aal2()->deviceBound()->ifEnrolled(), fn () => Authenticator::factory()->securityKey(), 'security-key'],
+        'aal3' => [fn () => Requirement::aal3()->ifEnrolled(), fn () => Authenticator::factory()->securityKey()->attested('2fc0579f-8113-47ea-b116-bb5a8db9202a'), 'security-key'],
+    ])->with([
+        'a new key' => [false],
+        'an established key' => [true],
+    ]);
+
     it('only counts established keys for noDowngrade', function (bool $established, string $factor) {
         Keyring::require(Requirement::aal2()->noDowngrade());
         Authenticator::factory()->securityKey()->for($this->user, 'authenticatable')

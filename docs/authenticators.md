@@ -268,9 +268,10 @@ An authenticator that isn't established works like any other. It signs in, and i
 
 - [`noDowngrade()`](policies.md#no-downgrade) only asks for a passkey or security key once the account has an established one.
 - A fresh verification only asks for a key that can't leave its device when that key is established.
-- An explicit requirement, such as `aal3()`, `phishingResistant()` or the `keyring:device-bound` middleware, is met by any key that qualifies, new or not. Those come from your app, not from the user's keyring, so a new key can't make them stricter.
+- Under a policy with [`ifEnrolled()`](policies.md#only-when-enrolled), a key that isn't established counts as a factor, but not as phishing resistant, device bound or attested. So `aal2()->phishingResistant()->ifEnrolled()`, `aal2()->deviceBound()->ifEnrolled()` and `aal3()->ifEnrolled()` only ask for a key once the account has an established one that qualifies.
+- A requirement your app asks for outright, such as a policy without `ifEnrolled()` or the `keyring:aal3` and `keyring:aal2,device-bound` middleware, is met by any key that qualifies, new or not. It isn't worked out from the user's keyring, so a new key can't make it stricter.
 
-That goes for the owner's own new key too. For its first 7 days, a security key or passkey the owner just added isn't asked for at sign in under `noDowngrade()`, or at a fresh verification, so their password and authenticator app still work. Keyring can't tell the owner's new key from one a copy of their session added.
+That goes for the owner's own new key too. For its first 7 days, a security key or passkey the owner just added isn't asked for at sign in under `noDowngrade()` or an `ifEnrolled()` policy, or at a fresh verification, so their password and authenticator app still work. It's accepted when they use it. Keyring can't tell the owner's new key from one a copy of their session added.
 
 `$user->keyring->isEstablished($authenticator)` says whether one is, and `$user->keyring->established()` is the keyring without the ones that aren't.
 
