@@ -278,6 +278,18 @@ describe('impersonation', () => {
     ])
   })
 
+  test('stops as asked when the impersonation had already ended by itself', async () => {
+    answers.push(
+      { status: 409, body: { status: 'impersonation-ended', message: 'You\'re back in your own account.', redirect: '/admin' } },
+      { status: 401, body: { status: 'signed-out', redirect: '/login' } },
+      { status: 409, body: { message: 'Something else' } },
+    )
+
+    expect(await stopImpersonating()).toEqual({ status: 'impersonation-ended', redirect: '/admin' })
+    expect((await stopImpersonating().catch(error => error)).status).toBe(401)
+    expect((await stopImpersonating().catch(error => error)).status).toBe(409)
+  })
+
   test('throws when it\'s refused, or needs a fresh second factor', async () => {
     answers.push({ status: 403, body: { message: 'You can\'t sign in as that user.' } }, { status: 423, body: { message: 'Confirm first', redirect: '/confirm' } })
 

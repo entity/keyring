@@ -1,4 +1,4 @@
-import { json } from './http.js'
+import { json, KeyringRequestError } from './http.js'
 import { routes } from './routes.js'
 
 /**
@@ -14,7 +14,20 @@ export function impersonate(user: string | number) {
  * Go back to your own account. Load the page in full afterwards: at the
  * `redirect` it answers with, or the login page when it answers 401 because
  * your own session had ended meanwhile.
+ *
+ * An impersonation that had already ended by itself (its time ran out, or
+ * the user ended its session) is answered with a 409 `impersonation-ended`
+ * by the session middleware, having gone back all the same. That resolves
+ * like stopping did, since you're back either way.
  */
-export function stopImpersonating() {
-  return json<{ status: string, redirect?: string }>('DELETE', routes.stopImpersonating())
+export async function stopImpersonating() {
+  try {
+    return await json<{ status: string, redirect?: string }>('DELETE', routes.stopImpersonating())
+  } catch (error) {
+    if (error instanceof KeyringRequestError && error.status === 409 && error.data?.status === 'impersonation-ended') {
+      return { status: 'impersonation-ended', redirect: error.data.redirect as string | undefined }
+    }
+
+    throw error
+  }
 }
