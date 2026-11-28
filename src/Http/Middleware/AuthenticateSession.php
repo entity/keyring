@@ -49,7 +49,6 @@ class AuthenticateSession
         protected RiskEngine $risk,
         protected RiskLocks $locks,
         protected SignIn $signIn,
-        protected Impersonation $impersonation,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -70,7 +69,7 @@ class AuthenticateSession
             // leaves the guard signed out. What's parked isn't left for the
             // next sign in on this session to go back with: it ends, and
             // the browser is signed out.
-            if ($this->impersonation->active($request)) {
+            if (app(Impersonation::class)->active($request)) {
                 return $this->endImpersonation($request, ImpersonationEndReason::Ended);
             }
 
@@ -87,7 +86,7 @@ class AuthenticateSession
         // A browser that's impersonating someone is held to the
         // impersonation, in place of what the user's own sessions are: it
         // ends, back to the impersonator, rather than signing anyone out.
-        if ($this->impersonation->active($request) || $session?->isImpersonated()) {
+        if (app(Impersonation::class)->active($request) || $session?->isImpersonated()) {
             return $this->impersonating($request, $next, $user, $session);
         }
 
@@ -152,14 +151,14 @@ class AuthenticateSession
      */
     protected function impersonating(Request $request, Closure $next, Authenticatable&Model $user, ?RegisteredSession $session): Response
     {
-        if (($reason = $this->impersonation->ending($request, $session, $user)) !== null) {
+        if (($reason = app(Impersonation::class)->ending($request, $session, $user)) !== null) {
             return $this->endImpersonation($request, $reason);
         }
 
         assert($session !== null);
 
         $this->assurance->touch();
-        $this->impersonation->touch($request, $session, now()->getTimestamp());
+        app(Impersonation::class)->touch($request, $session, now()->getTimestamp());
 
         return $next($request);
     }
@@ -175,11 +174,11 @@ class AuthenticateSession
      */
     protected function endImpersonation(Request $request, ImpersonationEndReason $reason): Response
     {
-        if (! ($reason = $this->impersonation->end($request, $reason))->returns()) {
+        if (! ($reason = app(Impersonation::class)->end($request, $reason))->returns()) {
             return $this->signedOut($request, $reason->value);
         }
 
-        $url = $this->impersonation->returnTo();
+        $url = app(Impersonation::class)->returnTo();
 
         if ($this->wantsJson($request)) {
             return $this->clearSiteData(new JsonResponse(['status' => 'impersonation-ended', 'message' => $this->keyring->statusMessage('impersonation-ended'), 'redirect' => $url], 409));
@@ -236,7 +235,7 @@ class AuthenticateSession
      */
     protected function register(Request $request, Authenticatable&Model $user, bool $remembered = false): void
     {
-        $this->impersonation->signedOut($request);
+        app(Impersonation::class)->signedOut($request);
         $this->sessions->start($request, $user, $this->devices->find($request, $user), $this->assurance->level(), $remembered);
         $this->assurance->touch();
     }
