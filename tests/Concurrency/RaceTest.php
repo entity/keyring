@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -379,7 +378,7 @@ it('leaves nothing of the admin signed in when they stop impersonating as they\'
     $now = now()->getTimestamp();
     $registry = app(SessionRegistry::class);
     $registry->save($own = new RegisteredSession('admins-own', (string) $admin->id, RegisteredSession::typeOf($admin), 'web', null, Assurance::AAL2, null, null, $now, $now, $now + 3600));
-    $impersonated = app(Sessions::class)->startImpersonation(Request::create('/'), $user, $admin, $own, $now + 3600);
+    $impersonated = app(Sessions::class)->startImpersonation($user, $admin, $own, $now + 3600);
 
     $browser = [
         Sessions::KEY => $impersonated->id,

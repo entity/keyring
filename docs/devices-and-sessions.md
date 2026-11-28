@@ -272,7 +272,7 @@ Laravel keeps one "remember me" token per user. Changing it signs out every reme
 }
 ```
 
-`impersonated` is `true` for a session someone else is signed in to as the user, through [impersonation](impersonation.md#the-sessions-list), and `impersonator` is who that is, as `{"name": "..."}` with no ID, or `null` once they've been deleted. The user can end it like any other. With `impersonation.show_in_sessions` off, it's left out of the list, unless it's the session asking.
+`impersonated` is `true` for a session someone else is signed in to as the user, through [impersonation](impersonation.md#the-sessions-list), and `impersonator` is who that is, as `{"name": "..."}` with no ID, or `null` once they've been deleted. Its `name`, `ip`, and `device` are always `null`, since they'd be the impersonator's: where they are and what they use. The user can end it like any other. With `impersonation.show_in_sessions` off, it's left out of the list, unless it's the session asking.
 
 `device` is the ID of the session's [device](#listing-and-revoking-devices). It's `null` when the session has no device or when devices are off, so a page can show sessions under their devices. `lastActiveAt` is kept to the minute. A session that has been revoked, has expired, has [idled out](#timeouts), or has moved to another record isn't listed.
 

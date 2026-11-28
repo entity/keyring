@@ -151,7 +151,10 @@ export interface Session {
   lastActiveAt: string
   expiresAt: string
   current: boolean
-  /** Someone else is signed in to it as the user, e.g. support. */
+  /**
+   * Someone else is signed in to it as the user, e.g. support. Its `name`,
+   * `ip` and `device` are then always null: they'd be that person's.
+   */
   impersonated: boolean
   /**
    * Who that is, by name only, or null when nobody else is in it or the

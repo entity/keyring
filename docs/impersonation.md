@@ -343,8 +343,8 @@ With `impersonation.show_in_sessions` on, which is the default, the impersonated
 ```json
 {
   "id": "9f2c41d0...",
-  "name": "Firefox on Windows",
-  "ip": "203.0.113.7",
+  "name": null,
+  "ip": null,
   "device": null,
   "remembered": false,
   "signedInAt": "2026-11-27T09:00:00+00:00",
@@ -355,6 +355,8 @@ With `impersonation.show_in_sessions` on, which is the default, the impersonated
   "impersonator": { "name": "Ada Admin" }
 }
 ```
+
+It shows no browser, IP address, or device: those would be the impersonator's, so the user would see where support staff are and what they use. Keyring doesn't keep them on the impersonated session's record at all, and `name`, `ip`, and `device` are always `null` for it in the list, whatever a [registry of your own](devices-and-sessions.md#the-session-registry) stores. The times are its own. The impersonator's IP address and browser are still on the [security log](#security-log-and-events) entries, as on any entry: the request's.
 
 The user can end it from there, like any of their sessions. The impersonator's next request then goes back to their own session. `impersonator` has only their name, not their ID as [`Keyring::impersonation()`](#showing-a-banner) does, since the user has no use for it. It's `null` once the impersonator has been deleted.
 

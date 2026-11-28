@@ -386,6 +386,9 @@ describe('starting', function () {
             ->and($record->impersonatorSession)->toBe($own)
             ->and($record->remembered)->toBeFalse()
             ->and($record->deviceId)->toBeNull()
+            // The admin's, so the user's record doesn't keep them.
+            ->and($record->ip)->toBeNull()
+            ->and($record->userAgent)->toBeNull()
             ->and($record->expiresAt)->toBe(now()->addHour()->getTimestamp())
             // The admin's own session is parked, not ended.
             ->and(record($own)->isActive(now()->getTimestamp()))->toBeTrue();
@@ -1537,6 +1540,32 @@ describe('the user\'s sessions list', function () {
         $listed = app(Sessions::class)->list(request(), $this->user)->sole();
 
         expect($listed)->toMatchArray(['impersonated' => true, 'impersonator' => ['name' => 'Ada Admin'], 'remembered' => false, 'device' => null]);
+    });
+
+    // They'd be the support staff's own: where they are, and what they use.
+    it('shows no ip address, browser or device for it, whatever its record holds, keeping the times', function () {
+        impersonating();
+        $impersonated = session(Sessions::KEY);
+        app(SessionRegistry::class)->update($impersonated, ['ip' => '198.51.100.9', 'userAgent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0', 'deviceId' => 'the admins']);
+
+        $listed = $this->getJson(route('keyring.sessions.index'))->assertOk()->json('sessions.0');
+
+        expect($listed)->toMatchArray(['name' => null, 'ip' => null, 'device' => null, 'impersonated' => true, 'impersonator' => ['name' => 'Ada Admin'], 'current' => true])
+            ->and($listed['signedInAt'])->toBe(now()->toIso8601String())
+            ->and($listed['lastActiveAt'])->toBe(now()->toIso8601String())
+            ->and($listed['expiresAt'])->toBe(now()->addHour()->toIso8601String());
+    });
+
+    it('still shows the user\'s own sessions\' ip address and browser beside it', function () {
+        impersonating();
+
+        $this->flushSession();
+        Auth::forgetGuards();
+        $this->withHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0')->post('/login', ['email' => 'abigail@example.com', 'password' => 'password']);
+
+        $own = collect($this->getJson(route('keyring.sessions.index'))->json('sessions'))->firstWhere('impersonated', false);
+
+        expect($own)->toMatchArray(['name' => 'Firefox on Windows', 'ip' => '127.0.0.1']);
     });
 
     it('names nobody once the impersonator is gone', function () {

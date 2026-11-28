@@ -129,7 +129,7 @@ class Impersonation
             'parked' => $this->pick($session),
         ];
 
-        $record = $this->sessions->startImpersonation($request, $user, $impersonator, $own, $until);
+        $record = $this->sessions->startImpersonation($user, $impersonator, $own, $until);
         $parked['handle'] = $this->sessions->handle($record);
 
         // Logged here rather than by a listener, ahead of the app's: one of

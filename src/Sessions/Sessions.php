@@ -96,11 +96,13 @@ class Sessions
      * Register the session someone signs in to as $user (Impersonation),
      * naming them and the record of their own session, which is left as it
      * is to come back to. It proved nothing, is never remembered, is on no
-     * device, and lasts no longer than the impersonation may. It's saved as
-     * it is: it ends none of the user's sessions to keep them to
-     * "sessions.max", and none of the impersonator's.
+     * device, and lasts no longer than the impersonation may. It keeps no
+     * IP address or browser: they'd be the impersonator's, and the record
+     * is the user's, listed to them. It's saved as it is: it ends none of
+     * the user's sessions to keep them to "sessions.max", and none of the
+     * impersonator's.
      */
-    public function startImpersonation(Request $request, Authenticatable $user, Authenticatable $impersonator, #[\SensitiveParameter] RegisteredSession $parked, int $until): RegisteredSession
+    public function startImpersonation(Authenticatable $user, Authenticatable $impersonator, #[\SensitiveParameter] RegisteredSession $parked, int $until): RegisteredSession
     {
         $now = now()->getTimestamp();
 
@@ -111,8 +113,8 @@ class Sessions
             guard: config('keyring.guard'),
             deviceId: null,
             assurance: Assurance::None,
-            ip: $this->keyring->recordedIp($request),
-            userAgent: UserAgent::from($request),
+            ip: null,
+            userAgent: null,
             authenticatedAt: $now,
             lastActivityAt: $now,
             expiresAt: min($now + $this->absolute(), $until),
@@ -461,7 +463,8 @@ class Sessions
      * active first, each under its handle. One someone else is signed in to
      * as the user is marked "impersonated", with who it is by name, as long
      * as "impersonation.show_in_sessions" is on. With it off, it's left
-     * out, unless it's the session asking.
+     * out, unless it's the session asking. It has no name, IP address or
+     * device, whatever its record holds: they'd be the impersonator's.
      *
      * @return Collection<int, array{id: string, name: ?string, ip: ?string, device: ?string, remembered: bool, signedInAt: string, lastActiveAt: string, expiresAt: string, current: bool, impersonated: bool, impersonator: array{name: ?string}|null}>
      */
@@ -476,9 +479,9 @@ class Sessions
             ->values()
             ->map(fn (RegisteredSession $session) => [
                 'id' => $this->handle($session),
-                'name' => $this->keyring->describeDevice($session->userAgent),
-                'ip' => $session->ip,
-                'device' => $session->deviceId,
+                'name' => $session->isImpersonated() ? null : $this->keyring->describeDevice($session->userAgent),
+                'ip' => $session->isImpersonated() ? null : $session->ip,
+                'device' => $session->isImpersonated() ? null : $session->deviceId,
                 'remembered' => $session->remembered,
                 'signedInAt' => $time($session->authenticatedAt),
                 'lastActiveAt' => $time($session->lastActivityAt),
