@@ -35,6 +35,5 @@ return [
     'password_too_long' => 'The :attribute is too long. It can take up 72 bytes: that\'s 72 plain letters, digits and symbols, and fewer with accented letters, other alphabets or emoji.',
     'sso_failed' => 'We couldn\'t sign you in with :provider. Please try again.',
     'sso_link_failed' => 'That :provider account couldn\'t be linked. Please try again, or use another account.',
-    'impersonation_refused' => 'You can\'t sign in as that user.',
     'unavailable' => 'Your account needs a sign-in method that isn\'t set up. Please contact support.',
 ];

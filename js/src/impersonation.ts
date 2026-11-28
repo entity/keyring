@@ -3,8 +3,9 @@ import { routes } from './routes.js'
 
 /**
  * Sign in as another user by their ID, where the server lets this user.
- * It needs a fresh second factor first: a 423 says where to confirm. Load
- * the page in full afterwards, at the `redirect` it answers with.
+ * It needs a fresh second factor first: a 423 says where to confirm. A
+ * refusal throws with a 403 `impersonation-refused`, whatever the reason.
+ * Load the page in full afterwards, at the `redirect` it answers with.
  */
 export function impersonate(user: string | number) {
   return json<{ status: string, redirect?: string }>('POST', routes.impersonate(String(user)))

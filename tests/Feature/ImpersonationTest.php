@@ -264,7 +264,7 @@ describe('who may impersonate', function () {
         (fn () => $this->impersonationGate = null)->call(app(KeyringManager::class));
         adminSignsIn();
 
-        impersonate($this->user, json: true)->assertForbidden()->assertExactJson(['message' => __('keyring::keyring.impersonation_refused')]);
+        impersonate($this->user, json: true)->assertForbidden()->assertExactJson(['status' => 'impersonation-refused', 'message' => Keyring::statusMessage('impersonation-refused')]);
 
         expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
             ->and(Keyring::allowsImpersonation($this->admin, $this->user))->toBeFalse()
@@ -282,7 +282,7 @@ describe('who may impersonate', function () {
         });
         adminSignsIn();
 
-        impersonate($this->user, json: true)->assertForbidden()->assertJson(['message' => __('keyring::keyring.impersonation_refused')]);
+        impersonate($this->user, json: true)->assertForbidden()->assertExactJson(['status' => 'impersonation-refused', 'message' => Keyring::statusMessage('impersonation-refused')]);
 
         expect($asked)->toBe([$this->admin->getKey(), $this->user->getKey()])
             ->and(Keyring::impersonationRefusal($this->admin, $this->user))->toBe(ImpersonationRefusal::NotAllowed)
@@ -350,7 +350,24 @@ describe('who may impersonate', function () {
     it('refuses an ID nobody has as it refuses one it may not impersonate', function () {
         adminSignsIn();
 
-        impersonate(new User(['id' => 999]), json: true)->assertForbidden()->assertJson(['message' => __('keyring::keyring.impersonation_refused')]);
+        impersonate(new User(['id' => 999]), json: true)->assertForbidden()->assertExactJson(['status' => 'impersonation-refused', 'message' => Keyring::statusMessage('impersonation-refused')]);
+    });
+
+    // As Keyring's other 403s: the status for JSON clients, and Laravel's
+    // 403 for a page visit or an Inertia one, the same whatever the reason.
+    it('answers a refusal with the impersonation-refused status for json clients, and a 403 for pages and inertia', function () {
+        Keyring::allowImpersonationWhen(fn () => false);
+        adminSignsIn();
+
+        impersonate($this->user, json: true)->assertForbidden()->assertExactJson(['status' => 'impersonation-refused', 'message' => 'You can\'t sign in as that user.']);
+        impersonate($this->user)->assertForbidden()->assertSee('You can\'t sign in as that user.');
+        $this->post(route('keyring.impersonation.store', $this->user->getKey()), headers: ['X-Inertia' => 'true', 'X-Requested-With' => 'XMLHttpRequest', 'Accept' => 'text/html, application/xhtml+xml'])
+            ->assertForbidden()
+            ->assertHeaderMissing('X-Inertia-Location');
+
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
+            ->and(new ImpersonationRefused(ImpersonationRefusal::NoCallback)->render(Request::create('/', server: ['HTTP_ACCEPT' => 'application/json']))->getData(true))
+            ->toBe(new ImpersonationRefused(ImpersonationRefusal::Self)->render(Request::create('/', server: ['HTTP_ACCEPT' => 'application/json']))->getData(true));
     });
 
     it('refuses an account of another model, which the guard would not load', function () {
@@ -2000,7 +2017,7 @@ describe('the security log and events', function () {
         Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => false);
         adminSignsIn();
 
-        $missing = impersonate(new User(['id' => 999]), json: true)->assertForbidden();
+        $missing = impersonate(new User(['id' => 999]), json: true)->assertForbidden()->assertJsonPath('status', 'impersonation-refused');
         $refused = impersonate($this->user, json: true)->assertForbidden();
 
         expect($missing->getContent())->toBe($refused->getContent())

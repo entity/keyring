@@ -120,7 +120,7 @@ Both are only registered with `Features::impersonation()` on. They sit in Keyrin
 
 The route takes `impersonation.middleware`, which is `['keyring:aal2', 'keyring.fresh:15m']` by default: the impersonator has to have proved two factors, the second a possession factor or a passkey, in the last 15 minutes. One who hasn't is sent to confirm, as on any [step-up](step-up.md) route, and one without a second factor is sent to [`enrollment_url`](configuration.md#account-changes-and-enrollment), or gets a `403` without one. An empty list asks for nothing more: any signed-in session your callback allows can start one, with no step-up.
 
-A refusal is a `403`, with Laravel's `{"message": "You can't sign in as that user."}` for JSON clients. Otherwise the answer is a [status response](sign-in-flow.md#status-responses) with `impersonation-started`, to `impersonation.redirect_url` (`home` when it's `null`). A JSON client gets `{"status": "impersonation-started", "message": "...", "redirect": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, so nothing the browser cached for the impersonator stays for the user's pages, and the other way round when stopping.
+A refusal is a `403`, with `{"status": "impersonation-refused", "message": "You can't sign in as that user."}` for JSON clients, the same whatever the reason, and Laravel's `403` page for a page visit or an Inertia one. Otherwise the answer is a [status response](sign-in-flow.md#status-responses) with `impersonation-started`, to `impersonation.redirect_url` (`home` when it's `null`). A JSON client gets `{"status": "impersonation-started", "message": "...", "redirect": "..."}`. Either way the response sends `Clear-Site-Data`, as signing out does, so nothing the browser cached for the impersonator stays for the user's pages, and the other way round when stopping.
 
 ### Stopping
 
@@ -177,7 +177,7 @@ Route::delete('/admin/impersonation', function (Request $request) {
 
 Keyring's routes also send `Clear-Site-Data`, and tell an Inertia visit to load the next page in full, so nothing the browser kept from one account's pages is left for the other's. A route of your own does neither: send `Clear-Site-Data: "cache", "storage"` yourself, and answer an Inertia visit with `Inertia::location()`, to get the same.
 
-`ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`, whatever the reason. Its `reason` says why, as a `Keyring\Enums\ImpersonationRefusal`:
+`ImpersonationRefused` is Laravel's `AuthorizationException`, so left uncaught it's a `403`, whatever the reason: `{"status": "impersonation-refused", "message": "..."}` for JSON clients, as from Keyring's route, and Laravel's `403` page otherwise. Its `reason` says why, as a `Keyring\Enums\ImpersonationRefusal`:
 
 | Case | Value | Why |
 |---|---|---|

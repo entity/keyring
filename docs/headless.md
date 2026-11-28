@@ -279,6 +279,7 @@ Keyring's answers carry a `redirect`, a URL on Laravel or one from your config. 
 | `401` `{"message": "Unauthenticated."}`, Laravel's own answer to a guest on a signed-in route | | |
 | `403` `enroll-first` | | `enrollment_url` |
 | `403` `change-password` | | `password_change_url` |
+| `403` `impersonation-refused`, a start of an [impersonation](impersonation.md#starting) that was refused, the same whatever the reason | | |
 | `403` `impersonating`, refused while [impersonating](impersonation.md#whats-refused-while-impersonating) the user | | |
 | `409` `impersonation-ended`, an impersonation that [ended by itself](impersonation.md#the-time-limit) and went back to the impersonator | | `impersonation.return_url`. Load it in full. |
 | `422` with `page`, a sign in or step-up that ran out or used up its guesses | `login` or `confirm` | That page. The reason is in `errors`, on the username field or the factor's. |

@@ -364,9 +364,11 @@ describe('impersonation', () => {
   })
 
   test('throws when it\'s refused, or needs a fresh second factor', async () => {
-    answers.push({ status: 403, body: { message: 'You can\'t sign in as that user.' } }, { status: 423, body: { message: 'Confirm first', redirect: '/confirm' } })
+    answers.push({ status: 403, body: { status: 'impersonation-refused', message: 'You can\'t sign in as that user.' } }, { status: 423, body: { message: 'Confirm first', redirect: '/confirm' } })
 
-    expect((await impersonate('7').catch(error => error)).status).toBe(403)
+    const refused = await impersonate('7').catch(error => error)
+    expect(refused.status).toBe(403)
+    expect(refused.data.status).toBe('impersonation-refused')
     expect((await impersonate('7').catch(error => error)).data.redirect).toBe('/confirm')
   })
 })

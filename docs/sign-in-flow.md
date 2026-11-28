@@ -573,7 +573,7 @@ Two statuses can say where the user was going when Keyring sent them away. That 
 
 The messages live in `lang/en/status.php`, as `keyring::status.{slug}`. The pages Keyring renders that show a status (`login`, `forgot-password`, and `verify-email`) receive the translated message as their `status` prop, not the slug. The slugs are:
 
-`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `impersonating`, `impersonation-ended`, `impersonation-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out`, `sso-cancelled` and `verification-link-sent`.
+`authenticator-added`, `authenticator-removed`, `authenticator-updated`, `change-password`, `code-sent`, `device-reported`, `device-revoked`, `email-change-cancelled`, `email-change-confirmed`, `email-change-invalid`, `email-change-requested`, `email-change-reverted`, `email-changed`, `email-verified`, `enroll-first`, `enrollment-started`, `impersonating`, `impersonation-ended`, `impersonation-refused`, `impersonation-started`, `password-reset`, `password-updated`, `registered`, `registration-received`, `reset-link-sent`, `session-revoked`, `sessions-revoked`, `sign-in-to-verify`, `signed-out`, `sso-cancelled` and `verification-link-sent`.
 
 You can swap it the same way as the others. Your class receives the same named arguments:
 

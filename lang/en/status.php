@@ -24,6 +24,7 @@ return [
     'enrollment-started' => 'Finish setting up your new sign-in method.',
     'impersonating' => 'You can\'t do that while you\'re signed in as someone else.',
     'impersonation-ended' => 'You\'re back in your own account.',
+    'impersonation-refused' => 'You can\'t sign in as that user.',
     'impersonation-started' => 'You\'re now signed in as someone else. Stop impersonating to go back to your own account.',
     'password-reset' => 'Your password has been reset. Please sign in.',
     'password-updated' => 'Your password has been changed.',
