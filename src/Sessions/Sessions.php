@@ -681,26 +681,33 @@ class Sessions
      * names the new one, so a "remember me" cookie used up before the swap
      * can still be followed to the session it became (latest).
      *
+     * Returns whether it moved. It doesn't when the session has no record
+     * or nobody is signed in, nor when the record has ended or moved on
+     * without this request: of two requests moving it at once, only one
+     * does.
+     *
      * @param  array<string, mixed>  $changes
      */
-    public function reregister(Request $request, array $changes = []): void
+    public function reregister(Request $request, array $changes = []): bool
     {
         $session = $this->current($request);
         $user = $this->keyring->guard()->user();
 
         if ($session === null || $user === null) {
-            return;
+            return false;
         }
 
         $current = $session->with(['id' => Str::random(40), 'origin' => $session->origin(), ...$changes]);
 
         // One that has ended, or moved on without this request, isn't brought back.
         if (! $this->holding($user, fn () => $this->registry->replace($session->id, $current, revoke: true))) {
-            return;
+            return false;
         }
 
         // The browser's "remember me" moves to the new record with it.
         $this->bind($request, $current, $request->session()->get(self::REMEMBERED) === true);
+
+        return true;
     }
 
     /**

@@ -213,6 +213,18 @@ class Impersonation
      * hasn't when handing it back throws before the session is on the
      * impersonator's record. Then the impersonator's session ends, and the
      * browser is signed out, before it's thrown on.
+     *
+     * Only one request ends an impersonation, however many of the
+     * browser's find it over at once, such as XHRs sent as its time ran
+     * out, or a copy of the session from before another request ended it.
+     * One that found the impersonated record still open ends it only if
+     * its revoke is the one that revokes it. One that found it ended
+     * already, by the user from their sessions list say, doesn't once
+     * another request has gone back from it (the impersonator's record has
+     * moved), and of two going back at once only the one that moves the
+     * impersonator's record does. The rest leave it to that request
+     * (alreadyEnded()): Lost, with nothing announced, logged, revoked or
+     * moved.
      */
     public function end(Request $request, ImpersonationEndReason $reason): ImpersonationEndReason
     {
@@ -237,28 +249,43 @@ class Impersonation
             $reason = $ours ? ImpersonationEndReason::ImpersonatorSessionEnded : ImpersonationEndReason::Lost;
         }
 
-        $this->sessions->because(SessionEndReason::ImpersonationEnded, function () use ($current, $own, $back) {
-            if ($current !== null) {
-                $this->sessions->registry()->revoke($current->id);
+        $live = $current !== null && $current->revokedAt === null;
+
+        $ours = $this->sessions->because(SessionEndReason::ImpersonationEnded, function () use ($current, $live, $own, $back) {
+            $revoked = $current === null ? null : $this->sessions->registry()->revoke($current->id);
+
+            // Another request revoked it first, or went back from it.
+            if ($live ? $revoked === null : $this->wentBack($own)) {
+                return false;
             }
 
             // Nobody is going back to it, so it ends with the browser.
             if ($back === null && $own !== null) {
                 $this->sessions->registry()->revoke($own);
             }
+
+            return true;
         });
 
         $this->forget($request);
+
+        if (! $ours) {
+            return $this->alreadyEnded($request);
+        }
 
         // It has ended by now, whatever the registry does next, so it's
         // announced, and logged, even when signing out or moving the record
         // throws. Once only: a sign-out the registry failed announced it.
         $returned = false;
+        $announce = ($impersonator !== null || $target !== null) && ($parked['announced'] ?? false) !== true;
 
         try {
             if ($back === null) {
                 app(SignIn::class)->out($request, onlyThisBrowser: true);
             } else {
+                // Only what this browser parked goes back ($ours).
+                assert($parked !== null);
+
                 try {
                     $this->switchTo($request, $back[0]);
                     $this->restore($request, $this->catchUp($parked['parked'])[0]);
@@ -282,16 +309,58 @@ class Impersonation
                 // the browser where regenerating can't destroy it, or a request
                 // that overlapped this one and saves the old session after it.
                 // The record moves, as on a step-up, so the copy's parked record
-                // has ended. The browser's "remember me" moves with it.
-                $this->sessions->reregister($request);
+                // has ended. The browser's "remember me" moves with it. Moved
+                // by another request going back from it meanwhile, it's that
+                // one's to announce. One that couldn't move for having ended,
+                // by a sign-out everywhere say, still went back, and the next
+                // request finds it ended.
+                if (! $this->sessions->reregister($request) && $this->wentBack($back[1]->id)) {
+                    $announce = false;
+
+                    return $this->alreadyEnded($request);
+                }
             }
         } finally {
-            if (($impersonator !== null || $target !== null) && ($parked['announced'] ?? false) !== true) {
+            if ($announce) {
                 ImpersonationEnded::dispatch($impersonator, $target, $reason, $returned, $handle);
             }
         }
 
         return $reason;
+    }
+
+    /**
+     * Whether a request went back to the impersonator's record: it has
+     * moved to a new one, which only going back does while it's parked.
+     */
+    protected function wentBack(#[\SensitiveParameter] ?string $own): bool
+    {
+        return $own !== null && $this->sessions->registry()->find($own)?->replacedBy !== null;
+    }
+
+    /**
+     * Leave an impersonation another request of the browser ended first,
+     * to that one: nothing is announced, logged, revoked or moved here. This
+     * request's copy of the session is a stale one, holding an impersonation
+     * that's over, or the impersonator on a record that moved without it,
+     * so it's emptied, as a guest's, to be signed out rather than end it
+     * again. Nothing else is touched, "remember me" cookies included:
+     * whichever answer the browser keeps last, the other request's leaves
+     * it signed in, and a remembered impersonator is brought back by their
+     * cookie when it's this one's.
+     */
+    protected function alreadyEnded(Request $request): ImpersonationEndReason
+    {
+        $guard = $this->keyring->guard();
+
+        assert($guard instanceof SessionGuard);
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+        $request->attributes->remove(Sessions::KEY);
+        $guard->forgetUser();
+
+        return ImpersonationEndReason::Lost;
     }
 
     /**

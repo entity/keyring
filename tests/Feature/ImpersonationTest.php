@@ -170,6 +170,52 @@ function registryThatGoesAway(int $works, string $method = 'revoke', int $fails 
 }
 
 /**
+ * A session registry that hands back these records as they were, as a
+ * request that read them a moment before another request changed them,
+ * until it moves one itself and so reads them as they are.
+ *
+ * @param  array<string, RegisteredSession>  $records
+ */
+function registryReadingEarlier(array $records): void
+{
+    $earlier = new ArrayObject($records);
+
+    app(SessionRegistryManager::class)->extend('earlier', fn () => new class(app('db')->connection(), $earlier) extends DatabaseSessionRegistry
+    {
+        public function __construct(ConnectionInterface $connection, protected ArrayObject $earlier)
+        {
+            parent::__construct($connection);
+        }
+
+        public function find(string $id): ?RegisteredSession
+        {
+            return $this->earlier[$id] ?? parent::find($id);
+        }
+
+        public function replace(string $id, RegisteredSession $successor, bool $revoke = false): bool
+        {
+            $this->earlier->exchangeArray([]);
+
+            return parent::replace($id, $successor, $revoke);
+        }
+    });
+    config(['keyring.sessions.driver' => 'earlier']);
+}
+
+/**
+ * The ImpersonationEnded events dispatched from now on, as they're
+ * dispatched: faking them would keep the security log from writing them.
+ */
+function impersonationsEnded(): ArrayObject
+{
+    $ended = new ArrayObject;
+
+    Event::listen(fn (ImpersonationEnded $event) => $ended->append($event));
+
+    return $ended;
+}
+
+/**
  * Run Laravel's auth.session middleware on the web group, ahead of
  * Keyring's session middleware, as an app that uses it would.
  */
@@ -1347,6 +1393,113 @@ describe('ending by itself', function () {
 
         expect(stopImpersonating()->assertUnauthorized()->getContent())->toBe('signed out: lost')
             ->and(record($own)->revokedAt)->not->toBeNull();
+    });
+});
+
+describe('two requests ending it', function () {
+    // A request that read the session before another ended the
+    // impersonation, an XHR sent alongside say, saves its copy after it.
+    it('ends it once when a copy of the session from before ends it again, leaving the admin signed in', function (string $driver) {
+        config(['keyring.sessions.driver' => $driver]);
+        $ended = impersonationsEnded();
+        adminSignsIn(remember: true);
+        $own = session(Sessions::KEY);
+        impersonate($this->user);
+        $during = session()->all();
+
+        $this->travel(61)->minutes();
+        $this->get('/whoami')->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
+        $back = session()->all();
+
+        sendBackSession($during);
+        Cookie::flushQueuedCookies();
+        $stale = $this->getJson('/whoami')->assertUnauthorized();
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->returned)->toBeTrue()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(2)
+            ->and(record(record($own)->replacedBy)->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(Auth::guard('web')->check())->toBeFalse()
+            // Its "remember me" cookies are the admin's, which it leaves as they are.
+            ->and($stale->getCookie('remembered_session'))->toBeNull()
+            ->and($stale->getCookie(Auth::guard('web')->getRecallerName()))->toBeNull();
+
+        sendBackSession($back);
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+    })->with(['database', 'cache']);
+
+    it('ends it once when two requests find it over together, and only one revokes it', function () {
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        $impersonated = session(Sessions::KEY);
+        $during = session()->all();
+        $earlier = [$impersonated => record($impersonated), $own => record($own)];
+
+        $this->travel(61)->minutes();
+        $this->get('/whoami')->assertRedirect('/dashboard');
+        $back = session()->all();
+
+        // The other request read both records before this one ended it.
+        registryReadingEarlier($earlier);
+        sendBackSession($during);
+        $this->getJson('/whoami')->assertUnauthorized();
+        config(['keyring.sessions.driver' => 'database']);
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe(ImpersonationEndReason::Expired)
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(2)
+            ->and(record($impersonated)->revokedAt)->not->toBeNull()
+            ->and(record(record($own)->replacedBy)->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(Auth::guard('web')->check())->toBeFalse();
+
+        sendBackSession($back);
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+    });
+
+    // Ended by the user from their sessions list, it's found ended by both,
+    // so neither revokes it: moving the admin's record decides.
+    it('goes back once when two requests go back together from one the user ended', function () {
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        app(SessionRegistry::class)->revoke(session(Sessions::KEY));
+        $during = session()->all();
+        $earlier = [$own => record($own)];
+
+        $this->get('/whoami')->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
+        $back = session()->all();
+
+        // The other request found the admin's record yet to move.
+        registryReadingEarlier($earlier);
+        sendBackSession($during);
+        $this->getJson('/whoami')->assertUnauthorized();
+        config(['keyring.sessions.driver' => 'database']);
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe(ImpersonationEndReason::Ended)
+            ->and($ended[0]->returned)->toBeTrue()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(2)
+            ->and(record(record($own)->replacedBy)->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(Auth::guard('web')->check())->toBeFalse();
+
+        sendBackSession($back);
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+    });
+
+    // On the cookie driver, a second stop from a copy kept in the browser
+    // gets past the stop route's block().
+    it('answers a stop another request beat to it as signed out', function () {
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        $during = session()->all();
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        sendBackSession($during);
+        stopImpersonating(json: true)->assertUnauthorized()->assertJson(['status' => 'signed-out']);
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe(ImpersonationEndReason::Stopped)
+            ->and(record(record($own)->replacedBy)->isActive(now()->getTimestamp()))->toBeTrue();
     });
 });
 

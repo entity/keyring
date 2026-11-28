@@ -52,6 +52,7 @@ A few things change whether or not you turn it on:
 - `SessionEndReason` has a new case, `ImpersonationEnded`. A `match` over it with no `default` needs an arm for it.
 - `RegisteredSession` has three new constructor arguments and properties after `origin`, `impersonatorId`, `impersonatorType`, and `impersonatorSession`, and `toArray()` has `impersonator_id`, `impersonator_type`, and `impersonator_session`, which `fromArray()` reads as `null` when they're missing. A [driver of your own](docs/devices-and-sessions.md#writing-a-driver) that stores `toArray()` and reads it back with `fromArray()` needs no change. One that writes the array into a table of its own needs the three columns once anyone impersonates. `withoutIds()` blanks `impersonatorSession` too.
 - `AuthenticateSession` has a new constructor argument, `Impersonation $impersonation`. A subclass with a constructor of its own needs it too.
+- `Sessions::reregister()` returns whether the session moved to a new record, as a `bool`, where it returned nothing. A subclass that overrides it needs the new return type.
 
 ### Pages Asked For With JSON or an XHR
 
