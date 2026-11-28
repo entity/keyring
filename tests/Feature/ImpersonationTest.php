@@ -29,6 +29,7 @@ use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Contracts\SessionRegistry;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Enums\ImpersonationEndReason;
 use Keyring\Enums\ImpersonationRefusal;
 use Keyring\Enums\SessionEndReason;
@@ -44,6 +45,7 @@ use Keyring\Http\Middleware\AuthenticateSession;
 use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
 use Keyring\Login\SignIn;
+use Keyring\Login\Verification;
 use Keyring\Models\Authenticator;
 use Keyring\Models\SecurityEvent;
 use Keyring\Sessions\DatabaseSessionRegistry;
@@ -962,7 +964,6 @@ describe('stopping', function () {
     // A passkey that verified the user is both factors at once: nothing
     // short of AAL2 is left to keep, so the passkey is asked for again.
     it('keeps nothing of a sign in that was both factors at once', function () {
-        config(['keyring.sessions.end_on_lapse' => true]);
         $this->actingAs($this->admin)->withAssurance(Assurance::AAL3)->withSession([SessionAssurance::SIGNED_IN => Assurance::AAL3->value]);
         $this->get('/whoami')->assertOk();
         impersonate($this->user)->assertRedirect('/dashboard');
@@ -971,7 +972,7 @@ describe('stopping', function () {
 
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::None)
             ->and(app(SessionAssurance::class)->all())->toBe([])
-            ->and(app(SessionAssurance::class)->signedInLevel())->toBe(Assurance::None);
+            ->and(app(SessionAssurance::class)->signedInLevel())->toBe(Assurance::AAL3);
         expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
         $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
     });
@@ -992,22 +993,69 @@ describe('stopping', function () {
         $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
     });
 
-    // Coming back is at AAL1 at most, so it's what goes back that shows
-    // it: a session that signed in at AAL3 goes back as long as AAL3 holds.
-    it('lapses each level on its own clock: aal3 after 15 minutes', function (int $gap, bool $back) {
+    // Coming back is at AAL1 at most, and a session there doesn't outlive
+    // the level it signed in at, as one "remember me" brings back doesn't.
+    it('signs the admin out rather than coming back below the level they signed in at, where sessions end with their level', function (Assurance $level) {
         config(['keyring.sessions.end_on_lapse' => true]);
-        $this->actingAs($this->admin)->withAssurance(Assurance::AAL3)->withSession([SessionAssurance::SIGNED_IN => Assurance::AAL3->value]);
+        Event::fake([ImpersonationEnded::class]);
+        $this->actingAs($this->admin)->withAssurance($level)->withSession([SessionAssurance::SIGNED_IN => $level->value]);
+        $this->get('/whoami')->assertOk();
+        $own = session(Sessions::KEY);
+        impersonate($this->user)->assertRedirect('/dashboard');
+        $impersonated = session(Sessions::KEY);
+
+        stopImpersonating()->assertRedirect('/login');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($own)->replacedBy)->toBeNull()
+            ->and(record($impersonated)->revokedAt)->not->toBeNull();
+        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::ImpersonatorSessionEnded && ! $event->returned);
+    })->with([
+        'signed in at aal2' => [Assurance::AAL2],
+        'signed in at aal3' => [Assurance::AAL3],
+    ]);
+
+    // AAL1 holds once back, so it doesn't lapse there.
+    it('comes back where sessions end with their level, for a session that signed in at aal1', function () {
+        config(['keyring.sessions.end_on_lapse' => true]);
+        $this->actingAs($this->admin)->withAssurance(Assurance::AAL2)->withSession([SessionAssurance::SIGNED_IN => Assurance::AAL1->value]);
         $this->get('/whoami')->assertOk();
         impersonate($this->user)->assertRedirect('/dashboard');
 
-        $this->travel($gap)->minutes();
-        stopImpersonating()->assertRedirect($back ? '/dashboard' : '/login');
+        stopImpersonating()->assertRedirect('/dashboard');
 
-        expect(Auth::guard('web')->check())->toBe($back);
-    })->with([
-        'a 10 minute gap' => [10, true],
-        'a 20 minute gap' => [20, false],
-    ]);
+        expect(app(SessionAssurance::class)->signedInLevel())->toBe(Assurance::AAL1)
+            ->and(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1);
+
+        $this->travel(5)->minutes();
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+    });
+
+    // What held AAL1 was the authenticator app, as the password is past
+    // AAL1's overall limit. Coming back takes the app away, which would
+    // lapse the session on the next request, so it ends now.
+    it('signs out a session that signed in at aal1 and held it only by what coming back takes away, where sessions end with their level', function () {
+        config(['keyring.sessions.end_on_lapse' => true, 'keyring.sessions.levels.aal1.absolute' => '1h']);
+        $this->actingAs($this->admin)->withSession([
+            SessionAssurance::KEY => [
+                'password' => new Verification('password', null, [Category::Knowledge], at: now()->subHours(2)->getTimestamp())->toArray(),
+                $this->totp->getKey() => new Verification('totp', $this->totp->getKey(), [Category::Possession], at: now()->getTimestamp())->toArray(),
+            ],
+            SessionAssurance::SIGNED_IN => Assurance::AAL1->value,
+        ]);
+        // Started from a route of the app's that asks for no step-up.
+        Route::middleware(['web', 'auth'])->post('/support/impersonate', fn (Request $request) => Keyring::impersonate($request, $this->user));
+        $this->get('/whoami')->assertOk();
+        $this->post('/support/impersonate')->assertOk();
+
+        stopImpersonating()->assertRedirect('/login');
+
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['impersonator_session_ended']);
+    });
 
     it('ends the admin\'s session where sessions end with their level, when a gap lapses it', function () {
         config(['keyring.sessions.end_on_lapse' => true, 'keyring.sessions.levels.aal2.idle' => '30m']);
@@ -1400,7 +1448,9 @@ describe('ending by itself', function () {
 
     it('brings the admin back signed in where sessions end with their level, having kept it from lapsing', function () {
         config(['keyring.sessions.end_on_lapse' => true]);
-        impersonating();
+        $this->actingAs($this->admin)->withAssurance(Assurance::AAL2)->withSession([SessionAssurance::SIGNED_IN => Assurance::AAL1->value]);
+        $this->get('/whoami')->assertOk();
+        impersonate($this->user)->assertRedirect('/dashboard');
 
         $this->travel(40)->minutes();
         $this->get('/whoami')->assertOk();
@@ -1431,33 +1481,29 @@ describe('ending by itself', function () {
         expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
     });
 
-    // A session that signed in at AAL2 and came back at AAL1 isn't one whose
-    // level lapsed: it stays signed in, and steps up.
-    it('keeps the admin signed in where sessions end with their level, coming back at aal1', function (bool $timeLimit) {
+    // A session that signed in at AAL2 would come back at AAL1, which is
+    // the level it signed in at lapsing: it ends instead, saying why.
+    it('signs the admin out where sessions end with their level, rather than coming back at aal1', function (bool $timeLimit) {
         config(['keyring.sessions.end_on_lapse' => true]);
         $own = impersonating();
+        $impersonated = session(Sessions::KEY);
 
         if ($timeLimit) {
             $this->travel(40)->minutes();
             $this->get('/whoami')->assertOk();
             $this->travel(21)->minutes();
-            $this->get('/whoami')->assertRedirect('/dashboard');
+            $this->get('/whoami')->assertRedirect('/login')->assertSessionHas('status', 'signed-out');
         } else {
-            stopImpersonating()->assertRedirect('/dashboard');
+            stopImpersonating()->assertRedirect('/login');
         }
 
-        expect(session(SessionAssurance::SIGNED_IN))->toBe(Assurance::AAL1->value);
-
-        $this->travel(5)->minutes();
-        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
-
-        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
-        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])->assertRedirect('http://localhost/billing');
-        $this->get('/billing')->assertOk();
-
-        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey())
-            ->and(record(session(Sessions::KEY))->revokedAt)->toBeNull()
-            ->and(record($own)->replacedBy)->not->toBeNull();
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($impersonated)->revokedAt)->not->toBeNull()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->oldest('id')->get()->map(fn (SecurityEvent $event) => [$event->meta['role'], $event->meta['reason'], $event->meta['returned']])->all())->toBe([
+                ['impersonator', 'impersonator_session_ended', false],
+                ['impersonated', 'impersonator_session_ended', false],
+            ]);
     })->with(['on a stop' => [false], 'after impersonation.lifetime' => [true]]);
 
     // Nothing is left for the next sign in on the browser to go back with.

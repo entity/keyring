@@ -38,7 +38,7 @@ describe('lowering to aal1', function () {
 
         expect(array_column($assurance->all(), 'factor'))->toBe([Password::KEY, EmailCode::KEY])
             ->and($assurance->level())->toBe(Assurance::AAL1)
-            ->and($assurance->signedInLevel())->toBe(Assurance::AAL1);
+            ->and($assurance->signedInLevel())->toBe(Assurance::AAL2);
     });
 
     it('keeps a session short of aal2 as it was', function () {
@@ -51,9 +51,9 @@ describe('lowering to aal1', function () {
             ->and($assurance->signedInLevel())->toBe(Assurance::None);
     });
 
-    // What's kept has lapsed at AAL1, so the session no longer holds the
-    // level it would be brought down to.
-    it('forgets the level it signed in at when what\'s kept no longer holds aal1', function () {
+    // Only sessions.end_on_lapse reads it, and there a session that signed
+    // in above AAL1 doesn't come back from an impersonation.
+    it('leaves the level it signed in at as it was', function () {
         config(['keyring.sessions.levels.aal1.absolute' => '1h']);
         $assurance = proved([
             new Verification(Password::KEY, null, [Category::Knowledge], at: now()->subHours(2)->getTimestamp()),
@@ -62,7 +62,7 @@ describe('lowering to aal1', function () {
 
         $assurance->lowerToAal1();
 
-        expect(session()->has(SessionAssurance::SIGNED_IN))->toBeFalse()
+        expect($assurance->signedInLevel())->toBe(Assurance::AAL1)
             ->and($assurance->level())->toBe(Assurance::None);
     });
 });

@@ -55,7 +55,9 @@ use Throwable;
  *   impersonate the user ends it too, and goes back. They come back at
  *   AAL1 at most, with nothing counting as fresh: a page of the user's
  *   could have sent them back, so anything behind keyring:aal2 asks for
- *   their second factor again.
+ *   their second factor again. Under sessions.end_on_lapse, an
+ *   impersonator whose session signed in above AAL1 is signed out instead,
+ *   as a session there doesn't outlive the level it signed in at.
  *
  * The user's own sign-in events don't fire, so nothing that listens for a
  * sign in (new device emails, risk, "last signed in") takes it for one.
@@ -207,7 +209,9 @@ class Impersonation
      * good. It goes back at AAL1 at most, with the second factor to prove
      * again and nothing counting as fresh (restore()). Otherwise, or for a
      * reason that doesn't, the browser is signed out and the impersonator's
-     * session ends too.
+     * session ends too. So does one that signed in above AAL1 under
+     * sessions.end_on_lapse, where a session doesn't outlive the level it
+     * signed in at (endsComingBack()).
      *
      * Only the impersonation this browser started goes back: the guard
      * still signed in as the user it parked the impersonator's session for,
@@ -254,6 +258,10 @@ class Impersonation
 
         if ($back === null && $reason->returns()) {
             $reason = $ours ? ImpersonationEndReason::ImpersonatorSessionEnded : ImpersonationEndReason::Lost;
+        }
+
+        if ($back !== null && $this->endsComingBack($parked)) {
+            [$back, $reason] = [null, ImpersonationEndReason::ImpersonatorSessionEnded];
         }
 
         $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $current === null ? null : $this->sessions->registry()->revoke($current->id));
@@ -782,11 +790,7 @@ class Impersonation
      */
     protected function catchUp(array $parked): array
     {
-        $session = new Store('keyring-parked', new ArraySessionHandler(0));
-
-        foreach ($parked as $key => $value) {
-            $session->put($key, $value);
-        }
+        $session = $this->parkedSession($parked);
 
         $assurance = new SessionAssurance($session, $this->sessions, $this->keyring);
         $assurance->touch();
@@ -795,17 +799,53 @@ class Impersonation
     }
 
     /**
+     * Whether coming back would end the impersonator's session where it
+     * stands: under sessions.end_on_lapse, a session doesn't outlive the
+     * level it signed in at, and it comes back at AAL1 at most (restore()).
+     * So one that signed in above AAL1 ends instead, as a session "remember
+     * me" brings back, or one a risk step-up asks to prove itself again,
+     * does there. So does one at AAL1 that held it only by what coming back
+     * takes away.
+     *
+     * @param  Parked  $parked
+     */
+    protected function endsComingBack(array $parked): bool
+    {
+        $assurance = new SessionAssurance($this->parkedSession($this->catchUp($parked['parked'])[0]), $this->sessions, $this->keyring);
+        $assurance->lowerToAal1();
+
+        return $assurance->lapse() !== null;
+    }
+
+    /**
+     * What the impersonator's session parked, as a session of its own to
+     * read it from by the rules their own session goes by.
+     *
+     * @param  array<string, mixed>  $parked
+     */
+    protected function parkedSession(array $parked): Store
+    {
+        $session = new Store('keyring-parked', new ArraySessionHandler(0));
+
+        foreach ($parked as $key => $value) {
+            $session->put($key, $value);
+        }
+
+        return $session;
+    }
+
+    /**
      * Put back what the impersonator's session had parked, at AAL1 at most,
      * and return the level it's back at. A page of the user's, a stored
      * script say, could have stopped the impersonation, and it would carry
      * on in the browser as the impersonator. So the second factor is
      * forgotten (SessionAssurance::lowerToAal1()), and anything behind
-     * keyring:aal2 or aal3 asks for it again; the rest, the password say,
+     * keyring:aal2 or aal3 asks for it again; what's kept, the password say,
      * still counts toward AAL1, so stepping up asks for the second factor
      * alone. None of it counts as fresh either: keyring.fresh and Laravel's
-     * password.confirm ask again. The level the session signed in at comes
-     * down with it, so sessions.end_on_lapse keeps the session rather than
-     * ending it for what was taken away here.
+     * password.confirm ask again. The level the session signed in at stays
+     * as it was: only sessions.end_on_lapse reads it, and there a session
+     * that signed in above AAL1 doesn't come back (endsComingBack()).
      *
      * @param  array<string, mixed>  $parked
      */

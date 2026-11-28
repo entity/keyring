@@ -30,7 +30,9 @@ enum ImpersonationEndReason: string
      * The impersonator's own session has ended (revoked, timed out), or the
      * impersonator was deleted, is no longer allowed to sign in, is held
      * for a new password, or their password changed, so there was nobody to
-     * go back to and the browser was signed out.
+     * go back to and the browser was signed out. Under
+     * sessions.end_on_lapse, also an impersonator whose session signed in
+     * above AAL1: coming back at AAL1 would have lapsed it.
      */
     case ImpersonatorSessionEnded = 'impersonator_session_ended';
 

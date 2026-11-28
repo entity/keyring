@@ -121,7 +121,7 @@ expect(Keyring::impersonating())->toBeTrue()
     ->and(Keyring::impersonator()->is($admin))->toBeTrue();
 ```
 
-`/dashboard` is your `impersonation.redirect_url`, or `home`. Later requests in the same test carry on as the user, and `delete(route('keyring.impersonation.destroy'))` goes back to the admin. Remember that step-up can't be met while impersonating, so a route of yours behind `keyring:aal2` or `keyring.fresh` answers `403` until it stops.
+`/dashboard` is your `impersonation.redirect_url`, or `home`. Later requests in the same test carry on as the user, and `delete(route('keyring.impersonation.destroy'))` goes back to the admin. Remember that step-up can't be met while impersonating, so a route of yours behind `keyring:aal2` or `keyring.fresh` answers `403` until it stops. The admin comes back at AAL1, with nothing counting as fresh, so after the stop that route sends them to confirm. A test that stops and then visits one needs `withAssurance()` again first.
 
 ## Faking Factors
 

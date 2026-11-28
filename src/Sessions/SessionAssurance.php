@@ -76,18 +76,19 @@ class SessionAssurance
 
     /**
      * Bring the session down to AAL1 at most, so anything that asks for
-     * more asks for the second factor again. Something the user has is what
-     * AAL2 and up can't be reached without, so what's kept is what was
-     * proved besides that (a password, say), and of that only as much as
-     * stays short of AAL2. What's kept still counts as before, so stepping
-     * up asks for the second factor alone. A session that proved nothing
-     * short of AAL2, a passkey that verified the user being both factors at
-     * once, keeps nothing.
+     * more asks for the second factor again. Of what it proved, only as
+     * much as stays short of AAL2 is kept, what isn't something the user
+     * has first: a password beside an authenticator app keeps the password,
+     * while an authenticator app's code on its own, short of AAL2 alone, is
+     * kept as it is. What's kept still counts as before, so stepping up
+     * asks for the second factor alone. A session that proved nothing short
+     * of AAL2, a passkey that verified the user being both factors at once,
+     * keeps nothing.
      *
-     * The level the session signed in at comes down with it, to AAL1 when
-     * what's kept still holds that and to none when it doesn't, so
-     * sessions.end_on_lapse doesn't end the session for the levels taken
-     * away here. A step-up brings those back, as for any session.
+     * The level the session signed in at isn't touched, so under
+     * sessions.end_on_lapse one that signed in above AAL1 lapses from here.
+     *
+     * @internal
      */
     public function lowerToAal1(): void
     {
@@ -104,15 +105,6 @@ class SessionAssurance
         }
 
         $this->session->put(static::KEY, $kept);
-
-        if ($this->signedInLevel() === Assurance::None) {
-            return;
-        }
-
-        $from = $this->countsFrom(Assurance::AAL1);
-        $holds = Requirement::aal1()->isMetBy(array_values(array_filter($this->recorded(), fn (Verification $verification) => $verification->at >= $from)));
-
-        $holds ? $this->session->put(static::SIGNED_IN, Assurance::AAL1->value) : $this->session->forget(static::SIGNED_IN);
     }
 
     /**

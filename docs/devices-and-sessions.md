@@ -683,6 +683,7 @@ That isn't enough where the whole application is meant to be AAL2, or where you 
 - Proving every factor for that level again before then (any [step-up](step-up.md) that asks for them all) starts both limits over, as reauthenticating does in NIST.
 - A level reached later by a step-up still lapses on its own, and it takes nothing with it. A session that signed in with a password and stepped up for one page stays an AAL1 session.
 - A [risk response](risk.md#responding-to-risk) that asks a signed-in session to step up ends it too. Forgetting what the session proved is its level running out. The reason on `SessionEnded` is `risk`.
+- An impersonator whose session signed in above AAL1 is signed out when the impersonation ends, rather than coming back at AAL1. See [Impersonation](impersonation.md#going-back).
 - "Remember me" brings nothing back. Its cookie proves nothing, so there's no level for the session to carry on at, and the browser signs in again. NIST doesn't accept such a cookie in place of authenticating either (Sec. 5.1), so leave the checkbox off your login page.
 - The timeouts leave sessions signed in at AAL1 as they were, because `idle` and `absolute` already end those.
 
