@@ -49,6 +49,14 @@ enum ImpersonationEndReason: string
     case SignedOut = 'signed_out';
 
     /**
+     * Starting it failed after its start was logged, handing the browser
+     * over, so the browser stayed the impersonator's. Only ever in the
+     * security log: ImpersonationEnded doesn't fire for it, as
+     * ImpersonationStarted never did.
+     */
+    case Failed = 'failed';
+
+    /**
      * Whether the impersonation goes back to the impersonator's session,
      * when that's still good.
      */

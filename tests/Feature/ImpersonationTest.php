@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\Events\Authenticated as LaravelAuthenticated;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -1771,6 +1772,40 @@ describe('the security log and events', function () {
         $this->artisan('keyring:sweep')->assertSuccessful();
 
         expect($announced)->toBeEmpty();
+    });
+
+    // Laravel's guard fires its Authenticated event as the browser changes
+    // hands, and an app's listener for it can throw.
+    it('leaves the admin where they were, takes the user\'s record back and logs the end, when handing the browser over fails', function () {
+        Exceptions::fake();
+        Event::fake([ImpersonationStarted::class, ImpersonationEnded::class, RegisteredSessionEnded::class]);
+        adminSignsIn();
+        $own = session(Sessions::KEY);
+        $proved = session(SessionAssurance::KEY);
+        Event::listen(fn (LaravelAuthenticated $event) => $event->user->is($this->user) ? throw new RuntimeException('The audit service went away.') : null);
+
+        impersonate($this->user)->assertServerError();
+
+        expect(Keyring::impersonating())->toBeFalse()
+            ->and(session(Sessions::KEY))->toBe($own)
+            ->and(session(SessionAssurance::KEY))->toBe($proved)
+            ->and(session()->has(Impersonation::KEY))->toBeFalse()
+            ->and(Auth::id())->toBe($this->admin->getKey())
+            ->and(app(SessionRegistry::class)->forUser($this->user))->toBeEmpty()
+            ->and(record($own)->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_started')->count())->toBe(2)
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->oldest('id')->get()->map(fn (SecurityEvent $entry) => [$entry->authenticatable_id, $entry->meta])->all())->toEqual([
+                [$this->admin->getKey(), ['impersonator' => (string) $this->admin->getKey(), 'user' => (string) $this->user->getKey(), 'reason' => 'failed', 'returned' => true, 'role' => 'impersonator']],
+                [$this->user->getKey(), ['impersonator' => (string) $this->admin->getKey(), 'user' => (string) $this->user->getKey(), 'reason' => 'failed', 'returned' => true, 'role' => 'impersonated']],
+            ]);
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The audit service went away.');
+        Event::assertNotDispatched(ImpersonationStarted::class);
+        Event::assertNotDispatched(ImpersonationEnded::class);
+        Event::assertNotDispatched(RegisteredSessionEnded::class);
+
+        // Still the admin on the next request, at the level they had.
+        expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
+        $this->get('/billing')->assertOk();
     });
 
     it('writes neither start entry when the second can\'t be written', function () {

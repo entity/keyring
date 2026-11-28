@@ -85,8 +85,10 @@ class Impersonation
      * The user's record is saved, and the start logged on both accounts,
      * before the browser changes hands, so a registry or a security log
      * that fails leaves the impersonator where they were: it never starts
-     * unlogged. A refusal is logged on the impersonator's account, as
-     * impersonation_refused.
+     * unlogged. Handing the browser over that fails, an app's listener for
+     * Laravel's Authenticated that throws say, leaves them where they were
+     * too, with the end logged after the start, as failed. A refusal is
+     * logged on the impersonator's account, as impersonation_refused.
      *
      * @throws ImpersonationRefused
      */
@@ -132,20 +134,32 @@ class Impersonation
 
         // Logged here rather than by a listener, ahead of the app's: one of
         // those that throws, sending an email say, can't leave it unlogged.
-        // A start that can't be logged takes its record back unannounced,
-        // now and by the sweep, as nobody used the session.
+        // A start that can't be logged, or can't hand the browser over,
+        // takes its record back unannounced, now and by the sweep, as nobody
+        // used the session. The browser is put back as it was, and a start
+        // already logged is logged as ended, so the log doesn't show it
+        // running on.
+        $before = $session->all();
+        $logged = false;
+
         try {
             $this->logStart($impersonator, $user);
+            $logged = true;
+
+            $this->switchTo($request, $user);
+            $session->put(self::KEY, $parked);
+            $request->attributes->set(self::KEY, $parked);
+            $this->sessions->rebind($request, $record, remembered: false);
         } catch (Throwable $e) {
             $this->sessions->withdraw($record->id);
 
+            if ($logged) {
+                $this->putBack($request, $before, $own);
+                $this->logFailed($impersonator, $user);
+            }
+
             throw $e;
         }
-
-        $this->switchTo($request, $user);
-        $session->put(self::KEY, $parked);
-        $request->attributes->set(self::KEY, $parked);
-        $this->sessions->rebind($request, $record, remembered: false);
 
         ImpersonationStarted::dispatch($impersonator, $user, $parked['handle']);
     }
@@ -512,6 +526,43 @@ class Impersonation
             $this->log->recordOrFail('impersonation_started', $impersonator, meta: [...$meta, 'role' => 'impersonator']);
             $this->log->recordOrFail('impersonation_started', $user, meta: [...$meta, 'role' => 'impersonated']);
         });
+    }
+
+    /**
+     * Put the browser back as it was before a start that failed handing it
+     * over: the impersonator's session as it was, on the new session ID if
+     * it got one, and the impersonator signed in, loaded again from it when
+     * next asked for. Nothing of the impersonation is left parked.
+     *
+     * @param  array<string, mixed>  $before
+     */
+    protected function putBack(Request $request, array $before, RegisteredSession $own): void
+    {
+        $request->session()->flush();
+        $request->session()->put($before);
+        $request->attributes->remove(self::KEY);
+        $request->attributes->set(Sessions::KEY, $own->id);
+
+        $guard = $this->keyring->guard();
+
+        assert($guard instanceof SessionGuard);
+
+        $guard->forgetUser();
+    }
+
+    /**
+     * Log the end of a start that was logged but couldn't hand the browser
+     * over, on both accounts as an end is, as failed: the browser stayed
+     * the impersonator's. ImpersonationEnded doesn't fire, as
+     * ImpersonationStarted never did. A failure is reported, not thrown:
+     * the start's own failure is being thrown already.
+     */
+    protected function logFailed(Authenticatable $impersonator, Authenticatable $user): void
+    {
+        $meta = ['impersonator' => (string) $impersonator->getAuthIdentifier(), 'user' => (string) $user->getAuthIdentifier(), 'reason' => ImpersonationEndReason::Failed->value, 'returned' => true];
+
+        $this->log->record('impersonation_ended', $impersonator, meta: [...$meta, 'role' => 'impersonator']);
+        $this->log->record('impersonation_ended', $user, meta: [...$meta, 'role' => 'impersonated']);
     }
 
     /**
