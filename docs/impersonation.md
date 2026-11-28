@@ -124,7 +124,7 @@ A refusal is a `403`, with `{"status": "impersonation-refused", "message": "You 
 
 ### Stopping
 
-`POST` or `DELETE /impersonate` stops, so a plain form works as well as a `DELETE` from JavaScript. It answers with `impersonation-ended`, to `impersonation.return_url` (`home` when it's `null`). An Inertia visit is told to load that page in full (a `409` with `X-Inertia-Location`), as starting is, so nothing of the other account's page is kept. If the impersonator's own session ended meanwhile, the browser is signed out instead, and the answer is the same as for any session Keyring ended: back to the login page with the `signed-out` status, or a `401` for JSON clients. When the [session middleware](devices-and-sessions.md#the-session-middleware) is the one that finds an impersonation over with nothing to go back to, a page visit to a [route that also serves guests](devices-and-sessions.md#pages-that-also-serve-guests) is asked for again as a guest, as for any other ended session. A browser that isn't impersonating anyone gets a `404`.
+`POST` or `DELETE /impersonate` stops, so a plain form works as well as a `DELETE` from JavaScript. It answers with `impersonation-ended`, to `impersonation.return_url` (`home` when it's `null`). An Inertia visit is told to load that page in full (a `409` with `X-Inertia-Location`), as starting is, so nothing of the other account's page is kept. If the impersonator's own session ended meanwhile, the browser is signed out instead, and the answer is the same as for any session Keyring ended: back to the login page with the `signed-out` status, or a `401` for JSON clients. When the [session middleware](devices-and-sessions.md#the-session-middleware) is the one that finds an impersonation over with nothing to go back to, a page visit to a [route that also serves guests](devices-and-sessions.md#pages-that-also-serve-guests) is asked for again as a guest, as for any other ended session. A browser that isn't impersonating anyone, such as a second stop from a tab left open after another stopped, is back already: a JSON client gets a `409` with `{"status": "not-impersonating", "message": "...", "redirect": "..."}`, and a page visit goes to `impersonation.return_url` with the `not-impersonating` status (an Inertia visit loads it in full). Nothing changes hands, so it sends no `Clear-Site-Data`.
 
 An impersonation that had already ended by itself, its [time limit](#the-time-limit) up or its session ended by the user, never reaches the route: the [session middleware](devices-and-sessions.md#the-session-middleware) ends it first, goes back, and answers a JSON client with a `409` and the `impersonation-ended` status. The browser is back in the impersonator's account either way.
 
@@ -144,7 +144,7 @@ await impersonate(user.id)     // { status: 'impersonation-started', redirect: '
 await stopImpersonating()      // { status: 'impersonation-ended', redirect: 'https://example.com/dashboard' }
 ```
 
-Load the page in full afterwards, at the `redirect` the answer gives, so nothing on the page is left from the other account. `stopImpersonating()` resolves the same way for the middleware's `409` `impersonation-ended`, since the browser is back either way, and throws for the `401` when it was signed out instead.
+Load the page in full afterwards, at the `redirect` the answer gives, so nothing on the page is left from the other account. `stopImpersonating()` resolves the same way, with that `status`, for the middleware's `409` `impersonation-ended` and the route's `409` `not-impersonating`, since the browser is back either way, and throws for the `401` when it was signed out instead.
 
 ## From Your Own Code
 
@@ -163,7 +163,9 @@ Route::post('/admin/users/{user}/impersonate', function (Request $request, User 
 })->middleware(['auth', 'keyring.not-impersonating', 'keyring:aal2', 'keyring.fresh:15m'])->block();
 
 Route::delete('/admin/impersonation', function (Request $request) {
-    abort_unless(Keyring::impersonating($request), 404);   // a second stop, from a stale tab say
+    if (! Keyring::impersonating($request)) {
+        return redirect('/admin/users');   // back already: a second stop, from a stale tab say
+    }
 
     $impersonator = Keyring::stopImpersonating($request);   // null when it signed out instead
 
@@ -173,7 +175,7 @@ Route::delete('/admin/impersonation', function (Request $request) {
 
 `Keyring::impersonate()` checks who may, but not how the request got there: keep it to a `POST` with the middleware above, as Keyring's route does. Keep `->block()` too, as Keyring's routes have it. Without it, two starts sent at once from the same browser, a double click say, both find nobody being impersonated yet, and each starts one. Laravel's [session blocking](https://laravel.com/docs/session#session-blocking) makes them take turns, so the second is refused as `impersonating`. It needs a cache store that supports locks.
 
-`Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated, which left uncaught is a `500`. A browser that stops twice, or a tab left open from before, gets there, so check `Keyring::impersonating()` first, as above and as Keyring's route does with its `404`.
+`Keyring::stopImpersonating()` throws a `LogicException` when nobody is being impersonated, which left uncaught is a `500`. A browser that stops twice, or a tab left open from before, gets there, so check `Keyring::impersonating()` first, as above and as Keyring's route does, which answers that it's back already (`not-impersonating`).
 
 Keyring's routes also send `Clear-Site-Data`, and tell an Inertia visit to load the next page in full, so nothing the browser kept from one account's pages is left for the other's. A route of your own does neither: send `Clear-Site-Data: "cache", "storage"` yourself, and answer an Inertia visit with `Inertia::location()`, to get the same.
 

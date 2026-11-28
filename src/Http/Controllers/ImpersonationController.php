@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Enums\ImpersonationEndReason;
@@ -49,16 +50,34 @@ class ImpersonationController
     /**
      * Stop impersonating, and go back to being whoever started it. When
      * their own session has ended meanwhile, the browser is signed out.
+     * With nobody being impersonated, a second stop from a stale tab say,
+     * it's back already: a JSON client gets a 409 "not-impersonating", and
+     * a page visit goes to impersonation.return_url as a stop would.
      */
     public function destroy(Request $request): Response
     {
-        abort_unless($this->impersonation->active($request), 404);
+        if (! $this->impersonation->active($request)) {
+            return $this->notImpersonating($request);
+        }
 
         if (! ($reason = $this->impersonation->end($request, ImpersonationEndReason::Stopped))->returns()) {
             return $this->keyring->response(SignedOutResponse::class, reason: $reason->value)->toResponse($request);
         }
 
         return $this->answer($request, 'impersonation-ended', $this->impersonation->returnTo());
+    }
+
+    protected function notImpersonating(Request $request): Response
+    {
+        $url = $this->impersonation->returnTo();
+
+        if ($this->wantsJson($request)) {
+            return new JsonResponse(['status' => 'not-impersonating', 'message' => $this->keyring->statusMessage('not-impersonating'), 'redirect' => $url], Response::HTTP_CONFLICT);
+        }
+
+        $request->session()->flash('status', 'not-impersonating');
+
+        return $request->hasHeader('X-Inertia') ? $this->loadInFull($url) : redirect()->to($url);
     }
 
     protected function answer(Request $request, string $status, string $url): Response

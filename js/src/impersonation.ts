@@ -18,15 +18,16 @@ export function impersonate(user: string | number) {
  *
  * An impersonation that had already ended by itself (its time ran out, or
  * the user ended its session) is answered with a 409 `impersonation-ended`
- * by the session middleware, having gone back all the same. That resolves
- * like stopping did, since you're back either way.
+ * by the session middleware, having gone back all the same, and one another
+ * tab already stopped with a 409 `not-impersonating`. Both resolve like
+ * stopping did, with their own `status`, since you're back either way.
  */
 export async function stopImpersonating() {
   try {
     return await json<{ status: string, redirect?: string }>('DELETE', routes.stopImpersonating())
   } catch (error) {
-    if (error instanceof KeyringRequestError && error.status === 409 && error.data?.status === 'impersonation-ended') {
-      return { status: 'impersonation-ended', redirect: error.data.redirect as string | undefined }
+    if (error instanceof KeyringRequestError && error.status === 409 && (error.data?.status === 'impersonation-ended' || error.data?.status === 'not-impersonating')) {
+      return { status: error.data.status as string, redirect: error.data.redirect as string | undefined }
     }
 
     throw error

@@ -351,14 +351,16 @@ describe('impersonation', () => {
     ])
   })
 
-  test('stops as asked when the impersonation had already ended by itself', async () => {
+  test('stops as asked when the impersonation had already ended by itself, or been stopped', async () => {
     answers.push(
       { status: 409, body: { status: 'impersonation-ended', message: 'You\'re back in your own account.', redirect: '/admin' } },
+      { status: 409, body: { status: 'not-impersonating', message: 'You\'re not signed in as someone else.', redirect: '/admin' } },
       { status: 401, body: { status: 'signed-out', redirect: '/login' } },
       { status: 409, body: { message: 'Something else' } },
     )
 
     expect(await stopImpersonating()).toEqual({ status: 'impersonation-ended', redirect: '/admin' })
+    expect(await stopImpersonating()).toEqual({ status: 'not-impersonating', redirect: '/admin' })
     expect((await stopImpersonating().catch(error => error)).status).toBe(401)
     expect((await stopImpersonating().catch(error => error)).status).toBe(409)
   })

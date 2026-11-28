@@ -752,12 +752,26 @@ describe('stopping', function () {
         expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey());
     });
 
-    it('is not found when nobody is being impersonated', function () {
-        adminSignsIn();
+    // A second stop, from a tab left open, finds the browser back already.
+    it('answers a stop with nobody being impersonated as back already: 409 not-impersonating for json clients', function () {
+        config(['keyring.impersonation.return_url' => '/admin/users']);
+        $own = impersonating();
+        stopImpersonating()->assertRedirect('/admin/users');
+        $back = session(Sessions::KEY);
 
-        stopImpersonating()->assertNotFound();
+        stopImpersonating(json: true)->assertConflict()->assertExactJson([
+            'status' => 'not-impersonating',
+            'message' => Keyring::statusMessage('not-impersonating'),
+            'redirect' => url('/admin/users'),
+        ])->assertHeaderMissing('Clear-Site-Data');
+        stopImpersonating()->assertRedirect('/admin/users')->assertSessionHas('status', 'not-impersonating');
+        $this->inertia()->delete(route('keyring.impersonation.destroy'))->assertConflict()->assertHeader('X-Inertia-Location', url('/admin/users'));
 
-        expect(fn () => Keyring::stopImpersonating(request()))->toThrow(LogicException::class);
+        expect(Auth::id())->toBe($this->admin->getKey())
+            ->and(session(Sessions::KEY))->toBe($back)
+            ->and(record($own)->replacedBy)->toBe($back)
+            ->and(record($back)->revokedAt)->toBeNull()
+            ->and(fn () => Keyring::stopImpersonating(request()))->toThrow(LogicException::class);
     });
 
     it('signs out when there is no going back', function (Closure $meanwhile) {

@@ -26,6 +26,7 @@ return [
     'impersonation-ended' => 'You\'re back in your own account.',
     'impersonation-refused' => 'You can\'t sign in as that user.',
     'impersonation-started' => 'You\'re now signed in as someone else. Stop impersonating to go back to your own account.',
+    'not-impersonating' => 'You\'re not signed in as someone else.',
     'password-reset' => 'Your password has been reset. Please sign in.',
     'password-updated' => 'Your password has been changed.',
     'registered' => 'Your account has been created. You can sign in once it\'s ready.',

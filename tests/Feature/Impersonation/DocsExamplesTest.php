@@ -46,7 +46,9 @@ function impersonationRoutesOfTheAppsOwn(): void
         })->middleware(['auth', 'keyring.not-impersonating', 'keyring:aal2', 'keyring.fresh:15m'])->block();
 
         Route::delete('/admin/impersonation', function (Request $request) {
-            abort_unless(Keyring::impersonating($request), 404);   // a second stop, from a stale tab say
+            if (! Keyring::impersonating($request)) {
+                return redirect('/admin/users');   // back already: a second stop, from a stale tab say
+            }
 
             $impersonator = Keyring::stopImpersonating($request);   // null when it signed out instead
 
@@ -55,7 +57,7 @@ function impersonationRoutesOfTheAppsOwn(): void
     });
 }
 
-it('starts and stops from routes of the app\'s own, answering a second stop with a 404', function () {
+it('starts and stops from routes of the app\'s own, answering a second stop as back already', function () {
     Keyring::allowImpersonationWhen(fn (User $impersonator, User $user) => $impersonator->is($this->admin));
     impersonationRoutesOfTheAppsOwn();
     adminSignsInForTheDocs();
@@ -68,7 +70,7 @@ it('starts and stops from routes of the app\'s own, answering a second stop with
 
     $this->assertAuthenticatedAs($this->admin);
 
-    $this->delete('/admin/impersonation')->assertNotFound();
+    $this->delete('/admin/impersonation')->assertRedirect('/admin/users');
 
     $this->assertAuthenticatedAs($this->admin);
 });
