@@ -72,6 +72,9 @@ class Impersonation
     /** Where a request notes the impersonation it ended, once the session has forgotten it. */
     protected const string ENDED = 'keyring.impersonation_ended';
 
+    /** Where a request notes it warned that impersonation isn't set up. */
+    protected const string WARNED = 'keyring.impersonation_warned';
+
     /** What the impersonator's session proved, kept aside until they come back. */
     protected const array PROVED = [SessionAssurance::KEY, SessionAssurance::ACTIVE, SessionAssurance::LAPSED, SessionAssurance::SIGNED_IN];
 
@@ -104,6 +107,7 @@ class Impersonation
         // Logged on whoever is impersonating, when someone is, rather than
         // the user they're signed in as.
         if ($refusal !== null) {
+            $this->warnIfNotSetUp($request, $refusal);
             $this->refused($this->impersonator($request) ?? $impersonator, (string) $user->getAuthIdentifier(), $refusal);
         }
 
@@ -584,6 +588,29 @@ class Impersonation
         $this->log->recordRefusal('impersonation_refused', $impersonator, meta: ['reason' => $reason->value, 'user' => Str::limit($id, 64, '')]);
 
         throw new ImpersonationRefused($as ?? $reason);
+    }
+
+    /**
+     * Tell the developer, in the app's log, that a refusal was for
+     * impersonation not being set up, which the answer doesn't say: a
+     * forgotten allowImpersonationWhen() looks like being turned down.
+     * Once a request.
+     */
+    protected function warnIfNotSetUp(Request $request, ImpersonationRefusal $refusal): void
+    {
+        $missing = match ($refusal) {
+            ImpersonationRefusal::Disabled => 'Features::impersonation() is not in the features in config/keyring.php',
+            ImpersonationRefusal::NoCallback => 'Keyring::allowImpersonationWhen() was never called, in a service provider\'s boot() say',
+            default => null,
+        };
+
+        if ($missing === null || $request->attributes->get(self::WARNED) === true) {
+            return;
+        }
+
+        $request->attributes->set(self::WARNED, true);
+
+        rescue(fn () => logger()->warning("Keyring refused an impersonation because it isn't set up: {$missing}, so nobody may impersonate anyone. The answer is the same as for one that isn't allowed."), report: false);
     }
 
     /**

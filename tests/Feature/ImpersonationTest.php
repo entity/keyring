@@ -273,6 +273,43 @@ describe('who may impersonate', function () {
             ->and(SecurityEvent::query()->where('type', 'impersonation_refused')->pluck('meta')->pluck('reason')->all())->toBe(['no_callback', 'no_callback']);
     });
 
+    // The answer can't say it, so the log does, for the developer.
+    it('warns in the log, once a request, when a refusal is for impersonation not being set up', function () {
+        (fn () => $this->impersonationGate = null)->call(app(KeyringManager::class));
+        adminSignsIn();
+        Log::spy();
+
+        impersonate($this->user)->assertForbidden();
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, 'Keyring::allowImpersonationWhen() was never called'));
+
+        // The same request again.
+        refusal(fn () => Keyring::impersonate(request(), $this->user));
+        refusal(fn () => Keyring::impersonate(request(), $this->user));
+
+        Log::shouldHaveReceived('warning')->once();
+
+        // A route of the app's own, with the feature off.
+        withFeatures(array_values(array_diff(Features::all(), [Features::impersonation()])));
+        Route::middleware(['web', 'auth'])->post('/become/{id}', fn (Request $request, string $id) => refusal(fn () => Keyring::impersonate($request, User::findOrFail($id)))?->value);
+
+        expect($this->post('/become/'.$this->user->getKey())->getContent())->toBe('disabled');
+
+        Log::shouldHaveReceived('warning')->twice();
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, 'Features::impersonation() is not in the features'));
+    });
+
+    it('doesn\'t warn when the callback turns the impersonator down', function () {
+        Keyring::allowImpersonationWhen(fn () => false);
+        adminSignsIn();
+        Log::spy();
+
+        impersonate($this->user)->assertForbidden();
+        impersonate($this->admin)->assertForbidden();
+
+        Log::shouldNotHaveReceived('warning');
+    });
+
     it('refuses whoever the callback turns down, and asks it with the impersonator and the user', function () {
         $asked = [];
         Keyring::allowImpersonationWhen(function (User $impersonator, User $user) use (&$asked) {
