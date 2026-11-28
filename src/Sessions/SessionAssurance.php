@@ -7,6 +7,7 @@ namespace Keyring\Sessions;
 use Illuminate\Container\Attributes\Scoped;
 use Illuminate\Contracts\Session\Session;
 use Keyring\Enums\Assurance;
+use Keyring\Enums\Category;
 use Keyring\Enums\Purpose;
 use Keyring\KeyringManager;
 use Keyring\Login\AttemptStore;
@@ -71,6 +72,47 @@ class SessionAssurance
 
         $this->session->put(static::KEY, $stored);
         $this->session->put(static::ACTIVE, now()->getTimestamp());
+    }
+
+    /**
+     * Bring the session down to AAL1 at most, so anything that asks for
+     * more asks for the second factor again. Something the user has is what
+     * AAL2 and up can't be reached without, so what's kept is what was
+     * proved besides that (a password, say), and of that only as much as
+     * stays short of AAL2. What's kept still counts as before, so stepping
+     * up asks for the second factor alone. A session that proved nothing
+     * short of AAL2, a passkey that verified the user being both factors at
+     * once, keeps nothing.
+     *
+     * The level the session signed in at comes down with it, to AAL1 when
+     * what's kept still holds that and to none when it doesn't, so
+     * sessions.end_on_lapse doesn't end the session for the levels taken
+     * away here. A step-up brings those back, as for any session.
+     */
+    public function lowerToAal1(): void
+    {
+        $kept = [];
+        $stored = $this->session->get(static::KEY, []);
+
+        // What isn't something the user has goes first, so it's what's kept.
+        uasort($stored, fn (array $a, array $b) => in_array(Category::Possession->value, $a['categories'], true) <=> in_array(Category::Possession->value, $b['categories'], true));
+
+        foreach ($stored as $key => $verification) {
+            if (! Assurance::of(array_map(Verification::fromArray(...), [...array_values($kept), $verification]))->atLeast(Assurance::AAL2)) {
+                $kept[$key] = $verification;
+            }
+        }
+
+        $this->session->put(static::KEY, $kept);
+
+        if ($this->signedInLevel() === Assurance::None) {
+            return;
+        }
+
+        $from = $this->countsFrom(Assurance::AAL1);
+        $holds = Requirement::aal1()->isMetBy(array_values(array_filter($this->recorded(), fn (Verification $verification) => $verification->at >= $from)));
+
+        $holds ? $this->session->put(static::SIGNED_IN, Assurance::AAL1->value) : $this->session->forget(static::SIGNED_IN);
     }
 
     /**

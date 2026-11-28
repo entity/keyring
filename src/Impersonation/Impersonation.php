@@ -15,6 +15,7 @@ use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Keyring\Activity\SecurityLog;
+use Keyring\Enums\Assurance;
 use Keyring\Enums\ImpersonationEndReason;
 use Keyring\Enums\ImpersonationRefusal;
 use Keyring\Enums\SessionEndReason;
@@ -51,9 +52,10 @@ use Throwable;
  *   started, and the browser's session still being the impersonation it
  *   started. Otherwise the browser is signed out, and
  *   the parked record ends with it. An impersonator who may no longer
- *   impersonate the user ends it too, and goes back. They come back at the
- *   level they had, but nothing counts as fresh: a page of the user's could
- *   have sent them back.
+ *   impersonate the user ends it too, and goes back. They come back at
+ *   AAL1 at most, with nothing counting as fresh: a page of the user's
+ *   could have sent them back, so anything behind keyring:aal2 asks for
+ *   their second factor again.
  *
  * The user's own sign-in events don't fire, so nothing that listens for a
  * sign in (new device emails, risk, "last signed in") takes it for one.
@@ -195,9 +197,10 @@ class Impersonation
      * impersonated session ends whatever happens. For a reason that goes
      * back, the browser goes back to the impersonator's session, on a new
      * session ID, as long as that session and the impersonator are still
-     * good. It goes back at the level that session had, with nothing
-     * counting as fresh. Otherwise, or for a reason that doesn't, the
-     * browser is signed out and the impersonator's session ends too.
+     * good. It goes back at AAL1 at most, with the second factor to prove
+     * again and nothing counting as fresh (restore()). Otherwise, or for a
+     * reason that doesn't, the browser is signed out and the impersonator's
+     * session ends too.
      *
      * Only the impersonation this browser started goes back: the guard
      * still signed in as the user it parked the impersonator's session for,
@@ -288,7 +291,7 @@ class Impersonation
 
                 try {
                     $this->switchTo($request, $back[0]);
-                    $this->restore($request, $this->catchUp($parked['parked'])[0]);
+                    $level = $this->restore($request, $this->catchUp($parked['parked'])[0]);
                     $this->sessions->rebind($request, $back[1], $parked['remembered']);
                 } catch (Throwable $e) {
                     // Nothing is parked to go back with now, so it ends as
@@ -313,8 +316,9 @@ class Impersonation
                 // by another request going back from it meanwhile, it's that
                 // one's to announce. One that couldn't move for having ended,
                 // by a sign-out everywhere say, still went back, and the next
-                // request finds it ended.
-                if (! $this->sessions->reregister($request) && $this->wentBack($back[1]->id)) {
+                // request finds it ended. The new record has the level the
+                // session came back at, for the sessions list.
+                if (! $this->sessions->reregister($request, ['assurance' => $level]) && $this->wentBack($back[1]->id)) {
                     $announce = false;
 
                     return $this->alreadyEnded($request);
@@ -744,15 +748,21 @@ class Impersonation
     }
 
     /**
-     * Put back what the impersonator's session had parked. What it proved
-     * counts toward its level as before, but none of it as fresh: a page of
-     * the user's, a stored script say, could have stopped the impersonation
-     * and would otherwise act straight after as an impersonator who had
-     * just proved everything. keyring.fresh and step-ups ask again.
+     * Put back what the impersonator's session had parked, at AAL1 at most,
+     * and return the level it's back at. A page of the user's, a stored
+     * script say, could have stopped the impersonation, and it would carry
+     * on in the browser as the impersonator. So the second factor is
+     * forgotten (SessionAssurance::lowerToAal1()), and anything behind
+     * keyring:aal2 or aal3 asks for it again; the rest, the password say,
+     * still counts toward AAL1, so stepping up asks for the second factor
+     * alone. None of it counts as fresh either: keyring.fresh and Laravel's
+     * password.confirm ask again. The level the session signed in at comes
+     * down with it, so sessions.end_on_lapse keeps the session rather than
+     * ending it for what was taken away here.
      *
      * @param  array<string, mixed>  $parked
      */
-    protected function restore(Request $request, array $parked): void
+    protected function restore(Request $request, array $parked): Assurance
     {
         foreach ($parked as $key => $value) {
             if ($key === SessionAssurance::KEY && is_array($value)) {
@@ -761,6 +771,11 @@ class Impersonation
 
             $request->session()->put($key, $value);
         }
+
+        $assurance = new SessionAssurance($request->session(), $this->sessions, $this->keyring);
+        $assurance->lowerToAal1();
+
+        return $assurance->level();
     }
 
     /**

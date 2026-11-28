@@ -699,7 +699,7 @@ describe('while impersonating', function () {
 });
 
 describe('stopping', function () {
-    it('goes back to the admin\'s own session, with what it had proved, on a new session id', function () {
+    it('goes back to the admin\'s own session, on a new session id', function () {
         $own = impersonating();
         $impersonated = session(Sessions::KEY);
         $before = session()->getId();
@@ -713,8 +713,8 @@ describe('stopping', function () {
             ->and(record($impersonated)->revokedAt)->not->toBeNull()
             ->and(record(session(Sessions::KEY))->revokedAt)->toBeNull();
 
-        // AAL2 from the admin's own sign in, without a confirm.
-        $this->get('/billing')->assertOk()->assertSee('billing');
+        // Back at AAL1: the second factor is asked for again.
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
     });
 
     it('answers json clients, and goes to impersonation.return_url', function () {
@@ -828,19 +828,52 @@ describe('stopping', function () {
     })->with(['database', 'cache']);
 
     // A page of the user's could have sent the stop, a stored script say,
-    // and would then act as an admin who had just proved everything.
-    it('comes back at the admin\'s level, with nothing counting as fresh', function () {
+    // and would then carry on as the admin. It gets no further than AAL1.
+    it('comes back at aal1, with nothing counting as fresh', function () {
         Route::middleware(['web', 'auth', 'keyring.fresh:15m'])->get('/danger', fn () => 'danger zone');
         impersonating();
 
         stopImpersonating();
 
-        $this->get('/billing')->assertOk()->assertSee('billing');
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->getJson('/billing')->assertStatus(423);
         $this->get('/danger')->assertRedirect(route('keyring.confirm.challenge'));
-        $this->getJson('/danger')->assertStatus(423);
 
-        expect(app(SessionAssurance::class)->level()->name)->toBe('AAL2')
-            ->and(app(SessionAssurance::class)->provedSince(now()->subMinutes(15)->getTimestamp()))->toBe([]);
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
+            ->and(array_column(app(SessionAssurance::class)->all(), 'factor'))->toBe(['password'])
+            ->and(app(SessionAssurance::class)->provedSince(now()->subMinutes(15)->getTimestamp()))->toBe([])
+            ->and(record(session(Sessions::KEY))->assurance)->toBe(Assurance::AAL1);
+    });
+
+    it('asks only for the second factor to step back up to aal2', function () {
+        impersonating();
+        stopImpersonating();
+
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->getJson(route('keyring.confirm.challenge'))->assertOk()->assertJsonPath('props.factor', 'totp')->assertJsonPath('props.alternatives', []);
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])->assertRedirect('http://localhost/billing');
+
+        $this->get('/billing')->assertOk()->assertSee('billing');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2)
+            ->and(record(session(Sessions::KEY))->assurance)->toBe(Assurance::AAL2);
+    });
+
+    // A passkey that verified the user is both factors at once: nothing
+    // short of AAL2 is left to keep, so the passkey is asked for again.
+    it('keeps nothing of a sign in that was both factors at once', function () {
+        config(['keyring.sessions.end_on_lapse' => true]);
+        $this->actingAs($this->admin)->withAssurance(Assurance::AAL3)->withSession([SessionAssurance::SIGNED_IN => Assurance::AAL3->value]);
+        $this->get('/whoami')->assertOk();
+        impersonate($this->user)->assertRedirect('/dashboard');
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::None)
+            ->and(app(SessionAssurance::class)->all())->toBe([])
+            ->and(app(SessionAssurance::class)->signedInLevel())->toBe(Assurance::None);
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
     });
 
     // The admin's own session would lapse a level after a gap past its idle
@@ -859,18 +892,21 @@ describe('stopping', function () {
         $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
     });
 
-    it('lapses each level on its own clock: aal3 after 15 minutes, aal2 after an hour', function (int $gap, Assurance $level) {
-        $this->actingAs($this->admin)->withAssurance(Assurance::AAL3);
+    // Coming back is at AAL1 at most, so it's what goes back that shows
+    // it: a session that signed in at AAL3 goes back as long as AAL3 holds.
+    it('lapses each level on its own clock: aal3 after 15 minutes', function (int $gap, bool $back) {
+        config(['keyring.sessions.end_on_lapse' => true]);
+        $this->actingAs($this->admin)->withAssurance(Assurance::AAL3)->withSession([SessionAssurance::SIGNED_IN => Assurance::AAL3->value]);
         $this->get('/whoami')->assertOk();
         impersonate($this->user)->assertRedirect('/dashboard');
 
         $this->travel($gap)->minutes();
-        stopImpersonating()->assertRedirect('/dashboard');
+        stopImpersonating()->assertRedirect($back ? '/dashboard' : '/login');
 
-        expect(app(SessionAssurance::class)->level())->toBe($level);
+        expect(Auth::guard('web')->check())->toBe($back);
     })->with([
-        'a 10 minute gap' => [10, Assurance::AAL3],
-        'a 20 minute gap' => [20, Assurance::AAL2],
+        'a 10 minute gap' => [10, true],
+        'a 20 minute gap' => [20, false],
     ]);
 
     it('ends the admin\'s session where sessions end with their level, when a gap lapses it', function () {
@@ -1273,8 +1309,56 @@ describe('ending by itself', function () {
         $this->get('/whoami')->assertRedirect('/dashboard');
 
         expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
-        $this->get('/billing')->assertOk();
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
     });
+
+    it('comes back at aal1 after impersonation.lifetime, and steps back up to aal2', function () {
+        impersonating();
+
+        // A request meanwhile keeps the admin's levels from idling out.
+        $this->travel(40)->minutes();
+        $this->get('/whoami')->assertOk();
+        $this->travel(21)->minutes();
+        $this->get('/whoami')->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL1)
+            ->and(record(session(Sessions::KEY))->assurance)->toBe(Assurance::AAL1);
+
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret)])->assertRedirect('http://localhost/billing');
+        $this->get('/billing')->assertOk()->assertSee('billing');
+
+        expect(app(SessionAssurance::class)->level())->toBe(Assurance::AAL2);
+    });
+
+    // A session that signed in at AAL2 and came back at AAL1 isn't one whose
+    // level lapsed: it stays signed in, and steps up.
+    it('keeps the admin signed in where sessions end with their level, coming back at aal1', function (bool $timeLimit) {
+        config(['keyring.sessions.end_on_lapse' => true]);
+        $own = impersonating();
+
+        if ($timeLimit) {
+            $this->travel(40)->minutes();
+            $this->get('/whoami')->assertOk();
+            $this->travel(21)->minutes();
+            $this->get('/whoami')->assertRedirect('/dashboard');
+        } else {
+            stopImpersonating()->assertRedirect('/dashboard');
+        }
+
+        expect(session(SessionAssurance::SIGNED_IN))->toBe(Assurance::AAL1->value);
+
+        $this->travel(5)->minutes();
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+
+        $this->get('/billing')->assertRedirect(route('keyring.confirm.challenge'));
+        $this->post(route('keyring.confirm.verify', 'totp'), ['code' => totpCode($this->totp->secret, 1)])->assertRedirect('http://localhost/billing');
+        $this->get('/billing')->assertOk();
+
+        expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey())
+            ->and(record(session(Sessions::KEY))->revokedAt)->toBeNull()
+            ->and(record($own)->replacedBy)->not->toBeNull();
+    })->with(['on a stop' => [false], 'after impersonation.lifetime' => [true]]);
 
     // Nothing is left for the next sign in on the browser to go back with.
     it('signs out when the user can no longer be loaded', function () {
