@@ -110,6 +110,34 @@ function impersonating(): string
     return $own;
 }
 
+/**
+ * A user provider whose database refuses any ID that isn't digits, with
+ * this SQLSTATE, as PostgreSQL refuses "abc" for an integer key.
+ */
+function pickyProvider(string $state, string $message): void
+{
+    Auth::provider('picky', fn ($app, array $config) => new class($app['hash'], $config['model'], $state, $message) extends EloquentUserProvider
+    {
+        public function __construct($hasher, $model, protected string $state, protected string $message)
+        {
+            parent::__construct($hasher, $model);
+        }
+
+        public function retrieveById($identifier)
+        {
+            if (ctype_digit((string) $identifier)) {
+                return parent::retrieveById($identifier);
+            }
+
+            $error = new PDOException($this->message);
+            $error->errorInfo = [$this->state, 7, $this->message];
+
+            throw new QueryException('pgsql', 'select * from "users" where "id" = ?', [$identifier], $error);
+        }
+    });
+    config(['auth.providers.users.driver' => 'picky']);
+}
+
 function record(string $id): ?RegisteredSession
 {
     return app(SessionRegistry::class)->find($id);
@@ -415,16 +443,7 @@ describe('who may impersonate', function () {
 
     // PostgreSQL won't compare "abc" with an integer key, and says so.
     it('refuses an ID the database won\'t look up as it refuses one nobody has, logging it as not_found', function () {
-        Auth::provider('picky', fn ($app, array $config) => new class($app['hash'], $config['model']) extends EloquentUserProvider
-        {
-            public function retrieveById($identifier)
-            {
-                return ctype_digit((string) $identifier)
-                    ? parent::retrieveById($identifier)
-                    : throw new QueryException('pgsql', 'select * from "users" where "id" = ?', [$identifier], new PDOException('invalid input syntax for type bigint'));
-            }
-        });
-        config(['auth.providers.users.driver' => 'picky']);
+        pickyProvider('22P02', 'invalid input syntax for type bigint');
         Keyring::allowImpersonationWhen(fn () => false);
         adminSignsIn();
 
@@ -438,6 +457,17 @@ describe('who may impersonate', function () {
                 ['reason' => 'not_allowed', 'user' => (string) $this->user->getKey()],
             ]);
     });
+
+    // Only data the column won't take is an ID nobody has. A database that
+    // fails for any other reason fails the start.
+    it('throws on any other error looking the user up', function (string $state) {
+        pickyProvider($state, 'the database went away');
+        adminSignsIn();
+        $this->withoutExceptionHandling();
+
+        expect(fn () => $this->postJson(route('keyring.impersonation.store', 'abc')))->toThrow(QueryException::class, 'the database went away')
+            ->and(SecurityEvent::query()->where('type', 'impersonation_refused')->count())->toBe(0);
+    })->with(['a deadlock' => ['40P01'], 'a dropped connection' => ['08006']]);
 
     it('refuses an account of another model, which the guard would not load', function () {
         Keyring::allowImpersonationWhen(fn () => true);

@@ -38,13 +38,17 @@ class ImpersonationController
      * that doesn't exist is refused like one that may not be impersonated,
      * so the answer doesn't say which IDs have an account. The log says
      * which it was. So is one the database won't look up at all, like
-     * "abc" for an integer key on PostgreSQL, rather than failing.
+     * "abc" for an integer key on PostgreSQL, rather than failing: an error
+     * in SQLSTATE class 22, data the column won't take. Any other error,
+     * a deadlock or a dropped connection say, is thrown on.
      */
     public function store(Request $request, string $user): Response
     {
         try {
             $found = $this->keyring->provider()->retrieveById($user);
-        } catch (QueryException) {
+        } catch (QueryException $e) {
+            throw_unless(str_starts_with((string) ($e->errorInfo[0] ?? $e->getCode()), '22'), $e);
+
             $found = null;
         }
 
