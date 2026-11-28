@@ -135,9 +135,11 @@ Route::middleware('auth:'.$guard)->group(function () use ($challenge, $sso) {
     // The verification link is an emailed link like the ones below: its GET
     // shows a page, and the page's button posts the link's signature. The
     // GET is further down, since the link is often opened signed out.
+    // Following it, and sending another, are the user's to do, so both are
+    // refused while impersonating.
     if (Features::enabled(Features::emailVerification())) {
         Route::get('/email/verify', [EmailVerificationController::class, 'notice'])->name('verification.notice');
-        Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware([ValidatePostedSignature::class, 'throttle:keyring'])->name('verification.verify.store');
+        Route::post('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])->middleware(['keyring.not-impersonating', ValidatePostedSignature::class, 'throttle:keyring'])->name('verification.verify.store');
         Route::post('/email/verification-notification', [EmailVerificationController::class, 'send'])->middleware(['keyring.not-impersonating', 'throttle:keyring'])->name('verification.send');
     }
 

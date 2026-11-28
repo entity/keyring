@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Testing\TestResponse;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Responses\SignedOutResponse;
@@ -501,6 +502,21 @@ describe('while impersonating', function () {
         'the confirm page' => ['GET', fn () => route('keyring.confirm.challenge')],
         'sending the verification email again' => ['POST', fn () => route('verification.send')],
     ]);
+
+    // The link went to the user's inbox: an impersonator who has it still
+    // isn't the one to say the address is theirs.
+    it('refuses following the user\'s email verification link', function () {
+        impersonating();
+        $this->user->forceFill(['email_verified_at' => null])->save();
+        $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $this->user->id, 'hash' => sha1($this->user->email)], absolute: false);
+
+        postSignedLink($url)->assertForbidden();
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $fields);
+        $this->postJson((string) parse_url($url, PHP_URL_PATH), $fields)->assertForbidden()->assertJson(['status' => 'impersonating']);
+
+        expect($this->user->fresh()->hasVerifiedEmail())->toBeFalse()
+            ->and($this->get('/whoami')->getContent())->toBe((string) $this->user->getKey());
+    });
 
     it('refuses the app\'s own routes behind keyring.not-impersonating, and lets them through otherwise', function () {
         adminSignsIn();

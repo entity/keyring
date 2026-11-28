@@ -249,7 +249,7 @@ Keyring refuses all of these with a `403`, and `{"status": "impersonating", "mes
 - adding, confirming, renaming, and removing authenticators,
 - ending sessions and devices, "sign out everywhere else" included,
 - confirming who they are: the confirm page, its challenges, and the identity provider confirm,
-- sending the email verification link again,
+- verifying the email address with the emailed link's button, and sending the link again,
 - starting another impersonation.
 
 Step-up can't be met either. A `keyring:{level}` or `keyring.fresh` route the session hasn't already met answers with the same `403`, rather than sending the impersonator to a confirm page that would refuse them. The impersonated session starts having proved nothing, so in practice that's every such route. A route with `keyring.enrolled`, or a user [held for a new password](protected-changes.md#requiring-a-password-change), lets the impersonator through, since only the user can do what those ask.
