@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\EloquentUserProvider;
 use Illuminate\Auth\Events\Authenticated as LaravelAuthenticated;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
@@ -406,6 +408,32 @@ describe('who may impersonate', function () {
         expect($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
             ->and(new ImpersonationRefused(ImpersonationRefusal::NoCallback)->render(Request::create('/', server: ['HTTP_ACCEPT' => 'application/json']))->getData(true))
             ->toBe(new ImpersonationRefused(ImpersonationRefusal::Self)->render(Request::create('/', server: ['HTTP_ACCEPT' => 'application/json']))->getData(true));
+    });
+
+    // PostgreSQL won't compare "abc" with an integer key, and says so.
+    it('refuses an ID the database won\'t look up as it refuses one nobody has, logging it as not_found', function () {
+        Auth::provider('picky', fn ($app, array $config) => new class($app['hash'], $config['model']) extends EloquentUserProvider
+        {
+            public function retrieveById($identifier)
+            {
+                return ctype_digit((string) $identifier)
+                    ? parent::retrieveById($identifier)
+                    : throw new QueryException('pgsql', 'select * from "users" where "id" = ?', [$identifier], new PDOException('invalid input syntax for type bigint'));
+            }
+        });
+        config(['auth.providers.users.driver' => 'picky']);
+        Keyring::allowImpersonationWhen(fn () => false);
+        adminSignsIn();
+
+        $unknown = $this->postJson(route('keyring.impersonation.store', 'abc'))->assertForbidden();
+        $refused = impersonate($this->user, json: true)->assertForbidden();
+
+        expect($unknown->getContent())->toBe($refused->getContent())
+            ->and(Auth::id())->toBe($this->admin->getKey())
+            ->and(SecurityEvent::query()->where('type', 'impersonation_refused')->oldest('id')->get()->pluck('meta')->all())->toBe([
+                ['reason' => 'not_found', 'user' => 'abc'],
+                ['reason' => 'not_allowed', 'user' => (string) $this->user->getKey()],
+            ]);
     });
 
     it('refuses an account of another model, which the guard would not load', function () {
@@ -2348,7 +2376,7 @@ describe('the session record', function () {
         $schema = 0;
         $this->withoutExceptionHandling();
 
-        expect(fn () => $become())->toThrow(Illuminate\Database\QueryException::class)
+        expect(fn () => $become())->toThrow(QueryException::class)
             ->and($schema)->toBe(0);
 
         // Once that's gone, it asks again, and a no isn't kept.

@@ -116,7 +116,7 @@ Both are only registered with `Features::impersonation()` on. They sit in Keyrin
 
 ### Starting
 
-`{user}` is the user's ID, as Keyring's guard loads them. An ID nobody has gets the same `403` as a user who may not be impersonated, so the answer doesn't say which IDs have an account. Only the [security log](#security-log-and-events) tells them apart.
+`{user}` is the user's ID, as Keyring's guard loads them. An ID nobody has gets the same `403` as a user who may not be impersonated, and so does one the database won't look up, such as `abc` for an integer key on PostgreSQL, so the answer doesn't say which IDs have an account. Only the [security log](#security-log-and-events) tells them apart.
 
 The route takes `impersonation.middleware`, which is `['keyring:aal2', 'keyring.fresh:15m']` by default: the impersonator has to have proved two factors, the second a possession factor or a passkey, in the last 15 minutes. One who hasn't is sent to confirm, as on any [step-up](step-up.md) route, and one without a second factor is sent to [`enrollment_url`](configuration.md#account-changes-and-enrollment), or gets a `403` without one. An empty list asks for nothing more: any signed-in session your callback allows can start one, with no step-up.
 

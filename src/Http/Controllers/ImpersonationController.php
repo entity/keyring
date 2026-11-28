@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Keyring\Http\Controllers;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Keyring\Contracts\Responses\SignedOutResponse;
@@ -36,11 +37,16 @@ class ImpersonationController
      * Sign in as the user with this ID, as Keyring's guard loads them. One
      * that doesn't exist is refused like one that may not be impersonated,
      * so the answer doesn't say which IDs have an account. The log says
-     * which it was.
+     * which it was. So is one the database won't look up at all, like
+     * "abc" for an integer key on PostgreSQL, rather than failing.
      */
     public function store(Request $request, string $user): Response
     {
-        $found = $this->keyring->provider()->retrieveById($user);
+        try {
+            $found = $this->keyring->provider()->retrieveById($user);
+        } catch (QueryException) {
+            $found = null;
+        }
 
         $this->impersonation->start($request, $found instanceof Model ? $found : $this->impersonation->refuseUnknown($request, $user));
 
