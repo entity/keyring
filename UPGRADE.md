@@ -51,6 +51,8 @@ A few things change whether or not you turn it on:
 - Each session in `GET /user/sessions`, and in `Sessions::list()`, has two new keys, `impersonated` and `impersonator`. Code that compares whole entries, such as a test with `assertExactJson`, needs them.
 - `SessionEndReason` has a new case, `ImpersonationEnded`. A `match` over it with no `default` needs an arm for it.
 - `RegisteredSession` has three new constructor arguments and properties after `origin`, `impersonatorId`, `impersonatorType`, and `impersonatorSession`, and `toArray()` has `impersonator_id`, `impersonator_type`, and `impersonator_session`, which `fromArray()` reads as `null` when they're missing. A [driver of your own](docs/devices-and-sessions.md#writing-a-driver) that stores `toArray()` and reads it back with `fromArray()` needs no change. One that writes the array into a table of its own needs the three columns once anyone impersonates. `withoutIds()` blanks `impersonatorSession` too.
+- `Features::all()` includes `Features::impersonation()` now, so config or a test that turns on `Features::all()` gets Keyring's `POST /impersonate/{user}` and `POST|DELETE /impersonate` routes, which can clash with routes of your own at those paths. List the features you want, or take it out with `array_diff(Features::all(), [Features::impersonation()])`.
+- The browser package's `Session` type has two new required fields, `impersonated` and `impersonator`. A `Session` you build by hand, such as a mock in a frontend test, needs them: `impersonated: false, impersonator: null`.
 - `Sessions::reregister()` returns whether the session moved to a new record, as a `bool`, where it returned nothing. A subclass that overrides it needs the new return type.
 
 ### Pages Asked For With JSON or an XHR

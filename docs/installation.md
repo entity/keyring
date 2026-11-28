@@ -46,7 +46,7 @@ php artisan keyring:install --factor=totp --factor=passkeys --feature=registrati
 | Option | Values |
 |---|---|
 | `--factor` | `totp`, `passkeys`, `security-keys`, or `email-codes`. `none` keeps the password alone without asking. |
-| `--feature` | `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes`, or `security-log`. |
+| `--feature` | `registration`, `reset-passwords`, `email-verification`, `update-passwords`, `manage-authenticators`, `devices`, `email-changes`, `security-log`, or `impersonation`. |
 | `--require-second-factor`, `--optional-second-factor` | Answer the second question. |
 
 The `--feature` option replaces the defaults (`registration`, `reset-passwords`, `email-verification`, `update-passwords`, and `security-log`), so list those too if you want them. An unknown value stops the command before it writes anything, and so does requiring a second factor without a sign-in method that counts.
