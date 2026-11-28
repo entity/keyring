@@ -38,7 +38,11 @@ enum ImpersonationEndReason: string
      * The browser's session no longer held the impersonation it started:
      * the user can no longer be loaded (deleted, say), someone else is
      * signed in on it, or it lost what was parked. Nothing says it's still
-     * the impersonator's, so the browser was signed out.
+     * the impersonator's, so the browser was signed out. Also what a request
+     * that another of the browser's beat to ending it returns, a copy of
+     * the session from before it ended say: that one is signed out quietly,
+     * and ImpersonationEnded doesn't fire for it, as the other request's
+     * end is the one announced.
      */
     case Lost = 'lost';
 

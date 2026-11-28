@@ -154,7 +154,9 @@ try {
         'stop-impersonating' => (function () use ($id, $value) {
             // A stop, which moves the impersonator's record as it goes
             // back, holding their row. The browser's session is what the
-            // race hands over.
+            // race hands over. Which request ends it is claimed in the rate
+            // limiter's store, kept in the database so every side sees it.
+            config(['cache.limiter' => 'database']);
             $request = Request::create('/impersonate', 'DELETE');
             $request->setLaravelSession($session = app('session.store'));
             $session->replace(json_decode($value, true));

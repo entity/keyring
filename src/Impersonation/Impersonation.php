@@ -220,21 +220,18 @@ class Impersonation
      * The reason it ended for is the one given, unless it couldn't go back:
      * then ImpersonatorSessionEnded or Lost. It went back when the reason
      * returns(). ImpersonationEnded says whether the browser did, which it
-     * hasn't when handing it back throws before the session is on the
-     * impersonator's record. Then the impersonator's session ends, and the
-     * browser is signed out, before it's thrown on.
+     * hasn't when handing it back throws. Then the impersonator's session
+     * ends, and the browser is signed out, before it's thrown on.
      *
      * Only one request ends an impersonation, however many of the
      * browser's find it over at once, such as XHRs sent as its time ran
-     * out, or a copy of the session from before another request ended it.
-     * One that found the impersonated record still open ends it only if
-     * its revoke is the one that revokes it. One that found it ended
-     * already, by the user from their sessions list say, doesn't once
-     * another request has gone back from it (the impersonator's record has
-     * moved), and of two going back at once only the one that moves the
-     * impersonator's record does. The rest leave it to that request
-     * (alreadyEnded()): Lost, with nothing announced, logged, revoked or
-     * moved.
+     * out, or a copy of the session from before another request ended it:
+     * the one that claims its end (claim()). That's whoever revoked its
+     * record, the user from their sessions list say, as only ending it
+     * claims it. The rest leave it to that request (alreadyEnded()): Lost,
+     * with nothing announced, logged, revoked or moved. A copy never goes
+     * back, whoever claims it: the impersonator's record it parked has
+     * moved on, or ended, by then (returnable()).
      */
     public function end(Request $request, ImpersonationEndReason $reason): ImpersonationEndReason
     {
@@ -259,29 +256,28 @@ class Impersonation
             $reason = $ours ? ImpersonationEndReason::ImpersonatorSessionEnded : ImpersonationEndReason::Lost;
         }
 
-        $live = $current !== null && $current->revokedAt === null;
+        $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $current === null ? null : $this->sessions->registry()->revoke($current->id));
 
-        $ours = $this->sessions->because(SessionEndReason::ImpersonationEnded, function () use ($current, $live, $own, $back) {
-            $revoked = $current === null ? null : $this->sessions->registry()->revoke($current->id);
+        // Another request ended it first.
+        if (! $this->claim($handle, $parked['expires_at'] ?? $current->expiresAt ?? now()->getTimestamp())) {
+            $this->forget($request);
 
-            // Another request revoked it first, or went back from it.
-            if ($live ? $revoked === null : $this->wentBack($own)) {
-                return false;
-            }
-
-            // Nobody is going back to it, so it ends with the browser.
-            if ($back === null && $own !== null) {
-                $this->sessions->registry()->revoke($own);
-            }
-
-            return true;
-        });
-
-        $this->forget($request);
-
-        if (! $ours) {
             return $this->alreadyEnded($request);
         }
+
+        // Nobody is going back to it, so it ends with the browser. A
+        // registry that fails leaves the end for the next request to claim.
+        if ($back === null && $own !== null) {
+            try {
+                $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($own));
+            } catch (Throwable $e) {
+                $this->unclaim($handle);
+
+                throw $e;
+            }
+        }
+
+        $this->forget($request);
 
         // It has ended by now, whatever the registry does next, so it's
         // announced, and logged, even when signing out or moving the record
@@ -294,18 +290,32 @@ class Impersonation
                 app(SignIn::class)->out($request, onlyThisBrowser: true);
             } else {
                 // Only what this browser parked goes back ($ours).
-                assert($parked !== null);
-
                 try {
                     $this->switchTo($request, $back[0]);
                     $level = $this->restore($request, $this->catchUp($parked['parked'])[0]);
                     $this->sessions->rebind($request, $back[1], $parked['remembered']);
+
+                    // A copy of the session from while impersonating would
+                    // lead back here again with what was parked: a cookie
+                    // session's, in the browser where regenerating can't
+                    // destroy it, or a request that overlapped this one and
+                    // saves the old session after it. The record moves, as
+                    // on a step-up, so the copy's parked record has ended.
+                    // The browser's "remember me" moves with it. One that
+                    // couldn't move for having ended, by a sign-out
+                    // everywhere say, or for having moved without this
+                    // request, still went back, and the next request finds
+                    // it ended. The new record has the level the session
+                    // came back at, for the sessions list.
+                    $this->sessions->reregister($request, ['assurance' => $level]);
                 } catch (Throwable $e) {
-                    // Nothing is parked to go back with now, so it ends as
-                    // if it couldn't go back: the impersonator's session
-                    // too, and the browser is signed out, rather than left
-                    // as the user on a record that has ended, for the next
-                    // request to end again.
+                    // Nothing is parked to go back with now, and the record
+                    // a copy of the session would go back to hasn't moved,
+                    // so it ends as if it couldn't go back: the
+                    // impersonator's session too, and the browser is signed
+                    // out, rather than left as the user on a record that has
+                    // ended, for the next request to end again, or as the
+                    // impersonator on one a copy could come back to.
                     rescue(fn () => $this->sessions->because(SessionEndReason::ImpersonationEnded, fn () => $this->sessions->registry()->revoke($back[1]->id)));
                     rescue(fn () => app(SignIn::class)->out($request, onlyThisBrowser: true));
 
@@ -313,23 +323,6 @@ class Impersonation
                 }
 
                 $returned = true;
-
-                // A copy of the session from while impersonating would lead
-                // back here again with what was parked: a cookie session's, in
-                // the browser where regenerating can't destroy it, or a request
-                // that overlapped this one and saves the old session after it.
-                // The record moves, as on a step-up, so the copy's parked record
-                // has ended. The browser's "remember me" moves with it. Moved
-                // by another request going back from it meanwhile, it's that
-                // one's to announce. One that couldn't move for having ended,
-                // by a sign-out everywhere say, still went back, and the next
-                // request finds it ended. The new record has the level the
-                // session came back at, for the sessions list.
-                if (! $this->sessions->reregister($request, ['assurance' => $level]) && $this->wentBack($back[1]->id)) {
-                    $announce = false;
-
-                    return $this->alreadyEnded($request);
-                }
             }
         } finally {
             if ($announce) {
@@ -341,12 +334,36 @@ class Impersonation
     }
 
     /**
-     * Whether a request went back to the impersonator's record: it has
-     * moved to a new one, which only going back does while it's parked.
+     * Claim the end of the impersonation with this handle for this request,
+     * returning whether it's this one's: only the first request to ask is
+     * given it. Kept in the rate limiter's cache store, as Keyring's other
+     * one-time claims are, for as long as the impersonation had left and a
+     * session lasts after that (session.lifetime), as no copy of the
+     * session can still be sent later. A store that fails, or an
+     * impersonation with no handle to claim it by, counts as this one's: a
+     * second entry in the log does less harm than none.
      */
-    protected function wentBack(#[\SensitiveParameter] ?string $own): bool
+    protected function claim(?string $handle, int $expiresAt): bool
     {
-        return $own !== null && $this->sessions->registry()->find($own)?->replacedBy !== null;
+        $for = max(0, $expiresAt - now()->getTimestamp()) + ((int) config('session.lifetime', 120) * 60) + 60;
+
+        return $handle === null || rescue(fn () => cache()->store(config('cache.limiter'))->add($this->claimKey($handle), true, $for), true);
+    }
+
+    /**
+     * Give up a claim this request couldn't see through, so the next
+     * request that finds the impersonation over ends it.
+     */
+    protected function unclaim(?string $handle): void
+    {
+        if ($handle !== null) {
+            rescue(fn () => cache()->store(config('cache.limiter'))->forget($this->claimKey($handle)));
+        }
+    }
+
+    protected function claimKey(string $handle): string
+    {
+        return 'keyring:impersonation-ended:'.sha1($handle);
     }
 
     /**

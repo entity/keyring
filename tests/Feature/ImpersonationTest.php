@@ -1641,7 +1641,7 @@ describe('two requests ending it', function () {
     });
 
     // Ended by the user from their sessions list, it's found ended by both,
-    // so neither revokes it: moving the admin's record decides.
+    // so neither revokes it: claiming its end decides.
     it('goes back once when two requests go back together from one the user ended', function () {
         $ended = impersonationsEnded();
         $own = impersonating();
@@ -1667,6 +1667,114 @@ describe('two requests ending it', function () {
 
         sendBackSession($back);
         expect($this->get('/whoami')->assertOk()->getContent())->toBe((string) $this->admin->getKey());
+    });
+
+    // The user ends it from their sessions list, or anything else ends it,
+    // while the stop is under way: after the stop read the record, before
+    // it revokes it. Nobody else ended the impersonation, so the stop does.
+    it('ends it, once, when its record is revoked from outside during the stop', function (bool $returnable) {
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        $impersonated = session(Sessions::KEY);
+        $calls = 0;
+
+        // Asked of the admin by the session middleware, then by the stop.
+        Keyring::allowSignInWhen(function (User $user) use (&$calls, $impersonated, $returnable) {
+            if ($user->is($this->admin) && ++$calls === 2) {
+                app(SessionRegistry::class)->revoke($impersonated);
+
+                return $returnable;
+            }
+
+            return true;
+        });
+
+        stopImpersonating()->assertRedirect($returnable ? '/dashboard' : '/login');
+
+        expect($calls)->toBe(2)
+            ->and($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe($returnable ? ImpersonationEndReason::Stopped : ImpersonationEndReason::ImpersonatorSessionEnded)
+            ->and($ended[0]->returned)->toBe($returnable)
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(2)
+            ->and(record($impersonated)->revokedAt)->not->toBeNull()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($own)->replacedBy)->toBe($returnable ? session(Sessions::KEY) : null)
+            ->and(Auth::id())->toBe($returnable ? $this->admin->getKey() : null);
+    })->with(['back to the admin' => [true], 'with nothing to go back to' => [false]]);
+
+    // The admin's own session was ended elsewhere, so both sign out.
+    it('ends it once when two requests sign out together', function () {
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        $during = session()->all();
+        app(SessionRegistry::class)->revoke($own);
+
+        stopImpersonating()->assertRedirect('/login');
+
+        sendBackSession($during);
+        $this->getJson('/whoami')->assertUnauthorized();
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe(ImpersonationEndReason::ImpersonatorSessionEnded)
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->oldest('id')->pluck('meta')->map(fn (array $meta) => $meta['role'])->all())->toBe(['impersonator', 'impersonated'])
+            ->and(Auth::guard('web')->check())->toBeFalse();
+    });
+
+    // The admin's record moved without going back to it, a step-up on a
+    // copy of their session from before it started say, and the user ended
+    // the impersonation. Nobody went back, so the end is still announced.
+    it('ends it when the admin\'s record moved for some other reason', function () {
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        $impersonated = session(Sessions::KEY);
+        app(SessionRegistry::class)->replace($own, record($own)->with(['id' => 'stepped-up', 'origin' => record($own)->origin()]), revoke: true);
+        app(SessionRegistry::class)->revoke($impersonated);
+
+        $this->get('/whoami')->assertRedirect('/login');
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe(ImpersonationEndReason::ImpersonatorSessionEnded)
+            ->and($ended[0]->returned)->toBeFalse()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->count())->toBe(2)
+            ->and(record('stepped-up')->isActive(now()->getTimestamp()))->toBeTrue()
+            ->and(Auth::guard('web')->check())->toBeFalse();
+    });
+
+    // Without the claim's store, nothing says another request ended it, so
+    // it's announced rather than risk never announcing it.
+    it('ends it when the store the claim is kept in fails, reporting why', function () {
+        Exceptions::fake();
+        $ended = impersonationsEnded();
+        impersonating();
+        config(['cache.limiter' => 'missing']);
+
+        stopImpersonating()->assertRedirect('/dashboard');
+
+        expect($ended)->toHaveCount(1)
+            ->and(Auth::id())->toBe($this->admin->getKey());
+        Exceptions::assertReported(InvalidArgumentException::class);
+    });
+
+    // The claim is given up, so the next request, finding it over, ends it.
+    it('leaves the end to the next request when ending the admin\'s session fails', function () {
+        Exceptions::fake();
+        $ended = impersonationsEnded();
+        $own = impersonating();
+        Keyring::withoutProtection(fn () => $this->admin->forceFill(['password' => 'changed meanwhile'])->save());
+
+        // The impersonated record ends, and the admin's doesn't, once.
+        registryThatGoesAway(works: 1, fails: 1);
+        stopImpersonating()->assertServerError();
+
+        expect($ended)->toHaveCount(0)
+            ->and(record($own)->revokedAt)->toBeNull();
+
+        $this->get('/whoami')->assertRedirect('/login');
+
+        expect($ended)->toHaveCount(1)
+            ->and($ended[0]->reason)->toBe(ImpersonationEndReason::ImpersonatorSessionEnded)
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(Auth::guard('web')->check())->toBeFalse();
     });
 
     // On the cookie driver, a second stop from a copy kept in the browser
@@ -2255,15 +2363,22 @@ describe('the security log and events', function () {
             ->and($this->user->fresh()->remember_token)->toBe('the users own');
     });
 
-    it('logs the end when moving the admin\'s record fails on the way back', function () {
+    // The admin's record didn't move, so a copy of the session from while
+    // impersonating could still go back to it. It ends instead, and the
+    // browser is signed out, as when handing it back fails.
+    it('logs the end, ends the admin\'s session and signs out, when moving the admin\'s record fails on the way back', function () {
         Exceptions::fake();
         Event::fake([ImpersonationEnded::class]);
-        impersonating();
+        $own = impersonating();
         registryThatGoesAway(works: 0, method: 'replace');
 
         stopImpersonating()->assertServerError();
 
-        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::Stopped && $event->returned);
+        Event::assertDispatchedTimes(ImpersonationEnded::class, 1);
+        Event::assertDispatched(ImpersonationEnded::class, fn (ImpersonationEnded $event) => $event->reason === ImpersonationEndReason::Stopped && ! $event->returned);
+        expect(Auth::guard('web')->check())->toBeFalse()
+            ->and(record($own)->revokedAt)->not->toBeNull()
+            ->and(record($own)->replacedBy)->toBeNull();
     });
 
     // The session can't be handed back, and nothing is parked to go back

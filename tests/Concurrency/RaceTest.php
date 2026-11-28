@@ -407,9 +407,10 @@ it('leaves nothing of the admin signed in when they stop impersonating as they\'
 });
 
 // Two of the browser's requests that find it over at once, XHRs sent as its
-// time ran out say, both revoke the impersonated record, which locks it.
-// Only the one given it goes back and logs the end. The other leaves it,
-// without signing the admin out of the record the first moved to.
+// time ran out say, both revoke the impersonated record, which locks it,
+// then claim its end. Only the one that claims it goes back and logs the
+// end. The other leaves it, without signing the admin out of the record
+// the first moved to.
 it('ends an impersonation two requests end at once once, leaving the admin signed in', function () {
     $admin = taylor();
     $user = User::create(['name' => 'Abigail', 'email' => 'abigail@example.com', 'password' => 'password']);
