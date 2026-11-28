@@ -49,7 +49,7 @@ php artisan keyring:install
 php artisan migrate
 ```
 
-The columns are only written for an impersonated session, so nothing else needs them. The `cache` driver needs no migration.
+The columns are only written for an impersonated session, so nothing else needs them. Without them, the first start throws a `LogicException` naming the missing columns and these two commands, rather than a database error. The `cache` driver needs no migration.
 
 By default the impersonator needs a second factor: [starting](#starting) takes `keyring:aal2` and `keyring.fresh:15m`. An application that only signs in with a password can ask for a recent password alone in `config/keyring.php`:
 

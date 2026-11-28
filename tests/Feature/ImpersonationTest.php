@@ -13,6 +13,7 @@ use Illuminate\Session\Middleware\AuthenticateSession as LaravelAuthenticateSess
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
@@ -2304,5 +2305,55 @@ describe('the session record', function () {
         adminSignsIn();
 
         expect(record(session(Sessions::KEY))->isImpersonated())->toBeFalse();
+    });
+
+    it('says the migration is missing on the first start without it, starting nothing', function () {
+        Schema::table('keyring_sessions', fn (Blueprint $table) => $table->dropColumn(['impersonator_id', 'impersonator_type', 'impersonator_session']));
+        adminSignsIn();
+        $this->withoutExceptionHandling();
+
+        expect(fn () => impersonate($this->user))->toThrow(LogicException::class, 'The [keyring_sessions] table is missing the columns Keyring keeps an impersonation in (impersonator_id, impersonator_type, impersonator_session). Publish and run Keyring\'s migrations: php artisan keyring:install, then php artisan migrate.')
+            ->and(Auth::id())->toBe($this->admin->getKey())
+            ->and(Keyring::impersonating())->toBeFalse()
+            ->and(SecurityEvent::query()->where('type', 'impersonation_started')->count())->toBe(0);
+    });
+
+    it('asks the database whether the migration ran once, then takes the cache\'s word for a few minutes', function () {
+        Route::middleware(['web', 'auth'])->post('/become/{id}', fn (Request $request, string $id) => Keyring::impersonate($request, User::findOrFail($id)));
+        $become = fn () => $this->post('/become/'.$this->user->getKey());
+        adminSignsIn();
+        $schema = 0;
+        DB::listen(function ($query) use (&$schema) {
+            $schema += (int) str_contains($query->sql, 'pragma_table_xinfo');
+        });
+
+        $become()->assertOk();
+
+        expect($schema)->toBe(1);
+
+        // The same process again, which has it in hand.
+        stopImpersonating();
+        $schema = 0;
+        $become()->assertOk();
+        stopImpersonating();
+
+        expect($schema)->toBe(0);
+
+        // Another process: it takes the cache's word, and asks nothing.
+        app()->forgetInstance(SessionRegistryManager::class);
+        Schema::table('keyring_sessions', fn (Blueprint $table) => $table->dropColumn(['impersonator_id', 'impersonator_type', 'impersonator_session']));
+        $schema = 0;
+        $this->withoutExceptionHandling();
+
+        expect(fn () => $become())->toThrow(Illuminate\Database\QueryException::class)
+            ->and($schema)->toBe(0);
+
+        // Once that's gone, it asks again, and a no isn't kept.
+        $this->travel(Sweep::SCHEMA_CACHED_FOR + 1)->seconds();
+        app()->forgetInstance(SessionRegistryManager::class);
+
+        expect(fn () => $become())->toThrow(LogicException::class)
+            ->and(fn () => $become())->toThrow(LogicException::class)
+            ->and($schema)->toBe(2);
     });
 });

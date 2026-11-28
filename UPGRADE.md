@@ -40,7 +40,7 @@ Laravel's `Failed` event now only takes the username from the request for a fact
 
 Impersonation is a new feature, off until you add `Features::impersonation()` and register `Keyring::allowImpersonationWhen()`. See [Impersonation](docs/impersonation.md), which also covers moving from `lab404/laravel-impersonate`.
 
-Before you turn it on with the `database` session driver, run `keyring:install` to publish the new `*_add_impersonation_to_keyring_sessions_table.php` migration, then `php artisan migrate`. It adds three nullable columns. Nothing else writes them, so the upgrade itself needs no migration, and the `cache` driver never does.
+Before you turn it on with the `database` session driver, run `keyring:install` to publish the new `*_add_impersonation_to_keyring_sessions_table.php` migration, then `php artisan migrate`. It adds three nullable columns. Nothing else writes them, so the upgrade itself needs no migration, and the `cache` driver never does. Without them, starting an impersonation throws a `LogicException` that says so.
 
 With the feature on, Keyring registers `POST /impersonate/{user}` and `POST|DELETE /impersonate`. A route of your own at either path, such as an impersonation package's, needs to move or go first.
 
