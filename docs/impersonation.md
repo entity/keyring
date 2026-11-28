@@ -82,6 +82,8 @@ A [risk](risk.md) lock doesn't refuse an impersonation: it only refuses sign ins
 
 The callback is asked again on every request while the impersonation lasts, so taking someone's admin role away, or protecting a user, ends an impersonation that's already running. The browser goes back to the impersonator's own session, with the `ended` [reason](#security-log-and-events).
 
+A callback that throws on one of those requests counts as a no. The exception is reported to your exception handler, and the impersonation ends the same way, rather than every request the browser makes failing, stopping and signing out included, until its cookies are cleared. Before starting, and in `Keyring::allowsImpersonation()` and `Keyring::impersonationRefusal()`, what it throws is thrown on, a `500` if nothing catches it, since nothing has started yet.
+
 On those requests the signed-in user is the one being impersonated, so decide from the two arguments alone. `auth()->user()`, `$request->user()`, and `Gate::allows()` all ask about the user, and would end the impersonation on its first request. To use a gate, ask it about the impersonator:
 
 ```php

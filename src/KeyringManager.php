@@ -488,7 +488,10 @@ class KeyringManager
      * when the signed-in user is the one being impersonated, so decide
      * from its two arguments alone: not auth()->user(), $request->user()
      * or Gate::allows(), which would ask about the user. For a gate, ask
-     * Gate::forUser($impersonator)->allows(...).
+     * Gate::forUser($impersonator)->allows(...). One that throws on those
+     * requests is reported and counts as a no, ending the impersonation,
+     * rather than failing every request the browser makes. Asked before
+     * starting, and by allowsImpersonation(), what it throws is thrown on.
      *
      * @param  Closure(Authenticatable&Model, Authenticatable&Model): bool  $callback
      */

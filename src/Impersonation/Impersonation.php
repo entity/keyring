@@ -355,7 +355,9 @@ class Impersonation
      * does. Asked by the session middleware on every request, in place of
      * its own checks. Who may impersonate whom is asked again each time, so
      * an impersonator who loses the right, or a user the app protects
-     * since, ends it on the next request.
+     * since, ends it on the next request. A callback that throws counts as
+     * a no, and is reported: thrown, it would fail every request the
+     * browser makes, stopping and signing out too, with no way back.
      */
     public function ending(Request $request, ?RegisteredSession $session, Authenticatable&Model $user): ?ImpersonationEndReason
     {
@@ -371,7 +373,7 @@ class Impersonation
         $impersonator = $this->impersonatorFrom($parked);
 
         return match (true) {
-            $impersonator !== null && ! $this->keyring->allowsImpersonation($impersonator, $user) => ImpersonationEndReason::Ended,
+            $impersonator !== null && ! rescue(fn () => $this->keyring->allowsImpersonation($impersonator, $user), false) => ImpersonationEndReason::Ended,
             $now >= $parked['expires_at'] || ! $session->isActive($now) || $this->sessions->idledOut($session, $now) => ImpersonationEndReason::Expired,
             $this->returnable($parked, $impersonator) === null => ImpersonationEndReason::ImpersonatorSessionEnded,
             default => null,

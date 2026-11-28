@@ -242,6 +242,20 @@ describe('who may impersonate', function () {
             ->and(refusal(fn () => Keyring::impersonate(request(), $this->user)))->toBe(ImpersonationRefusal::NotAllowed);
     });
 
+    // Nothing is stuck yet, so it's an error like any other.
+    it('throws on what the callback throws before starting, starting nothing', function () {
+        Keyring::allowImpersonationWhen(fn () => throw new RuntimeException('The roles service is down.'));
+        adminSignsIn();
+
+        $this->withoutExceptionHandling();
+
+        expect(fn () => impersonate($this->user))->toThrow(RuntimeException::class, 'The roles service is down.')
+            ->and(fn () => Keyring::allowsImpersonation($this->admin, $this->user))->toThrow(RuntimeException::class)
+            ->and(Keyring::impersonating())->toBeFalse()
+            ->and(Auth::id())->toBe($this->admin->getKey())
+            ->and(SecurityEvent::query()->where('type', 'impersonation_started')->count())->toBe(0);
+    });
+
     it('only counts a callback that answers true', function () {
         Keyring::allowImpersonationWhen(fn () => 1);
 
@@ -1181,6 +1195,21 @@ describe('ending by itself', function () {
         expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
             ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
             ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['ended']);
+    });
+
+    // Thrown, it would fail every request the browser makes, stopping and
+    // signing out included, until its cookies were cleared.
+    it('ends, back to the admin, when the callback throws while it runs, reporting what it threw', function () {
+        Exceptions::fake();
+        $own = impersonating();
+        Keyring::allowImpersonationWhen(fn () => throw new RuntimeException('The roles service is down.'));
+
+        $this->get('/whoami')->assertRedirect('/dashboard')->assertSessionHas('status', 'impersonation-ended');
+
+        expect(session(Sessions::KEY))->toBe(record($own)->replacedBy)
+            ->and($this->get('/whoami')->getContent())->toBe((string) $this->admin->getKey())
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->get()->pluck('meta.reason')->unique()->all())->toBe(['ended']);
+        Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The roles service is down.');
     });
 
     it('brings the admin back signed in where sessions end with their level, having kept it from lapsing', function () {
