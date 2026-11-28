@@ -564,13 +564,16 @@ describe('starting', function () {
         impersonate($this->user)->assertRedirect('/support/view');
     });
 
-    it('lasts no longer than the session could', function () {
+    it('lasts no longer than the session could, and says so to the banner', function () {
+        $this->freezeSecond();
         config(['keyring.impersonation.lifetime' => '90d']);
         adminSignsIn();
 
         impersonate($this->user);
 
-        expect(record(session(Sessions::KEY))->expiresAt)->toBe(now()->addDays(30)->getTimestamp());
+        expect(record(session(Sessions::KEY))->expiresAt)->toBe(now()->addDays(30)->getTimestamp())
+            ->and(session(Impersonation::KEY)['expires_at'])->toBe(now()->addDays(30)->getTimestamp())
+            ->and(Keyring::impersonation()['expiresAt'])->toBe(now()->addDays(30)->toIso8601String());
     });
 });
 

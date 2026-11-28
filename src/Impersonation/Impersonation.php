@@ -138,6 +138,9 @@ class Impersonation
         $record = $this->sessions->startImpersonation($user, $impersonator, $own, $until);
         $parked['handle'] = $this->sessions->handle($record);
 
+        // When it really ends: no later than a session could last either.
+        $parked['expires_at'] = $record->expiresAt;
+
         // Logged here rather than by a listener, ahead of the app's: one of
         // those that throws, sending an email say, can't leave it unlogged.
         // A start that can't be logged, or can't hand the browser over,

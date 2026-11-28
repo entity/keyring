@@ -302,7 +302,7 @@ public function share(Request $request): array
 }
 ```
 
-The name is the impersonator's `name` attribute, or their username without one. `stopUrl` is Keyring's [stop route](#stopping), or `null` when Keyring's routes aren't registered: with `routes` set to `false` in `config/keyring.php` and no `Keyring::routes()` of your own. Stop through a [route of your own](#from-your-own-code) then. The browser package types it as `Impersonation`:
+The name is the impersonator's `name` attribute, or their username without one. `expiresAt` is when it [ends by itself](#the-time-limit): `impersonation.lifetime` after it started, or sooner when `sessions.absolute` is shorter. `stopUrl` is Keyring's [stop route](#stopping), or `null` when Keyring's routes aren't registered: with `routes` set to `false` in `config/keyring.php` and no `Keyring::routes()` of your own. Stop through a [route of your own](#from-your-own-code) then. The browser package types it as `Impersonation`:
 
 ```tsx
 import { router, usePage } from '@inertiajs/react'
