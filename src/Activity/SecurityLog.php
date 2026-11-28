@@ -19,6 +19,7 @@ use Illuminate\Support\Str;
 use Keyring\Devices\UserAgent;
 use Keyring\Enums\Severity;
 use Keyring\Features;
+use Keyring\Impersonation\Impersonation;
 use Keyring\KeyringManager;
 use Keyring\Models\SecurityEvent;
 use Keyring\Support\Collation;
@@ -272,6 +273,8 @@ class SecurityLog
      */
     protected function entry(string $type, ?Authenticatable $user, ?string $factor, ?string $device, array $meta, ?Severity $severity): SecurityEvent
     {
+        $impersonated = $user !== null && $this->aboutImpersonated($type, $user, $meta);
+
         $event = new ($this->keyring->securityEventModel())([
             'type' => $type,
             'severity' => $severity ?? Severity::of($type),
@@ -279,8 +282,8 @@ class SecurityLog
             // column, and the entry is still kept.
             'factor' => $factor === null ? null : mb_substr($factor, 0, 64),
             'device_id' => $device,
-            'ip' => $this->keyring->recordedIp(request()),
-            'user_agent' => UserAgent::from(request()),
+            'ip' => $impersonated ? null : $this->keyring->recordedIp(request()),
+            'user_agent' => $impersonated ? null : UserAgent::from(request()),
             'request_id' => $this->requestId(),
             'meta' => $meta === [] ? null : $this->scrubbed($meta),
             'created_at' => now(),
@@ -291,6 +294,25 @@ class SecurityLog
         }
 
         return $event;
+    }
+
+    /**
+     * Whether an entry on $user's account is written while someone is
+     * impersonating them, or is the start or end of that: the request is
+     * then the impersonator's, so its IP address and browser are theirs,
+     * and are left off, as off the user's sessions list. The start and end
+     * say so with their "role", the start being logged before the browser
+     * changes hands. The impersonator's own entries keep them.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    protected function aboutImpersonated(string $type, Authenticatable $user, array $meta): bool
+    {
+        if (in_array($type, ['impersonation_started', 'impersonation_ended'], true)) {
+            return ($meta['role'] ?? null) === 'impersonated';
+        }
+
+        return Features::enabled(Features::impersonation()) && app(Impersonation::class)->impersonates(request(), $user);
     }
 
     /**

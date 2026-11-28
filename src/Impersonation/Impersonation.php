@@ -460,7 +460,9 @@ class Impersonation
      * Whether $user is the one this request's browser is impersonating, or
      * was until this request ended it. Their "remember me" cookies aren't
      * the browser's then, the impersonator's are, so a sign-out the registry
-     * fails mustn't cycle the user's token (Sessions::signedOut()).
+     * fails mustn't cycle the user's token (Sessions::signedOut()). Nor are
+     * the request's IP address and browser the user's, so the security log
+     * leaves them off the user's entries (SecurityLog).
      */
     public function impersonates(Request $request, Authenticatable $user): bool
     {

@@ -32,6 +32,8 @@ Keyring records sign ins, failures, lockouts, refusals, changes, and automatic a
 
 The log never holds passwords, codes, tokens, signatures, session IDs, or anything else from the request body.
 
+While someone is [impersonating](impersonation.md#security-log-and-events) a user, the requests are the impersonator's. So any entry written on the user's account in those requests has no IP address or user agent, and neither do the `impersonation_started` and `impersonation_ended` entries on the user's account. The impersonator's own entries keep them.
+
 The security log is turned on by default. The `Features::securityLog()` feature is part of Keyring's default features, and the `keyring:install` command includes it in your list unless you leave it out. You can configure the log with these options:
 
 ```php
@@ -102,8 +104,8 @@ How long those lines are kept, and who can read them, is up to that channel. The
 | `link_refused` | warning | An emailed link was refused. It's linked to the user whose email change it was, when there is one. | `link` and `reason`, [below](#refused-links) |
 | `verification_refused` | critical | A sign in or step-up was refused at the end, because a [mandatory step](sign-in-flow.md#mandatory-steps) hadn't run for the request. | `skipped`, the steps |
 | `refusals_limited` | warning | The entries above this one stopped being written for a while. See [Refusals That Repeat](#refusals-that-repeat). | `type`, the entry type that was left out |
-| `impersonation_started` | notice | Someone signed in as another user. It's logged on both accounts. See [Impersonation](impersonation.md#security-log-and-events). | `impersonator` and `user` (the two accounts' IDs), `role` (`impersonator` or `impersonated`, for the entry's account) |
-| `impersonation_ended` | info | An impersonation ended. It's logged on both accounts, or on the other's alone once one of them has been deleted. | `impersonator`, `user`, `role`, `reason` (`stopped`, `expired`, `ended`, `impersonator_session_ended`, `lost`, `signed_out` or `failed`), `returned` (whether the browser went back to the impersonator's session, or stayed theirs for `failed`) |
+| `impersonation_started` | notice | Someone signed in as another user. It's logged on both accounts, with no IP address or user agent on the user's. See [Impersonation](impersonation.md#security-log-and-events). | `impersonator` and `user` (the two accounts' IDs), `role` (`impersonator` or `impersonated`, for the entry's account) |
+| `impersonation_ended` | info | An impersonation ended. It's logged on both accounts, or on the other's alone once one of them has been deleted, with no IP address or user agent on the user's. | `impersonator`, `user`, `role`, `reason` (`stopped`, `expired`, `ended`, `impersonator_session_ended`, `lost`, `signed_out` or `failed`), `returned` (whether the browser went back to the impersonator's session, or stayed theirs for `failed`) |
 | `impersonation_refused` | warning | A start of an [impersonation](impersonation.md#security-log-and-events) was refused. It's logged on the impersonator's account. | `reason` (an [`ImpersonationRefusal`](impersonation.md#from-your-own-code) value: `disabled`, `no_callback`, `self`, `not_allowed`, `impersonating`, `unregistered`, or `not_found` for an ID nobody has, which gets the same `403` as `not_allowed`), `user` (the ID asked for, cut to 64 characters) |
 
 A wrong password for an unknown account is logged as `factor_failed`, with no user.

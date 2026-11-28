@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Testing\TestResponse;
+use Keyring\Activity\SecurityLog;
 use Keyring\Changes\PasswordHolds;
 use Keyring\Contracts\Responses\SignedOutResponse;
 use Keyring\Contracts\SessionRegistry;
@@ -2088,6 +2089,28 @@ describe('the user\'s sessions list', function () {
 });
 
 describe('the security log and events', function () {
+    // The requests are the admin's, so their IP address and browser would
+    // show the user where support staff are and what they use.
+    it('leaves the admin\'s IP address and browser off the user\'s entries, keeping them on the admin\'s', function () {
+        $this->withHeader('User-Agent', FIREFOX);
+        Route::middleware(['web', 'auth'])->post('/note', fn (Request $request) => app(SecurityLog::class)->record('noted', $request->user())?->getKey());
+        impersonating();
+        $during = $this->post('/note')->getContent();
+        stopImpersonating()->assertRedirect('/dashboard');
+        $after = $this->post('/note')->getContent();
+
+        $entries = SecurityEvent::query()->whereIn('type', ['impersonation_started', 'impersonation_ended'])->oldest('id')->get();
+
+        expect($entries->map(fn (SecurityEvent $entry) => [$entry->type, $entry->meta['role'], $entry->ip, $entry->user_agent])->all())->toBe([
+            ['impersonation_started', 'impersonator', '127.0.0.1', FIREFOX],
+            ['impersonation_started', 'impersonated', null, null],
+            ['impersonation_ended', 'impersonator', '127.0.0.1', FIREFOX],
+            ['impersonation_ended', 'impersonated', null, null],
+        ])
+            ->and(SecurityEvent::query()->findOrFail($during)->only(['authenticatable_id', 'ip', 'user_agent']))->toEqual(['authenticatable_id' => $this->user->getKey(), 'ip' => null, 'user_agent' => null])
+            ->and(SecurityEvent::query()->findOrFail($after)->only(['authenticatable_id', 'ip', 'user_agent']))->toEqual(['authenticatable_id' => $this->admin->getKey(), 'ip' => '127.0.0.1', 'user_agent' => FIREFOX]);
+    });
+
     it('shows the start and end in both accounts\' activity', function () {
         impersonating();
         stopImpersonating();
@@ -2317,7 +2340,8 @@ describe('the security log and events', function () {
             ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->oldest('id')->get()->map(fn (SecurityEvent $entry) => [$entry->authenticatable_id, $entry->meta])->all())->toEqual([
                 [$this->admin->getKey(), ['impersonator' => (string) $this->admin->getKey(), 'user' => (string) $this->user->getKey(), 'reason' => 'failed', 'returned' => true, 'role' => 'impersonator']],
                 [$this->user->getKey(), ['impersonator' => (string) $this->admin->getKey(), 'user' => (string) $this->user->getKey(), 'reason' => 'failed', 'returned' => true, 'role' => 'impersonated']],
-            ]);
+            ])
+            ->and(SecurityEvent::query()->where('type', 'impersonation_ended')->oldest('id')->pluck('ip')->all())->toBe(['127.0.0.1', null]);
         Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'The audit service went away.');
         Event::assertNotDispatched(ImpersonationStarted::class);
         Event::assertNotDispatched(ImpersonationEnded::class);
