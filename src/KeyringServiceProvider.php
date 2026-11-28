@@ -23,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 use Keyring\Activity\DispatchLaravelEvents;
 use Keyring\Activity\RecordSecurityEvents;
 use Keyring\Contracts\LocatesIps;
@@ -109,6 +110,12 @@ class KeyringServiceProvider extends ServiceProvider
         // A misspelt feature would otherwise just be off.
         if (($unknown = array_values(array_diff(config('keyring.features'), Features::all()))) !== []) {
             throw UnknownFeature::in($unknown);
+        }
+
+        // A lifetime that isn't a duration would only show at the first
+        // impersonation.
+        if (Features::enabled(Features::impersonation())) {
+            $this->checkImpersonationLifetime();
         }
 
         // Registration that hides who has an account leaves new users signed
@@ -261,6 +268,19 @@ class KeyringServiceProvider extends ServiceProvider
                 ->by($request->ip())
                 ->response(new TooManyAttempts('keyring-login-options')));
         });
+    }
+
+    protected function checkImpersonationLifetime(): void
+    {
+        $lifetime = config('keyring.impersonation.lifetime') ?? '1h';
+        $seconds = is_string($lifetime) || is_int($lifetime) ? rescue(fn () => Duration::seconds($lifetime), 0, report: false) : 0;
+
+        if ($seconds < 1) {
+            throw new InvalidArgumentException(sprintf(
+                'Keyring\'s [keyring.impersonation.lifetime] option is %s. Set it to a duration longer than nothing, such as "1h" or "30m", or to null for an hour.',
+                json_encode($lifetime),
+            ));
+        }
     }
 
     /**
